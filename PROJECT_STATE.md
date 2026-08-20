@@ -123,3 +123,67 @@
 | PUBLIC_APP_URL | ⏳ Add: https://arbor-leads-final-app.onrender.com |
 | STRIPE_SECRET_KEY | ⏳ Add from Stripe dashboard |
 | STRIPE_WEBHOOK_SECRET | ⏳ Add from Stripe dashboard (update endpoint URL first) |
+
+---
+
+## 10. TECHNICAL NOTES (FOR NEXT SESSION — READ THIS)
+
+### Deploy Convention
+- User types `execute` → run: `git add .` then `git commit -m "..."` then `git push`
+- No confirmation needed. Just run it.
+- Working directory: `c:\Users\twobo.DESKTOP-DI088K1\OneDrive\Documents\VECTOR DATA LABS`
+- PowerShell — use `;` not `&&` to chain commands
+
+### Verified API Endpoints (DO NOT CHANGE — THEY WORK)
+- **Leeds:** `https://mapservices.leeds.gov.uk/arcgis/rest/services/Public/Planning/MapServer/12/query` — ArcGIS, no auth, `verify=False` needed for SSL
+- **London:** `https://planningdata.london.gov.uk/api/applications` — requires `GLA_API_KEY` header as `Authorization`
+
+### Broken API Endpoints (DO NOT USE)
+- `https://www.planning.data.gov.uk/api/v1/entity.json?dataset=planning-application` — returns 404
+- `https://gis.birmingham.gov.uk/arcgis/...` — host does not exist
+- `https://maps.birmingham.gov.uk/arcgis/rest/services/Internet_Planning/MapServer` — returns HTTP 500, likely needs auth token or is internal-only
+
+### Birmingham Investigation Status
+- Birmingham HAS an ArcGIS Internet_Planning MapServer at maps.birmingham.gov.uk — confirmed
+- Returns HTTP 500 — likely behind firewall or needs token
+- Alternative: planapi.co.uk is a paid UK-wide planning aggregator (investigate pricing next session)
+- Same investigation needed for Manchester, Bristol, Sheffield
+
+### Stripe Setup Notes
+- Webhook endpoint in main.py is `POST /webhook` (NOT /webhook/stripe)
+- Old webhook was pointing to `arbor-leads-agent-1.onrender.com` (old/wrong app)
+- Correct webhook URL: `https://arbor-leads-final-app.onrender.com/webhook`
+- User must update URL in Stripe Dashboard → Developers → Webhooks → empowering-inspiration
+- **Starter tier (£19/month) NOT YET ADDED** — first objective next session
+- Add to PLANS dict in `payments.py` and update `/pricing` HTML in `main.py`
+
+### Companies House API
+- Auth: `Authorization: Basic base64(API_KEY:)` — note the trailing colon
+- Officers endpoint: `GET https://api.company-information.service.gov.uk/company/{company_number}/officers`
+- Names returned as `SURNAME, Firstname` — research.py flips to `Firstname SURNAME`
+- Apollo has been completely removed — do not reference it
+
+### Database Schema
+- `potential_partners`: id, company_name, company_number (UNIQUE), status, address, distance_miles, target_city, sic_codes, md_name, phone_number, google_rating, created_at
+- `leads`: id, reference (UNIQUE), address, summary, score, council_source, lead_score, lead_price, status, discovered_at
+- `payments`: id, stripe_session_id (UNIQUE), plan, amount_pence, customer_email, status, created_at
+
+### Auth System
+- Dashboard: HTTP Basic Auth via DASHBOARD_USER + DASHBOARD_PASS in Render
+- Cron routes: TRIGGER_SECRET query param (for Make.com, cron-job.org, external callers)
+- Both use `secrets.compare_digest()` — timing-attack safe
+- If DASHBOARD_PASS not set in Render → all routes return 503 (intentional)
+
+### Lead Scoring Keywords (scanners.py)
+- **Large £75:** tpo, tree preservation order, conservation area, woodland, development, several trees, multiple trees, commercial, site clearance, dangerous tree, estate, demolition
+- **Medium £50:** crown reduction, crown lift, fell, felling, removal, pollarding, overhanging, storm damage, deadwood, works to trees, urgent, diseased
+- **Small £25:** pruning, hedge, trim, cutting, maintenance, inspection, minor works, lopping
+- Default if no match: small / £25
+
+### Key Business Decisions (Made 20 Aug 2026)
+- TPO domestic homeowner leads are weak — job often already won before portal publishes it
+- Primary target: commercial arboricultural LTDs + arboricultural consultants (BS5837 surveys for developers)
+- Secondary target: small operators who have NEVER heard planning data tools exist — education sell
+- Exclusive leads (never shared) = primary differentiator vs BuildAlert / Planning Pipe
+- Director names from Companies House = secondary differentiator — no competitor does this
+- Do NOT chase homeowner permit requests — chase commercial contracts and development applications
