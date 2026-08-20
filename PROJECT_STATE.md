@@ -96,14 +96,23 @@
 
 ## 8. ACTIVE OBJECTIVES (PRIORITY ORDER)
 
-1. **Add Starter tier (£19/month)** to `payments.py` and `/pricing` page
-2. **Fix Birmingham scanner** — find correct ArcGIS or council API endpoint
-3. **Fix Manchester scanner** — same process as Birmingham
-4. **Fix Bristol + Sheffield scanners** — same process
-5. **Set up automated scheduling** — use cron-job.org (free) to call `/trigger-leads-{city}?secret=X` daily
-6. **Build Pillar 4** — Make.com webhook → Telegram bot for internal lead alerts
-7. **Outreach campaign** — use `/export-directors` to email the 134 directors with the "did you know" pitch
-8. **First sale**
+1. **Get ukplanningapi.co.uk free key** — user signs up at ukplanningapi.co.uk/api-signup (email only, no card), adds `UK_PLANNING_API_KEY` to Render. Unlocks Birmingham, Manchester, Bristol, Sheffield scanners.
+2. **Contact Birmingham council directly** — email their GIS/open data team for official API access (same approach used for London GLA). Removes dependency on third party.
+3. **Contact Manchester, Bristol, Sheffield councils** — same process.
+4. **Set up automated scheduling** — use cron-job.org (free) to call `/trigger-leads-{city}?secret=X` daily. No Render paid plan needed.
+5. **Build Pillar 4** — Make.com webhook → Telegram bot for internal lead alerts
+6. **Build customer-radius matching system** — requires:
+   - New `customers` table (postcode, radius_miles, city, stripe_customer_id)
+   - Geocoding via postcodes.io (free UK postcode → lat/lon)
+   - Distance calculation on lead insertion
+   - Route alerts only to customers within their radius
+   - **London default: 5–7 miles** (traffic makes distance irrelevant)
+   - **Outside London default: 15 miles** (standard trade travel)
+   - **Customer-selectable:** 5 / 10 / 15 / 20 miles at signup
+7. **Refine pricing** — current tiers (Starter £19, City Pro £49, National £89) are a starting point. Validate with real customers before locking in. Per-lead pricing (£25/£50/£75) may need adjusting based on what the market accepts.
+8. **Outreach campaign** — use `/export-directors` to email the 134 directors with the "did you know" pitch
+9. **First sale**
+
 
 ---
 
