@@ -174,37 +174,90 @@ def status(user: str = Depends(verify_dashboard_auth)):
 @app.get("/pricing", response_class=HTMLResponse)
 def pricing():
     plans = payments.PLANS
+
     cards = ""
     for key, plan in plans.items():
-        price_display = f"£{plan['amount'] / 100:.0f}" + ("/month" if plan["mode"] == "subscription" else " one-off")
+        if plan["mode"] == "subscription":
+            price_display = f"£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal;'>/month</span>"
+        else:
+            price_display = f"£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal;'> one-off</span>"
+
+        highlight = "border:3px solid #1b5e20;" if key == "city_monthly" else "border:2px solid #ccc;"
+
         cards += f"""
-        <div style="border:2px solid #1b5e20; border-radius:16px; padding:24px;
-                    margin:12px 0; text-align:center;">
-            <div style="font-size:14px; color:#1b5e20; font-weight:bold;">{plan['badge']}</div>
-            <h3>{plan['name']}</h3>
-            <p style="color:#555;">{plan['description']}</p>
-            <h2 style="color:#1b5e20;">{price_display}</h2>
-            <a href="/checkout/{key}" style="background:#1b5e20; color:white; padding:12px 28px;
-               border-radius:8px; text-decoration:none; display:inline-block; margin-top:8px;">
+        <div style="{highlight} border-radius:16px; padding:24px; margin:10px 0;
+                    background:white; text-align:center;">
+            <div style="font-size:13px; color:#1b5e20; font-weight:bold;
+                        margin-bottom:8px;">{plan['badge']}</div>
+            <h3 style="margin:0 0 8px 0;">{plan['name']}</h3>
+            <p style="color:#666; font-size:14px; margin:0 0 16px 0;">{plan['description']}</p>
+            <h2 style="color:#1b5e20; margin:0 0 20px 0;">{price_display}</h2>
+            <a href="/checkout/{key}"
+               style="background:#1b5e20; color:white; padding:12px 28px;
+                      border-radius:8px; text-decoration:none;
+                      display:inline-block; font-weight:bold;">
                Get Started →
             </a>
         </div>"""
 
     return f"""
-    <html><head><title>Pricing — Vector Data Labs</title></head>
+    <html>
+    <head><title>Pricing — Exclusive Tree Surgery Leads</title></head>
     <body style="font-family:sans-serif; background:#f4f4f9; padding:40px;">
-    <div style="max-width:540px; margin:auto;">
-        <h1 style="text-align:center;">🌳 Exclusive Tree Surgery Leads</h1>
-        <p style="text-align:center; color:#555;">
-            Government planning application data. Never shared. Delivered directly to you.
-        </p>
+    <div style="max-width:560px; margin:auto;">
+
+        <h1 style="text-align:center; color:#1b5e20;">🌳 Exclusive Tree Surgery Leads</h1>
+
+        <div style="background:#fff8e1; border-left:4px solid #f9a825; padding:16px;
+                    border-radius:8px; margin-bottom:24px; font-size:14px;">
+            <b>How it works:</b> Every time a planning application for tree surgery work
+            is filed at your local council, you get notified first —
+            before it appears on Checkatrade, Bark, or anywhere else.
+            Leads are <b>exclusive</b>: one buyer per lead, always.
+        </div>
+
         {cards}
-        <p style="text-align:center; font-size:12px; color:#888; margin-top:24px;">
-            All leads are exclusive — one buyer per lead, always.<br>
-            Cancel subscriptions anytime. No long-term contracts.
+
+        <div style="margin-top:32px; background:white; border-radius:12px; padding:24px;">
+            <h4 style="margin-top:0;">What's included in every plan</h4>
+            <table style="width:100%; font-size:13px; border-collapse:collapse;">
+                <tr style="background:#f4f4f9;">
+                    <th style="padding:8px; text-align:left;"></th>
+                    <th style="padding:8px; text-align:center;">Starter</th>
+                    <th style="padding:8px; text-align:center;">Pay As You Go</th>
+                    <th style="padding:8px; text-align:center;">City Pro</th>
+                    <th style="padding:8px; text-align:center;">National</th>
+                </tr>
+                <tr><td style="padding:8px;">Exclusive leads</td>
+                    <td style="text-align:center;">✅</td><td style="text-align:center;">✅</td>
+                    <td style="text-align:center;">✅</td><td style="text-align:center;">✅</td></tr>
+                <tr style="background:#f9f9f9;"><td style="padding:8px;">Email alert on new lead</td>
+                    <td style="text-align:center;">✅</td><td style="text-align:center;">✅</td>
+                    <td style="text-align:center;">✅</td><td style="text-align:center;">✅</td></tr>
+                <tr><td style="padding:8px;">Lead grade (Small/Medium/Large)</td>
+                    <td style="text-align:center;">✅</td><td style="text-align:center;">✅</td>
+                    <td style="text-align:center;">✅</td><td style="text-align:center;">✅</td></tr>
+                <tr style="background:#f9f9f9;"><td style="padding:8px;">Monthly lead limit</td>
+                    <td style="text-align:center;">10/month</td><td style="text-align:center;">—</td>
+                    <td style="text-align:center;">Unlimited</td><td style="text-align:center;">Unlimited</td></tr>
+                <tr><td style="padding:8px;">Cities covered</td>
+                    <td style="text-align:center;">1</td><td style="text-align:center;">1</td>
+                    <td style="text-align:center;">1</td><td style="text-align:center;">All</td></tr>
+                <tr style="background:#f9f9f9;"><td style="padding:8px;">First access to new leads</td>
+                    <td style="text-align:center;">—</td><td style="text-align:center;">—</td>
+                    <td style="text-align:center;">—</td><td style="text-align:center;">✅</td></tr>
+            </table>
+        </div>
+
+        <p style="text-align:center; font-size:12px; color:#999; margin-top:24px;">
+            Cancel anytime. No long-term contracts. All leads are government public data.<br>
+            Questions? Reply to your welcome email.
         </p>
-    </div></body></html>
+
+    </div>
+    </body></html>
     """
+
 
 
 # ── Checkout (Stripe) ─────────────────────────────────────────────────────────
