@@ -61,6 +61,10 @@ def dashboard():
             
             <h4>Latest Enriched Partners</h4>
             <ul>{rows or "None yet."}</ul>
+            <hr>
+            <p style="font-size:13px; color:#555;">
+                🔄 <a href="/enrich-all?secret={T_SEC}">Enrich All Partners (fill missing director names)</a>
+            </p>
         </div>
     </body></html>
     """
@@ -144,3 +148,11 @@ def leeds_partners(bg: BackgroundTasks):
 def london_partners(bg: BackgroundTasks):
     bg.add_task(research.perform_research, "London")
     return {"status": "started"}
+
+@app.get("/enrich-all")
+def enrich_all(bg: BackgroundTasks, secret: Optional[str] = Query(None)):
+    """Retroactively enriches all existing partners missing a director name."""
+    verify_gate(secret)
+    bg.add_task(research.enrich_existing_partners)
+    logger.info("[ENRICH] Retroactive enrichment job started.")
+    return {"status": "started", "message": "Enriching all partners in background. Check dashboard in 2-3 minutes."}
