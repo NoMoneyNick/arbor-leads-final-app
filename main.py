@@ -42,6 +42,8 @@ def verify_dashboard_auth(credentials: HTTPBasicCredentials = Depends(basic_auth
 def verify_cron_secret(secret: str):
     if not T_SEC:
         raise HTTPException(status_code=500, detail="TRIGGER_SECRET not configured.")
+    if not secret:
+        raise HTTPException(status_code=401, detail="Missing secret.")
     if not secrets.compare_digest(secret.encode(), T_SEC.encode()):
         logger.warning("[GATE] Invalid trigger secret.")
         raise HTTPException(status_code=401, detail="Unauthorized.")
