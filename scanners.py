@@ -175,57 +175,76 @@ def scan_london_leads() -> int:
     return len(new_leads)
 
 
-# ── Generic UK Planning Data Scanner (Birmingham, Manchester, Bristol, Sheffield) ─
+# ── UK Planning API Scanner (Birmingham, Manchester, Bristol, Sheffield) ──────
+# Uses ukplanningapi.co.uk — covers 289 UK councils, updated daily.
+# Free tier: 500 req/month (no card). Paid: £99/month for 10,000 req.
+# Sign up at: https://ukplanningapi.co.uk/api-signup
+# Add key to Render as: UK_PLANNING_API_KEY
 
-# LPA codes from the MHCLG Planning Data API (planning.data.gov.uk)
-CITY_LPA_CODES = {
-    "Birmingham": "local-authority-eng:BIR",
-    "Manchester":  "local-authority-eng:MAN",
-    "Bristol":     "local-authority-eng:BST",
-    "Sheffield":   "local-authority-eng:SHF",
+UK_PLANNING_API_KEY = os.getenv("UK_PLANNING_API_KEY", "").strip()
+
+# Postcode area prefix per city — covers the full city in one query
+CITY_POSTCODE_PREFIX = {
+    "Birmingham": "B",
+    "Manchester":  "M",
+    "Bristol":     "BS",
+    "Sheffield":   "S",
 }
 
 
 def scan_city_planning_api(city_name: str) -> int:
     """
-    Generic scanner using the national MHCLG Planning Data API.
-    Covers: Birmingham, Manchester, Bristol, Sheffield.
-    API docs: https://www.planning.data.gov.uk/api/v1/
+    Scans planning applications for a UK city using ukplanningapi.co.uk.
+    Covers Birmingham, Manchester, Bristol, Sheffield (and any future cities).
+    API docs: https://ukplanningapi.co.uk/api-docs
     """
-    lpa_code = CITY_LPA_CODES.get(city_name)
-    if not lpa_code:
-        logger.error(f"[{city_name}] No LPA code configured for this city.")
+    if not UK_PLANNING_API_KEY:
+        logger.error(f"[{city_name}] UK_PLANNING_API_KEY is not set. "
+                     f"Get a free key at ukplanningapi.co.uk/api-signup")
         return 0
 
+    postcode_prefix = CITY_POSTCODE_PREFIX.get(city_name)
+    if not postcode_prefix:
+        logger.error(f"[{city_name}] No postcode prefix configured for this city.")
+        return 0
+
+    headers = {"X-API-Key": UK_PLANNING_API_KEY}
     new_leads = []
 
     try:
         res = requests.get(
-            "https://www.planning.data.gov.uk/api/v1/entity.json",
+            "https://ukplanningapi.co.uk/v1/applications",
             params={
-                "dataset": "planning-application",
-                "organisation": lpa_code,
-                "limit": 100,
+                "postcode": postcode_prefix,
+                "status":   "received",
+                "limit":    200,
             },
+            headers=headers,
             timeout=20
         )
-        res.raise_for_status()
-        data = res.json()
-        entities = data.get("entities", [])
 
-        if not entities:
-            logger.warning(f"[{city_name}] Planning Data API returned no results for {lpa_code}.")
+        if res.status_code == 429:
+            logger.warning(f"[{city_name}] UK Planning API monthly quota reached. "
+                           f"Upgrade at ukplanningapi.co.uk")
+            return 0
+
+        res.raise_for_status()
+        records = res.json().get("data", [])
+
+        if not records:
+            logger.warning(f"[{city_name}] UK Planning API returned no results "
+                           f"for postcode prefix '{postcode_prefix}'.")
             return 0
 
         conn = database.get_db_conn()
         cur = conn.cursor()
 
-        for entity in entities:
-            summary = entity.get("description", "") or entity.get("name", "")
+        for item in records:
+            summary = item.get("description", "") or ""
             if not _is_tree_related(summary):
                 continue
-            ref = entity.get("reference", f"{city_name[:3].upper()}-{int(time.time())}")
-            addr = entity.get("address-text", "") or entity.get("name", city_name)
+            ref  = item.get("reference") or f"{city_name[:3].upper()}-{int(time.time())}"
+            addr = item.get("address", city_name)
             lead = _insert_lead(cur, ref, addr, summary, city_name)
             if lead:
                 new_leads.append(lead)
@@ -237,7 +256,7 @@ def scan_city_planning_api(city_name: str) -> int:
     except requests.exceptions.Timeout:
         logger.error(f"[{city_name}] Request timed out.")
     except requests.exceptions.HTTPError as e:
-        logger.error(f"[{city_name}] HTTP error: {e.response.status_code} — {e.response.text[:200]}")
+        logger.error(f"[{city_name}] HTTP {e.response.status_code}: {e.response.text[:200]}")
     except requests.exceptions.ConnectionError as e:
         logger.error(f"[{city_name}] Connection error: {e}")
     except Exception as e:
