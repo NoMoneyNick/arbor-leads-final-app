@@ -71,9 +71,24 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str) -
 # ── Leeds Scanner (ArcGIS) ────────────────────────────────────────────────────
 
 def scan_leeds_leads() -> int:
-    """Scout goes to the Leeds Council ArcGIS portal to find tree surgery jobs."""
+    """
+    Scans Leeds Council ArcGIS portal for tree surgery planning applications
+    within 15 miles (24,140m) of Leeds city centre.
+    Leeds city centre coords: 53.8008N, -1.5491W (WGS84 / EPSG:4326)
+    """
     url = "https://mapservices.leeds.gov.uk/arcgis/rest/services/Public/Planning/MapServer/12/query"
-    params = {"where": "1=1", "outFields": "*", "resultRecordCount": 50, "f": "json"}
+    params = {
+        "where":        "1=1",
+        "outFields":    "*",
+        "geometry":     "-1.5491,53.8008",
+        "geometryType": "esriGeometryPoint",
+        "inSR":         "4326",
+        "spatialRel":   "esriSpatialRelIntersects",
+        "distance":     24140,          # 15 miles in metres
+        "units":        "esriSRUnit_Meter",
+        "resultRecordCount": 200,
+        "f": "json"
+    }
     new_leads = []
 
     try:
@@ -82,7 +97,7 @@ def scan_leeds_leads() -> int:
         features = res.json().get("features", [])
 
         if not features:
-            logger.warning("[Leeds] ArcGIS returned no features.")
+            logger.warning("[Leeds] ArcGIS returned no features within 15-mile radius.")
             return 0
 
         conn = database.get_db_conn()
@@ -114,14 +129,21 @@ def scan_leeds_leads() -> int:
 
     if new_leads:
         notifications.dispatch_lead_alerts("Leeds", new_leads)
-    logger.info(f"[Leeds] Scan complete. {len(new_leads)} new leads found.")
+    logger.info(f"[Leeds] Scan complete. {len(new_leads)} new leads found within 15-mile radius.")
     return len(new_leads)
+
 
 
 # ── London Scanner (GLA Datahub) ──────────────────────────────────────────────
 
 def scan_london_leads() -> int:
-    """Scout goes to the London GLA Datahub to find tree surgery planning applications."""
+    """
+    Scans the GLA Planning Datahub for tree surgery applications across Greater London.
+    Geographic scope: Greater London boundary (~630 sq miles) — defined by the GLA API itself.
+    No further radius filter applied here; customer-radius filtering is a planned feature
+    that will match leads to subscribers based on their depot postcode (15-mile radius).
+    Requires GLA_API_KEY in Render environment (obtained directly from London Data Hub).
+    """
     if not GLA_API_KEY:
         logger.error("[London] GLA_API_KEY is not set. Aborting scan.")
         return 0
