@@ -24,3 +24,12 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Google Drive sync artifacts
+.tmp.driveupload/
+.tmp.drivedownload/
+desktop.ini
+
+# OneDrive sync artifacts
+*.tmp
+~$*
