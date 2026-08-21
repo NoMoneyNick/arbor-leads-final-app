@@ -4,7 +4,7 @@
 
 **Environment:** Modular Workspace (Antigravity / GitHub / Render)
 
-**Last Updated:** 20 Aug 2026
+**Last Updated:** 21 Aug 2026
 
 ---
 
@@ -26,20 +26,20 @@
 
 ## 2. FILE STRUCTURE (THE DEPARTMENTS)
 
-1.  `main.py` — Reception Desk. API routes, dashboard, auth, Stripe checkout, city scanning UI.
-2.  `database.py` — Filing Cabinet. Supabase connection, schema init, resilience columns.
-3.  `scanners.py` — Scout. Leeds (ArcGIS), London (GLA), + 4 city scaffolds. Lead scoring logic.
-4.  `research.py` — Investigator. Companies House search + Officers API (director names) + Google rating.
-5.  `notifications.py` — Digital Postman. Resend email alerts with lead score/price. WhatsApp links.
-6.  `payments.py` — Cashier. Stripe checkout sessions, webhook handler, pricing plan definitions.
-7.  `PROJECT_STATE.md` — Persistent memory of progress, objectives, and decisions.
+1.  `main.py` — Reception Desk. API routes, Basic Auth dashboard, Stripe checkout & webhook, CSV export (`/export-directors.csv`), database cleanup (`/clean-partners`), city scanning & research triggers.
+2.  `database.py` — Filing Cabinet. Supabase connection, schema migrations with resilience columns (`phone_number`, `md_name`, `google_rating`, `website`, `email`, `lead_score`, `lead_price`).
+3.  `scanners.py` — Scout. Leeds (ArcGIS with 15-mile radius query), London (GLA boundary), Birmingham, Manchester, Bristol, Sheffield (UK Planning API with postcode prefix matching). Compound keyword lead scoring (£25/£50/£75).
+4.  `research.py` — Investigator. Companies House search with two-layer name filtering + Officers API (director names) + Google Places Details (phone, rating, website) + website email scraper + retroactive DB cleanup.
+5.  `notifications.py` — Digital Postman. Resend email alerts with lead score/price and WhatsApp direct links.
+6.  `payments.py` — Cashier. Stripe checkout sessions (dynamic price_data), webhook handler, 4 live pricing tiers (Starter £19, 10-Lead Credits £80, City Pro £49, National £89).
+7.  `PROJECT_STATE.md` — Persistent memory of progress, active queue, and environment variables.
 8.  `MANIFEST.md` — This file. Operational rules, structure, mission, legal.
 
 ---
 
 ## 3. CORE MISSION & LEGAL
 
-*   **Mission:** Package UK council planning application data as exclusive, scored leads for tree surgery businesses. Automate director-level enrichment via Companies House.
+*   **Mission:** Package UK council planning application data as exclusive, scored leads for tree surgery businesses. Automate director-level enrichment via Companies House and Google Places.
 
 *   **The Golden Rule:** Strictly Limited Companies (LTD) only. No Sole Traders or Partnerships. Sole traders are not the target customer.
 
@@ -65,12 +65,13 @@
 
 ### Competitive Position
 - **Direct competitors:** BuildAlert, Planning Pipe, PlanAPI — but they target builders/architects, not tree surgeons. Tree surgeons are an underserved vertical.
-- **Key differentiator:** Exclusive leads (never shared) + Companies House director enrichment (no competitor does this) + education sell to unaware small operators.
+- **Key differentiator:** Exclusive leads (never shared) + Companies House director enrichment + direct phone/email extraction (no competitor does this) + education sell to unaware small operators.
 
-### Pricing Tiers (to implement)
+### Live Pricing Plans
 | Tier | Price | For |
 |---|---|---|
-| Starter | £19/month | Small operators, skeptics, entry point |
-| Professional | £49/month | One city, unlimited leads, full scoring |
-| National | £89/month | All cities, first access, full suite |
-| Pay-per-lead | £8 small / £30 medium / £75 large | Flexible option, converts to subscription |
+| Starter | £19/month | Small operators, entry point, 10 leads/mo |
+| 10-Lead Credits | £80 one-off | Pay-as-you-go credit pack |
+| City Pro | £49/month | One city, unlimited daily leads, full scoring |
+| National | £89/month | All 6 UK cities, instant priority alerts |
+
