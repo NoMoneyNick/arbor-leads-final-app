@@ -5,8 +5,10 @@ import database
 import scanners
 import research
 import payments
+import csv
+import io
 from fastapi import FastAPI, Query, BackgroundTasks, HTTPException, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from typing import Optional
 
@@ -397,7 +399,7 @@ def export_directors(user: str = Depends(verify_dashboard_auth)):
         conn = database.get_db_conn(); cur = conn.cursor()
         cur.execute("""
             SELECT company_name, company_number, md_name, phone_number,
-                   google_rating, target_city
+                   email, website, google_rating, target_city
             FROM potential_partners
             WHERE md_name IS NOT NULL
             ORDER BY target_city, company_name
@@ -410,11 +412,13 @@ def export_directors(user: str = Depends(verify_dashboard_auth)):
 
     table_rows = "".join([
         f"<tr>"
-        f"<td style='padding:8px; border:1px solid #ddd;'>{r[0]}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd;'><b>{r[0]}</b><br><span style='color:#777; font-size:11px;'>#{r[1]}</span></td>"
         f"<td style='padding:8px; border:1px solid #ddd;'>{r[2] or '—'}</td>"
         f"<td style='padding:8px; border:1px solid #ddd;'>{r[3] or '—'}</td>"
-        f"<td style='padding:8px; border:1px solid #ddd; text-align:center;'>⭐ {r[4] or 'N/A'}</td>"
-        f"<td style='padding:8px; border:1px solid #ddd;'>{r[5]}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd;'>{f'<a href=\"mailto:{r[4]}\">{r[4]}</a>' if r[4] else '—'}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd;'>{f'<a href=\"{r[5]}\" target=\"_blank\">Website</a>' if r[5] else '—'}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd; text-align:center;'>⭐ {r[6] or 'N/A'}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd;'>{r[7]}</td>"
         f"</tr>"
         for r in rows
     ])
@@ -422,19 +426,64 @@ def export_directors(user: str = Depends(verify_dashboard_auth)):
     return f"""
     <html><head><title>Director Export</title></head>
     <body style="font-family:sans-serif; background:#f4f4f9; padding:40px;">
-    <div style="max-width:900px; margin:auto; background:white; padding:30px;
+    <div style="max-width:1100px; margin:auto; background:white; padding:30px;
                 border-radius:16px; border-top:8px solid #1b5e20;">
-        <h2>📋 Director Outreach List ({len(rows)} contacts)</h2>
-        <p><a href="/">← Dashboard</a></p>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h2>📋 Director Outreach List ({len(rows)} verified contacts)</h2>
+            <div>
+                <a href="/export-directors.csv" style="background:#1b5e20; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold;">⬇️ Download CSV</a>
+                &nbsp;|&nbsp; <a href="/">← Dashboard</a>
+            </div>
+        </div>
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
             <tr style="background:#1b5e20; color:white;">
                 <th style="padding:10px; text-align:left;">Company</th>
                 <th style="padding:10px; text-align:left;">Director</th>
                 <th style="padding:10px; text-align:left;">Phone</th>
+                <th style="padding:10px; text-align:left;">Email</th>
+                <th style="padding:10px; text-align:left;">Web</th>
                 <th style="padding:10px; text-align:center;">Google ⭐</th>
                 <th style="padding:10px; text-align:left;">City</th>
             </tr>
-            {table_rows or "<tr><td colspan='5' style='padding:16px; text-align:center;'>Run /enrich-all first to populate director names.</td></tr>"}
+            {table_rows or "<tr><td colspan='7' style='padding:16px; text-align:center;'>No verified contacts found yet. Run /enrich-all.</td></tr>"}
         </table>
     </div></body></html>
     """
+
+
+@app.get("/export-directors.csv")
+def export_directors_csv(user: str = Depends(verify_dashboard_auth)):
+    """
+    Returns CSV file of all enriched directors ready for Google Sheets or Excel.
+    """
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Company Name", "Company Number", "Director Name",
+        "Phone Number", "Email", "Website", "Google Rating", "City"
+    ])
+
+    try:
+        conn = database.get_db_conn(); cur = conn.cursor()
+        cur.execute("""
+            SELECT company_name, company_number, md_name, phone_number,
+                   email, website, google_rating, target_city
+            FROM potential_partners
+            WHERE md_name IS NOT NULL
+            ORDER BY target_city, company_name
+        """)
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        for r in rows:
+            writer.writerow([
+                r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]
+            ])
+    except Exception as e:
+        logger.error(f"[EXPORT CSV] DB error: {e}")
+
+    output.seek(0)
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=tree_surgeons_outreach.csv"}
+    )

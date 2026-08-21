@@ -55,10 +55,59 @@ def get_director_from_ch(company_number: str):
     return None
 
 
-def get_google_rating(company_name: str, city: str):
-    """Pillar 3: Checks Google Places for reputation filtering."""
-    if not GOOGLE_MAPS_KEY:
+import re
+import urllib.parse
+
+def scrape_email_from_website(website_url: str):
+    """
+    Attempts to scrape a public contact email from a company's website.
+    Runs with a strict 5s timeout and avoids asset/framework false positives.
+    """
+    if not website_url:
         return None
+    try:
+        if not website_url.startswith("http://") and not website_url.startswith("https://"):
+            website_url = "https://" + website_url
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        res = requests.get(website_url, headers=headers, timeout=5, verify=False)
+        if res.status_code != 200:
+            return None
+
+        text = res.text
+        # Find mailto links first
+        mailto_matches = re.findall(r'mailto:([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', text, re.IGNORECASE)
+        # Find raw email patterns
+        raw_matches = re.findall(r'[b\s:\"\'<]([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)[>\s:\"\'b]', text, re.IGNORECASE)
+        
+        all_emails = mailto_matches + raw_matches
+        excluded_domains = ["sentry.io", "wixpress.com", "example.com", "domain.com", "schema.org", "w3.org", "googleapis.com"]
+        excluded_exts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".js", ".css"]
+
+        for email in all_emails:
+            email = email.strip().lower()
+            if any(email.endswith(ext) for ext in excluded_exts):
+                continue
+            if any(d in email for d in excluded_domains):
+                continue
+            if len(email) < 6:
+                continue
+            return email
+    except Exception as e:
+        logger.debug(f"[Email Scraper] Could not scrape {website_url}: {e}")
+    return None
+
+
+def get_google_places_info(company_name: str, city: str):
+    """
+    Pillar 3: Queries Google Places API for reputation rating,
+    direct phone number, and official website URL.
+    Returns: (rating: float|None, phone_number: str|None, website: str|None)
+    """
+    if not GOOGLE_MAPS_KEY:
+        return None, None, None
     try:
         res = requests.get(
             "https://maps.googleapis.com/maps/api/place/textsearch/json",
@@ -66,21 +115,47 @@ def get_google_rating(company_name: str, city: str):
             timeout=10
         )
         results = res.json().get("results", [])
-        if results:
-            return results[0].get("rating")
+        if not results:
+            return None, None, None
+
+        first = results[0]
+        rating = first.get("rating")
+        place_id = first.get("place_id")
+
+        phone = None
+        website = None
+
+        if place_id:
+            try:
+                details_res = requests.get(
+                    "https://maps.googleapis.com/maps/api/place/details/json",
+                    params={
+                        "place_id": place_id,
+                        "fields": "formatted_phone_number,website,rating",
+                        "key": GOOGLE_MAPS_KEY
+                    },
+                    timeout=10
+                )
+                details = details_res.json().get("result", {})
+                phone = details.get("formatted_phone_number")
+                website = details.get("website")
+                if details.get("rating") is not None:
+                    rating = details.get("rating")
+            except Exception as de:
+                logger.error(f"[Google Details] Error for {place_id}: {de}")
+
+        return rating, phone, website
     except Exception as e:
-        logger.error(f"[Google] Error fetching rating for {company_name}: {e}")
-    return None
+        logger.error(f"[Google] Error fetching info for {company_name}: {e}")
+    return None, None, None
 
 
 def perform_research(city_name: str):
     """
     Finds Tree Surgery LTD companies via Companies House,
     enforces the Golden Rule (active LTDs only),
-    then enriches with director name (CH Officers) and Google rating.
-    Two-layer name filter applied:
-    1. Company name must contain at least one tree-surgery word
-    2. Company name must not contain any excluded (irrelevant industry) words
+    then enriches with director name (CH Officers), Google Places info (rating, phone, website),
+    and public contact email scraped from their website.
     """
     if not CH_KEY:
         logger.error("[Investigator] COMPANIES_HOUSE_KEY not set. Aborting.")
@@ -95,7 +170,9 @@ def perform_research(city_name: str):
     EXCLUDED_NAME_WORDS = [
         "breast", "plastic", "cosmetic", "dental", "medical", "clinic",
         "hospital", "fruit", "olive", "palm", "christmas", "bonsai",
-        "surgery centre", "surgical", "ortho", "optic", "laser"
+        "surgery centre", "surgical", "ortho", "optic", "laser",
+        "hair", "skin", "beauty", "nail", "tattoo", "piercing",
+        "estate agent", "letting", "solicitor", "accountant"
     ]
 
     try:
@@ -140,22 +217,28 @@ def perform_research(city_name: str):
             # Pillar 2: Director from Companies House Officers
             md_name = get_director_from_ch(company_number)
 
-            # Pillar 3: Google reputation rating
-            rating = get_google_rating(name, city_name)
+            # Pillar 3: Google reputation rating, phone, and website
+            rating, phone, website = get_google_places_info(name, city_name)
+
+            # Scrape email from website if found
+            email = scrape_email_from_website(website) if website else None
 
             cur.execute("""
                 INSERT INTO potential_partners (
                     company_name, company_number, target_city,
-                    md_name, google_rating, status
+                    md_name, phone_number, google_rating, website, email, status
                 )
-                VALUES (%s, %s, %s, %s, %s, 'enriched')
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'enriched')
                 ON CONFLICT (company_number)
                 DO UPDATE SET
                     md_name = COALESCE(EXCLUDED.md_name, potential_partners.md_name),
-                    google_rating = COALESCE(EXCLUDED.google_rating, potential_partners.google_rating);
-            """, (name, company_number, city_name, md_name, rating))
+                    phone_number = COALESCE(EXCLUDED.phone_number, potential_partners.phone_number),
+                    google_rating = COALESCE(EXCLUDED.google_rating, potential_partners.google_rating),
+                    website = COALESCE(EXCLUDED.website, potential_partners.website),
+                    email = COALESCE(EXCLUDED.email, potential_partners.email);
+            """, (name, company_number, city_name, md_name, phone, rating, website, email))
 
-            logger.info(f"[Investigator] {name} → Director: {md_name or 'Not found'} | Rating: {rating or 'N/A'}")
+            logger.info(f"[Investigator] {name} → Director: {md_name or 'N/A'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'} | ⭐ {rating or 'N/A'}")
 
         conn.commit()
         cur.close()
@@ -169,8 +252,9 @@ def perform_research(city_name: str):
 
 def enrich_existing_partners():
     """
-    Retroactive enrichment job: loops through all partners with missing
-    director names and fills them in using Companies House Officers API.
+    Retroactive enrichment job: loops through all partners,
+    fills missing director names via CH Officers,
+    fetches Google Places phone/website/rating, and scrapes contact emails.
     Runs as a background task from /enrich-all.
     """
     if not CH_KEY:
@@ -181,31 +265,47 @@ def enrich_existing_partners():
         conn = database.get_db_conn()
         cur = conn.cursor()
 
-        # Fetch all partners missing a director name
+        # Fetch partners to enrich
         cur.execute("""
-            SELECT id, company_name, company_number, target_city, google_rating
+            SELECT id, company_name, company_number, target_city,
+                   md_name, phone_number, google_rating, website, email
             FROM potential_partners
-            WHERE md_name IS NULL AND company_number IS NOT NULL
+            WHERE company_number IS NOT NULL
         """)
         partners = cur.fetchall()
-        logger.info(f"[Enrichment] {len(partners)} partners queued for enrichment.")
+        logger.info(f"[Enrichment] {len(partners)} partners queued for full enrichment.")
 
-        for (pid, name, number, city, existing_rating) in partners:
-            md_name = get_director_from_ch(number)
-            rating = existing_rating or get_google_rating(name, city or "")
+        for (pid, name, number, city, existing_md, existing_phone, existing_rating, existing_website, existing_email) in partners:
+            md_name = existing_md or get_director_from_ch(number)
+            
+            rating = existing_rating
+            phone = existing_phone
+            website = existing_website
+
+            if not phone or not website or rating is None:
+                g_rating, g_phone, g_website = get_google_places_info(name, city or "")
+                rating = rating if rating is not None else g_rating
+                phone = phone or g_phone
+                website = website or g_website
+
+            email = existing_email
+            if not email and website:
+                email = scrape_email_from_website(website)
 
             cur.execute("""
                 UPDATE potential_partners
-                SET md_name = %s, google_rating = %s
+                SET md_name = %s, phone_number = %s, google_rating = %s,
+                    website = %s, email = %s
                 WHERE id = %s
-            """, (md_name, rating, pid))
+            """, (md_name, phone, rating, website, email, pid))
 
-            logger.info(f"[Enrichment] {name} → {md_name or 'Not found'} | ⭐ {rating or 'N/A'}")
+            logger.info(f"[Enrichment] {name} → Director: {md_name or 'N/A'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'}")
 
         conn.commit()
         cur.close()
         conn.close()
         logger.info("[Enrichment] All partners processed.")
+
 
 def clean_partner_database():
     """
