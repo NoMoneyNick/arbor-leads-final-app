@@ -353,11 +353,36 @@ def research_city(city_slug: str, bg: BackgroundTasks,
 @app.get("/enrich-all", response_class=HTMLResponse)
 def enrich_all(bg: BackgroundTasks, user: str = Depends(verify_dashboard_auth)):
     bg.add_task(research.enrich_existing_partners)
-    logger.info("[ENRICH] Retroactive enrichment started.")
     return """<html><body style="font-family:sans-serif; padding:40px;">
-        <p>✅ Enrichment started. Check dashboard in 2-3 minutes.</p>
+        <p>✅ Enrichment started in background. Check Render logs for progress.</p>
         <a href="/">← Back to Dashboard</a>
     </body></html>"""
+
+
+@app.get("/clean-partners", response_class=HTMLResponse)
+def clean_partners(user: str = Depends(verify_dashboard_auth)):
+    """
+    Retroactively removes non-tree-surgery companies from the partner DB.
+    Applies the two-layer name filter to all existing records.
+    Run once after deploy to clean up historical bad data.
+    """
+    result = research.clean_partner_database()
+    if "error" in result:
+        return f"""<html><body style="font-family:sans-serif; padding:40px;">
+            <p>❌ Cleanup failed: {result['error']}</p>
+            <a href="/">← Back to Dashboard</a>
+        </body></html>"""
+    return f"""<html><body style="font-family:sans-serif; padding:40px;">
+        <h3>🧹 Partner Database Cleanup Complete</h3>
+        <p>✅ Kept: <b>{result['kept']}</b> verified tree surgery companies</p>
+        <p>🗑️ Removed: <b>{result['removed']}</b> unrelated businesses</p>
+        <p style="color:#888; font-size:13px;">
+            Removed companies had no tree-surgery keywords in their name,
+            or contained excluded terms (medical, dental, fruit, cosmetic, etc.)
+        </p>
+        <a href="/">← Back to Dashboard</a>
+    </body></html>"""
+
 
 
 # ── Export Directors (Basic Auth) ─────────────────────────────────────────────

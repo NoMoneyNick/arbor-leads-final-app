@@ -207,5 +207,64 @@ def enrich_existing_partners():
         conn.close()
         logger.info("[Enrichment] All partners processed.")
 
+def clean_partner_database():
+    """
+    Retroactive cleanup: applies the two-layer name filter to ALL existing
+    partners in the DB and deletes any that don't qualify.
+    Removes: medical practices, fruit tree nurseries, unrelated businesses.
+    Keeps: active LTDs whose name contains a tree-surgery-related word
+    and does not contain any excluded industry word.
+    Run once after deploy via /clean-partners.
+    """
+
+    # Must match at least one of these
+    REQUIRED_NAME_WORDS = [
+        "tree", "arbor", "arboricultural", "arborist", "forestry",
+        "woodland", "felling", "stump", "timber", "hedge"
+    ]
+    # Must NOT match any of these
+    EXCLUDED_NAME_WORDS = [
+        "breast", "plastic", "cosmetic", "dental", "medical", "clinic",
+        "hospital", "fruit", "olive", "palm", "christmas", "bonsai",
+        "surgery centre", "surgical", "ortho", "optic", "laser",
+        "hair", "skin", "beauty", "nail", "tattoo", "piercing",
+        "estate agent", "letting", "solicitor", "accountant",
+        "restaurant", "café", "cafe", "bakery", "food"
+    ]
+
+    try:
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+
+        cur.execute("SELECT id, company_name FROM potential_partners")
+        all_partners = cur.fetchall()
+        logger.info(f"[Cleanup] {len(all_partners)} partners to review.")
+
+        removed = 0
+        kept = 0
+
+        for (pid, name) in all_partners:
+            name_lower = (name or "").lower()
+
+            # FILTER 1: Must contain a tree-surgery-related word
+            has_required = any(w in name_lower for w in REQUIRED_NAME_WORDS)
+            # FILTER 2: Must not contain an excluded word
+            has_excluded = any(w in name_lower for w in EXCLUDED_NAME_WORDS)
+
+            if not has_required or has_excluded:
+                cur.execute("DELETE FROM potential_partners WHERE id = %s", (pid,))
+                logger.info(f"[Cleanup] REMOVED: {name} "
+                            f"(has_required={has_required}, has_excluded={has_excluded})")
+                removed += 1
+            else:
+                kept += 1
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info(f"[Cleanup] Complete. Kept: {kept} | Removed: {removed}")
+        return {"kept": kept, "removed": removed}
+
     except Exception as e:
-        logger.error(f"[Enrichment] Fatal error: {e}")
+        logger.error(f"[Cleanup] Fatal error: {e}")
+        return {"error": str(e)}
