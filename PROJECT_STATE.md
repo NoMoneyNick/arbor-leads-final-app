@@ -94,44 +94,51 @@
 
 ---
 
-## 8. ACTIVE OBJECTIVES (PRIORITY ORDER)
+## 8. ACTIVE OBJECTIVES & STATUS
 
-1. **Get ukplanningapi.co.uk free key** — user signs up at ukplanningapi.co.uk/api-signup (email only, no card), adds `UK_PLANNING_API_KEY` to Render. Unlocks Birmingham, Manchester, Bristol, Sheffield scanners.
-2. **Contact Birmingham council directly** — email their GIS/open data team for official API access (same approach used for London GLA). Removes dependency on third party.
-3. **Contact Manchester, Bristol, Sheffield councils** — same process.
-4. **Set up automated scheduling** — use cron-job.org (free) to call `/trigger-leads-{city}?secret=X` daily. No Render paid plan needed.
-5. **Build Pillar 4** — Make.com webhook → Telegram bot for internal lead alerts
-6. **Build customer-radius matching system** — requires:
-   - New `customers` table (postcode, radius_miles, city, stripe_customer_id)
+### Completed:
+- ✅ **Starter tier (£19/month)** added to `payments.py` and comparison pricing page.
+- ✅ **Security & Basic Auth** on all internal dashboard routes; secret removed from HTML.
+- ✅ **15-mile radius query** on Leeds ArcGIS scanner; documented London boundary scope.
+- ✅ **UK Planning API scanner** deployed for Birmingham, Manchester, Bristol, Sheffield with `UK_PLANNING_API_KEY`.
+- ✅ **Automated scheduling** configured on cron-job.org with staggered triggers + keep-alive ping.
+- ✅ **Strict name/keyword filtering**: compound keywords for planning leads; 2-layer name filtering on Companies House partners (no breast surgeons, fruit tree specialists, medical/cosmetic clinics).
+- ✅ **`/clean-partners` route**: retroactive purge of non-tree-surgery companies from database.
+- ✅ **Enriched Contact Data (Pillar 2 & 3)**: Google Places Details retrieves direct phone number, website, and rating; auto-scrapes public contact email from company website.
+- ✅ **CSV Export**: `/export-directors.csv` for 1-click spreadsheet download with company, director, phone, email, website, city.
+- ✅ **Outreach Playbook created**: direct mail letter, short email sequence, and WhatsApp/phone pitch scripts.
+
+### Next in Queue:
+1. **Run `/clean-partners` and `/enrich-all` on live app**: purge existing junk from DB and enrich verified partners with phone, website, and email.
+2. **Launch Outreach Campaign**: use the CSV export (`/export-directors.csv`) and [outreach_playbook.md](file:///C:/Users/twobo.DESKTOP-DI088K1/.gemini/antigravity/brain/46137285-d767-4297-93ad-b75b5cbb2fa0/outreach_playbook.md) for direct mail and cold email/WhatsApp.
+3. **Build Customer-Radius Matching System**:
+   - `customers` table (postcode, radius_miles, city, stripe_customer_id)
    - Geocoding via postcodes.io (free UK postcode → lat/lon)
-   - Distance calculation on lead insertion
-   - Route alerts only to customers within their radius
-   - **London default: 5–7 miles** (traffic makes distance irrelevant)
-   - **Outside London default: 15 miles** (standard trade travel)
-   - **Customer-selectable:** 5 / 10 / 15 / 20 miles at signup
-7. **Refine pricing** — current tiers (Starter £19, City Pro £49, National £89) are a starting point. Validate with real customers before locking in. Per-lead pricing (£25/£50/£75) may need adjusting based on what the market accepts.
-8. **Outreach campaign** — use `/export-directors` to email the 134 directors with the "did you know" pitch
-9. **First sale**
-
+   - Route alerts only to customers within their chosen radius (5/10/15/20 miles)
+4. **Build Pillar 4 (Telegram Bot)**: Make.com webhook → Telegram bot for internal lead alerts.
+5. **Direct Council GIS Contact**: email Birmingham/Manchester GIS teams for official free feeds as volume grows.
+6. **First Paying Subscriber & Customer Feedback Review**.
 
 ---
 
-## 9. RENDER ENVIRONMENT VARIABLES REQUIRED
+## 9. RENDER ENVIRONMENT VARIABLES
 
-| Key | Status |
-|---|---|
-| SUPABASE_DB_URL | ✅ Set |
-| TRIGGER_SECRET | ✅ Set |
-| DASHBOARD_USER | ✅ Set |
-| DASHBOARD_PASS | ✅ Set |
-| COMPANIES_HOUSE_KEY | ✅ Set |
-| GOOGLE_MAPS_KEY | ✅ Set |
-| GLA_API_KEY | ✅ Set |
-| RESEND_API_KEY | ✅ Set |
-| TEST_EMAIL | ✅ Set |
-| PUBLIC_APP_URL | ⏳ Add: https://arbor-leads-final-app.onrender.com |
-| STRIPE_SECRET_KEY | ⏳ Add from Stripe dashboard |
-| STRIPE_WEBHOOK_SECRET | ⏳ Add from Stripe dashboard (update endpoint URL first) |
+| Key | Status | Description |
+|---|---|---|
+| SUPABASE_DB_URL | ✅ Set | PostgreSQL database |
+| TRIGGER_SECRET | ✅ Set | Cron security gate |
+| DASHBOARD_USER | ✅ Set | Dashboard basic auth username |
+| DASHBOARD_PASS | ✅ Set | Dashboard basic auth password |
+| COMPANIES_HOUSE_KEY | ✅ Set | Companies House Search + Officers API |
+| GOOGLE_MAPS_KEY | ✅ Set | Google Places search + place details (rating, phone, website) |
+| GLA_API_KEY | ✅ Set | London GLA Planning Datahub API |
+| UK_PLANNING_API_KEY | ✅ Set | UK Planning API for Birmingham, Manchester, Bristol, Sheffield |
+| RESEND_API_KEY | ✅ Set | Transactional email alerts |
+| TEST_EMAIL | ✅ Set | Alert destination email |
+| PUBLIC_APP_URL | ⏳ Add | `https://arbor-leads-final-app.onrender.com` |
+| STRIPE_SECRET_KEY | ⏳ Add | Stripe secret key from Stripe dashboard |
+| STRIPE_WEBHOOK_SECRET | ⏳ Add | Stripe webhook signing secret |
+
 
 ---
 
