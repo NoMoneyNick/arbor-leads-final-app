@@ -128,6 +128,7 @@ def status(user: str = Depends(verify_dashboard_auth)):
         ("COMPANIES_HOUSE_KEY",   "Companies House API"),
         ("GOOGLE_MAPS_KEY",       "Google Maps (Pillar 3)"),
         ("GLA_API_KEY",           "London Datahub (GLA)"),
+        ("UK_PLANNING_API_KEY",   "UK Planning API (Bham/Mcr/Bristol/Shef)"),
         ("RESEND_API_KEY",        "Email (Resend)"),
         ("TEST_EMAIL",            "Alert Email Address"),
         ("PUBLIC_APP_URL",        "Public App URL"),
