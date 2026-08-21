@@ -18,16 +18,40 @@ LARGE_KEYWORDS = [
     "demolition", "contaminated", "application to carry out works"
 ]
 MEDIUM_KEYWORDS = [
-    "crown reduction", "crown lift", "crown thin", "fell", "felling",
-    "removal", "pollarding", "overhanging", "storm damage",
-    "deadwood", "works to trees", "urgent", "diseased"
+    "crown reduction", "crown lift", "crown thin", "crown raising", "crown clean",
+    "fell", "felling", "tree felling",
+    "removal of tree", "remove tree", "tree removal",
+    "pollarding", "pollard",
+    "overhanging", "storm damage",
+    "deadwood", "works to trees", "work to trees",
+    "urgent", "diseased tree"
 ]
 SMALL_KEYWORDS = [
-    "pruning", "hedge", "trim", "cutting", "maintenance",
-    "inspection", "minor works", "lopping"
+    "tree pruning", "tree trimming", "tree maintenance",
+    "hedge trimming", "hedge cutting", "hedge removal", "hedge reduction",
+    "tree inspection", "tree survey", "tree assessment",
+    "minor works to tree", "lopping"
 ]
 
-TREE_GOLD = ["tree", "arbor", "felling", "stump", "surgery", "crown", "tpo", "woodland", "hedge"]
+# Compound phrases used to decide if a planning application is tree-related at all.
+# Uses compound terms to eliminate false positives:
+# "surgery" alone → matches breast/dental surgery
+# "tree" alone → matches fruit tree nursery, street, streetwise
+# "crown" alone → matches Crown Hotel, Crown Court
+TREE_GOLD = [
+    "tree surgery", "tree surgeon", "tree work", "tree works",
+    "tree felling", "tree removal", "tree pruning", "tree trimming",
+    "tree preservation", "tree protection", "tree survey", "tree assessment",
+    "works to tree", "work to tree",
+    "arboricultural", "arborist", "arbor",
+    "tpo",
+    "felling",
+    "stump",
+    "pollard",
+    "crown reduction", "crown lift", "crown thin", "crown raising",
+    "woodland management", "woodland clearance",
+    "hedge trimming", "hedge cutting", "hedge removal",
+]
 
 
 def score_lead(summary: str) -> tuple:

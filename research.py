@@ -78,10 +78,25 @@ def perform_research(city_name: str):
     Finds Tree Surgery LTD companies via Companies House,
     enforces the Golden Rule (active LTDs only),
     then enriches with director name (CH Officers) and Google rating.
+    Two-layer name filter applied:
+    1. Company name must contain at least one tree-surgery word
+    2. Company name must not contain any excluded (irrelevant industry) words
     """
     if not CH_KEY:
         logger.error("[Investigator] COMPANIES_HOUSE_KEY not set. Aborting.")
         return
+
+    # Words a legitimate tree surgery company name will contain
+    REQUIRED_NAME_WORDS = [
+        "tree", "arbor", "arboricultural", "arborist", "forestry",
+        "woodland", "felling", "stump", "timber", "hedge"
+    ]
+    # Words that indicate a non-tree-surgery company
+    EXCLUDED_NAME_WORDS = [
+        "breast", "plastic", "cosmetic", "dental", "medical", "clinic",
+        "hospital", "fruit", "olive", "palm", "christmas", "bonsai",
+        "surgery centre", "surgical", "ortho", "optic", "laser"
+    ]
 
     try:
         conn = database.get_db_conn()
@@ -104,11 +119,22 @@ def perform_research(city_name: str):
         for co in items:
             name = co.get("title", "").upper()
             company_number = co.get("company_number", "")
+            name_lower = name.lower()
 
             # GOLDEN RULE: Active Limited Companies only
             if not any(t in name for t in ["LTD", "LIMITED"]):
                 continue
             if co.get("company_status") != "active":
+                continue
+
+            # NAME FILTER 1: Must contain a tree-surgery-related word
+            if not any(w in name_lower for w in REQUIRED_NAME_WORDS):
+                logger.info(f"[Investigator] Skipping {name} — no tree-surgery keyword in name.")
+                continue
+
+            # NAME FILTER 2: Must not contain an excluded/unrelated industry word
+            if any(w in name_lower for w in EXCLUDED_NAME_WORDS):
+                logger.info(f"[Investigator] Skipping {name} — excluded industry keyword found.")
                 continue
 
             # Pillar 2: Director from Companies House Officers
@@ -138,6 +164,7 @@ def perform_research(city_name: str):
 
     except Exception as e:
         logger.error(f"[Investigator] Fatal error in perform_research: {e}")
+
 
 
 def enrich_existing_partners():
