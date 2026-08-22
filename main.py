@@ -70,23 +70,42 @@ def dashboard(user: str = Depends(verify_dashboard_auth)):
         cur.execute("SELECT count(*) FROM potential_partners"); stats["p"] = cur.fetchone()[0]
         cur.execute("SELECT count(*) FROM leads"); stats["l"] = cur.fetchone()[0]
         cur.execute("""SELECT company_name, md_name, target_city, google_rating
-                       FROM potential_partners ORDER BY created_at DESC LIMIT 5""")
+                       FROM potential_partners ORDER BY created_at DESC LIMIT 6""")
         stats["partners"] = cur.fetchall()
-        cur.execute("""SELECT address, summary, lead_score, lead_price, council_source
-                       FROM leads ORDER BY discovered_at DESC LIMIT 5""")
+        cur.execute("""SELECT address, summary, lead_score, lead_price, council_source, discovered_at
+                       FROM leads ORDER BY discovered_at DESC LIMIT 8""")
         stats["leads"] = cur.fetchall()
         cur.close(); conn.close()
     except Exception as e:
         logger.error(f"[DASHBOARD] DB error: {e}")
 
     partner_rows = "".join([
-        f"<li><b>{p[0]}</b> — {p[1] or 'Director: Searching...'} | {p[2]} | ⭐ {p[3] or 'N/A'}</li>"
+        f"<li><b>{p[0]}</b> — {p[1] or 'Director on file'} | {p[2]} | ⭐ {p[3] or 'N/A'}</li>"
         for p in stats["partners"]
     ])
 
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    def get_freshness_badge(discovered_at):
+        if not discovered_at:
+            return "🟢 <span style='color:#2e7d32; font-weight:bold;'>🔥 FRESH</span>"
+        try:
+            delta_days = (now - discovered_at).days
+            if delta_days <= 14:
+                return f"🟢 <span style='color:#2e7d32; font-weight:bold;'>🔥 FRESH ({delta_days}d ago)</span>"
+            elif delta_days <= 45:
+                return f"🟡 <span style='color:#f57f17; font-weight:bold;'>⏳ CONSULTATION ({delta_days}d)</span>"
+            elif delta_days <= 90:
+                return f"🔵 <span style='color:#0277bd; font-weight:bold;'>✅ GRANTED</span>"
+            else:
+                return f"⚪ <span style='color:#757575;'>📦 ARCHIVED</span>"
+        except Exception:
+            return "🟢 <span style='color:#2e7d32; font-weight:bold;'>🔥 FRESH</span>"
+
     SCORE_EMOJI = {"small": "🟡", "medium": "🟠", "large": "🔴"}
     lead_rows = "".join([
-        f"<li>{SCORE_EMOJI.get(l[2],'🟡')} <b>{l[0]}</b> — {l[1][:80]}... | £{l[3]} | {l[4]}</li>"
+        f"<li>{SCORE_EMOJI.get(l[2],'🟡')} <b>{l[0]}</b> {get_freshness_badge(l[5])}<br><span style='color:#555; font-size:13px;'>{l[1][:90]}... | £{l[3]} | {l[4]}</span></li>"
         for l in stats["leads"]
     ])
 
@@ -94,11 +113,12 @@ def dashboard(user: str = Depends(verify_dashboard_auth)):
         f"""<div style='display:inline-block; margin:6px; padding:12px 18px;
             background:#f4f4f9; border-radius:10px; border:1px solid #ddd;'>
             <b>📍 {city}</b><br>
-            <a href='/scan/{city.lower()}'>▶ Scan Leads</a> &nbsp;|&nbsp;
-            <a href='/research/{city.lower()}'>▶ Find Partners</a>
+            <a href='/scan/{city.lower().replace(" ", "-")}'>▶ Scan Leads</a> &nbsp;|&nbsp;
+            <a href='/research/{city.lower().replace(" ", "-")}'>▶ Find Partners</a>
         </div>"""
-        for city in ALL_CITIES
+        for city in ALL_CITIES[:9]  # Display the 9 core English regions
     ])
+
 
     return f"""
     <html><head><title>Vector Data Labs</title></head>
