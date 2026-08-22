@@ -134,10 +134,10 @@
 | GLA_API_KEY | ✅ Set | London GLA Planning Datahub API |
 | UK_PLANNING_API_KEY | ✅ Set | UK Planning API for Birmingham, Manchester, Bristol, Sheffield |
 | RESEND_API_KEY | ✅ Set | Transactional email alerts |
-| TEST_EMAIL | ✅ Set | Alert destination email |
-| PUBLIC_APP_URL | ⏳ Add | `https://arbor-leads-final-app.onrender.com` |
-| STRIPE_SECRET_KEY | ⏳ Add | Stripe secret key from Stripe dashboard |
-| STRIPE_WEBHOOK_SECRET | ⏳ Add | Stripe webhook signing secret |
+| PUBLIC_APP_URL | ✅ Set | `https://arbor-leads-final-app.onrender.com` |
+| STRIPE_SECRET_KEY | ✅ Set | Stripe payments live & verified |
+| STRIPE_WEBHOOK_SECRET | ✅ Set | Stripe webhook listener |
+
 
 
 ---
