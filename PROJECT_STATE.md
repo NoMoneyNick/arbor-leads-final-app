@@ -74,21 +74,23 @@
 | **10-Lead Credits** | £80 one-off | Credit Pack | Pay-as-you-go, no subscription |
 | **City Pro** | £49 / month | Recurring Subscription | One chosen city/radius, unlimited daily leads, full scoring |
 | **National Pro** | £89 / month | Recurring Subscription | All 6 UK regions, priority alerts, full scoring |
+| **Exclusive Lockout** | £149 / month | Territory Monopoly | **100% Exclusive Leads** — Locks out all competing contractors in your radius |
 
 ---
 
 ## 6. ACTIVE SPRINT QUEUE
 
-1. **🚨 Run Individual City Partner Scans (Opening Task):** Manchester, Leeds, Bristol, Sheffield, London.
-2. **Build Public Landing Page (`/`):** ArborLeads branded homepage with value prop, live sample leads ticker, 4-tier pricing table, FAQ, and CTA.
-3. **Move Admin Portal to `/admin`:** Protected by Basic Auth (`verify_dashboard_auth`).
-4. **Build Interactive Territory Map Selector:**
+1. **Build Public Landing Page (`/`):** ArborLeads branded homepage with value prop, live sample leads ticker, 5-tier pricing table (including Exclusive Lockout), FAQ, and CTA.
+2. **Move Admin Portal to `/admin`:** Protected by Basic Auth (`verify_dashboard_auth`).
+3. **Build Interactive Territory Map Selector:**
    - **Frontend:** Leaflet.js + OpenStreetMap (100% free, mobile-friendly).
    - **Geocoding:** Free `postcodes.io` API.
    - **Radius Slider:** 5 / 10 / 15 / 20 / 25 miles with live expanding circle overlay.
    - **Lead Router:** Computes Haversine distance from planning application coordinates to subscriber pin; only routes leads within customer's active territory circle.
-5. **Launch Outreach Campaign:** Use `/export-directors.csv` and [`outreach_playbook.md`](file:///C:/Users/twobo.DESKTOP-DI088K1/.gemini/antigravity/brain/46137285-d767-4297-93ad-b75b5cbb2fa0/outreach_playbook.md) for 100% legal B2B cold emails and WhatsApp outreach to 1,500+ LTD directors.
+4. **Implement Exclusive Lead Lockout System:** Flag leads claimed by Exclusive tier subscribers so they are suppressed from all other contractors.
+5. **Launch Outreach Campaign:** Use `/export-directors.csv` and [`outreach_playbook.md`](file:///C:/Users/twobo.DESKTOP-DI088K1/.gemini/antigravity/brain/46137285-d767-4297-93ad-b75b5cbb2fa0/outreach_playbook.md) for 100% legal B2B cold emails and WhatsApp outreach to verified LTD directors.
 6. **Build Pillar 4 (Telegram Bot):** Make.com webhook → Telegram bot for internal lead alerts.
+
 
 ---
 
