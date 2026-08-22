@@ -239,19 +239,19 @@ def scan_london_leads() -> int:
 
 UK_PLANNING_API_KEY = os.getenv("UK_PLANNING_API_KEY", "").strip()
 
-# Postcode area prefix per city — covers the full city in one query
+# Postcode area prefixes per region — covers central city + all surrounding borough/county councils
 CITY_POSTCODE_PREFIX = {
-    "Birmingham": "B",
-    "Manchester":  "M",
-    "Bristol":     "BS",
-    "Sheffield":   "S",
+    "Birmingham": ["B", "WS", "WV", "DY", "CV", "WR", "TF"],  # B'ham, Walsall, Wolverhampton, Dudley, Coventry, Worcester, Telford
+    "Manchester": ["M", "SK", "WA", "WN", "BL", "OL", "CW"],  # Manchester, Stockport, Warrington, Wigan, Bolton, Oldham, Cheshire
+    "Bristol":    ["BS", "BA", "GL", "SN"],                  # Bristol, Bath, Gloucester/Cheltenham, Swindon/Wiltshire
+    "Sheffield":  ["S", "DN", "DE", "NG"],                  # Sheffield, Doncaster, Derbyshire/Peak District, Nottinghamshire North
 }
 
 
 def scan_city_planning_api(city_name: str) -> int:
     """
-    Scans planning applications for a UK city using ukplanningapi.co.uk.
-    Covers Birmingham, Manchester, Bristol, Sheffield (and any future cities).
+    Scans planning applications for a UK city and all its surrounding borough/county councils
+    using ukplanningapi.co.uk across all regional postcode prefixes.
     API docs: https://ukplanningapi.co.uk/api-docs
     """
     if not UK_PLANNING_API_KEY:
@@ -259,64 +259,61 @@ def scan_city_planning_api(city_name: str) -> int:
                      f"Get a free key at ukplanningapi.co.uk/api-signup")
         return 0
 
-    postcode_prefix = CITY_POSTCODE_PREFIX.get(city_name)
-    if not postcode_prefix:
-        logger.error(f"[{city_name}] No postcode prefix configured for this city.")
+    postcode_prefixes = CITY_POSTCODE_PREFIX.get(city_name, [])
+    if isinstance(postcode_prefixes, str):
+        postcode_prefixes = [postcode_prefixes]
+    if not postcode_prefixes:
+        logger.error(f"[{city_name}] No postcode prefixes configured for this city.")
         return 0
 
     headers = {"X-API-Key": UK_PLANNING_API_KEY}
     new_leads = []
 
     try:
-        res = requests.get(
-            "https://ukplanningapi.co.uk/v1/applications",
-            params={
-                "postcode": postcode_prefix,
-                "status":   "received",
-                "limit":    200,
-            },
-            headers=headers,
-            timeout=20
-        )
-
-        if res.status_code == 429:
-            logger.warning(f"[{city_name}] UK Planning API monthly quota reached. "
-                           f"Upgrade at ukplanningapi.co.uk")
-            return 0
-
-        res.raise_for_status()
-        records = res.json().get("data", [])
-
-        if not records:
-            logger.warning(f"[{city_name}] UK Planning API returned no results "
-                           f"for postcode prefix '{postcode_prefix}'.")
-            return 0
-
         conn = database.get_db_conn()
         cur = conn.cursor()
 
-        for item in records:
-            summary = item.get("description", "") or ""
-            if not _is_tree_related(summary):
-                continue
-            ref  = item.get("reference") or f"{city_name[:3].upper()}-{int(time.time())}"
-            addr = item.get("address", city_name)
-            lead = _insert_lead(cur, ref, addr, summary, city_name)
-            if lead:
-                new_leads.append(lead)
+        for prefix in postcode_prefixes:
+            try:
+                res = requests.get(
+                    "https://ukplanningapi.co.uk/v1/applications",
+                    params={
+                        "postcode": prefix,
+                        "status":   "received",
+                        "limit":    200,
+                    },
+                    headers=headers,
+                    timeout=15
+                )
+
+                if res.status_code == 429:
+                    logger.warning(f"[{city_name}] UK Planning API monthly quota reached.")
+                    break
+
+                if res.status_code != 200:
+                    logger.debug(f"[{city_name}] Prefix '{prefix}' returned HTTP {res.status_code}")
+                    continue
+
+                records = res.json().get("data", [])
+                for item in records:
+                    summary = item.get("description", "") or ""
+                    if not _is_tree_related(summary):
+                        continue
+                    ref  = item.get("reference") or f"{prefix}-{int(time.time())}"
+                    addr = item.get("address", city_name)
+                    lead = _insert_lead(cur, ref, addr, summary, city_name)
+                    if lead:
+                        new_leads.append(lead)
+            except Exception as pe:
+                logger.debug(f"[{city_name}] Error scanning prefix '{prefix}': {pe}")
 
         conn.commit()
         cur.close()
         conn.close()
 
-    except requests.exceptions.Timeout:
-        logger.error(f"[{city_name}] Request timed out.")
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"[{city_name}] HTTP {e.response.status_code}: {e.response.text[:200]}")
-    except requests.exceptions.ConnectionError as e:
-        logger.error(f"[{city_name}] Connection error: {e}")
     except Exception as e:
-        logger.error(f"[{city_name}] Unexpected error: {e}", exc_info=True)
+        logger.error(f"[{city_name}] Unexpected error in planning scan: {e}", exc_info=True)
+
 
     if new_leads:
         notifications.dispatch_lead_alerts(city_name, new_leads)
