@@ -22,15 +22,21 @@
 ---
 
 ## 1. FILE STRUCTURE
+## 1. CORE ARCHITECTURE OVERVIEW
 
-- `main.py` — Routes, landing page, basic auth, Stripe checkout & webhooks, city lead triggers, CSV export, `/health` keep-alive.
-- `database.py` — Supabase PostgreSQL schema, migrations, connection resilience, customer territory records.
-- `scanners.py` — Leeds (ArcGIS 15-mile radius), London (GLA Datahub), Birmingham/Manchester/Bristol/Sheffield (UK Planning API).
-- `research.py` — Postcode/district resolution engine (`resolve_uk_city`), 8-worker ThreadPoolExecutor concurrency, Companies House Officers API, Google Places Details, website email scraper.
-- `notifications.py` — Resend email alerts with lead score/price, WhatsApp direct links, radius-based subscriber dispatching.
-- `payments.py` — Stripe checkout sessions with dynamic pricing (4 live tiers), webhook fulfillment, Statement Descriptor: `ARBORLEADS`.
-- `PROJECT_STATE.md` — This file.
-- `MANIFEST.md` — Master operational rules, business model, legal framework.
+Vector Data Labs operates **ArborLeads** — an automated, nationwide B2B lead intelligence and contractor radar platform tailored for the UK arboricultural sector.
+
+- **Public Landing Page:** `GET /` — High-converting customer-facing SaaS homepage with live lead sample ticker and 5-tier pricing.
+- **Admin Command Portal:** `GET /admin` — Protected behind HTTP Basic Auth (`verify_dashboard_auth`).
+- **Database Status:** **935 Verified Limited Company Tree Surgeons** + **Hundreds of Fresh Council Planning Leads**.
+- **Nationwide Council Coverage:** 100% of England's **309 Local Planning Authorities** across 9 economic regions.
+- **Lead Freshness Lifecycle Badges:** 🟢 `🔥 FRESH (0–14d)`, 🟡 `⏳ IN CONSULTATION (15–45d)`, 🔵 `✅ GRANTED (45–90d)`, ⚪ `📦 ARCHIVED (90d+)`.
+- **Pricing Matrix:**
+  1. **Single Lead:** £19 (One-time)
+  2. **5-Lead Pack:** £80 (Credits)
+  3. **City Pro:** £49/month (Unlimited regional leads in 15-mile radius)
+  4. **National Pass:** £89/month (Unlimited leads across all 309 English councils)
+  5. **Exclusive Lockout:** £149/month (100% Territory Monopoly / Competitor lockout)
 
 ---
 
