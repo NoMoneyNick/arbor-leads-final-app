@@ -109,15 +109,22 @@
 - ✅ **Outreach Playbook created**: direct mail letter, short email sequence, and WhatsApp/phone pitch scripts.
 
 ### Next in Queue:
-1. **Run `/clean-partners` and `/enrich-all` on live app**: purge existing junk from DB and enrich verified partners with phone, website, and email.
-2. **Launch Outreach Campaign**: use the CSV export (`/export-directors.csv`) and [outreach_playbook.md](file:///C:/Users/twobo.DESKTOP-DI088K1/.gemini/antigravity/brain/46137285-d767-4297-93ad-b75b5cbb2fa0/outreach_playbook.md) for direct mail and cold email/WhatsApp.
-3. **Build Customer-Radius Matching System**:
-   - `customers` table (postcode, radius_miles, city, stripe_customer_id)
-   - Geocoding via postcodes.io (free UK postcode → lat/lon)
-   - Route alerts only to customers within their chosen radius (5/10/15/20 miles)
+1. **Build Public Landing Page (`/`) & Admin Separation (`/admin`)**:
+   - High-converting, professional landing page branded as **ArborLeads** (powered by Vector Data Labs parent umbrella).
+   - Value proposition: *"Exclusive UK Council Planning Leads for Tree Surgeons & Arbs"*.
+   - Live sample leads ticker, 4-tier pricing table, trust signals, and direct call to action.
+   - Move admin management controls to `/admin` protected by Basic Auth.
+2. **Build Customer Interactive Territory Map Selector**:
+   - **Frontend:** Leaflet.js + OpenStreetMap (100% free, mobile-friendly).
+   - **Postcode Lookup:** Free `postcodes.io` API (converts UK postcodes to latitude/longitude coordinates).
+   - **Interactive Radius Slider:** 5 / 10 / 15 / 20 / 25 miles with live visual circle overlay expanding/shrinking on the map.
+   - **Database:** `customers` table (postcode, lat, lon, radius_miles, email, stripe_customer_id, plan).
+   - **Lead Router:** Automatically computes Haversine distance for new planning applications and routes alerts only to subscribers whose territory circle covers that job.
+3. **Launch Outreach Campaign**: use the CSV export (`/export-directors.csv`) and [outreach_playbook.md](file:///C:/Users/twobo.DESKTOP-DI088K1/.gemini/antigravity/brain/46137285-d767-4297-93ad-b75b5cbb2fa0/outreach_playbook.md) for direct mail, cold email, and WhatsApp outreach.
 4. **Build Pillar 4 (Telegram Bot)**: Make.com webhook → Telegram bot for internal lead alerts.
 5. **Direct Council GIS Contact**: email Birmingham/Manchester GIS teams for official free feeds as volume grows.
 6. **First Paying Subscriber & Customer Feedback Review**.
+
 
 ---
 
