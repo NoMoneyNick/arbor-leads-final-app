@@ -326,9 +326,34 @@ async def stripe_webhook(request: Request):
 # ── City Scan Routes (Dashboard — Basic Auth) ─────────────────────────────────
 
 def _resolve_city_param(slug: str) -> Optional[str]:
-    normalized = slug.lower().replace("-", " ").replace("_", " ").strip()
-    city_map = {c.lower(): c for c in ALL_CITIES}
-    return city_map.get(normalized)
+    clean = slug.lower().replace("-", " ").replace("_", " ").strip()
+    compact = slug.lower().replace("-", "").replace("_", "").replace(" ", "").strip()
+    city_map = {
+        "london": "London",
+        "south east": "South East",
+        "southeast": "South East",
+        "south west": "South West",
+        "southwest": "South West",
+        "west midlands": "West Midlands",
+        "westmidlands": "West Midlands",
+        "east midlands": "East Midlands",
+        "eastmidlands": "East Midlands",
+        "yorkshire": "Yorkshire",
+        "north west": "North West",
+        "northwest": "North West",
+        "north east": "North East",
+        "northeast": "North East",
+        "east of england": "East of England",
+        "eastofengland": "East of England",
+        "leeds": "Leeds",
+        "birmingham": "Birmingham",
+        "manchester": "Manchester",
+        "bristol": "Bristol",
+        "sheffield": "Sheffield",
+        "newcastle": "North East",
+        "cambridge": "East of England",
+    }
+    return city_map.get(clean) or city_map.get(compact)
 
 
 @app.get("/scan/{city_slug}", response_class=HTMLResponse)
@@ -352,6 +377,7 @@ def scan_city(city_slug: str, user: str = Depends(verify_dashboard_auth)):
 
 # ── City Cron Routes (External — Trigger Secret) ──────────────────────────────
 
+@app.get("/trigger-leads/{city_slug}")
 @app.get("/trigger-leads-{city_slug}")
 def cron_trigger(city_slug: str, secret: Optional[str] = Query(None)):
     verify_cron_secret(secret)
@@ -368,6 +394,7 @@ def cron_trigger(city_slug: str, secret: Optional[str] = Query(None)):
 
     logger.info(f"[CRON] {city}: {count} new leads.")
     return {"status": "success", "city": city, "new_leads": count}
+
 
 
 # ── Research Routes (Basic Auth) ──────────────────────────────────────────────
