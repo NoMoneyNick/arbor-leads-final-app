@@ -481,6 +481,14 @@ def clean_partners(user: str = Depends(verify_dashboard_auth)):
     </body></html>"""
 
 
+@app.get("/trigger-clean-partners")
+def trigger_clean_partners(secret: Optional[str] = Query(None)):
+    verify_cron_secret(secret)
+    result = research.clean_partner_database()
+    return {"status": "success", "result": result}
+
+
+
 
 # ── Export Directors (Basic Auth) ─────────────────────────────────────────────
 

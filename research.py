@@ -174,8 +174,9 @@ CITY_SUB_AREAS = {
     "Yorkshire": [
         "Leeds", "Bradford", "Sheffield", "York", "Hull", "Harrogate", "Wakefield",
         "Huddersfield", "Halifax", "Rotherham", "Barnsley", "Doncaster", "Scarborough",
-        "Bridlington", "Ripon", "Skipton", "Selby", "West Yorkshire", "North Yorkshire",
-        "South Yorkshire", "East Riding of Yorkshire"
+        "Bridlington", "Ripon", "Skipton", "Selby", "Ilkley", "Otley", "Wetherby",
+        "Knaresborough", "Malton", "Thirsk", "Beverley", "Driffield", "Whitby",
+        "West Yorkshire", "North Yorkshire", "South Yorkshire", "East Riding of Yorkshire"
     ],
     "Birmingham": [
         "Birmingham", "West Midlands", "Solihull", "Coventry", "Wolverhampton", "Dudley",
@@ -187,9 +188,10 @@ CITY_SUB_AREAS = {
     "West Midlands": [
         "Birmingham", "Coventry", "Solihull", "Wolverhampton", "Dudley", "Walsall",
         "West Bromwich", "Sutton Coldfield", "Stourbridge", "Tamworth", "Redditch",
-        "Bromsgrove", "Warwick", "Leamington Spa", "Stratford-upon-Avon", "Lichfield",
-        "Cannock", "Stafford", "Stoke-on-Trent", "Kidderminster", "Telford", "Shrewsbury",
-        "Worcester", "Hereford", "Warwickshire", "Staffordshire", "Worcestershire", "Shropshire"
+        "Bromsgrove", "Warwick", "Leamington Spa", "Stratford-upon-Avon", "Kenilworth",
+        "Lichfield", "Cannock", "Stafford", "Stoke-on-Trent", "Kidderminster", "Telford",
+        "Shrewsbury", "Worcester", "Hereford", "Malvern", "Evesham", "Bridgnorth",
+        "Ludlow", "Oswestry", "Warwickshire", "Staffordshire", "Worcestershire", "Shropshire"
     ],
     "Manchester": [
         "Manchester", "Greater Manchester", "Salford", "Stockport", "Trafford", "Altrincham",
@@ -198,9 +200,13 @@ CITY_SUB_AREAS = {
         "Chester", "Crewe", "Stoke-on-Trent", "Lancashire"
     ],
     "North West": [
-        "Manchester", "Liverpool", "Salford", "Stockport", "Trafford", "Bolton", "Bury",
-        "Oldham", "Rochdale", "Wigan", "Warrington", "Chester", "Crewe", "Preston",
-        "Blackpool", "Lancaster", "Blackburn", "Burnley", "Carlisle", "Kendal",
+        "Manchester", "Liverpool", "Salford", "Stockport", "Trafford", "Altrincham",
+        "Bowdon", "Hale", "Sale", "Bolton", "Bury", "Oldham", "Rochdale", "Wigan",
+        "Warrington", "Chester", "Crewe", "Wilmslow", "Alderley Edge", "Prestbury",
+        "Knutsford", "Macclesfield", "Poynton", "Northwich", "Nantwich", "Tarporley",
+        "Preston", "Blackpool", "Lancaster", "Blackburn", "Burnley", "Clitheroe",
+        "Ribble Valley", "Lytham St Annes", "Southport", "Formby", "Ormskirk",
+        "Carlisle", "Kendal", "Windermere", "Keswick", "Penrith",
         "Cheshire", "Greater Manchester", "Merseyside", "Lancashire", "Cumbria"
     ],
     "Bristol": [
@@ -211,8 +217,13 @@ CITY_SUB_AREAS = {
     ],
     "South West": [
         "Bristol", "Bath", "Gloucester", "Cheltenham", "Stroud", "Cirencester",
-        "Swindon", "Salisbury", "Trowbridge", "Taunton", "Bridgwater", "Yeovil",
-        "Exeter", "Plymouth", "Torquay", "Truro", "Bournemouth", "Poole", "Dorchester",
+        "Tetbury", "Moreton-in-Marsh", "Stow-on-the-Wold", "Chipping Campden", "Swindon",
+        "Marlborough", "Salisbury", "Chippenham", "Trowbridge", "Bradford-on-Avon",
+        "Taunton", "Bridgwater", "Yeovil", "Glastonbury", "Wells", "Frome",
+        "Minehead", "Exeter", "Plymouth", "Torquay", "Exmouth", "Barnstaple",
+        "Tiverton", "Totnes", "Dartmouth", "Truro", "Falmouth", "Penzance",
+        "St Ives", "Newquay", "St Austell", "Bournemouth", "Poole", "Christchurch",
+        "Dorchester", "Weymouth", "Sherborne", "Wimborne",
         "Somerset", "Gloucestershire", "Wiltshire", "Devon", "Cornwall", "Dorset"
     ],
     "Sheffield": [
@@ -222,34 +233,63 @@ CITY_SUB_AREAS = {
     ],
     "East Midlands": [
         "Nottingham", "Derby", "Leicester", "Lincoln", "Northampton", "Kettering",
-        "Corby", "Mansfield", "Chesterfield", "Loughborough", "Grantham", "Boston",
-        "Derbyshire", "Nottinghamshire", "Leicestershire", "Lincolnshire", "Northamptonshire", "Peak District"
+        "Corby", "Wellingborough", "Daventry", "Towcester", "Mansfield", "Chesterfield",
+        "Dronfield", "Matlock", "Bakewell", "Ashbourne", "Buxton", "Glossop",
+        "Belper", "Loughborough", "Melton Mowbray", "Market Harborough", "Oakham",
+        "Uppingham", "Grantham", "Stamford", "Boston", "Sleaford", "Spalding",
+        "Newark-on-Trent", "Southwell", "Derbyshire", "Nottinghamshire", "Leicestershire",
+        "Lincolnshire", "Northamptonshire", "Rutland", "Peak District"
     ],
     "North East": [
         "Newcastle upon Tyne", "Gateshead", "Sunderland", "Durham", "North Tyneside",
         "South Tyneside", "Middlesbrough", "Stockton-on-Tees", "Darlington", "Hartlepool",
-        "Morpeth", "Hexham", "Alnwick", "Northumberland", "Tyne and Wear", "County Durham"
+        "Morpeth", "Hexham", "Corbridge", "Ponteland", "Alnwick", "Berwick-upon-Tweed",
+        "Cramlington", "Blyth", "Ashington", "Barnard Castle", "Bishop Auckland",
+        "Chester-le-Street", "Newton Aycliffe", "Yarm", "Guisborough", "Saltburn-by-the-Sea",
+        "Northumberland", "Tyne and Wear", "County Durham"
     ],
     "Newcastle": [
         "Newcastle upon Tyne", "Gateshead", "Sunderland", "Durham", "Middlesbrough",
-        "Darlington", "Northumberland", "Tyne and Wear"
+        "Darlington", "Hexham", "Morpeth", "Alnwick", "Northumberland", "Tyne and Wear"
     ],
     "East of England": [
         "Cambridge", "Norwich", "Ipswich", "Peterborough", "Chelmsford", "Colchester",
-        "Southend-on-Sea", "Brentwood", "Luton", "Bedford", "Bury St Edmunds", "Kings Lynn",
-        "Great Yarmouth", "Cambridgeshire", "Norfolk", "Suffolk", "Essex", "Bedfordshire"
+        "Southend-on-Sea", "Brentwood", "Billericay", "Basildon", "Epping", "Loughton",
+        "Harlow", "Saffron Walden", "Great Dunmow", "Braintree", "Maldon", "Luton",
+        "Bedford", "Biggleswade", "Leighton Buzzard", "Dunstable", "St Albans", "Harpenden",
+        "Hitchin", "Letchworth", "Stevenage", "Hertford", "Ware", "Bishop's Stortford",
+        "Royston", "Ely", "Huntingdon", "St Neots", "Wisbech", "March",
+        "Bury St Edmunds", "Newmarket", "Haverhill", "Sudbury", "Stowmarket",
+        "Woodbridge", "Felixstowe", "Aldeburgh", "Southwold", "Kings Lynn", "Swaffham",
+        "Fakenham", "Cromer", "Holt", "Dereham", "Thetford", "Diss", "Great Yarmouth",
+        "Lowestoft", "Cambridgeshire", "Norfolk", "Suffolk", "Essex", "Bedfordshire"
     ],
     "Cambridge": [
         "Cambridge", "Norwich", "Ipswich", "Peterborough", "Ely", "Bury St Edmunds",
-        "Huntingdon", "Cambridgeshire", "Norfolk", "Suffolk"
+        "Huntingdon", "Saffron Walden", "Cambridgeshire", "Norfolk", "Suffolk"
     ],
     "South East": [
-        "Brighton", "Southampton", "Portsmouth", "Oxford", "Reading", "Milton Keynes",
-        "Canterbury", "Maidstone", "Guildford", "Chichester", "Winchester", "Basingstoke",
-        "Slough", "Windsor", "Aylesbury", "High Wycombe", "Surrey", "Kent", "East Sussex",
-        "West Sussex", "Hampshire", "Berkshire", "Buckinghamshire", "Oxfordshire"
+        "Brighton", "Hove", "Worthing", "Eastbourne", "Hastings", "Lewes", "Rye",
+        "Bexhill", "Southampton", "Portsmouth", "Winchester", "Andover", "Basingstoke",
+        "Farnborough", "Aldershot", "Alton", "Petersfield", "Fareham", "Gosport",
+        "Havant", "Eastleigh", "Romsey", "Lymington", "New Forest", "Oxford", "Banbury",
+        "Bicester", "Witney", "Abingdon", "Didcot", "Henley-on-Thames", "Thame",
+        "Reading", "Bracknell", "Wokingham", "Maidenhead", "Windsor", "Slough",
+        "Newbury", "Hungerford", "Milton Keynes", "Aylesbury", "High Wycombe",
+        "Buckingham", "Amersham", "Chesham", "Beaconsfield", "Marlow", "Gerrards Cross",
+        "Canterbury", "Maidstone", "Tunbridge Wells", "Tonbridge", "Sevenoaks",
+        "Dartford", "Gravesend", "Ashford", "Folkestone", "Dover", "Deal", "Sandwich",
+        "Thanet", "Margate", "Ramsgate", "Sittingbourne", "Faversham", "Cranbrook",
+        "Tenterden", "Guildford", "Woking", "Epsom", "Ewell", "Leatherhead",
+        "Dorking", "Reigate", "Redhill", "Caterham", "Oxted", "Godstone", "Warlingham",
+        "Weybridge", "Walton-on-Thames", "Esher", "Cobham", "Camberley", "Farnham",
+        "Haslemere", "Godalming", "Chichester", "Bognor Regis", "Littlehampton",
+        "Horsham", "Crawley", "Midhurst", "Petworth", "Haywards Heath", "Burgess Hill",
+        "East Grinstead", "Surrey", "Kent", "East Sussex", "West Sussex", "Hampshire",
+        "Berkshire", "Buckinghamshire", "Oxfordshire"
     ]
 }
+
 
 
 
