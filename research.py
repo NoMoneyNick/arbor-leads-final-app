@@ -253,7 +253,7 @@ def perform_research(city_name: str):
                 ON CONFLICT (company_number)
                 DO UPDATE SET
                     address = COALESCE(EXCLUDED.address, potential_partners.address),
-                    target_city = COALESCE(NULLIF(potential_partners.target_city, 'None'), EXCLUDED.target_city),
+                    target_city = EXCLUDED.target_city,
                     md_name = COALESCE(EXCLUDED.md_name, potential_partners.md_name),
                     phone_number = COALESCE(EXCLUDED.phone_number, potential_partners.phone_number),
                     google_rating = COALESCE(EXCLUDED.google_rating, potential_partners.google_rating),
@@ -397,15 +397,14 @@ def clean_partner_database():
                             f"(has_required={has_required}, has_excluded={has_excluded})")
                 removed += 1
             else:
-                # Fix missing / 'None' city
-                if not city or city == "None":
-                    detected_city = None
-                    for kc in KNOWN_CITIES:
-                        if kc.lower() in name_lower or kc.lower() in addr_lower:
-                            detected_city = kc
-                            break
-                    if detected_city:
-                        cur.execute("UPDATE potential_partners SET target_city = %s WHERE id = %s", (detected_city, pid))
+                # Accurately re-assign city if found in name or address
+                detected_city = None
+                for kc in KNOWN_CITIES:
+                    if kc.lower() in name_lower or kc.lower() in addr_lower:
+                        detected_city = kc
+                        break
+                if detected_city and detected_city != city:
+                    cur.execute("UPDATE potential_partners SET target_city = %s WHERE id = %s", (detected_city, pid))
                 kept += 1
 
         conn.commit()
@@ -413,6 +412,7 @@ def clean_partner_database():
         conn.close()
         logger.info(f"[Cleanup] Complete. Kept: {kept} | Removed: {removed}")
         return {"kept": kept, "removed": removed}
+
 
 
     except Exception as e:
