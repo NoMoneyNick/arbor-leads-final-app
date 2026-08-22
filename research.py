@@ -166,13 +166,14 @@ def perform_research(city_name: str):
         "tree", "arbor", "arboricultural", "arborist", "forestry",
         "woodland", "felling", "stump", "timber", "hedge"
     ]
-    # Words that indicate a non-tree-surgery company
     EXCLUDED_NAME_WORDS = [
         "breast", "plastic", "cosmetic", "dental", "medical", "clinic",
-        "hospital", "fruit", "olive", "palm", "christmas", "bonsai",
-        "surgery centre", "surgical", "ortho", "optic", "laser",
+        "hospital", "fruit", "olive", "palm", "christmas", "bonsai", "pyo",
+        "surgery centre", "surgical", "ortho", "optic", "laser", "eye", "neck", "spine",
+        "doctor", "health", "physio", "chiropractic", "therapy",
         "hair", "skin", "beauty", "nail", "tattoo", "piercing",
-        "estate agent", "letting", "solicitor", "accountant"
+        "estate agent", "letting", "solicitor", "accountant",
+        "restaurant", "café", "cafe", "bakery", "food"
     ]
 
     try:

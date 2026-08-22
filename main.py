@@ -94,20 +94,34 @@ def dashboard(user: str = Depends(verify_dashboard_auth)):
     return f"""
     <html><head><title>Vector Data Labs</title></head>
     <body style="font-family:sans-serif; background:#f4f4f9; padding:40px;">
-    <div style="max-width:760px; margin:auto; background:white; padding:40px;
+    <div style="max-width:800px; margin:auto; background:white; padding:40px;
                 border-radius:20px; border-top:8px solid #1b5e20;">
         <h1>📊 Vector Data Labs — V4.0</h1>
         <p>Partners: <b>{stats['p']}</b> &nbsp;|&nbsp; Leads: <b>{stats['l']}</b>
            &nbsp;|&nbsp; <a href='/status'>🔧 Status</a>
            &nbsp;|&nbsp; <a href='/pricing'>💳 Pricing</a>
-           &nbsp;|&nbsp; <a href='/export-directors'>📋 Export Directors</a>
+           &nbsp;|&nbsp; <a href='/export-directors'>📋 View Contacts</a>
+           &nbsp;|&nbsp; <a href='/export-directors.csv' style='color:#1b5e20; font-weight:bold;'>⬇️ Download CSV</a>
         </p>
         <hr>
-        <h3>🏙️ Cities</h3>
+        <h3>🏙️ City Scanners & Research</h3>
         {city_buttons}
         <hr>
-        <h3>🔄 Enrichment</h3>
-        <p><a href='/enrich-all'>▶ Enrich All Partners (fill missing director names)</a></p>
+        <h3>🔄 Database & Enrichment Tools</h3>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+            <a href='/clean-partners' style="background:#b71c1c; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
+                🧹 Clean Database (Purge Medical & Unrelated)
+            </a>
+            <a href='/enrich-all' style="background:#1b5e20; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
+                🔄 Enrich All (Phone, Email, Web, Director)
+            </a>
+            <a href='/export-directors.csv' style="background:#0d47a1; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
+                ⬇️ Export Contacts CSV
+            </a>
+        </div>
+        <p style="color:#666; font-size:12px;">
+            Click <b>Clean Database</b> first to delete any old medical/cosmetic records, then <b>Enrich All</b> to populate phones and contact emails.
+        </p>
         <hr>
         <h4>Latest Leads</h4>
         <ul>{lead_rows or "<li>No leads yet.</li>"}</ul>
@@ -116,6 +130,7 @@ def dashboard(user: str = Depends(verify_dashboard_auth)):
     </div>
     </body></html>
     """
+
 
 
 # ── Status ────────────────────────────────────────────────────────────────────
