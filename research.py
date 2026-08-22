@@ -277,8 +277,7 @@ def perform_research(city_name: str):
 
             # Address from Companies House
             addr = co.get("address_snippet") or ""
-            locality = co.get("address", {}).get("locality") or ""
-            assigned_city = city_name or locality or "UK"
+            assigned_city = resolve_uk_city(addr, name, default_city=city_name)
 
             # Pillar 2: Director from Companies House Officers
             md_name = get_director_from_ch(company_number)
@@ -388,17 +387,58 @@ def enrich_existing_partners():
         logger.error(f"[Enrichment] Fatal error: {e}")
 
 
+import re
+
+def resolve_uk_city(address_str: str, company_name: str = "", default_city: str = "UK") -> str:
+    """
+    Determines the genuine city or region using UK postcode outward codes,
+    borough/town names in the address snippet, and company title keywords.
+    """
+    addr = (address_str or "").upper()
+    name = (company_name or "").upper()
+    combined = f"{name} {addr}"
+
+    # 1. Postcode Prefix Mapping
+    pc_match = re.search(r'\b([A-Z]{1,2})\d[A-Z0-9]?\s*\d[A-Z]{2}\b', addr)
+    if pc_match:
+        area_code = pc_match.group(1)
+        if area_code in ["B", "WS", "WV", "DY", "CV", "ST", "TF", "WR"]:
+            return "Birmingham"
+        if area_code in ["M", "SK", "WA", "WN", "BL", "OL", "CW"]:
+            return "Manchester"
+        if area_code in ["BS", "BA", "GL", "SN", "TA"]:
+            return "Bristol"
+        if area_code in ["S", "DN", "DE", "NG", "LN"]:
+            return "Sheffield"
+        if area_code in ["LS", "BD", "WF", "HG", "HX", "HD", "YO"]:
+            return "Leeds"
+        if area_code in ["E", "EC", "N", "NW", "SE", "SW", "W", "WC", "BR", "CR", "DA", "EN", "HA", "IG", "KT", "RM", "SM", "TW", "UB", "WD", "CM", "SS", "ME", "TN", "RH", "GU", "SL", "HP", "AL", "SG"]:
+            return "London"
+
+    # 2. Town / District / County Keyword Matching
+    if any(k in combined for k in ["BIRMINGHAM", "SOLIHULL", "DUDLEY", "WALSALL", "WEST BROMWICH", "SUTTON COLDFIELD", "COVENTRY", "WOLVERHAMPTON", "WEST MIDLANDS", "WARWICK"]):
+        return "Birmingham"
+    if any(k in combined for k in ["MANCHESTER", "SALFORD", "STOCKPORT", "TRAFFORD", "BOLTON", "BURY", "OLDHAM", "ROCHDALE", "WIGAN", "ALTRINCHAM", "GREATER MANCHESTER", "CHESHIRE", "WARRINGTON"]):
+        return "Manchester"
+    if any(k in combined for k in ["BRISTOL", "BATH", "GLOUCESTERSHIRE", "SOMERSET", "KINGSWOOD", "WESTON-SUPER-MARE", "AVON", "CHELTENHAM", "GLOUCESTER"]):
+        return "Bristol"
+    if any(k in combined for k in ["SHEFFIELD", "ROTHERHAM", "BARNSLEY", "DONCASTER", "CHESTERFIELD", "SOUTH YORKSHIRE", "DERBYSHIRE", "PEAK DISTRICT"]):
+        return "Sheffield"
+    if any(k in combined for k in ["LEEDS", "BRADFORD", "WAKEFIELD", "HARROGATE", "WEST YORKSHIRE", "YORKSHIRE", "HALIFAX", "HUDDERSFIELD", "YORK", "WETHERBY"]):
+        return "Leeds"
+    if any(k in combined for k in ["LONDON", "CROYDON", "BROMLEY", "BARNET", "RICHMOND", "ENFIELD", "EALING", "WANDSWORTH", "GREENWICH", "KINGSTON", "HARROW", "HAVERING", "BEXLEY", "HOUNSLOW", "MERTON", "SUTTON", "TWICKENHAM", "WEMBLEY", "SURREY", "KENT", "ESSEX", "MIDDLESEX", "HERTFORDSHIRE"]):
+        return "London"
+
+    return default_city or "UK"
+
+
 def clean_partner_database():
     """
     Retroactive cleanup: applies the two-layer name filter to ALL existing
-    partners in the DB and deletes any that don't qualify.
-    Removes: medical practices, fruit tree nurseries, unrelated businesses.
-    Keeps: active LTDs whose name contains a tree-surgery-related word
-    and does not contain any excluded industry word.
-    Run once after deploy via /clean-partners.
+    partners in the DB, deletes any non-tree businesses, and accurately
+    re-assigns the genuine city from UK postcode/address analysis.
+    Run via /clean-partners.
     """
-
-    # Strict keywords a legitimate tree surgery company name will contain
     REQUIRED_NAME_WORDS = [
         "tree surgery", "tree surgeon", "tree surgeons", "tree care",
         "tree service", "tree services", "tree work", "tree works", "tree felling",
@@ -407,7 +447,6 @@ def clean_partner_database():
         "stump grinding", "stump removal", "hedge cutting", "hedge trimming",
         "tree", "arborist", "arboriculture", "arboricultural", "forestry"
     ]
-    # Words that indicate a non-tree-surgery company
     EXCLUDED_NAME_WORDS = [
         "breast", "plastic", "cosmetic", "dental", "medical", "clinic",
         "hospital", "fruit", "olive", "palm", "christmas", "bonsai", "pyo",
@@ -421,8 +460,6 @@ def clean_partner_database():
         "logistics", "transport", "security", "cleaning", "plumbing", "electrical", "roofing"
     ]
 
-
-
     try:
         conn = database.get_db_conn()
         cur = conn.cursor()
@@ -433,12 +470,10 @@ def clean_partner_database():
 
         removed = 0
         kept = 0
+        updated_cities = 0
 
-        KNOWN_CITIES = ["London", "Leeds", "Birmingham", "Manchester", "Bristol", "Sheffield"]
-
-        for (pid, name, addr, city) in all_partners:
+        for (pid, name, addr, current_city) in all_partners:
             name_lower = (name or "").lower()
-            addr_lower = (addr or "").lower()
 
             # FILTER 1: Must contain a tree-surgery-related word
             has_required = any(w in name_lower for w in REQUIRED_NAME_WORDS)
@@ -447,27 +482,21 @@ def clean_partner_database():
 
             if not has_required or has_excluded:
                 cur.execute("DELETE FROM potential_partners WHERE id = %s", (pid,))
-                logger.info(f"[Cleanup] REMOVED: {name} "
-                            f"(has_required={has_required}, has_excluded={has_excluded})")
+                logger.info(f"[Cleanup] REMOVED: {name} (has_required={has_required}, has_excluded={has_excluded})")
                 removed += 1
             else:
-                # Accurately re-assign city if found in name or address
-                detected_city = None
-                for kc in KNOWN_CITIES:
-                    if kc.lower() in name_lower or kc.lower() in addr_lower:
-                        detected_city = kc
-                        break
-                if detected_city and detected_city != city:
-                    cur.execute("UPDATE potential_partners SET target_city = %s WHERE id = %s", (detected_city, pid))
+                # Accurate real city resolution from postcode and address
+                real_city = resolve_uk_city(addr, name, default_city=current_city or "UK")
+                if real_city != current_city:
+                    cur.execute("UPDATE potential_partners SET target_city = %s WHERE id = %s", (real_city, pid))
+                    updated_cities += 1
                 kept += 1
 
         conn.commit()
         cur.close()
         conn.close()
-        logger.info(f"[Cleanup] Complete. Kept: {kept} | Removed: {removed}")
-        return {"kept": kept, "removed": removed}
-
-
+        logger.info(f"[Cleanup] Complete. Kept: {kept} | Removed: {removed} | Cities Re-assigned: {updated_cities}")
+        return {"kept": kept, "removed": removed, "updated_cities": updated_cities}
 
     except Exception as e:
         logger.error(f"[Cleanup] Fatal error: {e}")
