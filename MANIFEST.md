@@ -1,81 +1,113 @@
 # MASTER PROJECT MANIFEST: VECTOR DATA LABS (V4.0)
 
-**Project Status:** Secure, Deployed, Pre-Revenue
-
-**Environment:** Modular Workspace (Antigravity / GitHub / Render)
-
-**Last Updated:** 22 Aug 2026
-
----
-
-## 1. OPERATIONAL RULES (AI PROTOCOL)
-
-*   **The No-Title Rule:** The AI must not refer to itself or the User with titles. Both parties are untitled operators.
-
-*   **Communication Style:** Direct and operational. No metaphors unless requested. No introductory fluff.
-
-*   **The "Full Code" Rule:** Never provide code snippets. Always rewrite the entire content of the specific file being edited.
-
-*   **The Human Logic Protocol:** When the AI is stuck or looping, the User provides logical direction. The AI must prioritise this over its own processing.
-
-*   **Instruction Style:** Technical tasks broken into numbered, click-by-click steps.
-
-*   **Deploy Trigger:** When the User types `execute`, run `git add .` → `git commit` → `git push` immediately, no confirmation.
+**Project Status:** Secure, Deployed, Pre-Revenue  
+**Customer-Facing Brand:** **ArborLeads** (powered by Vector Data Labs parent umbrella)  
+**Live Production URL:** https://arbor-leads-final-app.onrender.com  
+**Last Updated:** 22 Aug 2026  
 
 ---
 
-## 2. FILE STRUCTURE (THE DEPARTMENTS)
+## 1. OPERATIONAL RULES & PROTOCOLS
 
-1.  `main.py` — Reception Desk. Public Landing Page (`/`), Admin Management Portal (`/admin`), Basic Auth security, Stripe checkout & webhooks, CSV export (`/export-directors.csv`), database cleanup (`/clean-partners`), city scanners & research triggers.
-2.  `database.py` — Filing Cabinet. Supabase connection, schema migrations with resilience columns (`phone_number`, `md_name`, `google_rating`, `website`, `email`, `lead_score`, `lead_price`), and customer territory records.
-3.  `scanners.py` — Scout. Leeds (ArcGIS with 15-mile radius query), London (GLA boundary), Birmingham, Manchester, Bristol, Sheffield (UK Planning API with postcode prefix matching). Compound keyword lead scoring (£25/£50/£75).
-4.  `research.py` — Investigator. Companies House search with two-layer name filtering + Officers API (director names) + Google Places Details (phone, rating, website) + website email scraper + retroactive DB cleanup.
-5.  `notifications.py` — Digital Postman. Resend email alerts with lead score/price, WhatsApp direct links, and radius-based subscriber dispatching.
-6.  `payments.py` — Cashier. Stripe checkout sessions (dynamic price_data), webhook handler, 4 live pricing tiers (Starter £19, 10-Lead Credits £80, City Pro £49, National £89).
-7.  `PROJECT_STATE.md` — Persistent memory of progress, active queue, and environment variables.
-8.  `MANIFEST.md` — This file. Operational rules, structure, mission, legal, branding.
+*   **🚨 STANDING ORDER (NEXT OPENING):** Whatever the Operator says next time we speak, the AI assistant MUST immediately remind the Operator to run the individual city partner scans on the dashboard:
+    1. **Manchester:** `/research/manchester` (60s)
+    2. **Leeds:** `/research/leeds` (60s)
+    3. **Bristol:** `/research/bristol` (60s)
+    4. **Sheffield:** `/research/sheffield` (60s)
+    5. **London:** `/research/london` (90s)
+    *(This ensures the remaining regional boroughs finish populating the 1,500+ nationwide LTD database!)*
+
+*   **The No-Title Rule:** The AI must not refer to itself or the Operator with titles. Both parties are untitled operators.
+*   **Communication Style:** Direct, concise, and operational. No introductory fluff.
+*   **The "Full Code" Rule:** Never provide incomplete code snippets. Always rewrite the full block or file.
+*   **The Human Logic Protocol:** When processing loops occur, Operator logic takes priority over automated loops.
+*   **Deploy Trigger:** When the Operator types `execute`, run `git add . ; git commit -m "..." ; git push` immediately.
+
+---
+
+## 2. SYSTEM ARCHITECTURE & FILE DEPARTMENTS
+
+1.  `main.py` — Reception Desk & Gateway.
+    - Public Homepage (`/`): High-converting SaaS landing page branded as **ArborLeads**.
+    - Admin Portal (`/admin`): Secure management dashboard protected by HTTP Basic Auth.
+    - Public Health Ping (`/health`): 24/7 unauthenticated keep-alive endpoint for cron-job.org uptime pings.
+    - Payments & Webhooks: Stripe checkout redirects and `POST /webhook` fulfillment.
+    - Data Exports: `/export-directors.csv` and `/export-directors` HTML table.
+    - City Scanner Gates: `/trigger-leads-{city_slug}?secret=...` for morning lead scraping.
+2.  `database.py` — Filing Cabinet.
+    - Supabase PostgreSQL connection with auto-reconnecting schema migrations.
+    - Tables: `leads`, `potential_partners`, `payments`, `customers`.
+    - Columns: `md_name`, `phone_number`, `google_rating`, `website`, `email`, `lead_score`, `lead_price`, `target_city`.
+3.  `scanners.py` — Scout & Lead Hunter.
+    - **Leeds:** ArcGIS 15-mile spatial boundary circle query.
+    - **London:** GLA Planning Datahub API (all 32 London Boroughs aggregated).
+    - **Birmingham, Manchester, Bristol, Sheffield:** UK Planning API via postcode prefixes (`B`, `M`, `BS`, `S`).
+    - Lead Grading: Small (£25), Medium (£50), Large (£75) with strict compound tree keyword filters.
+4.  `research.py` — Deep Partner Investigator.
+    - **Postcode & Address Parsing Engine (`resolve_uk_city`):** Parses UK outward postcodes (`B`, `M`, `BS`, `S`, `LS`, London postal codes) to accurately assign true home cities.
+    - **Exhaustive Borough Radar:** Scans 25 London boroughs, 20 West Midlands towns, 18 Greater Manchester towns, 17 Yorkshire towns, 17 Bristol/West towns, and 14 South Yorkshire towns.
+    - **8-Worker Concurrency:** Multi-threaded `ThreadPoolExecutor(max_workers=8)` for 8x speed (~60-90s per city).
+    - **Enrichment:** Companies House Officers API (directors) + Google Places (rating, phone, website) + Website email scraping.
+    - **Strict 2-Layer Filter:** LTDs only; requires tree surgery trade words; excludes medical, dental, cosmetic, housing, beer, finance, tattoo, and rail trades.
+5.  `notifications.py` — Digital Postman.
+    - Resend transactional email alerts with lead score/price.
+    - Pre-formatted WhatsApp direct lead claim links.
+6.  `payments.py` — Cashier.
+    - 4 Live Tiers: Starter (£19/mo), 10-Lead Credits (£80 one-off), City Pro (£49/mo), National (£89/mo).
+    - Statement Descriptor: `ARBORLEADS`.
+7.  `PROJECT_STATE.md` — Active development progress, environment variables, and sprint queues.
+8.  `MANIFEST.md` — This master operational guide.
 
 ---
 
 ## 3. BRAND & UMBRELLA ARCHITECTURE
 
-*   **Umbrella Structure:** Vector Data Labs functions as the parent technology/umbrella holding structure for automated data scraping & AI agent SaaS products.
-*   **Customer-Facing Brand:** **ArborLeads** (or *ArborAlert*) — the specialized, industry-targeted brand presented to tree surgeons, arbs, and planning consultants.
-*   **Stripe Alignment:** Zero disruption. Stripe checkout uses dynamic pricing sessions with product names defined in code. In the Stripe Dashboard under *Settings → Public Details*, set the public Business Name to **ArborLeads** and Statement Descriptor to **ARBORLEADS** so customer bank statements are clear and recognizable.
-*   **Domain & SSL:** Point public domain (e.g. `arborleads.co.uk`) directly to Render custom domain settings when ready.
+*   **Umbrella Holding:** **Vector Data Labs** functions as the parent holding entity taking payments and managing infrastructure.
+*   **Customer Brand:** **ArborLeads** — the focused, professional commercial lead platform for tree surgeons.
+*   **Stripe Settings:** Statement Descriptor set to `ARBORLEADS` so customer credit card statements are crystal clear.
 
 ---
 
-## 4. CORE MISSION & LEGAL
+## 4. LEGAL & OUTREACH COMPLIANCE FRAMEWORK
 
-*   **Mission:** Package UK council planning application data as exclusive, scored leads for tree surgery businesses. Automate director-level enrichment via Companies House and Google Places.
+### 1. Limited Companies (LTDs) — 1,500+ Directors
+*   **Legal Basis:** **PECR Regulation 22 (B2B Corporate Subscriber Exemption)** + **UK GDPR Article 6(1)(f) Legitimate Interests**.
+*   **Channel:** **100% Legal to Cold Email, Call, and WhatsApp**.
+*   **Requirements:** Relevant B2B subject matter (commercial tree jobs), sender identification, and simple opt-out/unsubscribe line.
+*   **Cost:** **£0.00** (zero postage, zero ad spend).
 
-*   **The Golden Rule:** Strictly Limited Companies (LTD) only. No Sole Traders or Partnerships. Sole traders are not the target customer.
-
-*   **Authorised Path:** Contact corporate bodies via "Legitimate Interest" using Companies House numbers as unique identifiers.
-
-*   **Data Source:** All planning data is legally public information under UK law.
+### 2. Sole Traders — 6,000+ UK Operators
+*   **Legal Basis:** **UK GDPR Article 6(1)(f) (Direct Postal Mail)**.
+*   **Channel:** **Direct Mail Letters, Postcards, or Yard Drop-offs** (Cannot cold email without prior opt-in).
+*   **Low-Cost Strategy:**
+    - **A6 Full-Colour Glossy Postcards:** ~18p–25p total (printed via Solopress/Instantprint).
+    - **Sniper Strategy:** Send 5–10 targeted letters/week only when a £5,000+ commercial felling job lands within 2 miles of a tree surgeon's yard.
+    - **Local Yard Drops:** Print 50 flyers at home (~4p each) and drop through local workshop letterboxes (£0 postage).
 
 ---
 
-## 5. BUSINESS MODEL & MAP TERRITORY ENGINE
+## 5. REVENUE FUNNEL & CONVERSION BENCHMARKS
 
-### Target Markets (in order of priority)
-1.  **Commercial arboricultural companies (LTDs)** — Larger operations with office managers seeking commercial contracts (development sites, council work, estates).
-2.  **Arboricultural consultants** — Write BS5837 tree surveys for property developers. High-value leads (£500–£5,000 per survey).
-3.  **Small "unaware" operators** — One-man bands who have never heard of planning data tools. Entry-level pricing gets them in the door.
+### B2B Cold Email Funnel (2,000 LTD Directors)
+*   **Deliverability / Open Rate:** 40% – 55% (~800 – 1,100 opens) using personalized subject lines (`[Company] + [City] commercial tree jobs`).
+*   **Click-through / Interest:** 8% – 12% (~90 – 140 warm clicks).
+*   **Paying Conversion (Conservative: 2.0%):** 40 paying subscribers $\rightarrow$ **£760 to £1,360 / month MRR**.
+*   **Paying Conversion (Moderate: 3.5%):** 70 paying subscribers $\rightarrow$ **£2,450 / month MRR (£29,400 / year)**.
+*   **Credit Pack Upsells:** 10-lead credit packs (£80 each) generate immediate upfront cash injections.
 
-### Customer Map Territory Selector (Leaflet.js + postcodes.io)
-- **Interactive UI:** Customer enters depot postcode → drops a pin on a live UK map.
-- **Dynamic Radius Slider:** 5 / 10 / 15 / 20 / 25 miles with live expanding circle overlay.
-- **Lead Matching Router:** Computes Haversine distance from planning application coordinates to subscriber pin; only routes leads within customer's active territory circle.
+---
 
-### Live Pricing Plans
-| Tier | Price | For |
-|---|---|---|
-| Starter | £19/month | Small operators, entry point, 10 leads/mo |
-| 10-Lead Credits | £80 one-off | Pay-as-you-go credit pack |
-| City Pro | £49/month | One city, unlimited daily leads, full scoring |
-| National | £89/month | All 6 UK cities, instant priority alerts |
+## 6. ACTIVE SPRINT OBJECTIVES
+
+1.  **Run Remaining Individual City Partner Scans:** Manchester, Leeds, Bristol, Sheffield, London (takes 60–90s each).
+2.  **Build Public Landing Page (`/`):** ArborLeads branded homepage with value prop, live sample leads ticker, 4-tier pricing table, FAQ, and CTA.
+3.  **Move Admin Portal to `/admin`:** Protected by Basic Auth (`verify_dashboard_auth`).
+4.  **Build Interactive Territory Map Selector:**
+    - Leaflet.js + OpenStreetMap frontend.
+    - Free `postcodes.io` geocoding.
+    - 5–25 mile radius dynamic slider with live circle overlay.
+    - Smart Haversine distance lead matching router.
+5.  **Launch Phase 1 Free Email Outreach:** Using [`outreach_playbook.md`](file:///C:/Users/twobo.DESKTOP-DI088K1/.gemini/antigravity/brain/46137285-d767-4297-93ad-b75b5cbb2fa0/outreach_playbook.md) with verified LTD CSV export.
+
 
 
