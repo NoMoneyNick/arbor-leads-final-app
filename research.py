@@ -230,31 +230,39 @@ def perform_research(city_name: str):
             if any(w in name_lower for w in EXCLUDED_NAME_WORDS):
                 continue
 
+            # Address from Companies House
+            addr = co.get("address_snippet") or ""
+            locality = co.get("address", {}).get("locality") or ""
+            assigned_city = city_name or locality or "UK"
+
             # Pillar 2: Director from Companies House Officers
             md_name = get_director_from_ch(company_number)
 
             # Pillar 3: Google reputation rating, phone, and website
-            rating, phone, website = get_google_places_info(name, city_name)
+            rating, phone, website = get_google_places_info(name, assigned_city)
 
             # Scrape email from website if found
             email = scrape_email_from_website(website) if website else None
 
             cur.execute("""
                 INSERT INTO potential_partners (
-                    company_name, company_number, target_city,
+                    company_name, company_number, address, target_city,
                     md_name, phone_number, google_rating, website, email, status
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'enriched')
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'enriched')
                 ON CONFLICT (company_number)
                 DO UPDATE SET
+                    address = COALESCE(EXCLUDED.address, potential_partners.address),
+                    target_city = COALESCE(NULLIF(potential_partners.target_city, 'None'), EXCLUDED.target_city),
                     md_name = COALESCE(EXCLUDED.md_name, potential_partners.md_name),
                     phone_number = COALESCE(EXCLUDED.phone_number, potential_partners.phone_number),
                     google_rating = COALESCE(EXCLUDED.google_rating, potential_partners.google_rating),
                     website = COALESCE(EXCLUDED.website, potential_partners.website),
                     email = COALESCE(EXCLUDED.email, potential_partners.email);
-            """, (name, company_number, city_name, md_name, phone, rating, website, email))
+            """, (name, company_number, addr, assigned_city, md_name, phone, rating, website, email))
 
-            logger.info(f"[Investigator] {name} → Director: {md_name or 'N/A'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'} | ⭐ {rating or 'N/A'}")
+            logger.info(f"[Investigator] {name} ({assigned_city}) → Director: {md_name or 'N/A'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'} | ⭐ {rating or 'N/A'}")
+
 
         conn.commit()
         cur.close()
@@ -365,15 +373,18 @@ def clean_partner_database():
         conn = database.get_db_conn()
         cur = conn.cursor()
 
-        cur.execute("SELECT id, company_name FROM potential_partners")
+        cur.execute("SELECT id, company_name, address, target_city FROM potential_partners")
         all_partners = cur.fetchall()
         logger.info(f"[Cleanup] {len(all_partners)} partners to review.")
 
         removed = 0
         kept = 0
 
-        for (pid, name) in all_partners:
+        KNOWN_CITIES = ["London", "Leeds", "Birmingham", "Manchester", "Bristol", "Sheffield"]
+
+        for (pid, name, addr, city) in all_partners:
             name_lower = (name or "").lower()
+            addr_lower = (addr or "").lower()
 
             # FILTER 1: Must contain a tree-surgery-related word
             has_required = any(w in name_lower for w in REQUIRED_NAME_WORDS)
@@ -386,6 +397,15 @@ def clean_partner_database():
                             f"(has_required={has_required}, has_excluded={has_excluded})")
                 removed += 1
             else:
+                # Fix missing / 'None' city
+                if not city or city == "None":
+                    detected_city = None
+                    for kc in KNOWN_CITIES:
+                        if kc.lower() in name_lower or kc.lower() in addr_lower:
+                            detected_city = kc
+                            break
+                    if detected_city:
+                        cur.execute("UPDATE potential_partners SET target_city = %s WHERE id = %s", (detected_city, pid))
                 kept += 1
 
         conn.commit()
@@ -393,6 +413,7 @@ def clean_partner_database():
         conn.close()
         logger.info(f"[Cleanup] Complete. Kept: {kept} | Removed: {removed}")
         return {"kept": kept, "removed": removed}
+
 
     except Exception as e:
         logger.error(f"[Cleanup] Fatal error: {e}")
