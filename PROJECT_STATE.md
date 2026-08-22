@@ -53,16 +53,16 @@
 
 ---
 
-## 4. CITY RADAR COVERAGE
+## 4. CITY & SURROUNDING COUNCIL RADAR COVERAGE
 
-| City | Scanner Source | Radar Scope | Status |
+| Regional Zone | Lead Scanners & Postcode Radars | Partner Green Belt Sweep Scope | Status |
 |---|---|---|---|
-| **Leeds** | Leeds Council ArcGIS MapServer | 15-mile spatial circle (17 towns/districts) | ✅ Verified live |
-| **London** | GLA Planning Datahub API | All 32 London Boroughs + Home Counties (25 districts) | ✅ Verified live |
-| **Birmingham** | UK Planning API (`B` prefix) | West Midlands & surrounding ring (20 towns) | ✅ Verified live |
-| **Manchester** | UK Planning API (`M` prefix) | Greater Manchester & Cheshire (18 towns) | ✅ Verified live |
-| **Bristol** | UK Planning API (`BS` prefix) | West of England & Somerset/Glos (17 towns) | ✅ Verified live |
-| **Sheffield** | UK Planning API (`S` prefix) | South Yorkshire & Peak District (14 towns) | ✅ Verified live |
+| **London & South East** | GLA Datahub (32 Boroughs) + UK Planning API (`SW, SE, NW, N, E, EC, WC, CR, BR, EN, HA, UB, KT, TW, DA, RM, IG, SM, RH, TN, GU, CM, SS, SL, HP, AL, SG, WD, ME`) | 75+ Towns (Surrey, Kent, Essex, Herts, Berks, Bucks) | ✅ Exhaustive nationwide radar |
+| **Leeds & Yorkshire** | Leeds ArcGIS MapServer + UK Planning API (`LS, BD, WF, HX, HD, YO, HG, HU, DL, TS`) | 24 Districts (West, North, East, South Yorkshire) | ✅ Exhaustive nationwide radar |
+| **Birmingham & West Midlands** | UK Planning API (`B, WS, WV, DY, CV, WR, TF, ST, HR, SY`) | 28 Towns (West Midlands, Staffs, Worcs, Shrops, Warks) | ✅ Exhaustive nationwide radar |
+| **Manchester & North West** | UK Planning API (`M, SK, WA, WN, BL, OL, CW, L, PR, BB, FY, CH`) | 22 Towns (Greater Manchester, Cheshire, Merseyside, Lancs) | ✅ Exhaustive nationwide radar |
+| **Bristol & West Country** | UK Planning API (`BS, BA, GL, SN, TA, DT, SP`) | 22 Towns (Bristol, Bath, Glos, Wilts, Somerset, Dorset) | ✅ Exhaustive nationwide radar |
+| **Sheffield & South Yorkshire** | UK Planning API (`S, DN, DE, NG, LN, LE`) | 15 Towns (South Yorks, Derbyshire, Peak District, Notts, Lincs) | ✅ Exhaustive nationwide radar |
 
 ---
 
