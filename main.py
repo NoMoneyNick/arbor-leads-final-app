@@ -429,9 +429,9 @@ def export_directors(user: str = Depends(verify_dashboard_auth)):
         conn = database.get_db_conn(); cur = conn.cursor()
         cur.execute("""
             SELECT company_name, company_number, md_name, phone_number,
-                   email, website, google_rating, target_city
+                   email, website, google_rating,
+                   COALESCE(NULLIF(target_city, 'None'), 'UK') as city
             FROM potential_partners
-            WHERE md_name IS NOT NULL
             ORDER BY target_city, company_name
         """)
         rows = cur.fetchall()
@@ -443,12 +443,12 @@ def export_directors(user: str = Depends(verify_dashboard_auth)):
     table_rows = "".join([
         f"<tr>"
         f"<td style='padding:8px; border:1px solid #ddd;'><b>{r[0]}</b><br><span style='color:#777; font-size:11px;'>#{r[1]}</span></td>"
-        f"<td style='padding:8px; border:1px solid #ddd;'>{r[2] or '—'}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd;'>{r[2] or '<span style=\"color:#888;\">Director on file</span>'}</td>"
         f"<td style='padding:8px; border:1px solid #ddd;'>{r[3] or '—'}</td>"
         f"<td style='padding:8px; border:1px solid #ddd;'>{f'<a href=\"mailto:{r[4]}\">{r[4]}</a>' if r[4] else '—'}</td>"
         f"<td style='padding:8px; border:1px solid #ddd;'>{f'<a href=\"{r[5]}\" target=\"_blank\">Website</a>' if r[5] else '—'}</td>"
         f"<td style='padding:8px; border:1px solid #ddd; text-align:center;'>⭐ {r[6] or 'N/A'}</td>"
-        f"<td style='padding:8px; border:1px solid #ddd;'>{r[7]}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd;'><b>{r[7]}</b></td>"
         f"</tr>"
         for r in rows
     ])
@@ -459,7 +459,7 @@ def export_directors(user: str = Depends(verify_dashboard_auth)):
     <div style="max-width:1100px; margin:auto; background:white; padding:30px;
                 border-radius:16px; border-top:8px solid #1b5e20;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-            <h2>📋 Director Outreach List ({len(rows)} verified contacts)</h2>
+            <h2>📋 Verified Tree Surgery Contacts ({len(rows)} companies)</h2>
             <div>
                 <a href="/export-directors.csv" style="background:#1b5e20; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold;">⬇️ Download CSV</a>
                 &nbsp;|&nbsp; <a href="/">← Dashboard</a>
@@ -497,16 +497,16 @@ def export_directors_csv(user: str = Depends(verify_dashboard_auth)):
         conn = database.get_db_conn(); cur = conn.cursor()
         cur.execute("""
             SELECT company_name, company_number, md_name, phone_number,
-                   email, website, google_rating, target_city
+                   email, website, google_rating,
+                   COALESCE(NULLIF(target_city, 'None'), 'UK') as city
             FROM potential_partners
-            WHERE md_name IS NOT NULL
             ORDER BY target_city, company_name
         """)
         rows = cur.fetchall()
         cur.close(); conn.close()
         for r in rows:
             writer.writerow([
-                r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]
+                r[0], r[1], r[2] or "Director on file", r[3] or "", r[4] or "", r[5] or "", r[6] or "", r[7]
             ])
     except Exception as e:
         logger.error(f"[EXPORT CSV] DB error: {e}")
