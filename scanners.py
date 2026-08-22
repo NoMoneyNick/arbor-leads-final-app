@@ -168,67 +168,80 @@ def scan_leeds_leads() -> int:
 
 
 
-# ── London Scanner (GLA Datahub) ──────────────────────────────────────────────
+# ── London Scanner (GLA Datahub + Green Belt Councils) ────────────────────────
 
 def scan_london_leads() -> int:
     """
-    Scans the GLA Planning Datahub for tree surgery applications across Greater London.
-    Geographic scope: Greater London boundary (~630 sq miles) — defined by the GLA API itself.
-    No further radius filter applied here; customer-radius filtering is a planned feature
-    that will match leads to subscribers based on their depot postcode (15-mile radius).
-    Requires GLA_API_KEY in Render environment (obtained directly from London Data Hub).
+    Scans both:
+    1. London GLA Planning Datahub (all 32 London Boroughs)
+    2. Surrounding Green Belt councils (Surrey/Tandridge/Oxted, Kent, Essex, Herts)
+       via UK Planning API postcodes (RH, TN, GU, CR, BR, KT, SM, TW, UB, HA, EN, IG, RM, DA, CM, AL, WD, SL).
     """
-    if not GLA_API_KEY:
-        logger.error("[London] GLA_API_KEY is not set. Aborting scan.")
-        return 0
-
-    headers = {"Authorization": GLA_API_KEY, "Accept": "application/json"}
     new_leads = []
+    conn = database.get_db_conn()
+    cur = conn.cursor()
 
-    try:
-        res = requests.get(
-            "https://planningdata.london.gov.uk/api/applications",
-            params={"limit": 50},
-            headers=headers,
-            timeout=20
-        )
-        res.raise_for_status()
-        records = res.json().get("data", [])
+    # 1. GLA Datahub Scan
+    if GLA_API_KEY:
+        try:
+            headers = {"Authorization": GLA_API_KEY, "Accept": "application/json"}
+            res = requests.get(
+                "https://planningdata.london.gov.uk/api/applications",
+                params={"limit": 50},
+                headers=headers,
+                timeout=15
+            )
+            if res.status_code == 200:
+                records = res.json().get("data", [])
+                for item in records:
+                    summary = item.get("proposal", "")
+                    if not _is_tree_related(summary):
+                        continue
+                    ref = item.get("reference", f"LON-{int(time.time())}")
+                    addr = item.get("address", "Greater London")
+                    lead = _insert_lead(cur, ref, addr, summary, "London")
+                    if lead:
+                        new_leads.append(lead)
+        except Exception as e:
+            logger.error(f"[London GLA] Error: {e}")
 
-        if not records:
-            logger.warning("[London] GLA API returned no records.")
-            return 0
+    # 2. Green Belt & Border Councils Scan (Tandridge/Oxted RH, Sevenoaks TN, Surrey GU, etc.)
+    if UK_PLANNING_API_KEY:
+        green_belt_prefixes = ["RH", "TN", "GU", "CR", "BR", "KT", "SM", "TW", "UB", "HA", "EN", "IG", "RM", "DA", "CM", "AL", "WD", "SL"]
+        headers = {"X-API-Key": UK_PLANNING_API_KEY}
+        for prefix in green_belt_prefixes:
+            try:
+                res = requests.get(
+                    "https://ukplanningapi.co.uk/v1/applications",
+                    params={"postcode": prefix, "status": "received", "limit": 200},
+                    headers=headers,
+                    timeout=15
+                )
+                if res.status_code == 429:
+                    break
+                if res.status_code == 200:
+                    records = res.json().get("data", [])
+                    for item in records:
+                        summary = item.get("description", "") or ""
+                        if not _is_tree_related(summary):
+                            continue
+                        ref  = item.get("reference") or f"{prefix}-{int(time.time())}"
+                        addr = item.get("address", f"London / {prefix}")
+                        lead = _insert_lead(cur, ref, addr, summary, "London")
+                        if lead:
+                            new_leads.append(lead)
+            except Exception as pe:
+                logger.debug(f"[London Green Belt] Error scanning prefix '{prefix}': {pe}")
 
-        conn = database.get_db_conn()
-        cur = conn.cursor()
-
-        for item in records:
-            summary = item.get("proposal", "")
-            if not _is_tree_related(summary):
-                continue
-            ref = item.get("reference", f"LON-{int(time.time())}")
-            addr = item.get("address", "Greater London")
-            lead = _insert_lead(cur, ref, addr, summary, "London")
-            if lead:
-                new_leads.append(lead)
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-    except requests.exceptions.Timeout:
-        logger.error("[London] Request timed out after 20s.")
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"[London] HTTP error: {e.response.status_code} — {e.response.text[:200]}")
-    except requests.exceptions.ConnectionError as e:
-        logger.error(f"[London] Connection error: {e}")
-    except Exception as e:
-        logger.error(f"[London] Unexpected error: {e}", exc_info=True)
+    conn.commit()
+    cur.close()
+    conn.close()
 
     if new_leads:
         notifications.dispatch_lead_alerts("London", new_leads)
-    logger.info(f"[London] Scan complete. {len(new_leads)} new leads found.")
+    logger.info(f"[London] Scan complete. {len(new_leads)} new leads found across London & Green Belt councils.")
     return len(new_leads)
+
 
 
 # ── UK Planning API Scanner (Birmingham, Manchester, Bristol, Sheffield) ──────
