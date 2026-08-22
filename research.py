@@ -150,12 +150,41 @@ def get_google_places_info(company_name: str, city: str):
     return None, None, None
 
 
+CITY_SUB_AREAS = {
+    "London": [
+        "London", "Greater London", "Croydon", "Bromley", "Barnet", "Richmond", "Enfield",
+        "Ealing", "Wandsworth", "Greenwich", "Kingston", "Harrow", "Havering", "Bexley",
+        "Hounslow", "Merton", "Sutton", "Twickenham", "Wembley", "Romford", "Ilford",
+        "Surrey", "Kent", "Essex", "Middlesex"
+    ],
+    "Leeds": [
+        "Leeds", "West Yorkshire", "Bradford", "Wakefield", "Harrogate", "Wetherby",
+        "Otley", "Ilkley", "Horsforth", "Pudsey", "Halifax", "Huddersfield"
+    ],
+    "Birmingham": [
+        "Birmingham", "West Midlands", "Solihull", "Dudley", "Walsall",
+        "West Bromwich", "Sutton Coldfield", "Stourbridge", "Halesowen", "Wolverhampton"
+    ],
+    "Manchester": [
+        "Manchester", "Greater Manchester", "Salford", "Stockport", "Trafford",
+        "Bolton", "Bury", "Oldham", "Rochdale", "Wigan", "Altrincham", "Sale", "Stockport"
+    ],
+    "Bristol": [
+        "Bristol", "Avon", "Bath", "South Gloucestershire", "North Somerset",
+        "Kingswood", "Weston-super-Mare", "Yate", "Clevedon"
+    ],
+    "Sheffield": [
+        "Sheffield", "South Yorkshire", "Rotherham", "Barnsley", "Doncaster",
+        "Chesterfield", "Dronfield", "Peak District"
+    ]
+}
+
+
 def perform_research(city_name: str):
     """
-    Finds Tree Surgery LTD companies via Companies House,
-    enforces the Golden Rule (active LTDs only),
-    then enriches with director name (CH Officers), Google Places info (rating, phone, website),
-    and public contact email scraped from their website.
+    Finds Tree Surgery LTD companies via Companies House across all boroughs
+    and regional sectors for the given city, enforces active LTD filtering,
+    then enriches with director name, Google Places info, and scraped emails.
     """
     if not CH_KEY:
         logger.error("[Investigator] COMPANIES_HOUSE_KEY not set. Aborting.")
@@ -188,40 +217,38 @@ def perform_research(city_name: str):
         conn = database.get_db_conn()
         cur = conn.cursor()
 
-        search_queries = [
-            f"tree surgery {city_name}",
-            f"tree surgeons {city_name}",
-            f"tree services {city_name}",
-            f"tree care {city_name}",
-            f"arboriculture {city_name}",
-            f"arborist {city_name}",
-            f"forestry {city_name}",
-            f"woodland management {city_name}",
-            f"stump grinding {city_name}"
-        ]
-
+        sub_areas = CITY_SUB_AREAS.get(city_name, [city_name])
         seen_company_numbers = set()
         all_companies = []
 
-        for q in search_queries:
-            try:
-                res = requests.get(
-                    "https://api.company-information.service.gov.uk/search/companies",
-                    params={"q": q, "items_per_page": 100},
-                    headers=_ch_headers(),
-                    timeout=15
-                )
-                if res.status_code == 200:
-                    items = res.json().get("items", [])
-                    for item in items:
-                        num = item.get("company_number")
-                        if num and num not in seen_company_numbers:
-                            seen_company_numbers.add(num)
-                            all_companies.append(item)
-            except Exception as qe:
-                logger.error(f"[Investigator] Query '{q}' failed: {qe}")
+        for area in sub_areas:
+            search_queries = [
+                f"tree surgery {area}",
+                f"tree surgeons {area}",
+                f"tree services {area}",
+                f"arboriculture {area}",
+                f"arborist {area}"
+            ]
+            for q in search_queries:
+                try:
+                    res = requests.get(
+                        "https://api.company-information.service.gov.uk/search/companies",
+                        params={"q": q, "items_per_page": 100},
+                        headers=_ch_headers(),
+                        timeout=10
+                    )
+                    if res.status_code == 200:
+                        items = res.json().get("items", [])
+                        for item in items:
+                            num = item.get("company_number")
+                            if num and num not in seen_company_numbers:
+                                seen_company_numbers.add(num)
+                                all_companies.append(item)
+                except Exception as qe:
+                    logger.debug(f"[Investigator] Query '{q}' failed: {qe}")
 
-        logger.info(f"[Investigator] {len(all_companies)} unique companies discovered for {city_name}.")
+        logger.info(f"[Investigator] {len(all_companies)} unique companies discovered across {len(sub_areas)} {city_name} boroughs/districts.")
+
 
         for co in all_companies:
             name = co.get("title", "").upper()
