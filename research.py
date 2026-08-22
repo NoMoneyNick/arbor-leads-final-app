@@ -161,19 +161,27 @@ def perform_research(city_name: str):
         logger.error("[Investigator] COMPANIES_HOUSE_KEY not set. Aborting.")
         return
 
-    # Words a legitimate tree surgery company name will contain
+    # Strict keywords a legitimate tree surgery company name will contain
     REQUIRED_NAME_WORDS = [
-        "tree", "arbor", "arboricultural", "arborist", "forestry",
-        "woodland", "felling", "stump", "timber", "hedge"
+        "tree surgery", "tree surgeon", "tree surgeons", "tree care",
+        "tree service", "tree services", "tree work", "tree works", "tree felling",
+        "arboricultural", "arboriculture", "arborist", "arborists",
+        "forestry", "woodland management", "woodland services",
+        "stump grinding", "stump removal", "hedge cutting", "hedge trimming",
+        "tree", "arborist", "arboriculture", "arboricultural", "forestry"
     ]
+    # Words that indicate a non-tree-surgery company
     EXCLUDED_NAME_WORDS = [
         "breast", "plastic", "cosmetic", "dental", "medical", "clinic",
         "hospital", "fruit", "olive", "palm", "christmas", "bonsai", "pyo",
         "surgery centre", "surgical", "ortho", "optic", "laser", "eye", "neck", "spine",
         "doctor", "health", "physio", "chiropractic", "therapy",
-        "hair", "skin", "beauty", "nail", "tattoo", "piercing",
+        "hair", "skin", "beauty", "nail", "tattoo", "piercing", "ink",
         "estate agent", "letting", "solicitor", "accountant",
-        "restaurant", "café", "cafe", "bakery", "food"
+        "restaurant", "café", "cafe", "bakery", "food", "bar", "pub", "coffee",
+        "homes", "housing", "ales", "beer", "brewery", "capital", "investment", "financial",
+        "construction", "rail", "railway", "events", "properties", "property",
+        "logistics", "transport", "security", "cleaning", "plumbing", "electrical", "roofing"
     ]
 
     try:
@@ -187,11 +195,9 @@ def perform_research(city_name: str):
             f"tree care {city_name}",
             f"arboriculture {city_name}",
             f"arborist {city_name}",
-            f"tree {city_name}",
-            f"arbor {city_name}",
             f"forestry {city_name}",
-            f"woodland {city_name}",
-            f"stump {city_name}"
+            f"woodland management {city_name}",
+            f"stump grinding {city_name}"
         ]
 
         seen_company_numbers = set()
@@ -358,21 +364,29 @@ def clean_partner_database():
     Run once after deploy via /clean-partners.
     """
 
-    # Must match at least one of these
+    # Strict keywords a legitimate tree surgery company name will contain
     REQUIRED_NAME_WORDS = [
-        "tree", "arbor", "arboricultural", "arborist", "forestry",
-        "woodland", "felling", "stump", "timber", "hedge"
+        "tree surgery", "tree surgeon", "tree surgeons", "tree care",
+        "tree service", "tree services", "tree work", "tree works", "tree felling",
+        "arboricultural", "arboriculture", "arborist", "arborists",
+        "forestry", "woodland management", "woodland services",
+        "stump grinding", "stump removal", "hedge cutting", "hedge trimming",
+        "tree", "arborist", "arboriculture", "arboricultural", "forestry"
     ]
-    # Must NOT match any of these
+    # Words that indicate a non-tree-surgery company
     EXCLUDED_NAME_WORDS = [
         "breast", "plastic", "cosmetic", "dental", "medical", "clinic",
         "hospital", "fruit", "olive", "palm", "christmas", "bonsai", "pyo",
         "surgery centre", "surgical", "ortho", "optic", "laser", "eye", "neck", "spine",
         "doctor", "health", "physio", "chiropractic", "therapy",
-        "hair", "skin", "beauty", "nail", "tattoo", "piercing",
+        "hair", "skin", "beauty", "nail", "tattoo", "piercing", "ink",
         "estate agent", "letting", "solicitor", "accountant",
-        "restaurant", "café", "cafe", "bakery", "food"
+        "restaurant", "café", "cafe", "bakery", "food", "bar", "pub", "coffee",
+        "homes", "housing", "ales", "beer", "brewery", "capital", "investment", "financial",
+        "construction", "rail", "railway", "events", "properties", "property",
+        "logistics", "transport", "security", "cleaning", "plumbing", "electrical", "roofing"
     ]
+
 
 
     try:
