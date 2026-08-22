@@ -102,14 +102,20 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str) -
     return None
 
 
-# ── Leeds Scanner (ArcGIS) ────────────────────────────────────────────────────
+# ── Leeds Scanner (ArcGIS + Yorkshire Regional Councils) ──────────────────────
 
 def scan_leeds_leads() -> int:
     """
-    Scans Leeds Council ArcGIS portal for tree surgery planning applications
-    within 15 miles (24,140m) of Leeds city centre.
-    Leeds city centre coords: 53.8008N, -1.5491W (WGS84 / EPSG:4326)
+    Scans both:
+    1. Leeds City Council ArcGIS MapServer Layer 12 (15-mile spatial boundary)
+    2. Surrounding Yorkshire councils (Bradford, Wakefield, Kirklees, Calderdale, York, Harrogate, North Yorkshire)
+       via UK Planning API postcodes (LS, BD, WF, HX, HD, YO, HG, HU, DL, TS).
     """
+    new_leads = []
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+
+    # 1. Leeds Council ArcGIS Server Query
     url = "https://mapservices.leeds.gov.uk/arcgis/rest/services/Public/Planning/MapServer/12/query"
     params = {
         "where":        "1=1",
@@ -123,47 +129,58 @@ def scan_leeds_leads() -> int:
         "resultRecordCount": 200,
         "f": "json"
     }
-    new_leads = []
-
     try:
-        res = requests.get(url, params=params, timeout=30, verify=False)
-        res.raise_for_status()
-        features = res.json().get("features", [])
-
-        if not features:
-            logger.warning("[Leeds] ArcGIS returned no features within 15-mile radius.")
-            return 0
-
-        conn = database.get_db_conn()
-        cur = conn.cursor()
-
-        for feature in features:
-            rec = feature.get("attributes", {})
-            summary = str(rec.get("DESCRIPTION") or "")
-            if not _is_tree_related(summary):
-                continue
-            ref = str(rec.get("REFERENCE") or rec.get("OBJECTID") or f"LDS-{int(time.time())}")
-            addr = rec.get("ADDRESS") or "Leeds"
-            lead = _insert_lead(cur, ref, addr, summary, "Leeds")
-            if lead:
-                new_leads.append(lead)
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-    except requests.exceptions.Timeout:
-        logger.error("[Leeds] Request timed out after 30s.")
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"[Leeds] HTTP error: {e.response.status_code} — {e.response.text[:200]}")
-    except requests.exceptions.ConnectionError as e:
-        logger.error(f"[Leeds] Connection error: {e}")
+        res = requests.get(url, params=params, timeout=20, verify=False)
+        if res.status_code == 200:
+            features = res.json().get("features", [])
+            for feature in features:
+                rec = feature.get("attributes", {})
+                summary = str(rec.get("DESCRIPTION") or "")
+                if not _is_tree_related(summary):
+                    continue
+                ref = str(rec.get("REFERENCE") or rec.get("OBJECTID") or f"LDS-{int(time.time())}")
+                addr = rec.get("ADDRESS") or "Leeds"
+                lead = _insert_lead(cur, ref, addr, summary, "Leeds")
+                if lead:
+                    new_leads.append(lead)
     except Exception as e:
-        logger.error(f"[Leeds] Unexpected error: {e}", exc_info=True)
+        logger.debug(f"[Leeds ArcGIS] Error: {e}")
+
+    # 2. Yorkshire Surrounding Councils Scan via UK Planning API
+    if UK_PLANNING_API_KEY:
+        yorkshire_prefixes = ["LS", "BD", "WF", "HX", "HD", "YO", "HG", "HU", "DL", "TS"]
+        headers = {"X-API-Key": UK_PLANNING_API_KEY}
+        for prefix in yorkshire_prefixes:
+            try:
+                res = requests.get(
+                    "https://ukplanningapi.co.uk/v1/applications",
+                    params={"postcode": prefix, "status": "received", "limit": 200},
+                    headers=headers,
+                    timeout=15
+                )
+                if res.status_code == 429:
+                    break
+                if res.status_code == 200:
+                    records = res.json().get("data", [])
+                    for item in records:
+                        summary = item.get("description", "") or ""
+                        if not _is_tree_related(summary):
+                            continue
+                        ref  = item.get("reference") or f"{prefix}-{int(time.time())}"
+                        addr = item.get("address", f"Leeds / {prefix}")
+                        lead = _insert_lead(cur, ref, addr, summary, "Leeds")
+                        if lead:
+                            new_leads.append(lead)
+            except Exception as pe:
+                logger.debug(f"[Leeds Yorkshire Radar] Error scanning prefix '{prefix}': {pe}")
+
+    conn.commit()
+    cur.close()
+    conn.close()
 
     if new_leads:
         notifications.dispatch_lead_alerts("Leeds", new_leads)
-    logger.info(f"[Leeds] Scan complete. {len(new_leads)} new leads found within 15-mile radius.")
+    logger.info(f"[Leeds] Scan complete. {len(new_leads)} new leads found across Yorkshire.")
     return len(new_leads)
 
 
@@ -175,7 +192,7 @@ def scan_london_leads() -> int:
     Scans both:
     1. London GLA Planning Datahub (all 32 London Boroughs)
     2. Surrounding Green Belt councils (Surrey/Tandridge/Oxted, Kent, Essex, Herts)
-       via UK Planning API postcodes (RH, TN, GU, CR, BR, KT, SM, TW, UB, HA, EN, IG, RM, DA, CM, AL, WD, SL).
+       via UK Planning API postcodes (RH, TN, GU, CR, BR, KT, SM, TW, UB, HA, EN, IG, RM, DA, CM, AL, WD, SL, ME).
     """
     new_leads = []
     conn = database.get_db_conn()
@@ -207,7 +224,7 @@ def scan_london_leads() -> int:
 
     # 2. Green Belt & Border Councils Scan (Tandridge/Oxted RH, Sevenoaks TN, Surrey GU, etc.)
     if UK_PLANNING_API_KEY:
-        green_belt_prefixes = ["RH", "TN", "GU", "CR", "BR", "KT", "SM", "TW", "UB", "HA", "EN", "IG", "RM", "DA", "CM", "AL", "WD", "SL"]
+        green_belt_prefixes = ["RH", "TN", "GU", "CR", "BR", "KT", "SM", "TW", "UB", "HA", "EN", "IG", "RM", "DA", "CM", "AL", "WD", "SL", "ME"]
         headers = {"X-API-Key": UK_PLANNING_API_KEY}
         for prefix in green_belt_prefixes:
             try:
@@ -246,19 +263,17 @@ def scan_london_leads() -> int:
 
 # ── UK Planning API Scanner (Birmingham, Manchester, Bristol, Sheffield) ──────
 # Uses ukplanningapi.co.uk — covers 289 UK councils, updated daily.
-# Free tier: 500 req/month (no card). Paid: £99/month for 10,000 req.
-# Sign up at: https://ukplanningapi.co.uk/api-signup
-# Add key to Render as: UK_PLANNING_API_KEY
 
 UK_PLANNING_API_KEY = os.getenv("UK_PLANNING_API_KEY", "").strip()
 
-# Postcode area prefixes per region — covers central city + all surrounding borough/county councils
+# Exhaustive regional postcode prefixes covering city councils + all surrounding border/county councils
 CITY_POSTCODE_PREFIX = {
-    "Birmingham": ["B", "WS", "WV", "DY", "CV", "WR", "TF"],  # B'ham, Walsall, Wolverhampton, Dudley, Coventry, Worcester, Telford
-    "Manchester": ["M", "SK", "WA", "WN", "BL", "OL", "CW"],  # Manchester, Stockport, Warrington, Wigan, Bolton, Oldham, Cheshire
-    "Bristol":    ["BS", "BA", "GL", "SN"],                  # Bristol, Bath, Gloucester/Cheltenham, Swindon/Wiltshire
-    "Sheffield":  ["S", "DN", "DE", "NG"],                  # Sheffield, Doncaster, Derbyshire/Peak District, Nottinghamshire North
+    "Birmingham": ["B", "WS", "WV", "DY", "CV", "WR", "TF", "ST", "HR", "SY"],          # West Midlands, Staffs, Worcs, Shrops, Warks
+    "Manchester": ["M", "SK", "WA", "WN", "BL", "OL", "CW", "L", "PR", "BB", "FY", "CH"], # Greater Manchester, Cheshire, Merseyside, Lancs
+    "Bristol":    ["BS", "BA", "GL", "SN", "TA", "DT", "SP"],                              # Bristol, Bath, Glos, Wilts, Somerset, Dorset
+    "Sheffield":  ["S", "DN", "DE", "NG", "LN", "LE"],                                      # South Yorks, Derbyshire, Notts, Lincs, Leics
 }
+
 
 
 def scan_city_planning_api(city_name: str) -> int:
