@@ -183,9 +183,15 @@ def perform_research(city_name: str):
         search_queries = [
             f"tree surgery {city_name}",
             f"tree surgeons {city_name}",
-            f"arboriculture {city_name}",
+            f"tree services {city_name}",
             f"tree care {city_name}",
-            f"arborists {city_name}"
+            f"arboriculture {city_name}",
+            f"arborist {city_name}",
+            f"tree {city_name}",
+            f"arbor {city_name}",
+            f"forestry {city_name}",
+            f"woodland {city_name}",
+            f"stump {city_name}"
         ]
 
         seen_company_numbers = set()
