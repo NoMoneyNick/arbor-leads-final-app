@@ -145,10 +145,13 @@ def get_google_places_info(company_name: str, city: str):
                 logger.error(f"[Google Details] Error for {place_id}: {de}")
 
         return rating, phone, website
-    return None, None, None
+    except Exception as e:
+        logger.error(f"[Google] Error fetching info for {company_name}: {e}")
+        return None, None, None
 
 
 CITY_SUB_AREAS = {
+
 
     "London": [
         "London", "Greater London", "Croydon", "Bromley", "Barnet", "Richmond", "Enfield",
