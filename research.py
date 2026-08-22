@@ -151,32 +151,49 @@ def get_google_places_info(company_name: str, city: str):
 
 
 CITY_SUB_AREAS = {
-
-
     "London": [
-        "London", "Greater London", "Croydon", "Bromley", "Barnet", "Richmond", "Enfield",
-        "Ealing", "Wandsworth", "Greenwich", "Kingston", "Harrow", "Havering", "Bexley",
-        "Twickenham", "Wembley", "Romford", "Surrey", "Kent", "Essex", "Hertfordshire"
+        "London", "Greater London", "Croydon", "Bromley", "Sutton", "Kingston", "Richmond",
+        "Merton", "Wimbledon", "Wandsworth", "Greenwich", "Bexley", "Lewisham", "Southwark",
+        "Lambeth", "Barnet", "Enfield", "Haringey", "Harrow", "Hillingdon", "Uxbridge",
+        "Hounslow", "Ealing", "Brent", "Camden", "Islington", "Hackney", "Redbridge",
+        "Havering", "Romford", "Ilford", "Barking", "Dagenham", "Waltham Forest", "Newham",
+        "Dartford", "Sevenoaks", "Orpington", "Swanley", "Epsom", "Guildford", "Woking",
+        "Leatherhead", "Reigate", "Redhill", "Dorking", "Caterham", "Oxted", "Godstone",
+        "Warlingham", "Coulsdon", "Purley", "Banstead", "Walton-on-Thames", "Weybridge",
+        "Esher", "Cobham", "Farnham", "St Albans", "Watford", "Hemel Hempstead",
+        "Welwyn Garden City", "Potters Bar", "Hertford", "Rickmansworth", "Brentwood",
+        "Chelmsford", "Loughton", "Epping", "Harlow", "Slough", "Windsor", "Maidenhead",
+        "Surrey", "Kent", "Essex", "Hertfordshire", "Berkshire", "Buckinghamshire"
     ],
     "Leeds": [
         "Leeds", "West Yorkshire", "Bradford", "Wakefield", "Harrogate", "Wetherby",
+        "Otley", "Ilkley", "Skipton", "Ripon", "Selby", "Knaresborough", "Pontefract",
+        "Castleford", "Keighley", "Bingley", "Shipley", "Batley", "Dewsbury", "Brighouse",
         "Halifax", "Huddersfield", "York", "North Yorkshire"
     ],
     "Birmingham": [
-        "Birmingham", "West Midlands", "Solihull", "Dudley", "Walsall",
-        "Sutton Coldfield", "Wolverhampton", "Coventry", "Tamworth", "Redditch", "Warwick"
+        "Birmingham", "West Midlands", "Solihull", "Coventry", "Wolverhampton", "Dudley",
+        "Walsall", "West Bromwich", "Sutton Coldfield", "Stourbridge", "Halesowen",
+        "Tamworth", "Redditch", "Bromsgrove", "Warwick", "Leamington Spa", "Stratford-upon-Avon",
+        "Kenilworth", "Lichfield", "Cannock", "Stafford", "Kidderminster", "Telford",
+        "Shrewsbury", "Worcester", "Warwickshire", "Staffordshire", "Worcestershire"
     ],
     "Manchester": [
-        "Manchester", "Greater Manchester", "Salford", "Stockport", "Trafford",
-        "Bolton", "Bury", "Oldham", "Rochdale", "Wigan", "Altrincham", "Cheshire", "Warrington"
+        "Manchester", "Greater Manchester", "Salford", "Stockport", "Trafford", "Altrincham",
+        "Sale", "Bolton", "Bury", "Oldham", "Rochdale", "Wigan", "Cheshire", "Warrington",
+        "Wilmslow", "Macclesfield", "Knutsford", "Alderley Edge", "Prestbury", "Northwich",
+        "Chester", "Crewe", "Stoke-on-Trent", "Lancashire"
     ],
     "Bristol": [
-        "Bristol", "Bath", "South Gloucestershire", "North Somerset",
-        "Kingswood", "Weston-super-Mare", "Gloucester", "Cheltenham", "Somerset"
+        "Bristol", "Bath", "Kingswood", "Weston-super-Mare", "Portishead", "Clevedon",
+        "Yate", "Thornbury", "Gloucester", "Cheltenham", "Stroud", "Cirencester",
+        "Tewkesbury", "Chippenham", "Trowbridge", "Swindon", "Taunton", "Bridgwater",
+        "Somerset", "Gloucestershire", "Wiltshire", "Cotswolds", "Avon"
     ],
     "Sheffield": [
-        "Sheffield", "South Yorkshire", "Rotherham", "Barnsley", "Doncaster",
-        "Chesterfield", "Derbyshire", "Peak District"
+        "Sheffield", "South Yorkshire", "Rotherham", "Barnsley", "Doncaster", "Chesterfield",
+        "Dronfield", "Matlock", "Bakewell", "Buxton", "Worksop", "Retford", "Mansfield",
+        "Peak District", "Derbyshire"
     ]
 }
 
@@ -222,35 +239,49 @@ def perform_research(city_name: str):
         logger.info(f"[Investigator] Loaded {len(already_enriched)} already-enriched companies from DB.")
 
         sub_areas = CITY_SUB_AREAS.get(city_name, [city_name])
+        search_terms = []
+        for area in sub_areas:
+            search_terms.extend([
+                f"tree surgery {area}",
+                f"tree surgeons {area}",
+                f"tree services {area}",
+                f"arboriculture {area}",
+                f"arborist {area}",
+                f"tree care {area}",
+                f"forestry {area}"
+            ])
+
         seen_company_numbers = set()
         all_companies = []
 
-        # Top 3 most productive search queries per sub-area
-        for area in sub_areas:
-            search_queries = [
-                f"tree surgery {area}",
-                f"arboriculture {area}",
-                f"tree services {area}"
-            ]
-            for q in search_queries:
-                try:
-                    res = requests.get(
-                        "https://api.company-information.service.gov.uk/search/companies",
-                        params={"q": q, "items_per_page": 100},
-                        headers=_ch_headers(),
-                        timeout=5
-                    )
-                    if res.status_code == 200:
-                        items = res.json().get("items", [])
-                        for item in items:
-                            num = item.get("company_number")
-                            if num and num not in seen_company_numbers:
-                                seen_company_numbers.add(num)
-                                all_companies.append(item)
-                except Exception as qe:
-                    logger.debug(f"[Investigator] Query '{q}' failed: {qe}")
+        # Execute search queries in parallel across 10 threads for blazing fast discovery
+        from concurrent.futures import ThreadPoolExecutor
 
-        logger.info(f"[Investigator] {len(all_companies)} unique companies discovered across {len(sub_areas)} {city_name} areas.")
+        def fetch_ch_search(q):
+            try:
+                res = requests.get(
+                    "https://api.company-information.service.gov.uk/search/companies",
+                    params={"q": q, "items_per_page": 100},
+                    headers=_ch_headers(),
+                    timeout=5
+                )
+                if res.status_code == 200:
+                    return res.json().get("items", [])
+            except Exception as qe:
+                logger.debug(f"[Investigator] Query '{q}' failed: {qe}")
+            return []
+
+        with ThreadPoolExecutor(max_workers=10) as search_executor:
+            results = search_executor.map(fetch_ch_search, search_terms)
+            for items in results:
+                for item in items:
+                    num = item.get("company_number")
+                    if num and num not in seen_company_numbers:
+                        seen_company_numbers.add(num)
+                        all_companies.append(item)
+
+        logger.info(f"[Investigator] {len(all_companies)} unique companies discovered across {len(sub_areas)} {city_name} areas/queries.")
+
 
         def process_single_company(co):
             try:
