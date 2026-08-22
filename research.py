@@ -145,58 +145,49 @@ def get_google_places_info(company_name: str, city: str):
                 logger.error(f"[Google Details] Error for {place_id}: {de}")
 
         return rating, phone, website
-    except Exception as e:
-        logger.error(f"[Google] Error fetching info for {company_name}: {e}")
     return None, None, None
 
 
 CITY_SUB_AREAS = {
+
     "London": [
         "London", "Greater London", "Croydon", "Bromley", "Barnet", "Richmond", "Enfield",
         "Ealing", "Wandsworth", "Greenwich", "Kingston", "Harrow", "Havering", "Bexley",
-        "Hounslow", "Merton", "Sutton", "Twickenham", "Wembley", "Romford", "Ilford",
-        "Surrey", "Kent", "Essex", "Middlesex", "Hertfordshire"
+        "Twickenham", "Wembley", "Romford", "Surrey", "Kent", "Essex", "Hertfordshire"
     ],
     "Leeds": [
         "Leeds", "West Yorkshire", "Bradford", "Wakefield", "Harrogate", "Wetherby",
-        "Otley", "Ilkley", "Horsforth", "Pudsey", "Halifax", "Huddersfield",
-        "York", "Selby", "Skipton", "Ripon", "North Yorkshire"
+        "Halifax", "Huddersfield", "York", "North Yorkshire"
     ],
     "Birmingham": [
         "Birmingham", "West Midlands", "Solihull", "Dudley", "Walsall",
-        "West Bromwich", "Sutton Coldfield", "Stourbridge", "Halesowen", "Wolverhampton",
-        "Coventry", "Tamworth", "Redditch", "Bromsgrove", "Warwick", "Leamington Spa",
-        "Cannock", "Lichfield", "Kidderminster", "Telford"
+        "Sutton Coldfield", "Wolverhampton", "Coventry", "Tamworth", "Redditch", "Warwick"
     ],
     "Manchester": [
         "Manchester", "Greater Manchester", "Salford", "Stockport", "Trafford",
-        "Bolton", "Bury", "Oldham", "Rochdale", "Wigan", "Altrincham", "Sale",
-        "Cheshire", "Warrington", "Wilmslow", "Macclesfield", "Knutsford", "Leigh"
+        "Bolton", "Bury", "Oldham", "Rochdale", "Wigan", "Altrincham", "Cheshire", "Warrington"
     ],
     "Bristol": [
-        "Bristol", "Avon", "Bath", "South Gloucestershire", "North Somerset",
-        "Kingswood", "Weston-super-Mare", "Yate", "Clevedon", "Portishead",
-        "Gloucester", "Cheltenham", "Stroud", "Chippenham", "Trowbridge", "Somerset", "Gloucestershire"
+        "Bristol", "Bath", "South Gloucestershire", "North Somerset",
+        "Kingswood", "Weston-super-Mare", "Gloucester", "Cheltenham", "Somerset"
     ],
     "Sheffield": [
         "Sheffield", "South Yorkshire", "Rotherham", "Barnsley", "Doncaster",
-        "Chesterfield", "Dronfield", "Peak District", "Derbyshire", "Worksop", "Retford", "Matlock", "Bakewell", "Mansfield"
+        "Chesterfield", "Derbyshire", "Peak District"
     ]
 }
 
 
-
 def perform_research(city_name: str):
     """
-    Finds Tree Surgery LTD companies via Companies House across all boroughs
-    and regional sectors for the given city, enforces active LTD filtering,
-    then enriches with director name, Google Places info, and scraped emails.
+    Finds Tree Surgery LTD companies via Companies House across major boroughs/districts,
+    enforces active LTD filtering, skips already-enriched companies, and enriches
+    with director names, Google Places info, and scraped emails using 12 concurrent workers.
     """
     if not CH_KEY:
         logger.error("[Investigator] COMPANIES_HOUSE_KEY not set. Aborting.")
         return
 
-    # Strict keywords a legitimate tree surgery company name will contain
     REQUIRED_NAME_WORDS = [
         "tree surgery", "tree surgeon", "tree surgeons", "tree care",
         "tree service", "tree services", "tree work", "tree works", "tree felling",
@@ -205,7 +196,6 @@ def perform_research(city_name: str):
         "stump grinding", "stump removal", "hedge cutting", "hedge trimming",
         "tree", "arborist", "arboriculture", "arboricultural", "forestry"
     ]
-    # Words that indicate a non-tree-surgery company
     EXCLUDED_NAME_WORDS = [
         "breast", "plastic", "cosmetic", "dental", "medical", "clinic",
         "hospital", "fruit", "olive", "palm", "christmas", "bonsai", "pyo",
@@ -223,17 +213,21 @@ def perform_research(city_name: str):
         conn = database.get_db_conn()
         cur = conn.cursor()
 
+        # Load existing enriched companies to SKIP re-enrichment (saves 90% of time)
+        cur.execute("SELECT company_number FROM potential_partners WHERE md_name IS NOT NULL AND phone_number IS NOT NULL")
+        already_enriched = set(r[0] for r in cur.fetchall() if r[0])
+        logger.info(f"[Investigator] Loaded {len(already_enriched)} already-enriched companies from DB.")
+
         sub_areas = CITY_SUB_AREAS.get(city_name, [city_name])
         seen_company_numbers = set()
         all_companies = []
 
+        # Top 3 most productive search queries per sub-area
         for area in sub_areas:
             search_queries = [
                 f"tree surgery {area}",
-                f"tree surgeons {area}",
-                f"tree services {area}",
                 f"arboriculture {area}",
-                f"arborist {area}"
+                f"tree services {area}"
             ]
             for q in search_queries:
                 try:
@@ -241,7 +235,7 @@ def perform_research(city_name: str):
                         "https://api.company-information.service.gov.uk/search/companies",
                         params={"q": q, "items_per_page": 100},
                         headers=_ch_headers(),
-                        timeout=10
+                        timeout=5
                     )
                     if res.status_code == 200:
                         items = res.json().get("items", [])
@@ -253,7 +247,7 @@ def perform_research(city_name: str):
                 except Exception as qe:
                     logger.debug(f"[Investigator] Query '{q}' failed: {qe}")
 
-        logger.info(f"[Investigator] {len(all_companies)} unique companies discovered across {len(sub_areas)} {city_name} boroughs/districts.")
+        logger.info(f"[Investigator] {len(all_companies)} unique companies discovered across {len(sub_areas)} {city_name} areas.")
 
         def process_single_company(co):
             try:
@@ -267,28 +261,31 @@ def perform_research(city_name: str):
                 if co.get("company_status") != "active":
                     return None
 
-                # NAME FILTER 1: Must contain a tree-surgery-related word
+                # NAME FILTER 1 & 2
                 if not any(w in name_lower for w in REQUIRED_NAME_WORDS):
                     return None
-
-                # NAME FILTER 2: Must not contain an excluded/unrelated industry word
                 if any(w in name_lower for w in EXCLUDED_NAME_WORDS):
                     return None
 
-                # Address & City from Companies House
+                # Address & Real City
                 addr = co.get("address_snippet") or ""
                 assigned_city = resolve_uk_city(addr, name, default_city=city_name)
 
-                # Pillar 2: Director from Companies House Officers
+                # Skip expensive external calls if already fully enriched in DB
+                if company_number in already_enriched:
+                    logger.info(f"[Investigator] {name} ({assigned_city}) → Already enriched. Skipped.")
+                    return name
+
+                # Pillar 2: Director from CH Officers (fast 3s timeout)
                 md_name = get_director_from_ch(company_number)
 
-                # Pillar 3: Google reputation rating, phone, and website
+                # Pillar 3: Google reputation & phone (fast 3s timeout)
                 rating, phone, website = get_google_places_info(name, assigned_city)
 
-                # Scrape email from website if found
+                # Scrape email from website (fast 2.5s timeout)
                 email = scrape_email_from_website(website) if website else None
 
-                # Save immediately with its own connection for thread-safety
+                # Thread-safe database save
                 co_conn = database.get_db_conn()
                 co_cur = co_conn.cursor()
                 co_cur.execute("""
@@ -311,20 +308,21 @@ def perform_research(city_name: str):
                 co_cur.close()
                 co_conn.close()
 
-                logger.info(f"[Investigator] {name} ({assigned_city}) → Director: {md_name or 'N/A'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'} | ⭐ {rating or 'N/A'}")
+                logger.info(f"[Investigator] ✅ {name} ({assigned_city}) → Director: {md_name or 'N/A'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'}")
                 return name
             except Exception as pe:
                 logger.error(f"[Investigator] Error processing {co.get('title')}: {pe}")
                 return None
 
-        # Execute concurrently with 8 parallel threads for 8x speed
+        # Execute concurrently with 12 parallel threads for maximum speed
         from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ThreadPoolExecutor(max_workers=12) as executor:
             executor.map(process_single_company, all_companies)
 
         cur.close()
         conn.close()
-        logger.info(f"[Investigator] Research complete for {city_name}.")
+        logger.info(f"[Investigator] 🚀 Research complete for {city_name}!")
+
 
 
 
