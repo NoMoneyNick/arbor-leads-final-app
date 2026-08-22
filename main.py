@@ -62,8 +62,191 @@ def verify_cron_secret(secret: str):
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
+# ── Public Landing Page (No Auth) ──────────────────────────────────────────
+
 @app.get("/", response_class=HTMLResponse)
-def dashboard(user: str = Depends(verify_dashboard_auth)):
+def public_homepage():
+    stats = {"p": 0, "l": 0, "sample_leads": []}
+    try:
+        conn = database.get_db_conn(); cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM potential_partners"); stats["p"] = cur.fetchone()[0]
+        cur.execute("SELECT count(*) FROM leads"); stats["l"] = cur.fetchone()[0]
+        cur.execute("""SELECT address, summary, lead_score, lead_price, council_source, discovered_at
+                       FROM leads ORDER BY discovered_at DESC LIMIT 6""")
+        stats["sample_leads"] = cur.fetchall()
+        cur.close(); conn.close()
+    except Exception as e:
+        logger.error(f"[HOMEPAGE] DB error: {e}")
+
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    def get_freshness_badge(discovered_at):
+        if not discovered_at:
+            return "<span style='background:#e8f5e9; color:#2e7d32; padding:3px 8px; border-radius:12px; font-size:12px; font-weight:bold;'>🔥 FRESH</span>"
+        try:
+            delta_days = (now - discovered_at).days
+            if delta_days <= 14:
+                return f"<span style='background:#e8f5e9; color:#2e7d32; padding:3px 8px; border-radius:12px; font-size:12px; font-weight:bold;'>🔥 FRESH ({delta_days}d ago)</span>"
+            elif delta_days <= 45:
+                return f"<span style='background:#fff8e1; color:#f57f17; padding:3px 8px; border-radius:12px; font-size:12px; font-weight:bold;'>⏳ IN CONSULTATION</span>"
+            elif delta_days <= 90:
+                return f"<span style='background:#e1f5fe; color:#0277bd; padding:3px 8px; border-radius:12px; font-size:12px; font-weight:bold;'>✅ GRANTED</span>"
+            else:
+                return f"<span style='background:#f5f5f5; color:#757575; padding:3px 8px; border-radius:12px; font-size:12px;'>📦 ARCHIVED</span>"
+        except Exception:
+            return "<span style='background:#e8f5e9; color:#2e7d32; padding:3px 8px; border-radius:12px; font-size:12px; font-weight:bold;'>🔥 FRESH</span>"
+
+    SCORE_EMOJI = {"small": "🟡", "medium": "🟠", "large": "🔴"}
+    lead_cards = "".join([
+        f"""<div style='background:white; border:1px solid #e0e0e0; border-radius:12px; padding:16px; margin-bottom:12px; box-shadow:0 2px 4px rgba(0,0,0,0.03);'>
+            <div style='display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;'>
+                <b style='font-size:15px; color:#1b5e20;'>📍 {l[0]}</b>
+                {get_freshness_badge(l[5])}
+            </div>
+            <p style='color:#444; font-size:13px; margin:0 0 8px 0; line-height:1.4;'>{l[1][:120]}...</p>
+            <div style='display:flex; justify-content:space-between; font-size:12px; color:#666;'>
+                <span>Council: <b>{l[4]}</b></span>
+                <span style='font-weight:bold; color:#2e7d32;'>Est. Job Value: £{l[3]*20}–£{l[3]*50}</span>
+            </div>
+        </div>"""
+        for l in stats["sample_leads"]
+    ]) or "<p style='color:#777;'>Connecting to real-time council radar...</p>"
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>ArborLeads — UK Tree Surgery Planning Radar</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin:0; padding:0; background:#f8fafc; color:#1e293b; }}
+            .container {{ max-width: 1080px; margin: auto; padding: 0 20px; }}
+            header {{ background: #064e3b; color: white; padding: 60px 0; text-align: center; }}
+            .badge {{ background: #10b981; color: #064e3b; padding: 6px 14px; border-radius: 20px; font-weight: 700; font-size: 13px; display: inline-block; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.5px; }}
+            h1 {{ font-size: 40px; margin: 0 0 16px 0; font-weight: 800; line-height: 1.2; }}
+            .subtitle {{ font-size: 19px; color: #a7f3d0; max-width: 700px; margin: 0 auto 30px auto; line-height: 1.5; }}
+            .btn-hero {{ background: #10b981; color: white; padding: 16px 36px; border-radius: 10px; font-size: 18px; font-weight: bold; text-decoration: none; display: inline-block; box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.4); }}
+            .btn-hero:hover {{ background: #059669; }}
+            .section {{ padding: 60px 0; }}
+            .grid-3 {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }}
+            .grid-5 {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; }}
+            .card {{ background: white; border-radius: 16px; padding: 28px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }}
+            .card-pricing {{ border: 2px solid #e2e8f0; text-align: center; position: relative; }}
+            .card-featured {{ border: 2px solid #10b981; transform: scale(1.03); background: #f0fdf4; }}
+            .price {{ font-size: 32px; font-weight: 800; color: #0f172a; margin: 12px 0; }}
+            .btn-buy {{ display: block; background: #064e3b; color: white; padding: 12px 20px; border-radius: 8px; font-weight: bold; text-decoration: none; margin-top: 20px; }}
+            .btn-buy:hover {{ background: #047857; }}
+            footer {{ background: #0f172a; color: #94a3b8; padding: 40px 0; text-align: center; font-size: 13px; }}
+            footer a {{ color: #cbd5e1; text-decoration: none; }}
+        </style>
+    </head>
+    <body>
+        <header>
+            <div class="container">
+                <span class="badge">⚡ 100% Automated Council Planning Radar</span>
+                <h1>Win High-Value Tree Surgery Jobs<br>Before Your Competitors Even Know They Exist</h1>
+                <p class="subtitle">We scan all 309 English local council planning feeds daily to alert professional tree surgeons within 24 hours of protected tree applications (TPO & Conservation Area submissions).</p>
+                <a href="#pricing" class="btn-hero">Claim Your Territory Radar →</a>
+            </div>
+        </header>
+
+        <section class="section">
+            <div class="container">
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center;">
+                    <div>
+                        <h2 style="font-size: 30px; margin-top: 0;">Why UK Tree Surgeons Rely on ArborLeads:</h2>
+                        <ul style="line-height: 2; font-size: 16px; padding-left: 20px;">
+                            <li><b>🎯 2 to 4-Week Head Start:</b> Quoting on jobs weeks before lamp post notices are hung or general public finds out.</li>
+                            <li><b>🌳 Legally Mandated Work:</b> Homeowners and developers submitting council tree applications MUST perform the work upon permission.</li>
+                            <li><b>🛡️ High-Ticket Opportunities:</b> TPO felling, crown reduction, deadwood dismantling, and site clearance.</li>
+                            <li><b>⚡ Instant Email & WhatsApp Alerts:</b> Real-time statutory reference, tree species, and full address.</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <div class="card" style="background:#f1f5f9;">
+                            <h3 style="margin-top:0; color:#0f172a;">📡 Live Radar Sample (Past 24-48 Hours)</h3>
+                            {lead_cards}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section" id="pricing" style="background: white; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0;">
+            <div class="container">
+                <div style="text-align: center; max-width: 700px; margin: auto; margin-bottom: 40px;">
+                    <h2 style="font-size: 32px; margin-bottom: 8px;">Simple, Transparent Pricing</h2>
+                    <p style="color: #64748b; font-size: 17px;">Choose the plan that fits your business. Cancel or pause anytime.</p>
+                </div>
+
+                <div class="grid-5">
+                    <!-- 1. Single -->
+                    <div class="card card-pricing">
+                        <h4>Single Lead</h4>
+                        <div class="price">£19</div>
+                        <p style="color:#64748b; font-size:12px;">One-time purchase</p>
+                        <p style="font-size:13px; color:#334155;">1 Verified Council Lead with homeowner/architect address & description.</p>
+                        <a href="/pricing" class="btn-buy">Buy 1 Lead</a>
+                    </div>
+
+                    <!-- 2. Pack of 5 -->
+                    <div class="card card-pricing">
+                        <h4>5-Lead Pack</h4>
+                        <div class="price">£80</div>
+                        <p style="color:#64748b; font-size:12px;">£16 / lead (Save 15%)</p>
+                        <p style="font-size:13px; color:#334155;">5 Lead Credits in your depot postcode radius to redeem on demand.</p>
+                        <a href="/pricing" class="btn-buy">Buy 5 Pack</a>
+                    </div>
+
+                    <!-- 3. City Pro -->
+                    <div class="card card-pricing card-featured">
+                        <span style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#10b981; color:white; font-size:11px; padding:2px 10px; border-radius:10px; font-weight:bold;">POPULAR</span>
+                        <h4>City Pro</h4>
+                        <div class="price">£49<span style="font-size:14px; font-weight:normal;">/mo</span></div>
+                        <p style="color:#64748b; font-size:12px;">Monthly subscription</p>
+                        <p style="font-size:13px; color:#334155;"><b>Unlimited Leads</b> in your entire regional council zone (15-mile radius).</p>
+                        <a href="/pricing" class="btn-buy" style="background:#10b981;">Subscribe City</a>
+                    </div>
+
+                    <!-- 4. National -->
+                    <div class="card card-pricing">
+                        <h4>National Pass</h4>
+                        <div class="price">£89<span style="font-size:14px; font-weight:normal;">/mo</span></div>
+                        <p style="color:#64748b; font-size:12px;">Monthly subscription</p>
+                        <p style="font-size:13px; color:#334155;">Unlimited leads across <b>all 309 English councils</b> nationwide.</p>
+                        <a href="/pricing" class="btn-buy">Subscribe National</a>
+                    </div>
+
+                    <!-- 5. Exclusive Lockout -->
+                    <div class="card card-pricing" style="border:2px solid #7c3aed; background:#faf5ff;">
+                        <span style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#7c3aed; color:white; font-size:11px; padding:2px 10px; border-radius:10px; font-weight:bold;">MONOPOLY</span>
+                        <h4 style="color:#7c3aed;">Exclusive Lockout</h4>
+                        <div class="price" style="color:#6d28d9;">£149<span style="font-size:14px; font-weight:normal;">/mo</span></div>
+                        <p style="color:#64748b; font-size:12px;">15-Mile Radius Lockout</p>
+                        <p style="font-size:13px; color:#334155;"><b>Lock out all competitors.</b> 100% exclusive access in your territory.</p>
+                        <a href="/pricing" class="btn-buy" style="background:#7c3aed;">Lock Territory</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer>
+            <div class="container">
+                <p>© 2026 ArborLeads — A Vector Data Labs SaaS Platform. Operating under UK Town and Country Planning Act open data regulations.</p>
+                <p><a href="/pricing">Pricing Plans</a> &nbsp;|&nbsp; <a href="/health">System Status</a> &nbsp;|&nbsp; <a href="/admin">Contractor Portal Login</a></p>
+            </div>
+        </footer>
+    </body>
+    </html>
+    """
+
+
+# ── Management Dashboard (Basic Auth Protected at /admin) ────────────────────
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_dashboard(user: str = Depends(verify_dashboard_auth)):
     stats = {"p": 0, "l": 0, "partners": [], "leads": []}
     try:
         conn = database.get_db_conn(); cur = conn.cursor()
@@ -77,7 +260,7 @@ def dashboard(user: str = Depends(verify_dashboard_auth)):
         stats["leads"] = cur.fetchall()
         cur.close(); conn.close()
     except Exception as e:
-        logger.error(f"[DASHBOARD] DB error: {e}")
+        logger.error(f"[ADMIN] DB error: {e}")
 
     partner_rows = "".join([
         f"<li><b>{p[0]}</b> — {p[1] or 'Director on file'} | {p[2]} | ⭐ {p[3] or 'N/A'}</li>"
@@ -119,30 +302,32 @@ def dashboard(user: str = Depends(verify_dashboard_auth)):
         for city in ALL_CITIES[:9]  # Display the 9 core English regions
     ])
 
-
     return f"""
-    <html><head><title>Vector Data Labs</title></head>
+    <html><head><title>Vector Data Labs — Admin Command</title></head>
     <body style="font-family:sans-serif; background:#f4f4f9; padding:40px;">
-    <div style="max-width:800px; margin:auto; background:white; padding:40px;
-                border-radius:20px; border-top:8px solid #1b5e20;">
-        <h1>📊 Vector Data Labs — V4.0</h1>
-        <p>Partners: <b>{stats['p']}</b> &nbsp;|&nbsp; Leads: <b>{stats['l']}</b>
-           &nbsp;|&nbsp; <a href='/status'>🔧 Status</a>
-           &nbsp;|&nbsp; <a href='/pricing'>💳 Pricing</a>
+    <div style="max-width:850px; margin:auto; background:white; padding:40px;
+                border-radius:20px; border-top:8px solid #064e3b; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h1>📊 ArborLeads Admin Command</h1>
+            <a href="/" target="_blank" style="background:#10b981; color:white; padding:8px 14px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">👁️ View Public Homepage</a>
+        </div>
+        <p>Verified LTD Partners: <b>{stats['p']}</b> &nbsp;|&nbsp; Total Planning Leads: <b>{stats['l']}</b>
+           &nbsp;|&nbsp; <a href='/status'>🔧 System Status</a>
+           &nbsp;|&nbsp; <a href='/pricing'>💳 Pricing Table</a>
            &nbsp;|&nbsp; <a href='/export-directors'>📋 View Contacts</a>
            &nbsp;|&nbsp; <a href='/export-directors.csv' style='color:#1b5e20; font-weight:bold;'>⬇️ Download CSV</a>
         </p>
         <hr>
-        <h3>🏙️ City Scanners & Research</h3>
+        <h3>🏙️ Regional Scanners & Partner Discovery</h3>
         {city_buttons}
         <hr>
-        <h3>🔄 Database & Enrichment Tools</h3>
+        <h3>🔄 Database Operations</h3>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
             <a href='/research-all' style="background:#2e7d32; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                🚀 Discover All Cities (Find Partners)
+                🚀 Discover All 9 Regions (Find Partners)
             </a>
             <a href='/clean-partners' style="background:#b71c1c; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                🧹 Clean Database (Purge Medical & Unrelated)
+                🧹 Clean Database (Purge False Substrings)
             </a>
             <a href='/enrich-all' style="background:#1b5e20; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
                 🔄 Enrich All (Phone, Email, Web, Director)
@@ -151,17 +336,15 @@ def dashboard(user: str = Depends(verify_dashboard_auth)):
                 ⬇️ Export Contacts CSV
             </a>
         </div>
-        <p style="color:#666; font-size:12px;">
-            Click <b>Discover All Cities</b> to search Companies House across all 6 cities. Click <b>Clean Database</b> to purge any invalid records, and <b>Enrich All</b> to populate contact details.
-        </p>
         <hr>
-        <h4>Latest Leads</h4>
+        <h4>Recent Leads (Past 24-48 Hours)</h4>
         <ul>{lead_rows or "<li>No leads yet.</li>"}</ul>
-        <h4>Latest Enriched Partners</h4>
+        <h4>Recent Verified Partners</h4>
         <ul>{partner_rows or "<li>No partners yet.</li>"}</ul>
     </div>
     </body></html>
     """
+
 
 
 
