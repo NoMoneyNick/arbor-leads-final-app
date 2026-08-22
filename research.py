@@ -155,29 +155,35 @@ CITY_SUB_AREAS = {
         "London", "Greater London", "Croydon", "Bromley", "Barnet", "Richmond", "Enfield",
         "Ealing", "Wandsworth", "Greenwich", "Kingston", "Harrow", "Havering", "Bexley",
         "Hounslow", "Merton", "Sutton", "Twickenham", "Wembley", "Romford", "Ilford",
-        "Surrey", "Kent", "Essex", "Middlesex"
+        "Surrey", "Kent", "Essex", "Middlesex", "Hertfordshire"
     ],
     "Leeds": [
         "Leeds", "West Yorkshire", "Bradford", "Wakefield", "Harrogate", "Wetherby",
-        "Otley", "Ilkley", "Horsforth", "Pudsey", "Halifax", "Huddersfield"
+        "Otley", "Ilkley", "Horsforth", "Pudsey", "Halifax", "Huddersfield",
+        "York", "Selby", "Skipton", "Ripon", "North Yorkshire"
     ],
     "Birmingham": [
         "Birmingham", "West Midlands", "Solihull", "Dudley", "Walsall",
-        "West Bromwich", "Sutton Coldfield", "Stourbridge", "Halesowen", "Wolverhampton"
+        "West Bromwich", "Sutton Coldfield", "Stourbridge", "Halesowen", "Wolverhampton",
+        "Coventry", "Tamworth", "Redditch", "Bromsgrove", "Warwick", "Leamington Spa",
+        "Cannock", "Lichfield", "Kidderminster", "Telford"
     ],
     "Manchester": [
         "Manchester", "Greater Manchester", "Salford", "Stockport", "Trafford",
-        "Bolton", "Bury", "Oldham", "Rochdale", "Wigan", "Altrincham", "Sale", "Stockport"
+        "Bolton", "Bury", "Oldham", "Rochdale", "Wigan", "Altrincham", "Sale",
+        "Cheshire", "Warrington", "Wilmslow", "Macclesfield", "Knutsford", "Leigh"
     ],
     "Bristol": [
         "Bristol", "Avon", "Bath", "South Gloucestershire", "North Somerset",
-        "Kingswood", "Weston-super-Mare", "Yate", "Clevedon"
+        "Kingswood", "Weston-super-Mare", "Yate", "Clevedon", "Portishead",
+        "Gloucester", "Cheltenham", "Stroud", "Chippenham", "Trowbridge", "Somerset", "Gloucestershire"
     ],
     "Sheffield": [
         "Sheffield", "South Yorkshire", "Rotherham", "Barnsley", "Doncaster",
-        "Chesterfield", "Dronfield", "Peak District"
+        "Chesterfield", "Dronfield", "Peak District", "Derbyshire", "Worksop", "Retford", "Matlock", "Bakewell", "Mansfield"
     ]
 }
+
 
 
 def perform_research(city_name: str):
