@@ -25,6 +25,11 @@ basic_auth = HTTPBasic()
 ALL_CITIES = ["Leeds", "London", "Birmingham", "Manchester", "Bristol", "Sheffield"]
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok", "app": "Vector Data Labs"}
+
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 def verify_dashboard_auth(credentials: HTTPBasicCredentials = Depends(basic_auth)):
