@@ -171,6 +171,12 @@ CITY_SUB_AREAS = {
         "Castleford", "Keighley", "Bingley", "Shipley", "Batley", "Dewsbury", "Brighouse",
         "Halifax", "Huddersfield", "York", "North Yorkshire"
     ],
+    "Yorkshire": [
+        "Leeds", "Bradford", "Sheffield", "York", "Hull", "Harrogate", "Wakefield",
+        "Huddersfield", "Halifax", "Rotherham", "Barnsley", "Doncaster", "Scarborough",
+        "Bridlington", "Ripon", "Skipton", "Selby", "West Yorkshire", "North Yorkshire",
+        "South Yorkshire", "East Riding of Yorkshire"
+    ],
     "Birmingham": [
         "Birmingham", "West Midlands", "Solihull", "Coventry", "Wolverhampton", "Dudley",
         "Walsall", "West Bromwich", "Sutton Coldfield", "Stourbridge", "Halesowen",
@@ -178,11 +184,24 @@ CITY_SUB_AREAS = {
         "Kenilworth", "Lichfield", "Cannock", "Stafford", "Kidderminster", "Telford",
         "Shrewsbury", "Worcester", "Warwickshire", "Staffordshire", "Worcestershire"
     ],
+    "West Midlands": [
+        "Birmingham", "Coventry", "Solihull", "Wolverhampton", "Dudley", "Walsall",
+        "West Bromwich", "Sutton Coldfield", "Stourbridge", "Tamworth", "Redditch",
+        "Bromsgrove", "Warwick", "Leamington Spa", "Stratford-upon-Avon", "Lichfield",
+        "Cannock", "Stafford", "Stoke-on-Trent", "Kidderminster", "Telford", "Shrewsbury",
+        "Worcester", "Hereford", "Warwickshire", "Staffordshire", "Worcestershire", "Shropshire"
+    ],
     "Manchester": [
         "Manchester", "Greater Manchester", "Salford", "Stockport", "Trafford", "Altrincham",
         "Sale", "Bolton", "Bury", "Oldham", "Rochdale", "Wigan", "Cheshire", "Warrington",
         "Wilmslow", "Macclesfield", "Knutsford", "Alderley Edge", "Prestbury", "Northwich",
         "Chester", "Crewe", "Stoke-on-Trent", "Lancashire"
+    ],
+    "North West": [
+        "Manchester", "Liverpool", "Salford", "Stockport", "Trafford", "Bolton", "Bury",
+        "Oldham", "Rochdale", "Wigan", "Warrington", "Chester", "Crewe", "Preston",
+        "Blackpool", "Lancaster", "Blackburn", "Burnley", "Carlisle", "Kendal",
+        "Cheshire", "Greater Manchester", "Merseyside", "Lancashire", "Cumbria"
     ],
     "Bristol": [
         "Bristol", "Bath", "Kingswood", "Weston-super-Mare", "Portishead", "Clevedon",
@@ -190,12 +209,48 @@ CITY_SUB_AREAS = {
         "Tewkesbury", "Chippenham", "Trowbridge", "Swindon", "Taunton", "Bridgwater",
         "Somerset", "Gloucestershire", "Wiltshire", "Cotswolds", "Avon"
     ],
+    "South West": [
+        "Bristol", "Bath", "Gloucester", "Cheltenham", "Stroud", "Cirencester",
+        "Swindon", "Salisbury", "Trowbridge", "Taunton", "Bridgwater", "Yeovil",
+        "Exeter", "Plymouth", "Torquay", "Truro", "Bournemouth", "Poole", "Dorchester",
+        "Somerset", "Gloucestershire", "Wiltshire", "Devon", "Cornwall", "Dorset"
+    ],
     "Sheffield": [
         "Sheffield", "South Yorkshire", "Rotherham", "Barnsley", "Doncaster", "Chesterfield",
         "Dronfield", "Matlock", "Bakewell", "Buxton", "Worksop", "Retford", "Mansfield",
         "Peak District", "Derbyshire"
+    ],
+    "East Midlands": [
+        "Nottingham", "Derby", "Leicester", "Lincoln", "Northampton", "Kettering",
+        "Corby", "Mansfield", "Chesterfield", "Loughborough", "Grantham", "Boston",
+        "Derbyshire", "Nottinghamshire", "Leicestershire", "Lincolnshire", "Northamptonshire", "Peak District"
+    ],
+    "North East": [
+        "Newcastle upon Tyne", "Gateshead", "Sunderland", "Durham", "North Tyneside",
+        "South Tyneside", "Middlesbrough", "Stockton-on-Tees", "Darlington", "Hartlepool",
+        "Morpeth", "Hexham", "Alnwick", "Northumberland", "Tyne and Wear", "County Durham"
+    ],
+    "Newcastle": [
+        "Newcastle upon Tyne", "Gateshead", "Sunderland", "Durham", "Middlesbrough",
+        "Darlington", "Northumberland", "Tyne and Wear"
+    ],
+    "East of England": [
+        "Cambridge", "Norwich", "Ipswich", "Peterborough", "Chelmsford", "Colchester",
+        "Southend-on-Sea", "Brentwood", "Luton", "Bedford", "Bury St Edmunds", "Kings Lynn",
+        "Great Yarmouth", "Cambridgeshire", "Norfolk", "Suffolk", "Essex", "Bedfordshire"
+    ],
+    "Cambridge": [
+        "Cambridge", "Norwich", "Ipswich", "Peterborough", "Ely", "Bury St Edmunds",
+        "Huntingdon", "Cambridgeshire", "Norfolk", "Suffolk"
+    ],
+    "South East": [
+        "Brighton", "Southampton", "Portsmouth", "Oxford", "Reading", "Milton Keynes",
+        "Canterbury", "Maidstone", "Guildford", "Chichester", "Winchester", "Basingstoke",
+        "Slough", "Windsor", "Aylesbury", "High Wycombe", "Surrey", "Kent", "East Sussex",
+        "West Sussex", "Hampshire", "Berkshire", "Buckinghamshire", "Oxfordshire"
     ]
 }
+
 
 
 def perform_research(city_name: str):
@@ -365,11 +420,15 @@ def perform_research(city_name: str):
 
 
 def research_all_cities():
-    """Runs deep partner research across all 6 target UK cities."""
-    cities = ["Birmingham", "Manchester", "Bristol", "Sheffield", "Leeds", "London"]
-    for city in cities:
-        logger.info(f"[Investigator] Starting batch discovery for {city}...")
-        perform_research(city)
+    """Runs deep partner research across all 9 English regions covering all 309 Local Planning Authorities."""
+    regions = [
+        "London", "South East", "South West", "West Midlands",
+        "East Midlands", "Yorkshire", "North West", "North East", "East of England"
+    ]
+    for r in regions:
+        logger.info(f"[Investigator] 🚀 Starting nationwide batch discovery for {r}...")
+        perform_research(r)
+
 
 
 
@@ -449,34 +508,43 @@ def resolve_uk_city(address_str: str, company_name: str = "", default_city: str 
     pc_match = re.search(r'\b([A-Z]{1,2})\d[A-Z0-9]?\s*\d[A-Z]{2}\b', addr)
     if pc_match:
         area_code = pc_match.group(1)
-        if area_code in ["B", "WS", "WV", "DY", "CV", "ST", "TF", "WR"]:
+        if area_code in ["B", "WS", "WV", "DY", "CV", "ST", "TF", "WR", "HR", "SY"]:
             return "Birmingham"
-        if area_code in ["M", "SK", "WA", "WN", "BL", "OL", "CW"]:
+        if area_code in ["M", "SK", "WA", "WN", "BL", "OL", "CW", "L", "PR", "BB", "FY", "CH", "LA", "CA"]:
             return "Manchester"
-        if area_code in ["BS", "BA", "GL", "SN", "TA"]:
+        if area_code in ["BS", "BA", "GL", "SN", "TA", "DT", "SP", "EX", "TQ", "PL", "TR", "BH"]:
             return "Bristol"
-        if area_code in ["S", "DN", "DE", "NG", "LN"]:
+        if area_code in ["S", "DN", "DE", "NG", "LN", "LE", "NN", "PE"]:
             return "Sheffield"
-        if area_code in ["LS", "BD", "WF", "HG", "HX", "HD", "YO"]:
+        if area_code in ["LS", "BD", "WF", "HG", "HX", "HD", "YO", "HU", "DL", "TS"]:
             return "Leeds"
-        if area_code in ["E", "EC", "N", "NW", "SE", "SW", "W", "WC", "BR", "CR", "DA", "EN", "HA", "IG", "KT", "RM", "SM", "TW", "UB", "WD", "CM", "SS", "ME", "TN", "RH", "GU", "SL", "HP", "AL", "SG"]:
+        if area_code in ["NE", "SR", "DH"]:
+            return "Newcastle"
+        if area_code in ["CB", "NR", "IP", "CO", "LU"]:
+            return "Cambridge"
+        if area_code in ["E", "EC", "N", "NW", "SE", "SW", "W", "WC", "BR", "CR", "DA", "EN", "HA", "IG", "KT", "RM", "SM", "TW", "UB", "WD", "CM", "SS", "ME", "TN", "RH", "GU", "SL", "HP", "AL", "SG", "OX", "RG", "MK", "BN", "SO", "PO", "CT"]:
             return "London"
 
     # 2. Town / District / County Keyword Matching
-    if any(k in combined for k in ["BIRMINGHAM", "SOLIHULL", "DUDLEY", "WALSALL", "WEST BROMWICH", "SUTTON COLDFIELD", "COVENTRY", "WOLVERHAMPTON", "WEST MIDLANDS", "WARWICK"]):
+    if any(k in combined for k in ["NEWCASTLE", "GATESHEAD", "SUNDERLAND", "DURHAM", "MIDDLESBROUGH", "DARLINGTON", "NORTHUMBERLAND", "TYNE AND WEAR", "COUNTY DURHAM"]):
+        return "Newcastle"
+    if any(k in combined for k in ["CAMBRIDGE", "NORWICH", "IPSWICH", "PETERBOROUGH", "CHELMSFORD", "COLCHESTER", "LUTON", "BEDFORD", "CAMBRIDGESHIRE", "NORFOLK", "SUFFOLK"]):
+        return "Cambridge"
+    if any(k in combined for k in ["BIRMINGHAM", "SOLIHULL", "DUDLEY", "WALSALL", "WEST BROMWICH", "SUTTON COLDFIELD", "COVENTRY", "WOLVERHAMPTON", "WEST MIDLANDS", "WARWICK", "WORCESTER", "STAFFORD", "SHROPSHIRE", "HEREFORD"]):
         return "Birmingham"
-    if any(k in combined for k in ["MANCHESTER", "SALFORD", "STOCKPORT", "TRAFFORD", "BOLTON", "BURY", "OLDHAM", "ROCHDALE", "WIGAN", "ALTRINCHAM", "GREATER MANCHESTER", "CHESHIRE", "WARRINGTON"]):
+    if any(k in combined for k in ["MANCHESTER", "LIVERPOOL", "SALFORD", "STOCKPORT", "TRAFFORD", "BOLTON", "BURY", "OLDHAM", "ROCHDALE", "WIGAN", "ALTRINCHAM", "GREATER MANCHESTER", "CHESHIRE", "WARRINGTON", "LANCASHIRE", "MERSEYSIDE", "CUMBRIA"]):
         return "Manchester"
-    if any(k in combined for k in ["BRISTOL", "BATH", "GLOUCESTERSHIRE", "SOMERSET", "KINGSWOOD", "WESTON-SUPER-MARE", "AVON", "CHELTENHAM", "GLOUCESTER"]):
+    if any(k in combined for k in ["BRISTOL", "BATH", "GLOUCESTERSHIRE", "SOMERSET", "KINGSWOOD", "WESTON-SUPER-MARE", "AVON", "CHELTENHAM", "GLOUCESTER", "WILTSHIRE", "SWINDON", "DEVON", "CORNWALL", "DORSET", "EXETER", "PLYMOUTH"]):
         return "Bristol"
-    if any(k in combined for k in ["SHEFFIELD", "ROTHERHAM", "BARNSLEY", "DONCASTER", "CHESTERFIELD", "SOUTH YORKSHIRE", "DERBYSHIRE", "PEAK DISTRICT"]):
+    if any(k in combined for k in ["SHEFFIELD", "ROTHERHAM", "BARNSLEY", "DONCASTER", "CHESTERFIELD", "SOUTH YORKSHIRE", "DERBYSHIRE", "PEAK DISTRICT", "NOTTINGHAM", "LEICESTER", "LINCOLN", "NORTHAMPTON"]):
         return "Sheffield"
-    if any(k in combined for k in ["LEEDS", "BRADFORD", "WAKEFIELD", "HARROGATE", "WEST YORKSHIRE", "YORKSHIRE", "HALIFAX", "HUDDERSFIELD", "YORK", "WETHERBY"]):
+    if any(k in combined for k in ["LEEDS", "BRADFORD", "WAKEFIELD", "HARROGATE", "WEST YORKSHIRE", "YORKSHIRE", "HALIFAX", "HUDDERSFIELD", "YORK", "WETHERBY", "HULL", "EAST RIDING", "NORTH YORKSHIRE"]):
         return "Leeds"
-    if any(k in combined for k in ["LONDON", "CROYDON", "BROMLEY", "BARNET", "RICHMOND", "ENFIELD", "EALING", "WANDSWORTH", "GREENWICH", "KINGSTON", "HARROW", "HAVERING", "BEXLEY", "HOUNSLOW", "MERTON", "SUTTON", "TWICKENHAM", "WEMBLEY", "SURREY", "KENT", "ESSEX", "MIDDLESEX", "HERTFORDSHIRE"]):
+    if any(k in combined for k in ["LONDON", "CROYDON", "BROMLEY", "BARNET", "RICHMOND", "ENFIELD", "EALING", "WANDSWORTH", "GREENWICH", "KINGSTON", "HARROW", "HAVERING", "BEXLEY", "HOUNSLOW", "MERTON", "SUTTON", "TWICKENHAM", "WEMBLEY", "SURREY", "KENT", "ESSEX", "MIDDLESEX", "HERTFORDSHIRE", "BERKSHIRE", "BUCKINGHAMSHIRE", "SUSSEX", "HAMPSHIRE", "OXFORDSHIRE"]):
         return "London"
 
     return default_city or "UK"
+
 
 
 def clean_partner_database():

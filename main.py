@@ -21,8 +21,12 @@ database.init_db()
 T_SEC      = os.getenv("TRIGGER_SECRET", "").strip()
 basic_auth = HTTPBasic()
 
-# All cities with their scan functions
-ALL_CITIES = ["Leeds", "London", "Birmingham", "Manchester", "Bristol", "Sheffield"]
+# All 9 English Regions with nationwide council & partner coverage
+ALL_CITIES = [
+    "London", "South East", "South West", "West Midlands",
+    "East Midlands", "Yorkshire", "North West", "North East", "East of England",
+    "Leeds", "Birmingham", "Manchester", "Bristol", "Sheffield"
+]
 
 
 @app.get("/health")
@@ -321,16 +325,21 @@ async def stripe_webhook(request: Request):
 
 # ── City Scan Routes (Dashboard — Basic Auth) ─────────────────────────────────
 
+def _resolve_city_param(slug: str) -> Optional[str]:
+    normalized = slug.lower().replace("-", " ").replace("_", " ").strip()
+    city_map = {c.lower(): c for c in ALL_CITIES}
+    return city_map.get(normalized)
+
+
 @app.get("/scan/{city_slug}", response_class=HTMLResponse)
 def scan_city(city_slug: str, user: str = Depends(verify_dashboard_auth)):
-    city_map = {c.lower(): c for c in ALL_CITIES}
-    city = city_map.get(city_slug.lower())
+    city = _resolve_city_param(city_slug)
     if not city:
-        raise HTTPException(status_code=404, detail=f"City '{city_slug}' not configured.")
+        raise HTTPException(status_code=404, detail=f"Region/City '{city_slug}' not configured.")
 
-    if city == "Leeds":
+    if city in ("Leeds", "Yorkshire"):
         count = scanners.scan_leeds_leads()
-    elif city == "London":
+    elif city in ("London", "South East"):
         count = scanners.scan_london_leads()
     else:
         count = scanners.scan_city_planning_api(city)
@@ -346,14 +355,13 @@ def scan_city(city_slug: str, user: str = Depends(verify_dashboard_auth)):
 @app.get("/trigger-leads-{city_slug}")
 def cron_trigger(city_slug: str, secret: Optional[str] = Query(None)):
     verify_cron_secret(secret)
-    city_map = {c.lower(): c for c in ALL_CITIES}
-    city = city_map.get(city_slug.lower())
+    city = _resolve_city_param(city_slug)
     if not city:
-        raise HTTPException(status_code=404, detail=f"City '{city_slug}' not configured.")
+        raise HTTPException(status_code=404, detail=f"Region/City '{city_slug}' not configured.")
 
-    if city == "Leeds":
+    if city in ("Leeds", "Yorkshire"):
         count = scanners.scan_leeds_leads()
-    elif city == "London":
+    elif city in ("London", "South East"):
         count = scanners.scan_london_leads()
     else:
         count = scanners.scan_city_planning_api(city)
@@ -367,12 +375,12 @@ def cron_trigger(city_slug: str, secret: Optional[str] = Query(None)):
 @app.get("/research/{city_slug}")
 def research_city(city_slug: str, bg: BackgroundTasks,
                   user: str = Depends(verify_dashboard_auth)):
-    city_map = {c.lower(): c for c in ALL_CITIES}
-    city = city_map.get(city_slug.lower())
+    city = _resolve_city_param(city_slug)
     if not city:
-        raise HTTPException(status_code=404, detail=f"City '{city_slug}' not configured.")
+        raise HTTPException(status_code=404, detail=f"Region/City '{city_slug}' not configured.")
     bg.add_task(research.perform_research, city)
     return {"status": "started", "city": city}
+
 
 
 @app.get("/research-all", response_class=HTMLResponse)

@@ -266,13 +266,35 @@ def scan_london_leads() -> int:
 
 UK_PLANNING_API_KEY = os.getenv("UK_PLANNING_API_KEY", "").strip()
 
-# Exhaustive regional postcode prefixes covering city councils + all surrounding border/county councils
+# Exhaustive regional postcode prefixes covering all 309 English Local Planning Authorities
 CITY_POSTCODE_PREFIX = {
-    "Birmingham": ["B", "WS", "WV", "DY", "CV", "WR", "TF", "ST", "HR", "SY"],          # West Midlands, Staffs, Worcs, Shrops, Warks
-    "Manchester": ["M", "SK", "WA", "WN", "BL", "OL", "CW", "L", "PR", "BB", "FY", "CH"], # Greater Manchester, Cheshire, Merseyside, Lancs
-    "Bristol":    ["BS", "BA", "GL", "SN", "TA", "DT", "SP"],                              # Bristol, Bath, Glos, Wilts, Somerset, Dorset
-    "Sheffield":  ["S", "DN", "DE", "NG", "LN", "LE"],                                      # South Yorks, Derbyshire, Notts, Lincs, Leics
+    # 1. Greater London
+    "London":          ["SW", "SE", "NW", "N", "E", "EC", "WC", "CR", "BR", "EN", "HA", "UB", "KT", "TW", "DA", "RM", "IG", "SM", "RH", "TN", "GU", "CM", "SS", "SL", "HP", "AL", "SG", "WD", "ME"],
+    # 2. South East & Home Counties
+    "South East":      ["RH", "TN", "GU", "ME", "CT", "BN", "SO", "PO", "OX", "RG", "MK", "HP", "AL", "SG", "WD", "SL"],
+    # 3. South West & West Country
+    "South West":      ["BS", "BA", "GL", "SN", "TA", "DT", "SP", "EX", "TQ", "PL", "TR", "BH"],
+    "Bristol":         ["BS", "BA", "GL", "SN", "TA", "DT", "SP"],
+    # 4. West Midlands
+    "West Midlands":   ["B", "WS", "WV", "DY", "CV", "WR", "TF", "ST", "HR", "SY"],
+    "Birmingham":      ["B", "WS", "WV", "DY", "CV", "WR", "TF", "ST", "HR", "SY"],
+    # 5. East Midlands
+    "East Midlands":   ["S", "DE", "NG", "LE", "LN", "NN", "PE"],
+    "Sheffield":       ["S", "DN", "DE", "NG", "LN", "LE"],
+    # 6. Yorkshire & The Humber
+    "Yorkshire":       ["LS", "BD", "WF", "HX", "HD", "YO", "HG", "HU", "DL", "TS", "DN"],
+    "Leeds":           ["LS", "BD", "WF", "HX", "HD", "YO", "HG", "HU", "DL", "TS"],
+    # 7. North West
+    "North West":      ["M", "SK", "WA", "WN", "BL", "OL", "CW", "L", "PR", "BB", "FY", "CH", "LA", "CA"],
+    "Manchester":      ["M", "SK", "WA", "WN", "BL", "OL", "CW", "L", "PR", "BB", "FY", "CH"],
+    # 8. North East
+    "North East":      ["NE", "SR", "DH", "TS", "DL"],
+    "Newcastle":       ["NE", "SR", "DH", "TS", "DL"],
+    # 9. East of England
+    "East of England": ["CM", "SS", "CO", "CB", "PE", "NR", "IP", "LU", "SG"],
+    "Cambridge":       ["CM", "SS", "CO", "CB", "PE", "NR", "IP", "LU", "SG"],
 }
+
 
 
 
