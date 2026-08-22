@@ -263,13 +263,13 @@ def perform_research(city_name: str):
         logger.error("[Investigator] COMPANIES_HOUSE_KEY not set. Aborting.")
         return
 
-    REQUIRED_NAME_WORDS = [
+    # Strict tree surgery trade phrases and isolated 'tree' word boundary
+    REQUIRED_PHRASES = [
         "tree surgery", "tree surgeon", "tree surgeons", "tree care",
         "tree service", "tree services", "tree work", "tree works", "tree felling",
         "arboricultural", "arboriculture", "arborist", "arborists",
         "forestry", "woodland management", "woodland services",
-        "stump grinding", "stump removal", "hedge cutting", "hedge trimming",
-        "tree", "arborist", "arboriculture", "arboricultural", "forestry"
+        "stump grinding", "stump removal", "hedge cutting", "hedge trimming"
     ]
     EXCLUDED_NAME_WORDS = [
         "breast", "plastic", "cosmetic", "dental", "medical", "clinic",
@@ -281,8 +281,11 @@ def perform_research(city_name: str):
         "restaurant", "café", "cafe", "bakery", "food", "bar", "pub", "coffee",
         "homes", "housing", "ales", "beer", "brewery", "capital", "investment", "financial",
         "construction", "rail", "railway", "events", "properties", "property",
-        "logistics", "transport", "security", "cleaning", "plumbing", "electrical", "roofing"
+        "logistics", "transport", "security", "cleaning", "plumbing", "electrical", "roofing",
+        "mot", "garage", "auto", "car", "motor", "vehicle", "repairs", "mechanic",
+        "development", "developments", "holdings", "management company", "residents", "flats", "apartments"
     ]
+
 
     try:
         conn = database.get_db_conn()
@@ -350,8 +353,10 @@ def perform_research(city_name: str):
                 if co.get("company_status") != "active":
                     return None
 
-                # NAME FILTER 1 & 2
-                if not any(w in name_lower for w in REQUIRED_NAME_WORDS):
+                # NAME FILTER 1 & 2: Strict tree trade phrases or isolated 'tree' word boundary
+                has_trade_phrase = any(w in name_lower for w in REQUIRED_PHRASES)
+                has_isolated_tree = bool(re.search(r'\btree\b', name_lower))
+                if not (has_trade_phrase or has_isolated_tree):
                     return None
                 if any(w in name_lower for w in EXCLUDED_NAME_WORDS):
                     return None
@@ -378,21 +383,24 @@ def perform_research(city_name: str):
                 co_conn = database.get_db_conn()
                 co_cur = co_conn.cursor()
                 co_cur.execute("""
-                    INSERT INTO potential_partners (
-                        company_name, company_number, address, target_city,
-                        md_name, phone_number, google_rating, website, email, status
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'enriched')
-                    ON CONFLICT (company_number)
-                    DO UPDATE SET
-                        address = COALESCE(EXCLUDED.address, potential_partners.address),
-                        target_city = EXCLUDED.target_city,
-                        md_name = COALESCE(EXCLUDED.md_name, potential_partners.md_name),
-                        phone_number = COALESCE(EXCLUDED.phone_number, potential_partners.phone_number),
+                    INSERT INTO potential_partners
+                        (company_name, company_number, status, address, target_city,
+                         sic_codes, md_name, phone_number, google_rating, website, email)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (company_number) DO UPDATE SET
+                        company_name  = EXCLUDED.company_name,
+                        target_city   = EXCLUDED.target_city,
+                        md_name       = COALESCE(EXCLUDED.md_name, potential_partners.md_name),
+                        phone_number  = COALESCE(EXCLUDED.phone_number, potential_partners.phone_number),
                         google_rating = COALESCE(EXCLUDED.google_rating, potential_partners.google_rating),
-                        website = COALESCE(EXCLUDED.website, potential_partners.website),
-                        email = COALESCE(EXCLUDED.email, potential_partners.email);
-                """, (name, company_number, addr, assigned_city, md_name, phone, rating, website, email))
+                        website       = COALESCE(EXCLUDED.website, potential_partners.website),
+                        email         = COALESCE(EXCLUDED.email, potential_partners.email)
+                """, (
+                    name, company_number, co.get("company_status"),
+                    addr, assigned_city,
+                    co.get("sic_codes", []), md_name, phone, rating,
+                    website, email
+                ))
                 co_conn.commit()
                 co_cur.close()
                 co_conn.close()
@@ -554,13 +562,12 @@ def clean_partner_database():
     re-assigns the genuine city from UK postcode/address analysis.
     Run via /clean-partners.
     """
-    REQUIRED_NAME_WORDS = [
+    REQUIRED_PHRASES = [
         "tree surgery", "tree surgeon", "tree surgeons", "tree care",
         "tree service", "tree services", "tree work", "tree works", "tree felling",
         "arboricultural", "arboriculture", "arborist", "arborists",
         "forestry", "woodland management", "woodland services",
-        "stump grinding", "stump removal", "hedge cutting", "hedge trimming",
-        "tree", "arborist", "arboriculture", "arboricultural", "forestry"
+        "stump grinding", "stump removal", "hedge cutting", "hedge trimming"
     ]
     EXCLUDED_NAME_WORDS = [
         "breast", "plastic", "cosmetic", "dental", "medical", "clinic",
@@ -572,7 +579,9 @@ def clean_partner_database():
         "restaurant", "café", "cafe", "bakery", "food", "bar", "pub", "coffee",
         "homes", "housing", "ales", "beer", "brewery", "capital", "investment", "financial",
         "construction", "rail", "railway", "events", "properties", "property",
-        "logistics", "transport", "security", "cleaning", "plumbing", "electrical", "roofing"
+        "logistics", "transport", "security", "cleaning", "plumbing", "electrical", "roofing",
+        "mot", "garage", "auto", "car", "motor", "vehicle", "repairs", "mechanic",
+        "development", "developments", "holdings", "management company", "residents", "flats", "apartments"
     ]
 
     try:
@@ -590,8 +599,11 @@ def clean_partner_database():
         for (pid, name, addr, current_city) in all_partners:
             name_lower = (name or "").lower()
 
-            # FILTER 1: Must contain a tree-surgery-related word
-            has_required = any(w in name_lower for w in REQUIRED_NAME_WORDS)
+            # FILTER 1: Must contain tree trade phrase OR isolated 'tree' word boundary
+            has_phrase = any(w in name_lower for w in REQUIRED_PHRASES)
+            has_isolated_tree = bool(re.search(r'\btree\b', name_lower))
+            has_required = has_phrase or has_isolated_tree
+
             # FILTER 2: Must not contain an excluded word
             has_excluded = any(w in name_lower for w in EXCLUDED_NAME_WORDS)
 
