@@ -287,10 +287,11 @@ def perform_research(city_name: str):
 
 def research_all_cities():
     """Runs deep partner research across all 6 target UK cities."""
-    cities = ["London", "Leeds", "Birmingham", "Manchester", "Bristol", "Sheffield"]
+    cities = ["Birmingham", "Manchester", "Bristol", "Sheffield", "Leeds", "London"]
     for city in cities:
         logger.info(f"[Investigator] Starting batch discovery for {city}...")
         perform_research(city)
+
 
 
 
