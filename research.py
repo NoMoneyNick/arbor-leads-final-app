@@ -326,12 +326,14 @@ def clean_partner_database():
     # Must NOT match any of these
     EXCLUDED_NAME_WORDS = [
         "breast", "plastic", "cosmetic", "dental", "medical", "clinic",
-        "hospital", "fruit", "olive", "palm", "christmas", "bonsai",
-        "surgery centre", "surgical", "ortho", "optic", "laser",
+        "hospital", "fruit", "olive", "palm", "christmas", "bonsai", "pyo",
+        "surgery centre", "surgical", "ortho", "optic", "laser", "eye", "neck", "spine",
+        "doctor", "health", "physio", "chiropractic", "therapy",
         "hair", "skin", "beauty", "nail", "tattoo", "piercing",
         "estate agent", "letting", "solicitor", "accountant",
         "restaurant", "café", "cafe", "bakery", "food"
     ]
+
 
     try:
         conn = database.get_db_conn()
