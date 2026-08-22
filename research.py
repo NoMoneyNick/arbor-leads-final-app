@@ -570,17 +570,19 @@ def enrich_existing_partners():
         conn = database.get_db_conn()
         cur = conn.cursor()
 
-        # Fetch partners that are missing director, phone, website, or email
+        # Fetch only partners that are still missing details (enables seamless resume)
         cur.execute("""
             SELECT id, company_name, company_number, target_city, address,
                    md_name, phone_number, google_rating, website, email
             FROM potential_partners
             WHERE company_number IS NOT NULL
+              AND (email IS NULL OR phone_number IS NULL OR md_name IS NULL OR website IS NULL)
         """)
         partners = cur.fetchall()
         cur.close()
         conn.close()
-        logger.info(f"[Enrichment] 🚀 {len(partners)} partners queued for parallel deep enrichment...")
+        logger.info(f"[Enrichment] 🚀 {len(partners)} remaining partners queued for parallel deep enrichment...")
+
 
         def enrich_single_partner(row):
             (pid, name, number, city, addr, existing_md, existing_phone, existing_rating, existing_website, existing_email) = row
