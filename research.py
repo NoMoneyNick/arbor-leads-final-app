@@ -58,49 +58,83 @@ def get_director_from_ch(company_number: str):
 import re
 import urllib.parse
 
-def scrape_email_from_website(website_url: str):
+import html
+
+def _extract_emails_from_html(html_text: str) -> list[str]:
+    """Helper to extract clean, valid email addresses from raw HTML text."""
+    if not html_text:
+        return []
+    # Decode HTML entities like &#105;&#110;&#102;&#111; or &commat;
+    decoded = html.unescape(html_text)
+
+    
+    # 1. Mailto links
+    mailto_matches = re.findall(r'mailto:([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', decoded, re.IGNORECASE)
+    # 2. General regex patterns
+    raw_matches = re.findall(r'\b[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+\b', decoded, re.IGNORECASE)
+    # 3. Obfuscated [at] or (at) patterns
+    obfuscated = re.findall(r'([a-zA-Z0-9_.+-]+)\s*(?:\[at\]|\(at\)|\s+at\s+)\s*([a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', decoded, re.IGNORECASE)
+    obf_emails = [f"{user}@{dom}" for user, dom in obfuscated]
+
+    all_emails = mailto_matches + raw_matches + obf_emails
+    excluded_domains = ["sentry.io", "wixpress.com", "example.com", "domain.com", "schema.org", "w3.org", "googleapis.com", "cloudflare.com", "wordpress.org"]
+    excluded_exts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".js", ".css", ".ico", ".woff", ".woff2"]
+
+    valid_emails = []
+    for email in all_emails:
+        clean = email.strip().lower().rstrip(".")
+        if any(clean.endswith(ext) for ext in excluded_exts):
+            continue
+        if any(d in clean for d in excluded_domains):
+            continue
+        if len(clean) < 6 or "@" not in clean:
+            continue
+        valid_emails.append(clean)
+    return valid_emails
+
+
+def scrape_email_from_website(website_url: str) -> Optional[str]:
     """
-    Attempts to scrape a public contact email from a company's website.
-    Runs with a strict 5s timeout and avoids asset/framework false positives.
+    High-yield multi-page email scraper:
+    1. Fetches homepage.
+    2. If no email found, checks /contact, /contact-us, /about, /quote pages.
     """
     if not website_url:
         return None
     try:
-        if not website_url.startswith("http://") and not website_url.startswith("https://"):
-            website_url = "https://" + website_url
+        if not website_url.startswith("http"):
+            website_url = "https://" + website_url.lstrip("/")
 
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        res = requests.get(website_url, headers=headers, timeout=5, verify=False)
-        if res.status_code != 200:
-            return None
-
-        text = res.text
-        # Find mailto links first
-        mailto_matches = re.findall(r'mailto:([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', text, re.IGNORECASE)
-        # Find raw email patterns
-        raw_matches = re.findall(r'[b\s:\"\'<]([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)[>\s:\"\'b]', text, re.IGNORECASE)
         
-        all_emails = mailto_matches + raw_matches
-        excluded_domains = ["sentry.io", "wixpress.com", "example.com", "domain.com", "schema.org", "w3.org", "googleapis.com"]
-        excluded_exts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".js", ".css"]
+        # 1. Fetch Homepage
+        res = requests.get(website_url, headers=headers, timeout=4, verify=False)
+        if res.status_code == 200:
+            emails = _extract_emails_from_html(res.text)
+            if emails:
+                return emails[0]
 
-        for email in all_emails:
-            email = email.strip().lower()
-            if any(email.endswith(ext) for ext in excluded_exts):
+        # 2. Check Common Contact Sub-pages if not on homepage
+        base_url = website_url.rstrip("/")
+        sub_paths = ["/contact", "/contact-us", "/about", "/about-us", "/quote", "/get-a-quote"]
+        for path in sub_paths:
+            try:
+                sub_res = requests.get(base_url + path, headers=headers, timeout=3, verify=False)
+                if sub_res.status_code == 200:
+                    sub_emails = _extract_emails_from_html(sub_res.text)
+                    if sub_emails:
+                        return sub_emails[0]
+            except Exception:
                 continue
-            if any(d in email for d in excluded_domains):
-                continue
-            if len(email) < 6:
-                continue
-            return email
+
     except Exception as e:
         logger.debug(f"[Email Scraper] Could not scrape {website_url}: {e}")
     return None
 
 
-def get_google_places_info(company_name: str, city: str):
+def get_google_places_info(company_name: str, city_or_addr: str = ""):
     """
     Pillar 3: Queries Google Places API for reputation rating,
     direct phone number, and official website URL.
@@ -109,14 +143,24 @@ def get_google_places_info(company_name: str, city: str):
     if not GOOGLE_MAPS_KEY:
         return None, None, None
     try:
+        # Include company name + address/town for pinpoint local precision
+        query = f"{company_name} {city_or_addr}".strip()
         res = requests.get(
             "https://maps.googleapis.com/maps/api/place/textsearch/json",
-            params={"query": f"{company_name} in {city}", "key": GOOGLE_MAPS_KEY},
-            timeout=10
+            params={"query": query, "key": GOOGLE_MAPS_KEY},
+            timeout=5
         )
         results = res.json().get("results", [])
         if not results:
-            return None, None, None
+            # Fallback to just company name UK
+            res = requests.get(
+                "https://maps.googleapis.com/maps/api/place/textsearch/json",
+                params={"query": f"{company_name} tree surgery UK", "key": GOOGLE_MAPS_KEY},
+                timeout=5
+            )
+            results = res.json().get("results", [])
+            if not results:
+                return None, None, None
 
         first = results[0]
         rating = first.get("rating")
@@ -134,7 +178,7 @@ def get_google_places_info(company_name: str, city: str):
                         "fields": "formatted_phone_number,website,rating",
                         "key": GOOGLE_MAPS_KEY
                     },
-                    timeout=10
+                    timeout=5
                 )
                 details = details_res.json().get("result", {})
                 phone = details.get("formatted_phone_number")
@@ -142,12 +186,13 @@ def get_google_places_info(company_name: str, city: str):
                 if details.get("rating") is not None:
                     rating = details.get("rating")
             except Exception as de:
-                logger.error(f"[Google Details] Error for {place_id}: {de}")
+                logger.debug(f"[Google Details] Error for {place_id}: {de}")
 
         return rating, phone, website
     except Exception as e:
-        logger.error(f"[Google] Error fetching info for {company_name}: {e}")
+        logger.debug(f"[Google] Error fetching info for {company_name}: {e}")
         return None, None, None
+
 
 
 CITY_SUB_AREAS = {
@@ -405,6 +450,32 @@ def perform_research(city_name: str):
                 addr = co.get("address_snippet") or ""
                 assigned_city = resolve_uk_city(addr, name, default_city=city_name)
 
+                # STRICT REGIONAL ENFORCEMENT: Ignore cross-region search bleed
+                REGIONAL_ALIASES = {
+                    "newcastle": "north east",
+                    "north east": "north east",
+                    "cambridge": "east of england",
+                    "east of england": "east of england",
+                    "leeds": "yorkshire",
+                    "yorkshire": "yorkshire",
+                    "birmingham": "west midlands",
+                    "west midlands": "west midlands",
+                    "manchester": "north west",
+                    "north west": "north west",
+                    "bristol": "south west",
+                    "south west": "south west",
+                    "sheffield": "east midlands",
+                    "east midlands": "east midlands",
+                    "london": "london",
+                    "south east": "south east",
+                }
+                target_norm = REGIONAL_ALIASES.get(city_name.lower(), city_name.lower())
+                assigned_norm = REGIONAL_ALIASES.get(assigned_city.lower(), assigned_city.lower())
+
+                if target_norm != "uk" and target_norm != assigned_norm:
+                    logger.debug(f"[Investigator] Ignored cross-region result: {name} (assigned={assigned_city}, target={city_name})")
+                    return None
+
                 # Skip expensive external calls if already fully enriched in DB
                 if company_number in already_enriched:
                     logger.info(f"[Investigator] {name} ({assigned_city}) → Already enriched. Skipped.")
@@ -414,10 +485,11 @@ def perform_research(city_name: str):
                 md_name = get_director_from_ch(company_number)
 
                 # Pillar 3: Google reputation & phone (fast 3s timeout)
-                rating, phone, website = get_google_places_info(name, assigned_city)
+                rating, phone, website = get_google_places_info(name, f"{addr} {assigned_city}")
 
-                # Scrape email from website (fast 2.5s timeout)
+                # Scrape email from website (multi-page /contact /about check)
                 email = scrape_email_from_website(website) if website else None
+
 
                 # Thread-safe database save
                 co_conn = database.get_db_conn()
@@ -484,9 +556,10 @@ def research_all_cities():
 
 def enrich_existing_partners():
     """
-    Retroactive enrichment job: loops through all partners,
+    Retroactive enrichment job: loops through all partners in parallel across 10 threads,
     fills missing director names via CH Officers,
-    fetches Google Places phone/website/rating, and scrapes contact emails.
+    fetches Google Places phone/website/rating with full address precision,
+    and scrapes contact emails across multi-page website endpoints.
     Runs as a background task from /enrich-all.
     """
     if not CH_KEY:
@@ -497,48 +570,61 @@ def enrich_existing_partners():
         conn = database.get_db_conn()
         cur = conn.cursor()
 
-        # Fetch partners to enrich
+        # Fetch partners that are missing director, phone, website, or email
         cur.execute("""
-            SELECT id, company_name, company_number, target_city,
+            SELECT id, company_name, company_number, target_city, address,
                    md_name, phone_number, google_rating, website, email
             FROM potential_partners
             WHERE company_number IS NOT NULL
         """)
         partners = cur.fetchall()
-        logger.info(f"[Enrichment] {len(partners)} partners queued for full enrichment.")
-
-        for (pid, name, number, city, existing_md, existing_phone, existing_rating, existing_website, existing_email) in partners:
-            md_name = existing_md or get_director_from_ch(number)
-            
-            rating = existing_rating
-            phone = existing_phone
-            website = existing_website
-
-            if not phone or not website or rating is None:
-                g_rating, g_phone, g_website = get_google_places_info(name, city or "")
-                rating = rating if rating is not None else g_rating
-                phone = phone or g_phone
-                website = website or g_website
-
-            email = existing_email
-            if not email and website:
-                email = scrape_email_from_website(website)
-
-            cur.execute("""
-                UPDATE potential_partners
-                SET md_name = %s, phone_number = %s, google_rating = %s,
-                    website = %s, email = %s
-                WHERE id = %s
-            """, (md_name, phone, rating, website, email, pid))
-
-            logger.info(f"[Enrichment] {name} → Director: {md_name or 'N/A'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'}")
-
-        conn.commit()
         cur.close()
         conn.close()
-        logger.info("[Enrichment] All partners processed.")
+        logger.info(f"[Enrichment] 🚀 {len(partners)} partners queued for parallel deep enrichment...")
+
+        def enrich_single_partner(row):
+            (pid, name, number, city, addr, existing_md, existing_phone, existing_rating, existing_website, existing_email) = row
+            try:
+                md_name = existing_md or get_director_from_ch(number)
+                rating = existing_rating
+                phone = existing_phone
+                website = existing_website
+
+                if not phone or not website or rating is None:
+                    lookup_loc = f"{addr or ''} {city or ''}".strip()
+                    g_rating, g_phone, g_website = get_google_places_info(name, lookup_loc)
+                    rating = rating if rating is not None else g_rating
+                    phone = phone or g_phone
+                    website = website or g_website
+
+                email = existing_email
+                if not email and website:
+                    email = scrape_email_from_website(website)
+
+                p_conn = database.get_db_conn()
+                p_cur = p_conn.cursor()
+                p_cur.execute("""
+                    UPDATE potential_partners
+                    SET md_name = %s, phone_number = %s, google_rating = %s,
+                        website = %s, email = %s
+                    WHERE id = %s
+                """, (md_name, phone, rating, website, email, pid))
+                p_conn.commit()
+                p_cur.close()
+                p_conn.close()
+
+                logger.info(f"[Enrichment] ✅ {name} → Director: {md_name or 'N/A'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'}")
+            except Exception as e:
+                logger.debug(f"[Enrichment] Error on {name}: {e}")
+
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            executor.map(enrich_single_partner, partners)
+
+        logger.info(f"[Enrichment] 🎯 Complete! All {len(partners)} partners enriched.")
     except Exception as e:
         logger.error(f"[Enrichment] Fatal error: {e}")
+
 
 
 import re
