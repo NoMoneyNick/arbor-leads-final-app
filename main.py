@@ -377,7 +377,6 @@ def scan_city(city_slug: str, user: str = Depends(verify_dashboard_auth)):
 
 # ── City Cron Routes (External — Trigger Secret) ──────────────────────────────
 
-@app.get("/trigger-leads/{city_slug}")
 @app.get("/trigger-leads-{city_slug}")
 def cron_trigger(city_slug: str, secret: Optional[str] = Query(None)):
     verify_cron_secret(secret)
@@ -394,6 +393,12 @@ def cron_trigger(city_slug: str, secret: Optional[str] = Query(None)):
 
     logger.info(f"[CRON] {city}: {count} new leads.")
     return {"status": "success", "city": city, "new_leads": count}
+
+
+@app.get("/trigger-leads/{city_slug}")
+def cron_trigger_slash(city_slug: str, secret: Optional[str] = Query(None)):
+    return cron_trigger(city_slug, secret)
+
 
 
 
