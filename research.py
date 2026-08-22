@@ -255,62 +255,77 @@ def perform_research(city_name: str):
 
         logger.info(f"[Investigator] {len(all_companies)} unique companies discovered across {len(sub_areas)} {city_name} boroughs/districts.")
 
+        def process_single_company(co):
+            try:
+                name = co.get("title", "").upper()
+                company_number = co.get("company_number", "")
+                name_lower = name.lower()
 
-        for co in all_companies:
-            name = co.get("title", "").upper()
-            company_number = co.get("company_number", "")
-            name_lower = name.lower()
+                # GOLDEN RULE: Active Limited Companies only
+                if not any(t in name for t in ["LTD", "LIMITED"]):
+                    return None
+                if co.get("company_status") != "active":
+                    return None
 
-            # GOLDEN RULE: Active Limited Companies only
-            if not any(t in name for t in ["LTD", "LIMITED"]):
-                continue
-            if co.get("company_status") != "active":
-                continue
+                # NAME FILTER 1: Must contain a tree-surgery-related word
+                if not any(w in name_lower for w in REQUIRED_NAME_WORDS):
+                    return None
 
-            # NAME FILTER 1: Must contain a tree-surgery-related word
-            if not any(w in name_lower for w in REQUIRED_NAME_WORDS):
-                continue
+                # NAME FILTER 2: Must not contain an excluded/unrelated industry word
+                if any(w in name_lower for w in EXCLUDED_NAME_WORDS):
+                    return None
 
-            # NAME FILTER 2: Must not contain an excluded/unrelated industry word
-            if any(w in name_lower for w in EXCLUDED_NAME_WORDS):
-                continue
+                # Address & City from Companies House
+                addr = co.get("address_snippet") or ""
+                assigned_city = resolve_uk_city(addr, name, default_city=city_name)
 
-            # Address from Companies House
-            addr = co.get("address_snippet") or ""
-            assigned_city = resolve_uk_city(addr, name, default_city=city_name)
+                # Pillar 2: Director from Companies House Officers
+                md_name = get_director_from_ch(company_number)
 
-            # Pillar 2: Director from Companies House Officers
-            md_name = get_director_from_ch(company_number)
+                # Pillar 3: Google reputation rating, phone, and website
+                rating, phone, website = get_google_places_info(name, assigned_city)
 
-            # Pillar 3: Google reputation rating, phone, and website
-            rating, phone, website = get_google_places_info(name, assigned_city)
+                # Scrape email from website if found
+                email = scrape_email_from_website(website) if website else None
 
-            # Scrape email from website if found
-            email = scrape_email_from_website(website) if website else None
+                # Save immediately with its own connection for thread-safety
+                co_conn = database.get_db_conn()
+                co_cur = co_conn.cursor()
+                co_cur.execute("""
+                    INSERT INTO potential_partners (
+                        company_name, company_number, address, target_city,
+                        md_name, phone_number, google_rating, website, email, status
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'enriched')
+                    ON CONFLICT (company_number)
+                    DO UPDATE SET
+                        address = COALESCE(EXCLUDED.address, potential_partners.address),
+                        target_city = EXCLUDED.target_city,
+                        md_name = COALESCE(EXCLUDED.md_name, potential_partners.md_name),
+                        phone_number = COALESCE(EXCLUDED.phone_number, potential_partners.phone_number),
+                        google_rating = COALESCE(EXCLUDED.google_rating, potential_partners.google_rating),
+                        website = COALESCE(EXCLUDED.website, potential_partners.website),
+                        email = COALESCE(EXCLUDED.email, potential_partners.email);
+                """, (name, company_number, addr, assigned_city, md_name, phone, rating, website, email))
+                co_conn.commit()
+                co_cur.close()
+                co_conn.close()
 
-            cur.execute("""
-                INSERT INTO potential_partners (
-                    company_name, company_number, address, target_city,
-                    md_name, phone_number, google_rating, website, email, status
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'enriched')
-                ON CONFLICT (company_number)
-                DO UPDATE SET
-                    address = COALESCE(EXCLUDED.address, potential_partners.address),
-                    target_city = EXCLUDED.target_city,
-                    md_name = COALESCE(EXCLUDED.md_name, potential_partners.md_name),
-                    phone_number = COALESCE(EXCLUDED.phone_number, potential_partners.phone_number),
-                    google_rating = COALESCE(EXCLUDED.google_rating, potential_partners.google_rating),
-                    website = COALESCE(EXCLUDED.website, potential_partners.website),
-                    email = COALESCE(EXCLUDED.email, potential_partners.email);
-            """, (name, company_number, addr, assigned_city, md_name, phone, rating, website, email))
-            conn.commit()
+                logger.info(f"[Investigator] {name} ({assigned_city}) → Director: {md_name or 'N/A'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'} | ⭐ {rating or 'N/A'}")
+                return name
+            except Exception as pe:
+                logger.error(f"[Investigator] Error processing {co.get('title')}: {pe}")
+                return None
 
-            logger.info(f"[Investigator] {name} ({assigned_city}) → Director: {md_name or 'N/A'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'} | ⭐ {rating or 'N/A'}")
+        # Execute concurrently with 8 parallel threads for 8x speed
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            executor.map(process_single_company, all_companies)
 
         cur.close()
         conn.close()
         logger.info(f"[Investigator] Research complete for {city_name}.")
+
 
 
     except Exception as e:
