@@ -306,6 +306,8 @@ def enrich_existing_partners():
         cur.close()
         conn.close()
         logger.info("[Enrichment] All partners processed.")
+    except Exception as e:
+        logger.error(f"[Enrichment] Fatal error: {e}")
 
 
 def clean_partner_database():
