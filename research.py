@@ -272,14 +272,14 @@ def perform_research(city_name: str):
                     website = COALESCE(EXCLUDED.website, potential_partners.website),
                     email = COALESCE(EXCLUDED.email, potential_partners.email);
             """, (name, company_number, addr, assigned_city, md_name, phone, rating, website, email))
+            conn.commit()
 
             logger.info(f"[Investigator] {name} ({assigned_city}) → Director: {md_name or 'N/A'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'} | ⭐ {rating or 'N/A'}")
 
-
-        conn.commit()
         cur.close()
         conn.close()
         logger.info(f"[Investigator] Research complete for {city_name}.")
+
 
     except Exception as e:
         logger.error(f"[Investigator] Fatal error in perform_research: {e}")
