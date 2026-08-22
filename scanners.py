@@ -15,43 +15,53 @@ LARGE_KEYWORDS = [
     "tpo", "tree preservation order", "conservation area", "woodland",
     "development", "several trees", "multiple trees", "commercial",
     "site clearance", "site works", "dangerous tree", "estate",
-    "demolition", "contaminated", "application to carry out works"
+    "demolition", "contaminated", "application to carry out works",
+    "section 211", "s211", "bs5837", "bs 5837", "arboricultural impact",
+    "woodland clearance", "group of trees", "woodland management"
 ]
 MEDIUM_KEYWORDS = [
     "crown reduction", "crown lift", "crown thin", "crown raising", "crown clean",
-    "fell", "felling", "tree felling",
-    "removal of tree", "remove tree", "tree removal",
-    "pollarding", "pollard",
-    "overhanging", "storm damage",
-    "deadwood", "works to trees", "work to trees",
-    "urgent", "diseased tree"
+    "crown thinning", "crown lifting", "crown cleaning", "lateral branches",
+    "fell", "felling", "tree felling", "felling of",
+    "removal of tree", "remove tree", "tree removal", "sectional dismantle", "dismantle",
+    "pollarding", "pollard", "re-pollard",
+    "overhanging", "storm damage", "hanging branch", "decayed tree",
+    "deadwood", "dead wood", "dead branches", "works to trees", "work to trees",
+    "urgent", "diseased tree", "ash dieback", "coppice", "coppicing", "monolith"
 ]
 SMALL_KEYWORDS = [
-    "tree pruning", "tree trimming", "tree maintenance",
+    "tree pruning", "tree trimming", "tree maintenance", "pruning of",
     "hedge trimming", "hedge cutting", "hedge removal", "hedge reduction",
-    "tree inspection", "tree survey", "tree assessment",
-    "minor works to tree", "lopping"
+    "tree inspection", "tree survey", "tree assessment", "tree report",
+    "minor works to tree", "lopping", "sever ivy", "root protection", "root severance"
 ]
 
 # Compound phrases used to decide if a planning application is tree-related at all.
-# Uses compound terms to eliminate false positives:
-# "surgery" alone → matches breast/dental surgery
-# "tree" alone → matches fruit tree nursery, street, streetwise
-# "crown" alone → matches Crown Hotel, Crown Court
+# Eliminates false positives (medical/dental surgery, street names, hotel crowns)
 TREE_GOLD = [
-    "tree surgery", "tree surgeon", "tree work", "tree works",
-    "tree felling", "tree removal", "tree pruning", "tree trimming",
-    "tree preservation", "tree protection", "tree survey", "tree assessment",
-    "works to tree", "work to tree",
-    "arboricultural", "arborist", "arbor",
-    "tpo",
-    "felling",
-    "stump",
-    "pollard",
-    "crown reduction", "crown lift", "crown thin", "crown raising",
-    "woodland management", "woodland clearance",
-    "hedge trimming", "hedge cutting", "hedge removal",
+    # Core trade terms
+    "tree surgery", "tree surgeon", "tree work", "tree works", "works to tree", "work to tree",
+    "tree felling", "tree removal", "tree pruning", "tree trimming", "tree maintenance",
+    "tree preservation", "tree protection", "tree survey", "tree assessment", "tree report",
+    "arboricultural", "arborist", "arboriculture", "arbor",
+    "tpo", "tree preservation order", "protected tree", "mature tree", "specimen tree",
+    "section 211", "s211", "notice of intent",
+    # Specific arboricultural operations
+    "felling", "fell ", "fell to ground", "fell 1", "fell 2", "fell 3", "sectional dismantle", "dismantle",
+    "stump grinding", "stump removal", "stump",
+    "pollard", "pollarding", "re-pollard",
+    "crown reduction", "crown lift", "crown thin", "crown raising", "crown clean",
+    "crown thinning", "crown lifting", "crown cleaning", "lateral branch", "lateral branches",
+    "deadwood", "dead wood", "dead branches", "ash dieback", "diseased tree", "decayed tree",
+    "woodland management", "woodland clearance", "coppice", "coppicing", "monolith",
+    "hedge trimming", "hedge cutting", "hedge removal", "hedge reduction",
+    "bs5837", "bs 5837", "root protection area", "root severance",
+    # Specific species with tree/work indicators
+    "oak tree", "ash tree", "sycamore tree", "beech tree", "pine tree", "willow tree",
+    "birch tree", "conifer tree", "cedar tree", "cypress tree", "poplar tree", "yew tree",
+    "lime tree", "horse chestnut", "eucalyptus"
 ]
+
 
 
 def score_lead(summary: str) -> tuple:
