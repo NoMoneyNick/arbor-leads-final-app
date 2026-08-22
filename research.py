@@ -180,21 +180,38 @@ def perform_research(city_name: str):
         conn = database.get_db_conn()
         cur = conn.cursor()
 
-        res = requests.get(
-            "https://api.company-information.service.gov.uk/search/companies",
-            params={"q": f"tree surgery {city_name}", "items_per_page": 20},
-            headers=_ch_headers(),
-            timeout=15
-        )
+        search_queries = [
+            f"tree surgery {city_name}",
+            f"tree surgeons {city_name}",
+            f"arboriculture {city_name}",
+            f"tree care {city_name}",
+            f"arborists {city_name}"
+        ]
 
-        if res.status_code != 200:
-            logger.error(f"[Investigator] CH search failed: {res.status_code}")
-            return
+        seen_company_numbers = set()
+        all_companies = []
 
-        items = res.json().get("items", [])
-        logger.info(f"[Investigator] {len(items)} companies found for {city_name}.")
+        for q in search_queries:
+            try:
+                res = requests.get(
+                    "https://api.company-information.service.gov.uk/search/companies",
+                    params={"q": q, "items_per_page": 100},
+                    headers=_ch_headers(),
+                    timeout=15
+                )
+                if res.status_code == 200:
+                    items = res.json().get("items", [])
+                    for item in items:
+                        num = item.get("company_number")
+                        if num and num not in seen_company_numbers:
+                            seen_company_numbers.add(num)
+                            all_companies.append(item)
+            except Exception as qe:
+                logger.error(f"[Investigator] Query '{q}' failed: {qe}")
 
-        for co in items:
+        logger.info(f"[Investigator] {len(all_companies)} unique companies discovered for {city_name}.")
+
+        for co in all_companies:
             name = co.get("title", "").upper()
             company_number = co.get("company_number", "")
             name_lower = name.lower()
@@ -207,12 +224,10 @@ def perform_research(city_name: str):
 
             # NAME FILTER 1: Must contain a tree-surgery-related word
             if not any(w in name_lower for w in REQUIRED_NAME_WORDS):
-                logger.info(f"[Investigator] Skipping {name} — no tree-surgery keyword in name.")
                 continue
 
             # NAME FILTER 2: Must not contain an excluded/unrelated industry word
             if any(w in name_lower for w in EXCLUDED_NAME_WORDS):
-                logger.info(f"[Investigator] Skipping {name} — excluded industry keyword found.")
                 continue
 
             # Pillar 2: Director from Companies House Officers
@@ -248,6 +263,15 @@ def perform_research(city_name: str):
 
     except Exception as e:
         logger.error(f"[Investigator] Fatal error in perform_research: {e}")
+
+
+def research_all_cities():
+    """Runs deep partner research across all 6 target UK cities."""
+    cities = ["London", "Leeds", "Birmingham", "Manchester", "Bristol", "Sheffield"]
+    for city in cities:
+        logger.info(f"[Investigator] Starting batch discovery for {city}...")
+        perform_research(city)
+
 
 
 

@@ -109,6 +109,9 @@ def dashboard(user: str = Depends(verify_dashboard_auth)):
         <hr>
         <h3>🔄 Database & Enrichment Tools</h3>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+            <a href='/research-all' style="background:#2e7d32; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
+                🚀 Discover All Cities (Find Partners)
+            </a>
             <a href='/clean-partners' style="background:#b71c1c; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
                 🧹 Clean Database (Purge Medical & Unrelated)
             </a>
@@ -120,7 +123,7 @@ def dashboard(user: str = Depends(verify_dashboard_auth)):
             </a>
         </div>
         <p style="color:#666; font-size:12px;">
-            Click <b>Clean Database</b> first to delete any old medical/cosmetic records, then <b>Enrich All</b> to populate phones and contact emails.
+            Click <b>Discover All Cities</b> to search Companies House across all 6 cities. Click <b>Clean Database</b> to purge any invalid records, and <b>Enrich All</b> to populate contact details.
         </p>
         <hr>
         <h4>Latest Leads</h4>
@@ -365,6 +368,18 @@ def research_city(city_slug: str, bg: BackgroundTasks,
         raise HTTPException(status_code=404, detail=f"City '{city_slug}' not configured.")
     bg.add_task(research.perform_research, city)
     return {"status": "started", "city": city}
+
+
+@app.get("/research-all", response_class=HTMLResponse)
+def research_all(bg: BackgroundTasks, user: str = Depends(verify_dashboard_auth)):
+    bg.add_task(research.research_all_cities)
+    return """<html><body style="font-family:sans-serif; padding:40px;">
+        <h3>🚀 Nationwide Discovery Started</h3>
+        <p>Investigating Companies House across London, Leeds, Birmingham, Manchester, Bristol, and Sheffield in the background.</p>
+        <p>New verified LTD tree surgery contractors will populate in your database over the next 2-3 minutes.</p>
+        <a href="/">← Back to Dashboard</a>
+    </body></html>"""
+
 
 
 @app.get("/enrich-all", response_class=HTMLResponse)
