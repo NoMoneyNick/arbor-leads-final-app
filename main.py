@@ -20,6 +20,8 @@ database.init_db()
 
 T_SEC      = os.getenv("TRIGGER_SECRET", "").strip()
 basic_auth = HTTPBasic()
+optional_auth = HTTPBasic(auto_error=False)
+
 
 # All 9 English Regions with nationwide council & partner coverage
 ALL_CITIES = [
@@ -1180,7 +1182,7 @@ def export_directors(user: str = Depends(verify_dashboard_auth)):
 
 @app.get("/export-directors.csv")
 def export_directors_csv(secret: Optional[str] = Query(None),
-                         credentials: Optional[HTTPBasicCredentials] = Depends(security)):
+                         credentials: Optional[HTTPBasicCredentials] = Depends(optional_auth)):
     """
     Returns CSV file of all enriched directors ready for Google Sheets or Excel.
     Accepts either dashboard Basic Auth or ?secret= query parameter.
@@ -1193,6 +1195,7 @@ def export_directors_csv(secret: Optional[str] = Query(None),
         DASH_PASS = os.getenv("DASHBOARD_PASS", "").strip()
         if DASH_PASS and secrets.compare_digest(credentials.username.encode(), DASH_USER.encode()) and secrets.compare_digest(credentials.password.encode(), DASH_PASS.encode()):
             authorized = True
+
 
     if not authorized:
         raise HTTPException(status_code=401, detail="Unauthorized.",
