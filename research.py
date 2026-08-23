@@ -1018,7 +1018,7 @@ def sweep_100_random_contractors(target_count: int = 50) -> dict:
                     all_queries.append((f"{kw} {town}", region))
 
         random.shuffle(all_queries)
-        selected_queries = all_queries[:16]
+        selected_queries = all_queries[:60]
 
         def fetch_candidates(q_task):
             query, region = q_task
@@ -1038,7 +1038,7 @@ def sweep_100_random_contractors(target_count: int = 50) -> dict:
                 found.append((co, cname, cnum, addr, assigned))
             return found
 
-        with ThreadPoolExecutor(max_workers=8) as search_executor:
+        with ThreadPoolExecutor(max_workers=12) as search_executor:
             for found_list in search_executor.map(fetch_candidates, selected_queries):
                 for item in found_list:
                     cnum = item[2]
@@ -1052,24 +1052,22 @@ def sweep_100_random_contractors(target_count: int = 50) -> dict:
 
         logger.info(f"[Fast Sweep] Found {len(candidates)} brand new candidates in {time.time() - t_start:.2f}s.")
 
-
-
-        # Enrich in parallel with 15 workers (no per-thread DB overhead)
+        # Enrich in parallel with 20 workers (no per-thread DB overhead)
         def enrich_item(item):
             co, name, company_number, addr, assigned_region = item
             md_name = get_director_from_ch(company_number)
             rating, phone, website = get_google_places_info(name, f"{addr} {assigned_region}")
             email = None
             return (
-
                 name, company_number, co.get("company_status"),
                 addr, assigned_region,
                 co.get("sic_codes", []), md_name, phone, rating,
                 website, email
             )
 
-        with ThreadPoolExecutor(max_workers=15) as enrich_executor:
+        with ThreadPoolExecutor(max_workers=20) as enrich_executor:
             enriched_rows = list(enrich_executor.map(enrich_item, candidates))
+
 
         # Single batch insert into PostgreSQL
         from psycopg2.extras import execute_batch
