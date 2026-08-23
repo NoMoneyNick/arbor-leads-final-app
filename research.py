@@ -988,15 +988,24 @@ def sweep_100_random_contractors(target_count: int = 50) -> dict:
         return {"error": "COMPANIES_HOUSE_KEY missing"}
 
     SWEEP_TARGETS = [
-        ("South West", ["Truro", "Exeter", "Plymouth", "Torquay", "Taunton", "Bristol", "Bath", "Cheltenham"]),
-        ("Scotland", ["Edinburgh", "Glasgow", "Aberdeen", "Dundee", "Inverness", "Stirling", "Perth"]),
-        ("Wales", ["Cardiff", "Swansea", "Newport", "Wrexham", "Bridgend", "Bangor"]),
-        ("East Midlands", ["Nottingham", "Derby", "Leicester", "Northampton", "Lincoln"]),
-        ("Yorkshire", ["Leeds", "Sheffield", "York", "Harrogate", "Bradford", "Wakefield"]),
-        ("North East", ["Newcastle", "Sunderland", "Durham", "Carlisle", "Middlesbrough"]),
-        ("West Midlands", ["Birmingham", "Coventry", "Solihull", "Wolverhampton", "Warwick"]),
-        ("East of England", ["Norwich", "Ipswich", "Cambridge", "Colchester", "Chelmsford"])
+        ("London & Surrey", ["London", "Surrey", "Richmond", "Bromley", "Croydon", "Barnet", "Enfield", "Wandsworth", "Kingston", "Harrow"]),
+        ("Home Counties South", ["Guildford", "Woking", "Reigate", "Sevenoaks", "Tunbridge Wells", "Maidstone", "Crawley", "Horsham"]),
+        ("Home Counties North", ["Reading", "Slough", "Windsor", "High Wycombe", "St Albans", "Watford", "Chelmsford", "Colchester"]),
+        ("South Coast", ["Southampton", "Portsmouth", "Winchester", "Basingstoke", "Bournemouth", "Brighton", "Chichester"]),
+        ("West Country", ["Bristol", "Bath", "Gloucester", "Cheltenham", "Swindon", "Taunton", "Exeter", "Plymouth", "Truro", "Dorset", "Somerset", "Cornwall"]),
+        ("West Midlands", ["Birmingham", "Coventry", "Wolverhampton", "Solihull", "Dudley", "Walsall", "Warwick", "Stoke-on-Trent", "Shropshire", "Worcester"]),
+        ("East Midlands", ["Nottingham", "Leicester", "Derby", "Northampton", "Lincoln", "Mansfield", "Chesterfield"]),
+        ("East of England", ["Norwich", "Ipswich", "Cambridge", "Colchester", "Chelmsford", "Peterborough", "Norfolk", "Suffolk"]),
+        ("Manchester & Cheshire", ["Manchester", "Stockport", "Salford", "Bolton", "Altrincham", "Wilmslow", "Chester", "Warrington", "Knutsford", "Macclesfield"]),
+        ("Yorkshire", ["Leeds", "Sheffield", "Bradford", "York", "Harrogate", "Wakefield", "Huddersfield", "Hull", "Doncaster"]),
+        ("North East & Cumbria", ["Newcastle", "Sunderland", "Durham", "Middlesbrough", "Darlington", "Carlisle", "Penrith", "Kendal", "Northumberland"]),
+        ("Lancashire & Merseyside", ["Liverpool", "Preston", "Blackpool", "Lancaster", "Blackburn", "Southport", "Wigan"]),
+        ("Scotland Central Belt", ["Edinburgh", "Glasgow", "Stirling", "Falkirk", "Livingston", "Paisley", "Hamilton", "Dunfermline"]),
+        ("Scotland Highlands & Coast", ["Aberdeen", "Dundee", "Inverness", "Perth", "St Andrews", "Elgin", "Dumfries", "Ayr", "Kilmarnock", "Galashiels"]),
+        ("South & Mid Wales", ["Cardiff", "Swansea", "Newport", "Bridgend", "Barry", "Neath", "Pontypridd", "Cwmbran", "Carmarthen", "Aberystwyth"]),
+        ("North Wales", ["Wrexham", "Bangor", "Llandudno", "Rhyl", "Flintshire", "Conwy", "Gwynedd", "Anglesey"])
     ]
+
 
     KEYWORDS = ["tree surgery", "tree surgeon", "arboricultural", "tree services", "tree care", "forestry"]
 
