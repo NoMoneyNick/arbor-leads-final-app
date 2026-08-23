@@ -692,36 +692,6 @@ def public_homepage():
                     attribution: '© OpenStreetMap contributors'
                 }}).addTo(map);
 
-                // Translucent Pine Green Overlays for Non-English Territories
-                const excludedStyle = {{
-                    color: '#044332',
-                    fillColor: '#044332',
-                    fillOpacity: 0.35,
-                    weight: 1.5,
-                    dashArray: '3, 4',
-                    interactive: false
-                }};
-
-                // Scotland Overlay
-                L.polygon([
-                    [55.8, -1.9], [56.3, -1.9], [57.7, -1.8], [58.8, -3.1], [58.8, -5.4],
-                    [58.2, -5.6], [57.5, -6.1], [56.3, -6.5], [55.4, -5.3], [54.8, -5.1],
-                    [54.8, -3.4], [55.1, -3.1], [55.8, -2.0]
-                ], excludedStyle).addTo(map);
-
-                // Wales Overlay
-                L.polygon([
-                    [53.4, -3.0], [53.45, -4.5], [52.8, -4.8], [52.0, -5.4], [51.6, -5.2],
-                    [51.3, -3.2], [51.55, -2.65], [51.9, -2.7], [52.4, -3.0], [53.0, -2.9],
-                    [53.3, -3.0]
-                ], excludedStyle).addTo(map);
-
-                // Ireland & Northern Ireland Overlay
-                L.polygon([
-                    [55.5, -5.4], [55.5, -10.6], [51.4, -10.6], [51.4, -5.8], [53.0, -5.8],
-                    [54.0, -5.4], [55.5, -5.4]
-                ], excludedStyle).addTo(map);
-
                 // CLICK ANYWHERE ON MAP TO INSTANTLY MOVE PIN (NO FORCED ZOOM)
                 map.on('click', function(e) {{
                     currentLat = e.latlng.lat;
@@ -736,6 +706,7 @@ def public_homepage():
                 // Pan smoothly without changing user's zoom level
                 map.panTo([lat, lng]);
             }}
+
 
             if (depotMarker) {{
                 depotMarker.setLatLng([lat, lng]);
