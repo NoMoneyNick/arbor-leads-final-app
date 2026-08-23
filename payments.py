@@ -1,5 +1,6 @@
 import os
 import logging
+from typing import Optional, Dict, Any
 import stripe
 from dotenv import load_dotenv
 
@@ -43,7 +44,8 @@ PLANS = {
 }
 
 
-def create_checkout_session(plan_key: str) -> str | None:
+def create_checkout_session(plan_key: str) -> Optional[str]:
+
     """
     Creates a Stripe Checkout session for the given plan.
     Returns the checkout URL to redirect the customer to.

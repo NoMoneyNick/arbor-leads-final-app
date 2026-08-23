@@ -2,14 +2,18 @@ import os
 import requests
 import time
 import logging
+from typing import Optional, List, Tuple, Dict, Any
 import database
 import notifications
 
 logger = logging.getLogger("vector-data-labs")
 
 GLA_API_KEY = os.getenv("GLA_API_KEY", "").strip()
+UK_PLANNING_API_KEY = os.getenv("UK_PLANNING_API_KEY", "").strip()
 
 # ── Lead Scoring ──────────────────────────────────────────────────────────────
+
+
 
 LARGE_KEYWORDS = [
     "tpo", "tree preservation order", "conservation area", "woodland",
@@ -82,10 +86,11 @@ def _is_tree_related(text: str) -> bool:
     return any(word in text.lower() for word in TREE_GOLD)
 
 
-def _insert_lead(cur, reference: str, address: str, summary: str, source: str) -> dict | None:
+def _insert_lead(cur, reference: str, address: str, summary: str, source: str) -> Optional[dict]:
     """
     Inserts a lead into the DB. Returns the lead dict if new, None if duplicate.
     """
+
     lead_score, lead_price = score_lead(summary)
     cur.execute(
         """

@@ -7,7 +7,9 @@ import re
 import html
 import urllib.parse
 import database
+from typing import Optional, List, Dict, Tuple, Set, Any
 from dotenv import load_dotenv
+
 
 
 load_dotenv()

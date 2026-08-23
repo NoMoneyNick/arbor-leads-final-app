@@ -2,7 +2,9 @@ import os
 import requests
 import urllib.parse
 import logging
+from typing import Optional, Dict, Any, Tuple, List
 from dotenv import load_dotenv
+
 
 load_dotenv()
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()

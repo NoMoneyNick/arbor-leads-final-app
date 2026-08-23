@@ -1,7 +1,9 @@
 import os
 import psycopg2
 import logging
+from typing import Optional, Dict, Any, Tuple, List
 from dotenv import load_dotenv
+
 
 load_dotenv()
 SURL = os.getenv("SUPABASE_DB_URL", "").strip()
@@ -11,7 +13,8 @@ logger = logging.getLogger("vector-data-labs")
 def get_db_conn():
     """Opens a connection to the Supabase database with automated incident tripwire."""
     try:
-        return psycopg2.connect(SURL)
+        return psycopg2.connect(SURL, connect_timeout=10)
+
     except Exception as e:
         logger.error(f"[DB] Connection failed: {e}")
         try:
