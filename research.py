@@ -294,8 +294,23 @@ CITY_SUB_AREAS = {
         "Dorchester", "Weymouth", "Sherborne", "Wimborne",
         "Somerset", "Gloucestershire", "Wiltshire", "Devon", "Cornwall", "Dorset"
     ],
+    "Cornwall": [
+        "Truro", "Falmouth", "Penzance", "St Ives", "Newquay", "St Austell", "Bodmin",
+        "Camborne", "Redruth", "Helston", "Bude", "Saltash", "Liskeard", "Launceston",
+        "Wadebridge", "Padstow", "Hayle", "Torpoint", "Cornwall"
+    ],
+    "Devon": [
+        "Exeter", "Plymouth", "Torquay", "Paignton", "Exmouth", "Barnstaple", "Tiverton",
+        "Totnes", "Dartmouth", "Newton Abbot", "Bideford", "Ilfracombe", "Tavistock",
+        "Honiton", "Sidmouth", "Teignmouth", "Brixham", "Dawlish", "Devon"
+    ],
+    "Cumbria": [
+        "Carlisle", "Kendal", "Barrow-in-Furness", "Workington", "Whitehaven", "Penrith",
+        "Keswick", "Windermere", "Ambleside", "Ulverston", "Cockermouth", "Cumbria", "Lake District"
+    ],
     "Sheffield": [
         "Sheffield", "South Yorkshire", "Rotherham", "Barnsley", "Doncaster", "Chesterfield",
+
         "Dronfield", "Matlock", "Bakewell", "Buxton", "Worksop", "Retford", "Mansfield",
         "Peak District", "Derbyshire"
     ],

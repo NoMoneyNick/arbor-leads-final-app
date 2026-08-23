@@ -1327,6 +1327,10 @@ def _resolve_city_param(slug: str) -> Optional[str]:
         "sheffield": "Sheffield",
         "newcastle": "North East",
         "cambridge": "East of England",
+        "cornwall": "Cornwall",
+        "devon": "Devon",
+        "cumbria": "Cumbria",
+        "norfolk": "Norfolk",
         "scotland": "Scotland",
         "edinburgh": "Edinburgh",
         "glasgow": "Glasgow",
@@ -1337,6 +1341,7 @@ def _resolve_city_param(slug: str) -> Optional[str]:
         "northwales": "North Wales",
     }
     return city_map.get(clean) or city_map.get(compact)
+
 
 
 

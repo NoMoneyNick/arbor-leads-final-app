@@ -272,9 +272,11 @@ CITY_POSTCODE_PREFIX = {
     "London":          ["SW", "SE", "NW", "N", "E", "EC", "WC", "CR", "BR", "EN", "HA", "UB", "KT", "TW", "DA", "RM", "IG", "SM", "RH", "TN", "GU", "CM", "SS", "SL", "HP", "AL", "SG", "WD", "ME"],
     # 2. South East & Home Counties
     "South East":      ["RH", "TN", "GU", "ME", "CT", "BN", "SO", "PO", "OX", "RG", "MK", "HP", "AL", "SG", "WD", "SL"],
-    # 3. South West & West Country
+    # 3. South West & West Country (Devon, Cornwall, Somerset, Dorset, Wiltshire, Gloucestershire)
     "South West":      ["BS", "BA", "GL", "SN", "TA", "DT", "SP", "EX", "TQ", "PL", "TR", "BH"],
     "Bristol":         ["BS", "BA", "GL", "SN", "TA", "DT", "SP"],
+    "Cornwall":        ["TR", "PL"],
+    "Devon":           ["EX", "TQ", "PL"],
     # 4. West Midlands
     "West Midlands":   ["B", "WS", "WV", "DY", "CV", "WR", "TF", "ST", "HR", "SY"],
     "Birmingham":      ["B", "WS", "WV", "DY", "CV", "WR", "TF", "ST", "HR", "SY"],
@@ -284,26 +286,29 @@ CITY_POSTCODE_PREFIX = {
     # 6. Yorkshire & The Humber
     "Yorkshire":       ["LS", "BD", "WF", "HX", "HD", "YO", "HG", "HU", "DL", "TS", "DN"],
     "Leeds":           ["LS", "BD", "WF", "HX", "HD", "YO", "HG", "HU", "DL", "TS"],
-    # 7. North West
+    # 7. North West & Cumbria Lake District
     "North West":      ["M", "SK", "WA", "WN", "BL", "OL", "CW", "L", "PR", "BB", "FY", "CH", "LA", "CA"],
     "Manchester":      ["M", "SK", "WA", "WN", "BL", "OL", "CW", "L", "PR", "BB", "FY", "CH"],
+    "Cumbria":         ["CA", "LA"],
     # 8. North East
     "North East":      ["NE", "SR", "DH", "TS", "DL"],
     "Newcastle":       ["NE", "SR", "DH", "TS", "DL"],
-    # 9. East of England
+    # 9. East of England (East Anglia, Norfolk, Suffolk, Essex, Beds, Herts, Cambs)
     "East of England": ["CM", "SS", "CO", "CB", "PE", "NR", "IP", "LU", "SG"],
     "Cambridge":       ["CM", "SS", "CO", "CB", "PE", "NR", "IP", "LU", "SG"],
-    # 10. Scotland (All 32 Scottish Councils)
+    "Norfolk":         ["NR", "IP", "PE"],
+    # 10. Scotland (All 32 Scottish Councils / Central Belt, Borders, Highlands & Islands)
     "Scotland":        ["EH", "G", "AB", "DD", "IV", "KW", "PA", "PH", "FK", "KY", "ML", "TD", "DG", "ZE", "HS"],
     "Edinburgh":       ["EH", "KY", "FK", "TD"],
     "Glasgow":         ["G", "PA", "ML", "KA", "DG"],
     "Aberdeen":        ["AB", "DD", "IV", "PH", "KW"],
-    # 11. Wales (All 22 Welsh Councils)
+    # 11. Wales (All 22 Welsh Councils / South Wales, Mid Wales, North Wales)
     "Wales":           ["CF", "SA", "NP", "LL", "LD", "SY"],
     "Cardiff":         ["CF", "NP", "SA"],
     "Swansea":         ["SA", "CF", "LD"],
     "North Wales":     ["LL", "SY", "CH"]
 }
+
 
 
 
