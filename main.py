@@ -37,7 +37,9 @@ def health():
 
 
 @app.get("/api/check-postcode")
+@app.get("/check-postcode")
 def api_check_postcode(postcode: str = Query(...)):
+
     """
     Public postcode radar inspection endpoint.
     Returns live council planning notice count and estimated arboricultural contract values.
