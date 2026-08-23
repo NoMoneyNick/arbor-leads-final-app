@@ -420,9 +420,7 @@ def perform_research(city_name: str):
         seen_company_numbers = set()
         all_companies = []
 
-        # Execute search queries in parallel across 10 threads for blazing fast discovery
         from concurrent.futures import ThreadPoolExecutor
-
         def fetch_ch_search(q):
             try:
                 res = requests.get(
@@ -446,75 +444,67 @@ def perform_research(city_name: str):
                         seen_company_numbers.add(num)
                         all_companies.append(item)
 
-        logger.info(f"[Investigator] {len(all_companies)} unique companies discovered across {len(sub_areas)} {city_name} areas/queries.")
+        candidates_to_enrich = []
+        REGIONAL_ALIASES = {
+            "newcastle": "north east",
+            "north east": "north east",
+            "cambridge": "east of england",
+            "east of england": "east of england",
+            "leeds": "yorkshire",
+            "yorkshire": "yorkshire",
+            "birmingham": "west midlands",
+            "west midlands": "west midlands",
+            "manchester": "north west",
+            "north west": "north west",
+            "bristol": "south west",
+            "south west": "south west",
+            "sheffield": "east midlands",
+            "east midlands": "east midlands",
+            "london": "london",
+            "south east": "south east",
+        }
+        target_norm = REGIONAL_ALIASES.get(city_name.lower(), city_name.lower())
 
+        for co in all_companies:
+            name = co.get("title", "").upper()
+            company_number = co.get("company_number", "")
+            if not company_number:
+                continue
 
-        def process_single_company(co):
+            if not any(t in name for t in ["LTD", "LIMITED"]):
+                continue
+            if co.get("company_status") != "active":
+                continue
+
+            if company_number in already_enriched:
+                continue
+
+            name_lower = name.lower()
+            has_trade_phrase = any(w in name_lower for w in REQUIRED_PHRASES)
+            has_isolated_tree = bool(re.search(r'\btree\b', name_lower))
+            if not (has_trade_phrase or has_isolated_tree):
+                continue
+            if any(w in name_lower for w in EXCLUDED_NAME_WORDS):
+                continue
+
+            addr = co.get("address_snippet") or ""
+            assigned_city = resolve_uk_city(addr, name, default_city=city_name)
+            assigned_norm = REGIONAL_ALIASES.get(assigned_city.lower(), assigned_city.lower())
+
+            if target_norm != "uk" and target_norm != assigned_norm:
+                continue
+
+            candidates_to_enrich.append((co, name, company_number, addr, assigned_city))
+
+        logger.info(f"[Investigator] ⚡ {len(candidates_to_enrich)} brand new tree surgery LTDs to enrich for {city_name} (out of {len(all_companies)} raw search items).")
+
+        def process_single_candidate(item):
+            co, name, company_number, addr, assigned_city = item
             try:
-                name = co.get("title", "").upper()
-                company_number = co.get("company_number", "")
-                name_lower = name.lower()
-
-                # GOLDEN RULE: Active Limited Companies only
-                if not any(t in name for t in ["LTD", "LIMITED"]):
-                    return None
-                if co.get("company_status") != "active":
-                    return None
-
-                # NAME FILTER 1 & 2: Strict tree trade phrases or isolated 'tree' word boundary
-                has_trade_phrase = any(w in name_lower for w in REQUIRED_PHRASES)
-                has_isolated_tree = bool(re.search(r'\btree\b', name_lower))
-                if not (has_trade_phrase or has_isolated_tree):
-                    return None
-                if any(w in name_lower for w in EXCLUDED_NAME_WORDS):
-                    return None
-
-                # Address & Real City
-                addr = co.get("address_snippet") or ""
-                assigned_city = resolve_uk_city(addr, name, default_city=city_name)
-
-                # STRICT REGIONAL ENFORCEMENT: Ignore cross-region search bleed
-                REGIONAL_ALIASES = {
-                    "newcastle": "north east",
-                    "north east": "north east",
-                    "cambridge": "east of england",
-                    "east of england": "east of england",
-                    "leeds": "yorkshire",
-                    "yorkshire": "yorkshire",
-                    "birmingham": "west midlands",
-                    "west midlands": "west midlands",
-                    "manchester": "north west",
-                    "north west": "north west",
-                    "bristol": "south west",
-                    "south west": "south west",
-                    "sheffield": "east midlands",
-                    "east midlands": "east midlands",
-                    "london": "london",
-                    "south east": "south east",
-                }
-                target_norm = REGIONAL_ALIASES.get(city_name.lower(), city_name.lower())
-                assigned_norm = REGIONAL_ALIASES.get(assigned_city.lower(), assigned_city.lower())
-
-                if target_norm != "uk" and target_norm != assigned_norm:
-                    logger.debug(f"[Investigator] Ignored cross-region result: {name} (assigned={assigned_city}, target={city_name})")
-                    return None
-
-                # Skip expensive external calls if already fully enriched in DB
-                if company_number in already_enriched:
-                    logger.info(f"[Investigator] {name} ({assigned_city}) → Already enriched. Skipped.")
-                    return name
-
-                # Pillar 2: Director from CH Officers (fast 3s timeout)
                 md_name = get_director_from_ch(company_number)
-
-                # Pillar 3: Google reputation & phone (fast 3s timeout)
                 rating, phone, website = get_google_places_info(name, f"{addr} {assigned_city}")
-
-                # Scrape email from website (multi-page /contact /about check)
                 email = scrape_email_from_website(website) if website else None
 
-
-                # Thread-safe database save
                 co_conn = database.get_db_conn()
                 co_cur = co_conn.cursor()
                 co_cur.execute("""
@@ -540,23 +530,21 @@ def perform_research(city_name: str):
                 co_cur.close()
                 co_conn.close()
 
-                logger.info(f"[Investigator] ✅ {name} ({assigned_city}) → Director: {md_name or 'N/A'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'}")
+                logger.info(f"[Investigator] ✅ {name} ({assigned_city}) → "
+                            f"Director: {md_name or 'N/A'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'}")
                 return name
             except Exception as pe:
-                logger.error(f"[Investigator] Error processing {co.get('title')}: {pe}")
+                logger.error(f"[Investigator] Error on company {name}: {pe}")
                 return None
 
-        # Execute concurrently with 12 parallel threads for maximum speed
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=12) as executor:
-            executor.map(process_single_company, all_companies)
+        if candidates_to_enrich:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                executor.map(process_single_candidate, candidates_to_enrich)
 
         cur.close()
         conn.close()
-        logger.info(f"[Investigator] 🚀 Research complete for {city_name}!")
-
-
-
+        logger.info(f"[Investigator] 🚀 Research complete for {city_name}! Enriched {len(candidates_to_enrich)} new partners.")
 
     except Exception as e:
         logger.error(f"[Investigator] Fatal error in perform_research: {e}")
