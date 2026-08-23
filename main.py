@@ -39,51 +39,80 @@ def health():
 @app.get("/api/check-postcode")
 @app.get("/check-postcode")
 @app.get("/check-postcode/{postcode}")
-def api_check_postcode(postcode: str = "LS1", radius: int = 15):
+def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = None, lng: Optional[float] = None, radius: int = 15):
     """
     Public postcode radar inspection endpoint.
-    Returns live council planning notice count inside selected radius and connected adjacent zones.
+    Supports search by Postcode/Outcode or direct Map Click (lat/lng coordinates).
     """
-    clean_pc = postcode.upper().strip()
-    outcode = clean_pc.split()[0] if " " in clean_pc else clean_pc[:4]
-    prefix_alpha = "".join([c for c in outcode if c.isalpha()])
+    import urllib.request
+    import urllib.parse
+    import json
     
-    # Lookup exact coordinates via postcodes.io API
-    lat, lng = 53.8008, -1.5491  # Default Leeds centroid
-    district = f"{clean_pc} District"
-    try:
-        import urllib.request
-        import json
-        req = urllib.request.Request(f"https://api.postcodes.io/postcodes/{clean_pc}", headers={'User-Agent': 'ArborLeads/1.0'})
-        with urllib.request.urlopen(req, timeout=2.0) as response:
-            res_data = json.loads(response.read().decode())
-            if res_data.get("status") == 200:
-                result = res_data.get("result", {})
-                lat = result.get("latitude", lat)
-                lng = result.get("longitude", lng)
-                district = result.get("admin_district") or district
-    except Exception:
-        pass
+    target_lat, target_lng = 53.8008, -1.5491  # Default Leeds centroid
+    district = "Leeds District Authority"
+    display_pc = "LS1"
     
+    # 1. Handle Direct Map Click Coordinates
+    if lat is not None and lng is not None:
+        target_lat, target_lng = float(lat), float(lng)
+        try:
+            req = urllib.request.Request(
+                f"https://api.postcodes.io/postcodes?lat={target_lat}&lon={target_lng}",
+                headers={'User-Agent': 'ArborLeads/1.0'}
+            )
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                data = json.loads(resp.read().decode())
+                if data.get("status") == 200 and data.get("result"):
+                    first = data["result"][0]
+                    display_pc = first.get("outcode") or first.get("postcode", "Local Area")
+                    district = first.get("admin_district") or f"{display_pc} District Authority"
+        except Exception:
+            display_pc = f"{target_lat:.2f}, {target_lng:.2f}"
+            district = "Operating Territory"
+            
+    # 2. Handle Typed Postcode / Outcode (e.g. SW1, LS1, M1, BS1, or full SW1A 1AA)
+    elif postcode:
+        clean_pc = postcode.strip().upper()
+        display_pc = clean_pc
+        try:
+            # Query endpoint handles full postcodes, outcodes, and partial searches
+            encoded_query = urllib.parse.quote(clean_pc)
+            req = urllib.request.Request(
+                f"https://api.postcodes.io/postcodes?q={encoded_query}",
+                headers={'User-Agent': 'ArborLeads/1.0'}
+            )
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                data = json.loads(resp.read().decode())
+                if data.get("status") == 200 and data.get("result"):
+                    first = data["result"][0]
+                    target_lat = first.get("latitude", target_lat)
+                    target_lng = first.get("longitude", target_lng)
+                    display_pc = first.get("outcode") or clean_pc
+                    district = first.get("admin_district") or f"{display_pc} District Authority"
+        except Exception:
+            district = f"{clean_pc} District Authority"
+
+    # Query local database for lead matches
+    prefix_alpha = "".join([c for c in display_pc if c.isalpha()])[:3]
     conn = database.get_db_conn()
     cur = conn.cursor()
-    cur.execute("SELECT count(*) FROM leads WHERE address ILIKE %s OR council_source ILIKE %s", (f"%{prefix_alpha}%", f"%{prefix_alpha}%"))
+    cur.execute("SELECT count(*) FROM leads WHERE address ILIKE %s OR council_source ILIKE %s", (f"%{prefix_alpha}%", f"%{district[:6]}%"))
     direct_leads = cur.fetchone()[0]
     cur.close()
     conn.close()
 
-    # Calculate realistic radius distribution based on actual leads database
+    # Dynamic calculation based on location & radius
     selected_leads = max(int(direct_leads * (radius / 15.0)), int(radius * 0.4) + 2)
-    connected_leads = max(int(selected_leads * 1.8), 8)
+    connected_leads = max(int(selected_leads * 1.8), 7)
     
     min_val = selected_leads * 450
-    max_val = selected_leads * 1350
+    max_val = selected_leads * 1450
     
     return {
-        "postcode": clean_pc,
+        "postcode": display_pc,
         "authority": district,
-        "lat": lat,
-        "lng": lng,
+        "lat": target_lat,
+        "lng": target_lng,
         "radius_miles": radius,
         "selected_area_leads": selected_leads,
         "connected_area_leads": connected_leads,
@@ -92,6 +121,7 @@ def api_check_postcode(postcode: str = "LS1", radius: int = 15):
         "est_max_val": f"{max_val:,}",
         "exclusivity_status": "Available (Unclaimed)"
     }
+
 
 
 
@@ -510,20 +540,30 @@ def public_homepage():
 
         <script>
         let currentRadius = 15;
+        let currentLat = 53.8008;
+        let currentLng = -1.5491;
         let map = null;
         let depotMarker = null;
         let radiusCircle = null;
         let leadMarkers = [];
 
-        function initMap(lat, lng) {{
-            if (map) {{
-                map.setView([lat, lng], 11);
-            }} else {{
+        function initMap(lat, lng, label) {{
+            currentLat = lat;
+            currentLng = lng;
+
+            if (!map) {{
                 map = L.map('radarMap', {{ scrollWheelZoom: false }}).setView([lat, lng], 11);
                 L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
                     maxZoom: 18,
                     attribution: '© OpenStreetMap contributors'
                 }}).addTo(map);
+
+                // CLICK ANYWHERE ON MAP TO REPOSITION PIN & RECALCULATE LEADS
+                map.on('click', function(e) {{
+                    fetchTerritoryData(null, e.latlng.lat, e.latlng.lng);
+                }});
+            }} else {{
+                map.panTo([lat, lng]);
             }}
 
             if (depotMarker) map.removeLayer(depotMarker);
@@ -531,14 +571,9 @@ def public_homepage():
             leadMarkers.forEach(m => map.removeLayer(m));
             leadMarkers = [];
 
-            // Add Draggable Depot Pin
-            depotMarker = L.marker([lat, lng], {{ draggable: true }}).addTo(map)
-                .bindPopup("<b>📍 Your Depot Location</b><br>Drag pin to reposition territory radar.").openPopup();
-
-            depotMarker.on('dragend', function(e) {{
-                const pos = e.target.getLatLng();
-                updateCircle(pos.lat, pos.lng);
-            }});
+            // Add Depot Pin
+            depotMarker = L.marker([lat, lng]).addTo(map)
+                .bindPopup(`<b>📍 ${{label || 'Depot Location'}}</b><br>Click anywhere on the map to move pin.`).openPopup();
 
             updateCircle(lat, lng);
         }}
@@ -554,7 +589,7 @@ def public_homepage():
                 weight: 2
             }}).addTo(map);
 
-            // Add sample visual lead pings around territory
+            // Add visual sample lead markers inside radius
             leadMarkers.forEach(m => map.removeLayer(m));
             leadMarkers = [];
 
@@ -570,7 +605,7 @@ def public_homepage():
                     color: '#ffffff',
                     weight: 2,
                     fillOpacity: 0.9
-                }}).addTo(map).bindPopup(`<b>Statutory Protected Tree Notice #${{idx + 1}}</b><br>Active Local Authority Application`);
+                }}).addTo(map).bindPopup(`<b>Protected Tree Application #${{idx + 1}}</b><br>Active Local Authority Notice`);
                 leadMarkers.push(m);
             }});
         }}
@@ -591,20 +626,31 @@ def public_homepage():
                     }}
                 }}
             }});
-            scanTerritory();
+            fetchTerritoryData(null, currentLat, currentLng);
         }}
 
-        async function scanTerritory() {{
-            const input = document.getElementById('postcodeInput');
+        async function fetchTerritoryData(pc, lat, lng) {{
             const btn = document.getElementById('scanBtn');
-            const pc = input.value.trim() || 'LS1';
-
+            const input = document.getElementById('postcodeInput');
             btn.innerText = 'Scanning...';
             btn.disabled = true;
 
+            let url = `/api/check-postcode?radius=${{currentRadius}}`;
+            if (lat !== undefined && lng !== undefined && lat !== null && lng !== null) {{
+                url += `&lat=${{lat}}&lng=${{lng}}`;
+            }} else if (pc) {{
+                url += `&postcode=${{encodeURIComponent(pc)}}`;
+            }} else if (input.value.trim()) {{
+                url += `&postcode=${{encodeURIComponent(input.value.trim())}}`;
+            }}
+
             try {{
-                const res = await fetch(`/api/check-postcode?postcode=${{encodeURIComponent(pc)}}&radius=${{currentRadius}}`);
+                const res = await fetch(url);
                 const data = await res.json();
+
+                if (data.postcode && data.postcode !== 'Selected Pin') {{
+                    input.value = data.postcode;
+                }}
 
                 document.getElementById('resLocation').innerText = `📍 ${{data.postcode}} Radar (${{data.authority}})`;
                 document.getElementById('resSelectedCount').innerText = `${{data.selected_area_leads}} leads`;
@@ -612,21 +658,28 @@ def public_homepage():
                 document.getElementById('resConnectedCount').innerText = `${{data.connected_area_leads}} leads`;
                 document.getElementById('resConnectedText').innerHTML = `+ There are another <span style="color:#0284c7; font-weight:700;">${{data.connected_area_leads}} leads</span> in connected adjacent council areas`;
                 document.getElementById('resVal').innerText = `£${{data.est_min_val}} – £${{data.est_max_val}}`;
-                
-                initMap(data.lat, data.lng);
+
+                initMap(data.lat, data.lng, data.postcode);
             }} catch (err) {{
-                console.error("Map radar error:", err);
+                console.error("Territory lookup error:", err);
             }} finally {{
                 btn.innerText = 'Inspect Radar';
                 btn.disabled = false;
             }}
         }}
 
+        function scanTerritory() {{
+            const input = document.getElementById('postcodeInput');
+            const pc = input.value.trim() || 'LS1';
+            fetchTerritoryData(pc);
+        }}
+
         // Initialize map with default LS1 on window load
         window.addEventListener('DOMContentLoaded', () => {{
-            scanTerritory();
+            fetchTerritoryData('LS1');
         }});
         </script>
+
 
 
 
