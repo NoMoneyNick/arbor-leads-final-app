@@ -584,14 +584,16 @@ def perform_research(city_name: str):
 
 
 def research_all_cities():
-    """Runs deep partner research across all 9 English regions covering all 309 Local Planning Authorities."""
+    """Runs deep partner research across all UK regions (England, Scotland, Wales)."""
     regions = [
         "London", "South East", "South West", "West Midlands",
-        "East Midlands", "Yorkshire", "North West", "North East", "East of England"
+        "East Midlands", "Yorkshire", "North West", "North East", "East of England",
+        "Scotland", "Wales"
     ]
     for r in regions:
         logger.info(f"[Investigator] 🚀 Starting nationwide batch discovery for {r}...")
         perform_research(r)
+
 
 
 

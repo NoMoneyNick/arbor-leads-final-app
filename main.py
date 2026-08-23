@@ -1058,7 +1058,7 @@ def admin_dashboard(user: str = Depends(verify_dashboard_auth)):
                 <a href='/enrich-region/{city.lower().replace(" ", "-")}' style='color:#7c3aed; font-weight:bold; text-decoration:none;'>⚡ Enrich</a>
             </div>
         </div>"""
-        for city in ALL_CITIES[:9]  # Display the 9 core English regions
+        for city in ALL_CITIES  # Display all UK regions including Scotland and Wales
     ])
 
     pct = int((stats['enriched'] / stats['p'] * 100)) if stats['p'] else 0
@@ -1066,7 +1066,7 @@ def admin_dashboard(user: str = Depends(verify_dashboard_auth)):
     return f"""
     <html><head><title>Vector Data Labs — Admin Command</title></head>
     <body style="font-family:sans-serif; background:#f4f4f9; padding:40px;">
-    <div style="max-width:880px; margin:auto; background:white; padding:40px;
+    <div style="max-width:920px; margin:auto; background:white; padding:40px;
                 border-radius:20px; border-top:8px solid #064e3b; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
         <div style="display:flex; justify-content:space-between; align-items:center;">
             <h1>📊 ArborLeads Admin Command</h1>
@@ -1081,10 +1081,11 @@ def admin_dashboard(user: str = Depends(verify_dashboard_auth)):
            &nbsp;|&nbsp; <a href='/export-directors.csv' style='color:#1b5e20; font-weight:bold;'>⬇️ Download CSV</a>
         </p>
         <hr>
-        <h3>🏙️ Regional Scanners, Discovery & Instant Regional Enrichment</h3>
-        <p style="color:#64748b; font-size:13px; margin-top:-5px;">Click <b>⚡ Enrich</b> on any specific region to pull phone numbers and emails in ~5 seconds for that region alone!</p>
+        <h3>🏙️ Nationwide Territory Scanners, Discovery & Instant Enrichment</h3>
+        <p style="color:#64748b; font-size:13px; margin-top:-5px;">Click <b>▶ Scan Leads</b> to fetch local planning applications, <b>🔍 Find New</b> to discover tree surgery LTDs via Companies House, or <b>⚡ Enrich</b> to pull direct phones and ratings in ~5 seconds.</p>
         {city_buttons}
         <hr>
+
         <h3>🔄 Batch Operations</h3>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
             <a href='/enrich-all' style="background:#1b5e20; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
