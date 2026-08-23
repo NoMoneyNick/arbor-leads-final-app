@@ -737,11 +737,27 @@ def trigger_enrich_all(secret: Optional[str] = Query(None)):
 
 
 
-@app.get("/trigger-research-all")
-def trigger_research_all(secret: Optional[str] = Query(None)):
+@app.get("/api-stats")
+def api_stats(secret: Optional[str] = Query(None)):
     verify_cron_secret(secret)
-    threading.Thread(target=research.research_all_cities, daemon=True).start()
-    return {"status": "started", "action": "research_all"}
+    try:
+        conn = database.get_db_conn(); cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM potential_partners"); total_partners = cur.fetchone()[0]
+        cur.execute("SELECT count(*) FROM potential_partners WHERE enriched_at IS NOT NULL"); enriched_partners = cur.fetchone()[0]
+        cur.execute("SELECT count(*) FROM potential_partners WHERE phone_number IS NOT NULL OR email IS NOT NULL"); with_contacts = cur.fetchone()[0]
+        cur.execute("SELECT count(*) FROM leads"); total_leads = cur.fetchone()[0]
+        cur.close(); conn.close()
+        return {
+            "total_partners": total_partners,
+            "audited_and_enriched": enriched_partners,
+            "with_direct_contacts": with_contacts,
+            "remaining_to_enrich": total_partners - enriched_partners,
+            "total_leads": total_leads,
+            "progress_percent": f"{int((enriched_partners / total_partners * 100)) if total_partners else 0}%"
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 
 
 
