@@ -1132,129 +1132,123 @@ def sweep_100_random_contractors(target_count: int = 50) -> dict:
 
 
 def populate_2000_partners_into_db() -> dict:
-
-
     """
-    Nationwide High-Capacity Discovery Engine:
-    Sweeps Companies House across all 15 UK regional clusters (England, Scotland, Wales),
-    extracts active Managing Director names, direct phone numbers, and websites,
-    and inserts 2,000+ verified tree surgery LTDs directly into the Supabase database.
+    Nationwide High-Capacity Discovery Engine (Autonomous Background Daemon):
+    Sweeps paginated trade categories across all of Great Britain in self-regulating cycles,
+    enriches with Companies House directors and Google Places in parallel (20 workers),
+    and commits in single bulk transactions.
+    Safe to run autonomously in the background with zero freezing.
     """
     if not CH_KEY:
         logger.error("[Bulk Harvest] COMPANIES_HOUSE_KEY not set.")
         return {"error": "COMPANIES_HOUSE_KEY missing"}
 
-    UK_DISCOVERY_REGIONS = [
-        # Greater London & South East Wealth Belts
-        {"region": "London", "terms": ["London", "Surrey", "Richmond", "Bromley", "Croydon", "Barnet", "Enfield", "Wandsworth", "Kingston", "Harrow"]},
-        {"region": "South East", "terms": ["Guildford", "Woking", "Reigate", "Sevenoaks", "Tunbridge Wells", "Maidstone", "Crawley", "Horsham", "Reading", "Slough", "Windsor", "High Wycombe", "St Albans", "Watford", "Chelmsford", "Colchester", "Southampton", "Portsmouth", "Winchester", "Brighton", "Chichester"]},
-        # South West & West Country
-        {"region": "South West", "terms": ["Bristol", "Bath", "Gloucester", "Cheltenham", "Swindon", "Taunton", "Exeter", "Plymouth", "Truro", "Torquay", "Bournemouth", "Poole", "Dorchester", "Cornwall", "Devon", "Somerset", "Dorset", "Wiltshire", "Cotswolds"]},
-        # Midlands
-        {"region": "West Midlands", "terms": ["Birmingham", "Coventry", "Wolverhampton", "Solihull", "Dudley", "Walsall", "Warwick", "Stoke-on-Trent", "Shrewsbury", "Telford", "Worcester", "Hereford"]},
-        {"region": "East Midlands", "terms": ["Nottingham", "Leicester", "Derby", "Northampton", "Lincoln", "Mansfield", "Chesterfield", "Kettering", "Grantham", "Boston", "Peak District"]},
-        # North of England
-        {"region": "Manchester", "terms": ["Manchester", "Stockport", "Salford", "Bolton", "Altrincham", "Wilmslow", "Chester", "Warrington", "Knutsford", "Macclesfield", "Bury", "Rochdale", "Oldham"]},
-        {"region": "Leeds", "terms": ["Leeds", "Sheffield", "Bradford", "York", "Harrogate", "Wakefield", "Huddersfield", "Hull", "Doncaster", "Rotherham", "Barnsley", "Halifax", "North Yorkshire", "West Yorkshire"]},
-        {"region": "North East", "terms": ["Newcastle", "Sunderland", "Durham", "Middlesbrough", "Darlington", "Carlisle", "Penrith", "Kendal", "Cumbria", "Northumberland", "Tyne and Wear"]},
-        {"region": "East of England", "terms": ["Norwich", "Ipswich", "Cambridge", "Peterborough", "Bury St Edmunds", "Kings Lynn", "Colchester", "Chelmsford", "Norfolk", "Suffolk", "Cambridgeshire", "Essex"]},
-        # Scotland (All 32 Councils)
-        {"region": "Scotland", "terms": ["Edinburgh", "Glasgow", "Aberdeen", "Dundee", "Inverness", "Perth", "Stirling", "Paisley", "Livingston", "Dunfermline", "Kirkcaldy", "Ayr", "Kilmarnock", "Dumfries", "Galashiels", "Highlands", "Fife", "Lanarkshire", "Lothian", "Scottish Borders"]},
-        # Wales (All 22 Councils)
-        {"region": "Wales", "terms": ["Cardiff", "Swansea", "Newport", "Wrexham", "Barry", "Neath", "Bridgend", "Llanelli", "Caerphilly", "Pontypridd", "Aberystwyth", "Bangor", "Llandudno", "Rhyl", "Carmarthen", "Pembrokeshire", "Snowdonia", "Monmouth"]}
-    ]
-
-    SEARCH_KEYWORDS = [
-        "tree surgery", "tree surgeon", "tree surgeons", "tree services",
-        "tree care", "arboricultural", "arboriculture", "arborist",
-        "tree specialists", "tree management", "forestry services", "stump grinding"
+    TRADE_QUERIES = [
+        "tree surgery", "tree surgeon", "tree surgeons", "tree care",
+        "tree services", "arboricultural", "arboriculture", "arborist",
+        "forestry services", "woodland management", "stump grinding", "hedge trimming",
+        "tree work", "tree felling", "tree specialists", "tree management"
     ]
 
     try:
+        t_start = time.time()
         conn = database.get_db_conn()
         cur = conn.cursor()
 
-        # Load existing company numbers from DB to prevent duplicate calls
         cur.execute("SELECT company_number FROM potential_partners")
         existing_numbers = set(r[0] for r in cur.fetchall() if r[0])
-        logger.info(f"[Bulk Harvest] Found {len(existing_numbers)} existing partners in database.")
+        logger.info(f"[Bulk Harvest] Starting harvest. {len(existing_numbers)} partners currently in DB.")
 
-        found_candidates = []
         seen_numbers = set(existing_numbers)
+        total_inserted = 0
 
-        for reg in UK_DISCOVERY_REGIONS:
-            region_name = reg["region"]
-            for term in reg["terms"][:8]:  # Top sub-areas per region
-                for kw in SEARCH_KEYWORDS[:4]:
-                    query = f"{kw} {term}"
-                    co_list = search_companies_house(query, items_per_page=30)
-                    for co in co_list:
-                        cnum = co.get("company_number")
-                        if not cnum or cnum in seen_numbers:
-                            continue
-                        if co.get("company_status") != "active":
-                            continue
-                        cname = co.get("title", "")
-                        if not _is_valid_tree_company_name(cname):
-                            continue
-                        seen_numbers.add(cnum)
-                        found_candidates.append((co, cname, cnum, co.get("address_snippet", ""), region_name))
-                    time.sleep(0.08)  # Polite CH rate limit compliance
+        # Build list of paginated trade query tasks
+        all_query_tasks = []
+        for kw in TRADE_QUERIES:
+            for s_idx in [0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600]:
+                all_query_tasks.append((kw, s_idx))
 
-        logger.info(f"[Bulk Harvest] Discovered {len(found_candidates)} new candidate tree companies to enrich.")
+        random.shuffle(all_query_tasks)
 
-        # Enrich and insert into PostgreSQL
-        inserted_count = 0
-        from concurrent.futures import ThreadPoolExecutor
+        # Process in chunks of 20 queries with a polite 2-second rate-limit pause between cycles
+        chunk_size = 20
+        for cycle_idx in range(0, min(len(all_query_tasks), 80), chunk_size):
+            cycle_tasks = all_query_tasks[cycle_idx:cycle_idx + chunk_size]
+            candidates = []
 
-        def enrich_and_insert(item):
-            co, name, company_number, addr, assigned_region = item
-            try:
+            def fetch_paginated(task):
+                kw, s_idx = task
+                items = search_companies_house(kw, items_per_page=50, start_index=s_idx)
+                found = []
+                for co in items:
+                    cnum = co.get("company_number")
+                    if not cnum or cnum in seen_numbers:
+                        continue
+                    if co.get("company_status") != "active":
+                        continue
+                    cname = co.get("title", "")
+                    if not _is_valid_tree_company_name(cname):
+                        continue
+                    addr = co.get("address_snippet", "")
+                    assigned = resolve_uk_city(addr, cname, default_city="UK")
+                    found.append((co, cname, cnum, addr, assigned))
+                return found
+
+            with ThreadPoolExecutor(max_workers=10) as s_exec:
+                for found_list in s_exec.map(fetch_paginated, cycle_tasks):
+                    for item in found_list:
+                        cnum = item[2]
+                        if cnum not in seen_numbers:
+                            seen_numbers.add(cnum)
+                            candidates.append(item)
+
+            if not candidates:
+                continue
+
+            logger.info(f"[Bulk Harvest Cycle {cycle_idx//chunk_size + 1}] Found {len(candidates)} fresh candidates. Enriching...")
+
+            def enrich_item(item):
+                co, name, company_number, addr, assigned_region = item
                 md_name = get_director_from_ch(company_number)
                 rating, phone, website = get_google_places_info(name, f"{addr} {assigned_region}")
-                email = scrape_email_from_website(website) if website else None
-
-                c_conn = database.get_db_conn()
-                c_cur = c_conn.cursor()
-                c_cur.execute("""
-                    INSERT INTO potential_partners
-                        (company_name, company_number, status, address, target_city,
-                         sic_codes, md_name, phone_number, google_rating, website, email)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (company_number) DO UPDATE SET
-                        company_name  = EXCLUDED.company_name,
-                        target_city   = EXCLUDED.target_city,
-                        md_name       = COALESCE(EXCLUDED.md_name, potential_partners.md_name),
-                        phone_number  = COALESCE(EXCLUDED.phone_number, potential_partners.phone_number),
-                        google_rating = COALESCE(EXCLUDED.google_rating, potential_partners.google_rating),
-                        website       = COALESCE(EXCLUDED.website, potential_partners.website),
-                        email         = COALESCE(EXCLUDED.email, potential_partners.email)
-                """, (
+                return (
                     name, company_number, co.get("company_status"),
                     addr, assigned_region,
                     co.get("sic_codes", []), md_name, phone, rating,
-                    website, email
-                ))
-                c_conn.commit()
-                c_cur.close()
-                c_conn.close()
-                return True
-            except Exception as e:
-                logger.error(f"[Bulk Harvest] Insertion error for {name}: {e}")
-                return False
+                    website, None
+                )
 
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            results = list(executor.map(enrich_and_insert, found_candidates))
-            inserted_count = sum(1 for r in results if r)
+            with ThreadPoolExecutor(max_workers=20) as enrich_exec:
+                enriched_rows = list(enrich_exec.map(enrich_item, candidates))
 
-        # Run final clean and count
+            # Batch insert
+            from psycopg2.extras import execute_batch
+            execute_batch(cur, """
+                INSERT INTO potential_partners
+                    (company_name, company_number, status, address, target_city,
+                     sic_codes, md_name, phone_number, google_rating, website, email)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (company_number) DO UPDATE SET
+                    company_name  = EXCLUDED.company_name,
+                    target_city   = EXCLUDED.target_city,
+                    md_name       = COALESCE(EXCLUDED.md_name, potential_partners.md_name),
+                    phone_number  = COALESCE(EXCLUDED.phone_number, potential_partners.phone_number),
+                    google_rating = COALESCE(EXCLUDED.google_rating, potential_partners.google_rating),
+                    website       = COALESCE(EXCLUDED.website, potential_partners.website)
+            """, enriched_rows, page_size=100)
+            conn.commit()
+
+            total_inserted += len(enriched_rows)
+            logger.info(f"[Bulk Harvest Cycle {cycle_idx//chunk_size + 1}] Inserted {len(enriched_rows)} contractors. Total added so far: {total_inserted}")
+            time.sleep(2.0)  # Polite pause between cycles
+
         cur.execute("SELECT COUNT(*) FROM potential_partners")
         total_now = cur.fetchone()[0]
         cur.close()
         conn.close()
 
-        logger.info(f"[Bulk Harvest] Finished! Inserted {inserted_count} new partners. Database now has {total_now} partners.")
-        return {"new_inserted": inserted_count, "total_partners": total_now}
+        logger.info(f"[Bulk Harvest Complete] Total inserted: {total_inserted} | Total in DB: {total_now} in {round(time.time() - t_start, 2)}s.")
+        return {"new_inserted": total_inserted, "total_partners": total_now}
 
     except Exception as e:
         logger.error(f"[Bulk Harvest] Fatal error: {e}")
