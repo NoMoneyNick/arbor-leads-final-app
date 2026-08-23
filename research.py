@@ -355,8 +355,41 @@ CITY_SUB_AREAS = {
         "Horsham", "Crawley", "Midhurst", "Petworth", "Haywards Heath", "Burgess Hill",
         "East Grinstead", "Surrey", "Kent", "East Sussex", "West Sussex", "Hampshire",
         "Berkshire", "Buckinghamshire", "Oxfordshire"
+    ],
+    "Scotland": [
+        "Edinburgh", "Glasgow", "Aberdeen", "Dundee", "Inverness", "Perth", "Stirling",
+        "Paisley", "East Kilbride", "Livingston", "Hamilton", "Dunfermline", "Kirkcaldy",
+        "Ayr", "Kilmarnock", "Greenock", "Coatbridge", "Glenrothes", "Airdrie", "Falkirk",
+        "Dumfries", "Motherwell", "Cumbernauld", "Elgin", "St Andrews", "Galashiels",
+        "Peebles", "Scottish Borders", "Highlands", "Fife", "Lanarkshire", "Lothian"
+    ],
+    "Edinburgh": [
+        "Edinburgh", "Livingston", "Dunfermline", "Kirkcaldy", "Musselburgh", "Dalkeith",
+        "Penicuik", "Queensferry", "Linlithgow", "Bathgate", "Lothian", "Fife"
+    ],
+    "Glasgow": [
+        "Glasgow", "Paisley", "East Kilbride", "Hamilton", "Coatbridge", "Airdrie",
+        "Motherwell", "Cumbernauld", "Greenock", "Kilmarnock", "Ayr", "Lanarkshire"
+    ],
+    "Aberdeen": [
+        "Aberdeen", "Dundee", "Inverness", "Perth", "Elgin", "Peterhead", "Fraserburgh",
+        "Inverurie", "Stonehaven", "Aberdeenshire", "Highlands"
+    ],
+    "Wales": [
+        "Cardiff", "Swansea", "Newport", "Wrexham", "Barry", "Neath", "Cwmbran",
+        "Bridgend", "Llanelli", "Merthyr Tydfil", "Caerphilly", "Pontypridd",
+        "Aberystwyth", "Bangor", "Llandudno", "Rhyl", "Carmarthen", "Haverfordwest",
+        "Pembrokeshire", "Snowdonia", "Anglesey", "Monmouth", "Abergavenny", "Chepstow"
+    ],
+    "Cardiff": [
+        "Cardiff", "Barry", "Penarth", "Caerphilly", "Pontypridd", "Bridgend", "Cowbridge",
+        "Llantrisant", "Vale of Glamorgan", "Rhondda Cynon Taf"
+    ],
+    "Swansea": [
+        "Swansea", "Neath", "Port Talbot", "Llanelli", "Carmarthen", "Gower", "Ammanford"
     ]
 }
+
 
 
 
