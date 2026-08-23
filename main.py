@@ -333,11 +333,14 @@ def admin_dashboard(user: str = Depends(verify_dashboard_auth)):
         <hr>
         <h3>🔄 Batch Operations</h3>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+            <a href='/enrich-all' style="background:#1b5e20; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
+                🚀 Enrich All (All Remaining Partners)
+            </a>
             <a href='/enrich-batch' style="background:#7c3aed; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
                 ⚡ Enrich Next 50 Partners (5-8 Seconds)
             </a>
             <a href='/research-all' style="background:#0284c7; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                🚀 Discover All 9 Regions (Find Partners)
+                🔍 Discover All 9 Regions (Find New)
             </a>
             <a href='/clean-partners' style="background:#b71c1c; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
                 🧹 Clean Database (Purge False Substrings)
@@ -346,6 +349,7 @@ def admin_dashboard(user: str = Depends(verify_dashboard_auth)):
                 ⬇️ Export Contacts CSV
             </a>
         </div>
+
         <hr>
         <h4>Recent Leads (Past 24-48 Hours)</h4>
         <ul>{lead_rows or "<li>No leads yet.</li>"}</ul>
