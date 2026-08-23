@@ -71,15 +71,18 @@ UK_CITY_COORDS = {
 def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = None, lng: Optional[float] = None, radius: int = 15):
     """
     Public postcode radar inspection endpoint.
+    Restricted strictly to the 309 English Local Planning Authorities.
     Supports search by Postcode/Outcode, UK City name, or direct Map Click (lat/lng coordinates).
     """
     import urllib.request
     import urllib.parse
     import json
+    import math
     
-    target_lat, target_lng = 53.8008, -1.5491  # Default Leeds centroid
-    district = "Leeds District Authority"
-    display_pc = "LS1"
+    target_lat, target_lng = 52.4862, -1.8904  # Default Birmingham (Center of England)
+    district = "Birmingham City Council"
+    display_pc = "B1"
+    country_name = "England"
     
     # 1. Handle Direct Map Click Coordinates
     if lat is not None and lng is not None:
@@ -95,6 +98,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
                     first = data["result"][0]
                     display_pc = first.get("outcode") or first.get("postcode", "Local Area")
                     district = first.get("admin_district") or f"{display_pc} District Authority"
+                    country_name = first.get("country", "England")
         except Exception:
             display_pc = f"{target_lat:.2f}, {target_lng:.2f}"
             district = "Operating Territory"
@@ -131,10 +135,45 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
                             target_lng = first.get("longitude", target_lng)
                             display_pc = first.get("outcode") or clean_input
                             district = first.get("admin_district") or f"{display_pc} District Authority"
+                            country_name = first.get("country", "England")
                 except Exception:
                     district = f"{clean_input} District Authority"
 
-    # Query local database for lead matches
+    # Enforce England-Only Validation (ArborLeads covers all 309 English LPAs)
+    is_england = True
+    non_england_region = None
+
+    if country_name.lower() in ["scotland", "wales", "northern ireland", "republic of ireland"]:
+        is_england = False
+        non_england_region = country_name
+    elif target_lat > 55.78:
+        is_england = False
+        non_england_region = "Scotland"
+    elif (51.3 < target_lat < 53.45) and (target_lng < -2.95 if target_lat > 52.2 else target_lng < -2.65):
+        is_england = False
+        non_england_region = "Wales"
+    elif target_lng < -5.3:
+        is_england = False
+        non_england_region = "Northern Ireland / Ireland"
+
+    if not is_england:
+        return {
+            "postcode": display_pc,
+            "authority": f"{district} ({non_england_region})",
+            "lat": target_lat,
+            "lng": target_lng,
+            "radius_miles": radius,
+            "is_england": False,
+            "selected_area_leads": 0,
+            "connected_area_leads": 0,
+            "total_leads_in_scope": 0,
+            "est_min_val": "0",
+            "est_max_val": "0",
+            "exclusivity_status": "Outside Coverage (England LPAs Only)",
+            "message": f"ArborLeads monitors all 309 English Local Planning Authorities. {non_england_region} coverage is scheduled for Phase 2."
+        }
+
+    # Query local database for lead matches in England
     prefix_alpha = "".join([c for c in display_pc if c.isalpha()])[:3]
     conn = database.get_db_conn()
     cur = conn.cursor()
@@ -144,11 +183,9 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
     conn.close()
 
     # Continuous spatial micro-density distribution calculation
-    import math
-
     area_factor = (radius / 15.0) ** 1.35
 
-    # Spatial micro-harmonic variance based on precise coordinates (approx 2-3 mile harmonic oscillation)
+    # Spatial micro-harmonic variance based on precise coordinates
     lat_harmonic = math.sin(target_lat * 28.5) * 0.28
     lng_harmonic = math.cos(target_lng * 32.1) * 0.22
     fine_harmonic = math.sin((target_lat + target_lng) * 45.0) * 0.15
@@ -177,6 +214,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
         "lat": target_lat,
         "lng": target_lng,
         "radius_miles": radius,
+        "is_england": True,
         "selected_area_leads": selected_leads,
         "connected_area_leads": connected_leads,
         "total_leads_in_scope": selected_leads + connected_leads,
@@ -184,6 +222,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
         "est_max_val": f"{max_val:,}",
         "exclusivity_status": "Available (Unclaimed)"
     }
+
 
 
 
@@ -545,8 +584,8 @@ def public_homepage():
                     </div>
                     
                     <form onsubmit="event.preventDefault(); scanTerritory();" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
-                        <input type="text" id="postcodeInput" placeholder="Enter depot postcode or city (e.g. LS1, SW1, M4, Birmingham, Bristol)" 
-                               value="LS1"
+                        <input type="text" id="postcodeInput" placeholder="Enter English postcode or city (e.g. B1, SW1, M4, Birmingham, Bristol)" 
+                               value="B1"
                                style="flex:1; min-width:240px; padding:12px 16px; border:2px solid var(--border-color); border-radius:6px; font-size:15px; font-weight:600; outline:none;">
                         <button type="submit" id="scanBtn" 
                                 style="background:var(--brand-primary); color:white; border:none; padding:12px 24px; border-radius:6px; font-weight:700; font-size:14px; cursor:pointer; transition:background 0.15s;">
@@ -564,12 +603,12 @@ def public_homepage():
                     </div>
 
                     <!-- Leaflet Interactive Map Container -->
-                    <div id="radarMap" style="height:340px; width:100%; border-radius:8px; border:1px solid #cbd5e1; margin-bottom:18px; z-index:1; background:#e5e7eb;"></div>
+                    <div id="radarMap" style="height:360px; width:100%; border-radius:8px; border:1px solid #cbd5e1; margin-bottom:18px; z-index:1; background:#e5e7eb;"></div>
                     
                     <!-- Live Dual-Zone Results Callout -->
                     <div id="radarResult" style="background:#f8fafc; border:1px solid #cbd5e1; border-left:4px solid var(--brand-accent); border-radius:8px; padding:20px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
-                            <b style="font-size:16px; color:#0f172a;" id="resLocation">📍 LS1 Territory Radar (Leeds District Authority)</b>
+                            <b style="font-size:16px; color:#0f172a;" id="resLocation">📍 B1 Territory Radar (Birmingham City Council)</b>
                             <span style="background:#ecfdf5; color:#047857; padding:4px 10px; border-radius:6px; font-weight:700; font-size:12px; border:1px solid #a7f3d0;" id="resStatus">
                                 🟢 Available (Unclaimed)
                             </span>
@@ -577,17 +616,17 @@ def public_homepage():
 
                         <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-bottom:16px;">
                             <div style="font-size:15px; color:#044332; font-weight:700; margin-bottom:6px;" id="resSelectedText">
-                                ✓ There are <span style="font-size:19px; color:#059669;" id="resSelectedCount">6 leads</span> in the selected area (15 miles)
+                                ✓ There are <span style="font-size:19px; color:#059669;">397 leads</span> in the selected area (15 miles)
                             </div>
                             <div style="font-size:14px; color:#475569; font-weight:600;" id="resConnectedText">
-                                + There are another <span style="color:#0284c7; font-weight:700;" id="resConnectedCount">11 leads</span> in connected adjacent council areas
+                                + There are another <span style="color:#0284c7; font-weight:700;">714 leads</span> in connected adjacent council areas
                             </div>
                         </div>
 
                         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px;">
                             <div>
                                 <span style="font-size:12px; color:#64748b;">Est. Potential Contract Value:</span><br>
-                                <b style="font-size:20px; color:#0f172a;" id="resVal">£2,700 – £8,100</b>
+                                <b style="font-size:20px; color:#0f172a;" id="resVal">£178,650 – £575,650</b>
                             </div>
                             <a href="#pricing" style="display:inline-block; background:#044332; color:#ffffff; padding:11px 22px; border-radius:6px; font-weight:700; font-size:13px; text-decoration:none; transition:background 0.15s;">
                                 Unlock All Leads & Lock Territory (£149/mo) →
@@ -605,8 +644,8 @@ def public_homepage():
 
         <script>
         let currentRadius = 15;
-        let currentLat = 53.8008;
-        let currentLng = -1.5491;
+        let currentLat = 52.4862;
+        let currentLng = -1.8904;
         let map = null;
         let depotMarker = null;
         let radiusCircle = null;
@@ -617,13 +656,44 @@ def public_homepage():
             currentLng = lng;
 
             if (!map) {{
-                map = L.map('radarMap', {{ scrollWheelZoom: false }}).setView([lat, lng], 11);
+                // Default zoom level 6 centered over England
+                map = L.map('radarMap', {{ scrollWheelZoom: false }}).setView([52.4862, -1.8904], 6);
                 L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
                     maxZoom: 18,
                     attribution: '© OpenStreetMap contributors'
                 }}).addTo(map);
 
-                // CLICK ANYWHERE ON MAP TO INSTANTLY MOVE PIN & RECALCULATE LEADS
+                // Translucent Pine Green Overlays for Non-English Territories
+                const excludedStyle = {{
+                    color: '#044332',
+                    fillColor: '#044332',
+                    fillOpacity: 0.35,
+                    weight: 1.5,
+                    dashArray: '3, 4',
+                    interactive: false
+                }};
+
+                // Scotland Overlay
+                L.polygon([
+                    [55.8, -1.9], [56.3, -1.9], [57.7, -1.8], [58.8, -3.1], [58.8, -5.4],
+                    [58.2, -5.6], [57.5, -6.1], [56.3, -6.5], [55.4, -5.3], [54.8, -5.1],
+                    [54.8, -3.4], [55.1, -3.1], [55.8, -2.0]
+                ], excludedStyle).addTo(map);
+
+                // Wales Overlay
+                L.polygon([
+                    [53.4, -3.0], [53.45, -4.5], [52.8, -4.8], [52.0, -5.4], [51.6, -5.2],
+                    [51.3, -3.2], [51.55, -2.65], [51.9, -2.7], [52.4, -3.0], [53.0, -2.9],
+                    [53.3, -3.0]
+                ], excludedStyle).addTo(map);
+
+                // Ireland & Northern Ireland Overlay
+                L.polygon([
+                    [55.5, -5.4], [55.5, -10.6], [51.4, -10.6], [51.4, -5.8], [53.0, -5.8],
+                    [54.0, -5.4], [55.5, -5.4]
+                ], excludedStyle).addTo(map);
+
+                // CLICK ANYWHERE ON MAP TO INSTANTLY MOVE PIN (NO FORCED ZOOM)
                 map.on('click', function(e) {{
                     currentLat = e.latlng.lat;
                     currentLng = e.latlng.lng;
@@ -634,7 +704,8 @@ def public_homepage():
 
                 setTimeout(() => {{ if (map) map.invalidateSize(); }}, 300);
             }} else {{
-                map.setView([lat, lng], 11);
+                // Pan smoothly without changing user's zoom level
+                map.panTo([lat, lng]);
             }}
 
             if (depotMarker) {{
@@ -732,13 +803,21 @@ def public_homepage():
                 if (locEl) locEl.innerText = `📍 ${{data.postcode}} Radar (${{data.authority}})`;
 
                 const selEl = document.getElementById('resSelectedText');
-                if (selEl) selEl.innerHTML = `✓ There are <span style="font-size:19px; color:#059669; font-weight:700;">${{data.selected_area_leads}} leads</span> in the selected area (${{data.radius_miles}} miles)`;
-
                 const connEl = document.getElementById('resConnectedText');
-                if (connEl) connEl.innerHTML = `+ There are another <span style="color:#0284c7; font-weight:700;">${{data.connected_area_leads}} leads</span> in connected adjacent council areas`;
-
                 const valEl = document.getElementById('resVal');
-                if (valEl) valEl.innerText = `£${{data.est_min_val}} – £${{data.est_max_val}}`;
+                const statusEl = document.getElementById('resStatus');
+
+                if (data.is_england === false) {{
+                    if (selEl) selEl.innerHTML = `<span style="color:#b91c1c; font-weight:700;">⚠️ Non-English Territory:</span> ArborLeads monitors all 309 English Local Planning Authorities. Coverage for ${{data.authority}} is scheduled for Phase 2.`;
+                    if (connEl) connEl.innerHTML = `Please select an English postcode or click within England.`;
+                    if (valEl) valEl.innerText = `£0`;
+                    if (statusEl) statusEl.innerHTML = `<span style="background:#fef2f2; color:#b91c1c; padding:4px 10px; border-radius:6px; font-weight:700; font-size:12px; border:1px solid #fecaca;">Outside English Coverage</span>`;
+                }} else {{
+                    if (selEl) selEl.innerHTML = `✓ There are <span style="font-size:19px; color:#059669; font-weight:700;">${{data.selected_area_leads}} leads</span> in the selected area (${{data.radius_miles}} miles)`;
+                    if (connEl) connEl.innerHTML = `+ There are another <span style="color:#0284c7; font-weight:700;">${{data.connected_area_leads}} leads</span> in connected adjacent council areas`;
+                    if (valEl) valEl.innerText = `£${{data.est_min_val}} – £${{data.est_max_val}}`;
+                    if (statusEl) statusEl.innerHTML = `🟢 Available (Unclaimed)`;
+                }}
 
                 initMap(data.lat, data.lng, data.postcode);
             }} catch (err) {{
@@ -753,15 +832,16 @@ def public_homepage():
 
         function scanTerritory() {{
             const input = document.getElementById('postcodeInput');
-            const pc = (input ? input.value.trim() : '') || 'LS1';
+            const pc = (input ? input.value.trim() : '') || 'B1';
             fetchTerritoryData(pc, null, null);
         }}
 
-        // Initialize map with default LS1 on window load
+        // Initialize map with default Birmingham (B1) on window load
         window.addEventListener('DOMContentLoaded', () => {{
-            fetchTerritoryData('LS1', null, null);
+            fetchTerritoryData('B1', null, null);
         }});
         </script>
+
 
 
 
