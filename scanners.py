@@ -343,6 +343,10 @@ def scan_city_planning_api(city_name: str) -> int:
                     headers=headers,
                     timeout=8
                 )
+                if res.status_code == 429:
+                    # 429 indicates limit hit — send immediate alert
+                    notifications.send_api_quota_warning_email("UK Planning API", 500, cap=500)
+                    return prefix, []
                 if res.status_code == 200:
                     return prefix, res.json().get("data", [])
             except Exception:
@@ -351,6 +355,12 @@ def scan_city_planning_api(city_name: str) -> int:
 
         with ThreadPoolExecutor(max_workers=6) as executor:
             prefix_results = list(executor.map(fetch_prefix, postcode_prefixes))
+
+        # Track monthly usage and trigger warning email when nearing 500 cap (400 / 80% threshold)
+        usage_info = database.increment_api_usage("UK Planning API", increment=len(postcode_prefixes), warning_threshold=400)
+        if usage_info.get("warning_needed"):
+            notifications.send_api_quota_warning_email("UK Planning API", usage_info.get("count", 400), cap=500)
+
 
         conn = database.get_db_conn()
         cur = conn.cursor()

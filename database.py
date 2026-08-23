@@ -60,6 +60,16 @@ def init_db():
                 status TEXT DEFAULT 'pending',
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
+
+            CREATE TABLE IF NOT EXISTS api_usage (
+                id SERIAL PRIMARY KEY,
+                api_name TEXT NOT NULL,
+                period_month TEXT NOT NULL,
+                call_count INT DEFAULT 0,
+                warning_sent BOOLEAN DEFAULT FALSE,
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE (api_name, period_month)
+            );
         """)
 
         # Resilience: add any missing columns safely
@@ -71,7 +81,6 @@ def init_db():
             "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS email TEXT;",
             "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMPTZ;",
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_score TEXT DEFAULT 'small';",
-
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_price NUMERIC DEFAULT 25;",
         ]
         for stmt in resilience_cols:
@@ -83,3 +92,43 @@ def init_db():
         logger.info("[DB] Database initialized successfully.")
     except Exception as e:
         logger.error(f"[DB] Initialization error: {e}")
+
+
+def increment_api_usage(api_name: str = "UK Planning API", increment: int = 1, warning_threshold: int = 400) -> dict:
+    """
+    Increments the monthly API request counter and checks if a warning email is needed.
+    Returns: {"count": int, "warning_needed": bool}
+    """
+    import datetime
+    period = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m")
+    out = {"count": 0, "warning_needed": False}
+    if not SURL:
+        return out
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO api_usage (api_name, period_month, call_count, warning_sent, updated_at)
+            VALUES (%s, %s, %s, FALSE, NOW())
+            ON CONFLICT (api_name, period_month)
+            DO UPDATE SET 
+                call_count = api_usage.call_count + EXCLUDED.call_count,
+                updated_at = NOW()
+            RETURNING call_count, warning_sent;
+        """, (api_name, period, increment))
+        row = cur.fetchone()
+        if row:
+            count, warning_sent = row
+            out["count"] = count
+            if count >= warning_threshold and not warning_sent:
+                out["warning_needed"] = True
+                cur.execute("""
+                    UPDATE api_usage SET warning_sent = TRUE 
+                    WHERE api_name = %s AND period_month = %s;
+                """, (api_name, period))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.debug(f"[API Usage] Tracking error: {e}")
+    return out

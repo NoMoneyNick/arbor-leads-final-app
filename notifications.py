@@ -113,3 +113,41 @@ def dispatch_lead_alerts(city: str, leads: list):
                 f"{emoji} New {score.title()} Lead: {lead['addr']} (£{price})",
                 body
             )
+
+
+def send_api_quota_warning_email(api_name: str = "UK Planning Data API", current_calls: int = 400, cap: int = 500):
+    """
+    Dispatches a high-priority warning email when API usage approaches the 500-request limit.
+    """
+    pct = round((current_calls / max(cap, 1)) * 100, 1)
+    subject = f"⚠️ ACTION REQUIRED: {api_name} Approaching 500 Cap ({current_calls}/{cap} requests used)"
+    html_body = f"""
+    <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:30px; border:2px solid #ea580c; border-radius:12px; background:#fffaf0;">
+        <h2 style="color:#c2410c; margin-top:0;">⚠️ National Planning Data API Quota Alert</h2>
+        <p style="font-size:15px; color:#1e293b; line-height:1.6;">
+            Your live planning radar usage for <b>{api_name}</b> has reached <b>{current_calls} of {cap} requests</b> ({pct}% of the monthly free tier cap).
+        </p>
+        <div style="background:#ffffff; border:1px solid #fed7aa; border-radius:8px; padding:16px; margin:20px 0;">
+            <div style="font-size:13px; color:#64748b; margin-bottom:6px;">Monthly Request Meter:</div>
+            <div style="background:#e2e8f0; border-radius:10px; height:18px; width:100%; overflow:hidden;">
+                <div style="background:#ea580c; width:{min(pct, 100)}%; height:100%;"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:bold; color:#334155; margin-top:6px;">
+                <span>{current_calls} Used</span>
+                <span>{cap} Monthly Free Limit</span>
+            </div>
+        </div>
+        <p style="font-size:14px; color:#334155; line-height:1.5;">
+            <b>Why this matters:</b> When the 500 request cap is reached, daily automated planning sweeps will pause until the monthly cycle resets or the account is upgraded.
+        </p>
+        <p style="font-size:14px; color:#334155; line-height:1.5;">
+            <b>Next Step:</b> Log into your UK Planning API account (<a href="https://ukplanningapi.co.uk" target="_blank" style="color:#0284c7; font-weight:bold;">ukplanningapi.co.uk</a>) and upgrade to the Standard / Pro tier to ensure continuous 24/7 lead scraping across all UK councils.
+        </p>
+        <hr style="border:none; border-top:1px solid #fed7aa; margin:20px 0;">
+        <p style="font-size:12px; color:#94a3b8; margin-bottom:0;">
+            Sent automatically by Vector Data Labs System Monitor.
+        </p>
+    </div>
+    """
+    send_resend_email(subject, html_body)
+    logging.warning(f"[QUOTA WARNING] Dispatched API quota warning email for {api_name} ({current_calls}/{cap}) to {TEST_EMAIL}")
