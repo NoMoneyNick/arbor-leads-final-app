@@ -677,6 +677,21 @@ def trigger_clean_partners(secret: Optional[str] = Query(None)):
     return {"status": "success", "result": result}
 
 
+@app.get("/trigger-enrich-all")
+def trigger_enrich_all(bg: BackgroundTasks, secret: Optional[str] = Query(None)):
+    verify_cron_secret(secret)
+    bg.add_task(research.enrich_existing_partners)
+    return {"status": "started", "action": "enrich_all"}
+
+
+@app.get("/trigger-research-all")
+def trigger_research_all(bg: BackgroundTasks, secret: Optional[str] = Query(None)):
+    verify_cron_secret(secret)
+    bg.add_task(research.research_all_cities)
+    return {"status": "started", "action": "research_all"}
+
+
+
 
 
 # ── Export Directors (Basic Auth) ─────────────────────────────────────────────
