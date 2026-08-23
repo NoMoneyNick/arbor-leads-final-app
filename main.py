@@ -1179,16 +1179,32 @@ def export_directors(user: str = Depends(verify_dashboard_auth)):
 
 
 @app.get("/export-directors.csv")
-def export_directors_csv(user: str = Depends(verify_dashboard_auth)):
+def export_directors_csv(secret: Optional[str] = Query(None),
+                         credentials: Optional[HTTPBasicCredentials] = Depends(security)):
     """
     Returns CSV file of all enriched directors ready for Google Sheets or Excel.
+    Accepts either dashboard Basic Auth or ?secret= query parameter.
     """
+    authorized = False
+    if secret and T_SEC and secrets.compare_digest(secret.encode(), T_SEC.encode()):
+        authorized = True
+    elif credentials:
+        DASH_USER = os.getenv("DASHBOARD_USER", "admin").strip()
+        DASH_PASS = os.getenv("DASHBOARD_PASS", "").strip()
+        if DASH_PASS and secrets.compare_digest(credentials.username.encode(), DASH_USER.encode()) and secrets.compare_digest(credentials.password.encode(), DASH_PASS.encode()):
+            authorized = True
+
+    if not authorized:
+        raise HTTPException(status_code=401, detail="Unauthorized.",
+                            headers={"WWW-Authenticate": "Basic"})
+
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
         "Company Name", "Company Number", "Director Name",
         "Phone Number", "Email", "Website", "Google Rating", "City"
     ])
+
 
     try:
         conn = database.get_db_conn(); cur = conn.cursor()
