@@ -583,12 +583,14 @@ def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -
                    md_name, phone_number, google_rating, website, email
             FROM potential_partners
             WHERE company_number IS NOT NULL
-              AND (email IS NULL OR phone_number IS NULL OR md_name IS NULL OR website IS NULL)
+              AND enriched_at IS NULL
         """
         params = []
         if city_name and city_name.lower() != "uk":
             query += " AND LOWER(target_city) = LOWER(%s)"
             params.append(city_name)
+
+        query += " ORDER BY created_at DESC"
 
         if limit and limit > 0:
             query += " LIMIT %s"
@@ -600,10 +602,10 @@ def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -
         conn.close()
 
         if not partners:
-            logger.info(f"[Enrichment] All partners {f'in {city_name}' if city_name else ''} are already fully enriched!")
+            logger.info(f"[Enrichment] All partners {f'in {city_name}' if city_name else ''} are already enriched!")
             return 0
 
-        logger.info(f"[Enrichment] 🚀 Processing bite-sized batch of {len(partners)} partners {f'for {city_name}' if city_name else ''}...")
+        logger.info(f"[Enrichment] 🚀 Processing fresh batch of {len(partners)} partners {f'for {city_name}' if city_name else ''}...")
 
         from psycopg2.extras import execute_batch
 
@@ -629,7 +631,8 @@ def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -
                 return (md_name, phone, rating, website, email, pid)
             except Exception as e:
                 logger.debug(f"[Enrichment] Error on {name}: {e}")
-                return None
+                # Still mark enriched_at so it doesn't loop infinitely on faulty records
+                return (existing_md, existing_phone, existing_rating, existing_website, existing_email, pid)
 
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=8) as executor:
@@ -642,12 +645,13 @@ def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -
             execute_batch(p_cur, """
                 UPDATE potential_partners
                 SET md_name = %s, phone_number = %s, google_rating = %s,
-                    website = %s, email = %s
+                    website = %s, email = %s, enriched_at = NOW()
                 WHERE id = %s
             """, valid_updates, page_size=25)
             p_conn.commit()
             p_cur.close()
             p_conn.close()
+
 
         logger.info(f"[Enrichment] 🎯 Complete! Enriched and saved {len(valid_updates)} partners in {city_name or 'batch'}.")
         return len(valid_updates)

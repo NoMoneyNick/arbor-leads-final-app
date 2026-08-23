@@ -69,7 +69,9 @@ def init_db():
             "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS google_rating NUMERIC;",
             "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS website TEXT;",
             "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS email TEXT;",
+            "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMPTZ;",
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_score TEXT DEFAULT 'small';",
+
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_price NUMERIC DEFAULT 25;",
         ]
         for stmt in resilience_cols:
