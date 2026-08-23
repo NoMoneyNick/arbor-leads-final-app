@@ -1,9 +1,14 @@
 import os
+import time
 import base64
 import requests
 import logging
+import re
+import html
+import urllib.parse
 import database
 from dotenv import load_dotenv
+
 
 load_dotenv()
 CH_KEY = os.getenv("COMPANIES_HOUSE_KEY", "").strip()
