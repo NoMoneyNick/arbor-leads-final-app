@@ -907,7 +907,15 @@ def clean_partner_database():
         conn.close()
 
         logger.info(f"[Cleanup] Complete. Kept: {kept} | Removed: {removed} | Cities Re-assigned: {updated_cities}")
+        return {"kept": kept, "removed": removed, "updated_cities": updated_cities}
+
+    except Exception as e:
+        logger.error(f"[Cleanup] Fatal error: {e}")
+        return {"error": str(e)}
+
+
 def sweep_100_random_contractors() -> dict:
+
     """
     Sweeps 100 brand new UK tree surgery LTD contractors across target regions,
     extracts verified directors and contact info, and inserts them into PostgreSQL.
