@@ -1459,10 +1459,12 @@ def populate_2000_partners_view(request: Request, secret: Optional[str] = Query(
 
 
 @app.get("/sweep-100")
-def sweep_100_route(request: Request, secret: Optional[str] = Query(None)):
+@app.get("/sweep-50")
+def sweep_route(request: Request, count: int = 50, secret: Optional[str] = Query(None)):
     verify_admin_or_secret(request, secret)
-    result = research.sweep_100_random_contractors()
+    result = research.sweep_100_random_contractors(target_count=min(count, 100))
     return result
+
 
 
 @app.get("/trigger-populate-2000")
