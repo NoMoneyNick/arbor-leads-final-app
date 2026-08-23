@@ -23,12 +23,14 @@ basic_auth = HTTPBasic()
 optional_auth = HTTPBasic(auto_error=False)
 
 
-# All 9 English Regions with nationwide council & partner coverage
+# All UK Regions with nationwide council & partner coverage (England, Scotland, Wales)
 ALL_CITIES = [
     "London", "South East", "South West", "West Midlands",
     "East Midlands", "Yorkshire", "North West", "North East", "East of England",
-    "Leeds", "Birmingham", "Manchester", "Bristol", "Sheffield"
+    "Leeds", "Birmingham", "Manchester", "Bristol", "Sheffield",
+    "Scotland", "Wales"
 ]
+
 
 
 @app.get("/health")
