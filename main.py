@@ -182,7 +182,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
                             district = f"{clean_input} District Authority"
 
 
-    # Enforce Great Britain Coverage (Tree Key covers England, Scotland, and Wales)
+    # Enforce Great Britain Coverage (Tree Key covers England, Scotland, and Wales exclusively)
     is_covered = True
     uncovered_region = None
 
@@ -207,8 +207,9 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
             "est_min_val": "0",
             "est_max_val": "0",
             "exclusivity_status": "Outside Great Britain Coverage",
-            "message": f"Tree Key monitors all 309 English Local Planning Authorities, all 32 Scottish Councils, and all 22 Welsh Councils. {uncovered_region} coverage is scheduled for Phase 2."
+            "message": "Tree Key is dedicated exclusively to Great Britain statutory planning registers (England, Scotland, and Wales). Northern Ireland and Ireland are outside operating scope."
         }
+
 
 
     # Query local database for lead matches across Great Britain
@@ -865,8 +866,9 @@ def public_homepage():
                 const statusEl = document.getElementById('resStatus');
 
                 if (data.is_covered === false) {{
-                    if (selEl) selEl.innerHTML = `<span style="color:#b91c1c; font-weight:700;">⚠️ Territory Notice:</span> Tree Key monitors all English, Scottish, and Welsh local authorities. Coverage for ${{data.authority}} is scheduled for Phase 2.`;
+                    if (selEl) selEl.innerHTML = `<span style="color:#b91c1c; font-weight:700;">⚠️ Operating Scope:</span> Tree Key operates exclusively across Great Britain (England, Scotland, and Wales). ${{data.authority}} is outside operating coverage.`;
                     if (connEl) connEl.innerHTML = `Please select a Great Britain postcode (England, Scotland, or Wales).`;
+
 
                     if (valEl) valEl.innerText = `£0`;
                     if (statusEl) statusEl.innerHTML = `<span style="background:#fef2f2; color:#b91c1c; padding:4px 10px; border-radius:6px; font-weight:700; font-size:12px; border:1px solid #fecaca;">Outside Great Britain Coverage</span>`;
