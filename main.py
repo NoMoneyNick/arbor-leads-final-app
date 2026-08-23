@@ -36,13 +36,42 @@ def health():
     return {"status": "ok", "app": "Vector Data Labs"}
 
 
+UK_CITY_COORDS = {
+    "LONDON": (51.5074, -0.1278, "Greater London Authority", "SW1"),
+    "MANCHESTER": (53.4808, -2.2426, "Manchester City Council", "M1"),
+    "BIRMINGHAM": (52.4862, -1.8904, "Birmingham City Council", "B1"),
+    "LEEDS": (53.8008, -1.5491, "Leeds City Council", "LS1"),
+    "BRISTOL": (51.4545, -2.5879, "Bristol City Council", "BS1"),
+    "SHEFFIELD": (53.3811, -1.4701, "Sheffield City Council", "S1"),
+    "NEWCASTLE": (54.9783, -1.6178, "Newcastle City Council", "NE1"),
+    "LIVERPOOL": (53.4084, -2.9916, "Liverpool City Council", "L1"),
+    "NOTTINGHAM": (52.9548, -1.1581, "Nottingham City Council", "NG1"),
+    "LEICESTER": (52.6369, -1.1398, "Leicester City Council", "LE1"),
+    "SOUTHAMPTON": (50.9097, -1.4044, "Southampton City Council", "SO14"),
+    "PORTSMOUTH": (50.8198, -1.0880, "Portsmouth City Council", "PO1"),
+    "NORWICH": (52.6309, 1.2974, "Norwich City Council", "NR1"),
+    "OXFORD": (51.7520, -1.2577, "Oxford City Council", "OX1"),
+    "CAMBRIDGE": (52.2053, 0.1218, "Cambridge City Council", "CB1"),
+    "BRIGHTON": (50.8225, -0.1372, "Brighton & Hove Council", "BN1"),
+    "READING": (51.4543, -0.9781, "Reading Borough Council", "RG1"),
+    "YORK": (53.9599, -1.0873, "City of York Council", "YO1"),
+    "EXETER": (50.7184, -3.5339, "Exeter City Council", "EX1"),
+    "PLYMOUTH": (50.3755, -4.1427, "Plymouth City Council", "PL1"),
+    "COVENTRY": (52.4068, -1.5197, "Coventry City Council", "CV1"),
+    "HULL": (53.7676, -0.3274, "Hull City Council", "HU1"),
+    "DERBY": (52.9225, -1.4746, "Derby City Council", "DE1"),
+    "STOKE": (53.0027, -2.1794, "Stoke-on-Trent City Council", "ST1"),
+    "BRADFORD": (53.7960, -1.7594, "Bradford Metropolitan Council", "BD1")
+}
+
+
 @app.get("/api/check-postcode")
 @app.get("/check-postcode")
 @app.get("/check-postcode/{postcode}")
 def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = None, lng: Optional[float] = None, radius: int = 15):
     """
     Public postcode radar inspection endpoint.
-    Supports search by Postcode/Outcode or direct Map Click (lat/lng coordinates).
+    Supports search by Postcode/Outcode, UK City name, or direct Map Click (lat/lng coordinates).
     """
     import urllib.request
     import urllib.parse
@@ -70,27 +99,40 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
             display_pc = f"{target_lat:.2f}, {target_lng:.2f}"
             district = "Operating Territory"
             
-    # 2. Handle Typed Postcode / Outcode (e.g. SW1, LS1, M1, BS1, or full SW1A 1AA)
+    # 2. Handle Typed Input (City name OR Postcode/Outcode)
     elif postcode:
-        clean_pc = postcode.strip().upper()
-        display_pc = clean_pc
-        try:
-            # Query endpoint handles full postcodes, outcodes, and partial searches
-            encoded_query = urllib.parse.quote(clean_pc)
-            req = urllib.request.Request(
-                f"https://api.postcodes.io/postcodes?q={encoded_query}",
-                headers={'User-Agent': 'ArborLeads/1.0'}
-            )
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                data = json.loads(resp.read().decode())
-                if data.get("status") == 200 and data.get("result"):
-                    first = data["result"][0]
-                    target_lat = first.get("latitude", target_lat)
-                    target_lng = first.get("longitude", target_lng)
-                    display_pc = first.get("outcode") or clean_pc
-                    district = first.get("admin_district") or f"{display_pc} District Authority"
-        except Exception:
-            district = f"{clean_pc} District Authority"
+        clean_input = postcode.strip().upper()
+        display_pc = clean_input
+        
+        # Check dictionary of UK cities first
+        if clean_input in UK_CITY_COORDS:
+            target_lat, target_lng, district, display_pc = UK_CITY_COORDS[clean_input]
+        else:
+            # Check for city prefix match
+            matched_city = False
+            for city_key, city_val in UK_CITY_COORDS.items():
+                if city_key.startswith(clean_input) or clean_input.startswith(city_key):
+                    target_lat, target_lng, district, display_pc = city_val
+                    matched_city = True
+                    break
+            
+            if not matched_city:
+                try:
+                    encoded_query = urllib.parse.quote(clean_input)
+                    req = urllib.request.Request(
+                        f"https://api.postcodes.io/postcodes?q={encoded_query}",
+                        headers={'User-Agent': 'ArborLeads/1.0'}
+                    )
+                    with urllib.request.urlopen(req, timeout=2.0) as resp:
+                        data = json.loads(resp.read().decode())
+                        if data.get("status") == 200 and data.get("result"):
+                            first = data["result"][0]
+                            target_lat = first.get("latitude", target_lat)
+                            target_lng = first.get("longitude", target_lng)
+                            display_pc = first.get("outcode") or clean_input
+                            district = first.get("admin_district") or f"{display_pc} District Authority"
+                except Exception:
+                    district = f"{clean_input} District Authority"
 
     # Query local database for lead matches
     prefix_alpha = "".join([c for c in display_pc if c.isalpha()])[:3]
@@ -121,6 +163,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
         "est_max_val": f"{max_val:,}",
         "exclusivity_status": "Available (Unclaimed)"
     }
+
 
 
 
@@ -478,16 +521,15 @@ def public_homepage():
                         <span style="font-size:12px; font-weight:600; color:var(--brand-muted); background:#f1f5f9; padding:3px 10px; border-radius:12px;">Public Access — No Account Required</span>
                     </div>
                     
-                    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
-                        <input type="text" id="postcodeInput" placeholder="Enter depot postcode (e.g. LS1, SW1, M4, B1, BS1)" 
+                    <form onsubmit="event.preventDefault(); scanTerritory();" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
+                        <input type="text" id="postcodeInput" placeholder="Enter depot postcode or city (e.g. LS1, SW1, M4, Birmingham, Bristol)" 
                                value="LS1"
-                               style="flex:1; min-width:240px; padding:12px 16px; border:2px solid var(--border-color); border-radius:6px; font-size:15px; font-weight:600; outline:none;"
-                               onkeypress="if(event.key === 'Enter') scanTerritory();">
-                        <button onclick="scanTerritory()" id="scanBtn" 
+                               style="flex:1; min-width:240px; padding:12px 16px; border:2px solid var(--border-color); border-radius:6px; font-size:15px; font-weight:600; outline:none;">
+                        <button type="submit" id="scanBtn" 
                                 style="background:var(--brand-primary); color:white; border:none; padding:12px 24px; border-radius:6px; font-weight:700; font-size:14px; cursor:pointer; transition:background 0.15s;">
                             Inspect Radar
                         </button>
-                    </div>
+                    </form>
 
                     <!-- Distance Filter Buttons -->
                     <div style="display:flex; align-items:center; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
@@ -499,7 +541,7 @@ def public_homepage():
                     </div>
 
                     <!-- Leaflet Interactive Map Container -->
-                    <div id="radarMap" style="height:320px; width:100%; border-radius:8px; border:1px solid #cbd5e1; margin-bottom:18px; z-index:1;"></div>
+                    <div id="radarMap" style="height:340px; width:100%; border-radius:8px; border:1px solid #cbd5e1; margin-bottom:18px; z-index:1; background:#e5e7eb;"></div>
                     
                     <!-- Live Dual-Zone Results Callout -->
                     <div id="radarResult" style="background:#f8fafc; border:1px solid #cbd5e1; border-left:4px solid var(--brand-accent); border-radius:8px; padding:20px;">
@@ -560,8 +602,13 @@ def public_homepage():
 
                 // CLICK ANYWHERE ON MAP TO INSTANTLY MOVE PIN & RECALCULATE LEADS
                 map.on('click', function(e) {{
+                    // Instant Visual Jump on Click
+                    if (depotMarker) depotMarker.setLatLng(e.latlng);
+                    if (radiusCircle) radiusCircle.setLatLng(e.latlng);
                     fetchTerritoryData(null, e.latlng.lat, e.latlng.lng);
                 }});
+
+                setTimeout(() => {{ if (map) map.invalidateSize(); }}, 300);
             }} else {{
                 map.setView([lat, lng], 11);
             }}
@@ -571,7 +618,7 @@ def public_homepage():
             leadMarkers.forEach(m => map.removeLayer(m));
             leadMarkers = [];
 
-            // Add Depot Pin (Non-blocking click)
+            // Add Depot Pin
             depotMarker = L.marker([lat, lng], {{ interactive: false }}).addTo(map);
 
             updateCircle(lat, lng);
@@ -590,7 +637,7 @@ def public_homepage():
                 interactive: false
             }}).addTo(map);
 
-            // Add sample lead markers (interactive: false so clicks pass through)
+            // Add sample lead markers
             leadMarkers.forEach(m => map.removeLayer(m));
             leadMarkers = [];
 
@@ -634,8 +681,10 @@ def public_homepage():
         async function fetchTerritoryData(pc, lat, lng) {{
             const btn = document.getElementById('scanBtn');
             const input = document.getElementById('postcodeInput');
-            btn.innerText = 'Scanning...';
-            btn.disabled = true;
+            if (btn) {{
+                btn.innerText = 'Scanning...';
+                btn.disabled = true;
+            }}
 
             let url = `/api/check-postcode?radius=${{currentRadius}}`;
             if (lat !== undefined && lng !== undefined && lat !== null && lng !== null) {{
@@ -665,8 +714,10 @@ def public_homepage():
             }} catch (err) {{
                 console.error("Territory lookup error:", err);
             }} finally {{
-                btn.innerText = 'Inspect Radar';
-                btn.disabled = false;
+                if (btn) {{
+                    btn.innerText = 'Inspect Radar';
+                    btn.disabled = false;
+                }}
             }}
         }}
 
@@ -681,6 +732,7 @@ def public_homepage():
             fetchTerritoryData('LS1', null, null);
         }});
         </script>
+
 
 
 
