@@ -288,6 +288,31 @@ def verify_cron_secret(secret: str):
         raise HTTPException(status_code=401, detail="Unauthorized.")
 
 
+def verify_admin_or_secret(request: Request, secret: Optional[str] = None):
+    """Allows access via either Basic Auth or ?secret= query parameter."""
+    if secret:
+        try:
+            verify_cron_secret(secret)
+            return True
+        except Exception:
+            pass
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Basic "):
+        import base64
+        try:
+            decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+            u, p = decoded.split(":", 1)
+            DASH_USER = os.getenv("DASHBOARD_USER", "admin").strip()
+            DASH_PASS = os.getenv("DASHBOARD_PASS", "").strip()
+            if DASH_PASS and secrets.compare_digest(u.encode(), DASH_USER.encode()) and secrets.compare_digest(p.encode(), DASH_PASS.encode()):
+                return True
+        except Exception:
+            pass
+    raise HTTPException(status_code=401, detail="Unauthorized.",
+                        headers={"WWW-Authenticate": "Basic"})
+
+
+
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
 # ── Public Landing Page (Enterprise Institutional Architecture) ───────────────
@@ -1000,8 +1025,10 @@ def public_homepage():
 # ── Management Dashboard (Basic Auth Protected at /admin) ────────────────────
 
 @app.get("/admin", response_class=HTMLResponse)
-def admin_dashboard(user: str = Depends(verify_dashboard_auth)):
+def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
+    verify_admin_or_secret(request, secret)
     stats = {"p": 0, "l": 0, "enriched": 0, "partners": [], "leads": []}
+
     try:
         conn = database.get_db_conn(); cur = conn.cursor()
         cur.execute("SELECT count(*) FROM potential_partners"); stats["p"] = cur.fetchone()[0]
@@ -1347,10 +1374,10 @@ def _resolve_city_param(slug: str) -> Optional[str]:
     return city_map.get(clean) or city_map.get(compact)
 
 
-
-
 @app.get("/scan/{city_slug}", response_class=HTMLResponse)
-def scan_city(city_slug: str, user: str = Depends(verify_dashboard_auth)):
+def scan_city(city_slug: str, request: Request, secret: Optional[str] = Query(None)):
+
+    verify_admin_or_secret(request, secret)
     city = _resolve_city_param(city_slug)
     if not city:
         raise HTTPException(status_code=404, detail=f"Region/City '{city_slug}' not configured.")
@@ -1391,12 +1418,13 @@ def cron_trigger_slash(city_slug: str, secret: Optional[str] = Query(None)):
 
 
 
-# ── Research Routes (Basic Auth) ──────────────────────────────────────────────
+# ── Research Routes (Basic Auth & Secret) ──────────────────────────────────────
 
 import threading
 
 @app.get("/research/{city_slug}", response_class=HTMLResponse)
-def research_city(city_slug: str, user: str = Depends(verify_dashboard_auth)):
+def research_city(city_slug: str, request: Request, secret: Optional[str] = Query(None)):
+    verify_admin_or_secret(request, secret)
     city = _resolve_city_param(city_slug)
     if not city:
         raise HTTPException(status_code=404, detail=f"Region/City '{city_slug}' not configured.")
@@ -1411,7 +1439,8 @@ def research_city(city_slug: str, user: str = Depends(verify_dashboard_auth)):
 
 
 @app.get("/populate-2000-partners", response_class=HTMLResponse)
-def populate_2000_partners_view(user: str = Depends(verify_dashboard_auth)):
+def populate_2000_partners_view(request: Request, secret: Optional[str] = Query(None)):
+    verify_admin_or_secret(request, secret)
     threading.Thread(target=research.populate_2000_partners_into_db, daemon=True).start()
     return """<html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; color:#0f172a;">
         <div style="max-width:600px; margin:auto; background:white; padding:30px; border-radius:12px; border:1px solid #e2e8f0; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
@@ -1433,7 +1462,8 @@ def trigger_populate_2000_cron(secret: Optional[str] = Query(None)):
 
 
 @app.get("/research-all", response_class=HTMLResponse)
-def research_all(user: str = Depends(verify_dashboard_auth)):
+def research_all(request: Request, secret: Optional[str] = Query(None)):
+    verify_admin_or_secret(request, secret)
     threading.Thread(target=research.research_all_cities, daemon=True).start()
     return """<html><body style="font-family:sans-serif; padding:40px;">
         <h3>🚀 Nationwide Discovery Started</h3>
@@ -1446,7 +1476,8 @@ def research_all(user: str = Depends(verify_dashboard_auth)):
 
 
 @app.get("/enrich-batch", response_class=HTMLResponse)
-def enrich_batch(user: str = Depends(verify_dashboard_auth)):
+def enrich_batch(request: Request, secret: Optional[str] = Query(None)):
+    verify_admin_or_secret(request, secret)
     count = research.enrich_existing_partners(limit=50)
     return f"""<html><body style="font-family:sans-serif; padding:40px;">
         <h3>⚡ Batch Enrichment Complete</h3>
@@ -1459,7 +1490,8 @@ def enrich_batch(user: str = Depends(verify_dashboard_auth)):
 
 
 @app.get("/enrich-region/{city_slug}", response_class=HTMLResponse)
-def enrich_region(city_slug: str, user: str = Depends(verify_dashboard_auth)):
+def enrich_region(city_slug: str, request: Request, secret: Optional[str] = Query(None)):
+    verify_admin_or_secret(request, secret)
     city = _resolve_city_param(city_slug)
     if not city:
         raise HTTPException(status_code=404, detail=f"Region/City '{city_slug}' not configured.")
@@ -1474,7 +1506,8 @@ def enrich_region(city_slug: str, user: str = Depends(verify_dashboard_auth)):
 
 
 @app.get("/enrich-all", response_class=HTMLResponse)
-def enrich_all(user: str = Depends(verify_dashboard_auth)):
+def enrich_all(request: Request, secret: Optional[str] = Query(None)):
+    verify_admin_or_secret(request, secret)
     threading.Thread(target=research.enrich_existing_partners, kwargs={"limit": 0}, daemon=True).start()
     return """<html><body style="font-family:sans-serif; padding:40px;">
         <p>✅ Enrichment started in background across 8 parallel threads. Check Render logs or refresh admin dashboard for progress.</p>
@@ -1485,12 +1518,8 @@ def enrich_all(user: str = Depends(verify_dashboard_auth)):
 
 
 @app.get("/clean-partners", response_class=HTMLResponse)
-def clean_partners(user: str = Depends(verify_dashboard_auth)):
-    """
-    Retroactively removes non-tree-surgery companies from the partner DB.
-    Applies the two-layer name filter to all existing records.
-    Run once after deploy to clean up historical bad data.
-    """
+def clean_partners(request: Request, secret: Optional[str] = Query(None)):
+    verify_admin_or_secret(request, secret)
     result = research.clean_partner_database()
     if "error" in result:
         return f"""<html><body style="font-family:sans-serif; padding:40px;">
@@ -1510,6 +1539,7 @@ def clean_partners(user: str = Depends(verify_dashboard_auth)):
 
 
 def run_master_daily_pipeline():
+
     """
     4-Stage Daily Automated Ingestion & Quality Sanitization Pipeline:
     1. Council Planning Radar: Scans all 309 local councils across all 9 English regions.
