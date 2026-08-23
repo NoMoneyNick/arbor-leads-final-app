@@ -89,18 +89,22 @@ def get_director_from_ch(company_number: str):
     return None
 
 
-def search_companies_house(query: str, items_per_page: int = 50):
-    """Searches Companies House for LTD companies matching a query."""
+def search_companies_house(query: str, items_per_page: int = 50, start_index: int = 0):
+    """Searches Companies House for LTD companies matching a query with pagination support."""
     if not CH_KEY or not query:
         return []
     try:
         url = "https://api.company-information.service.gov.uk/search/companies"
-        res = requests.get(url, params={"q": query, "items_per_page": items_per_page}, headers=_ch_headers(), timeout=5)
+        params = {"q": query, "items_per_page": items_per_page}
+        if start_index > 0:
+            params["start_index"] = start_index
+        res = requests.get(url, params=params, headers=_ch_headers(), timeout=5)
         if res.status_code == 200:
             return res.json().get("items", [])
     except Exception as e:
-        logger.debug(f"[CH Search] Query '{query}' failed: {e}")
+        logger.debug(f"[CH Search] Query '{query}' (start_index={start_index}) failed: {e}")
     return []
+
 
 
 REQUIRED_TREE_PHRASES = [
@@ -1019,19 +1023,25 @@ def sweep_100_random_contractors(target_count: int = 50) -> dict:
         candidates = []
         seen = set(existing_numbers)
 
-        # Fast parallel search across randomized UK towns — completes in under 1 second
-        all_queries = []
-        for region, towns in SWEEP_TARGETS:
-            for town in towns:
-                for kw in ["tree surgery", "tree surgeon", "tree work"]:
-                    all_queries.append((f"{kw} {town}", region))
+        # Paginated trade queries across nationwide tree surgery categories
+        TRADE_QUERIES = [
+            "tree surgery", "tree surgeon", "tree surgeons", "tree care",
+            "tree services", "arboricultural", "arboriculture", "arborist",
+            "forestry services", "woodland management", "stump grinding", "hedge trimming",
+            "tree work", "tree felling", "tree specialists", "tree management"
+        ]
 
-        random.shuffle(all_queries)
-        selected_queries = all_queries[:60]
+        query_tasks = []
+        for kw in TRADE_QUERIES:
+            for s_idx in [0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500]:
+                query_tasks.append((kw, s_idx))
+
+        random.shuffle(query_tasks)
+        selected_queries = query_tasks[:25]
 
         def fetch_candidates(q_task):
-            query, region = q_task
-            items = search_companies_house(query, items_per_page=25)
+            kw, s_idx = q_task
+            items = search_companies_house(kw, items_per_page=50, start_index=s_idx)
             found = []
             for co in items:
                 cnum = co.get("company_number")
@@ -1043,7 +1053,7 @@ def sweep_100_random_contractors(target_count: int = 50) -> dict:
                 if not _is_valid_tree_company_name(cname):
                     continue
                 addr = co.get("address_snippet", "")
-                assigned = resolve_uk_city(addr, cname, default_city=region)
+                assigned = resolve_uk_city(addr, cname, default_city="UK")
                 found.append((co, cname, cnum, addr, assigned))
             return found
 
@@ -1060,6 +1070,7 @@ def sweep_100_random_contractors(target_count: int = 50) -> dict:
                     break
 
         logger.info(f"[Fast Sweep] Found {len(candidates)} brand new candidates in {time.time() - t_start:.2f}s.")
+
 
         # Enrich in parallel with 20 workers (no per-thread DB overhead)
         def enrich_item(item):
