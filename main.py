@@ -515,16 +515,16 @@ def public_homepage():
         let radiusCircle = null;
         let leadMarkers = [];
 
-        function initMap(lat, lng) {
-            if (map) {
+        function initMap(lat, lng) {{
+            if (map) {{
                 map.setView([lat, lng], 11);
-            } else {
-                map = L.map('radarMap', { scrollWheelZoom: false }).setView([lat, lng], 11);
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            }} else {{
+                map = L.map('radarMap', {{ scrollWheelZoom: false }}).setView([lat, lng], 11);
+                L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
                     maxZoom: 18,
                     attribution: '© OpenStreetMap contributors'
-                }).addTo(map);
-            }
+                }}).addTo(map);
+            }}
 
             if (depotMarker) map.removeLayer(depotMarker);
             if (radiusCircle) map.removeLayer(radiusCircle);
@@ -532,27 +532,27 @@ def public_homepage():
             leadMarkers = [];
 
             // Add Draggable Depot Pin
-            depotMarker = L.marker([lat, lng], { draggable: true }).addTo(map)
+            depotMarker = L.marker([lat, lng], {{ draggable: true }}).addTo(map)
                 .bindPopup("<b>📍 Your Depot Location</b><br>Drag pin to reposition territory radar.").openPopup();
 
-            depotMarker.on('dragend', function(e) {
+            depotMarker.on('dragend', function(e) {{
                 const pos = e.target.getLatLng();
                 updateCircle(pos.lat, pos.lng);
-            });
+            }});
 
             updateCircle(lat, lng);
-        }
+        }}
 
-        function updateCircle(lat, lng) {
+        function updateCircle(lat, lng) {{
             if (radiusCircle) map.removeLayer(radiusCircle);
             const meters = currentRadius * 1609.34;
-            radiusCircle = L.circle([lat, lng], {
+            radiusCircle = L.circle([lat, lng], {{
                 radius: meters,
                 color: '#044332',
                 fillColor: '#059669',
                 fillOpacity: 0.15,
                 weight: 2
-            }).addTo(map);
+            }}).addTo(map);
 
             // Add sample visual lead pings around territory
             leadMarkers.forEach(m => map.removeLayer(m));
@@ -561,40 +561,40 @@ def public_homepage():
             const sampleOffsets = [
                 [0.02, 0.03], [-0.03, 0.02], [0.04, -0.02], [-0.02, -0.04], [0.06, 0.05], [-0.05, 0.07]
             ];
-            sampleOffsets.forEach((offset, idx) => {
+            sampleOffsets.forEach((offset, idx) => {{
                 const mLat = lat + offset[0] * (currentRadius / 15);
                 const mLng = lng + offset[1] * (currentRadius / 15);
-                const m = L.circleMarker([mLat, mLng], {
+                const m = L.circleMarker([mLat, mLng], {{
                     radius: 6,
                     fillColor: '#059669',
                     color: '#ffffff',
                     weight: 2,
                     fillOpacity: 0.9
-                }).addTo(map).bindPopup(`<b>Statutory Protected Tree Notice #${idx + 1}</b><br>Active Local Authority Application`);
+                }}).addTo(map).bindPopup(`<b>Statutory Protected Tree Notice #${{idx + 1}}</b><br>Active Local Authority Application`);
                 leadMarkers.push(m);
-            });
-        }
+            }});
+        }}
 
-        function setRadius(r) {
+        function setRadius(r) {{
             currentRadius = r;
-            [5, 10, 15, 25].forEach(val => {
+            [5, 10, 15, 25].forEach(val => {{
                 const btn = document.getElementById('btn-' + val);
-                if (btn) {
-                    if (val === r) {
+                if (btn) {{
+                    if (val === r) {{
                         btn.style.background = 'var(--brand-primary)';
                         btn.style.color = '#ffffff';
                         btn.style.border = '1px solid var(--brand-primary)';
-                    } else {
+                    }} else {{
                         btn.style.background = '#ffffff';
                         btn.style.color = '#0f172a';
                         btn.style.border = '1px solid #cbd5e1';
-                    }
-                }
-            });
+                    }}
+                }}
+            }});
             scanTerritory();
-        }
+        }}
 
-        async function scanTerritory() {
+        async function scanTerritory() {{
             const input = document.getElementById('postcodeInput');
             const btn = document.getElementById('scanBtn');
             const pc = input.value.trim() || 'LS1';
@@ -602,31 +602,32 @@ def public_homepage():
             btn.innerText = 'Scanning...';
             btn.disabled = true;
 
-            try {
-                const res = await fetch(`/api/check-postcode?postcode=${encodeURIComponent(pc)}&radius=${currentRadius}`);
+            try {{
+                const res = await fetch(`/api/check-postcode?postcode=${{encodeURIComponent(pc)}}&radius=${{currentRadius}}`);
                 const data = await res.json();
 
-                document.getElementById('resLocation').innerText = `📍 ${data.postcode} Radar (${data.authority})`;
-                document.getElementById('resSelectedCount').innerText = `${data.selected_area_leads} leads`;
-                document.getElementById('resSelectedText').innerHTML = `✓ There are <span style="font-size:19px; color:#059669; font-weight:700;">${data.selected_area_leads} leads</span> in the selected area (${data.radius_miles} miles)`;
-                document.getElementById('resConnectedCount').innerText = `${data.connected_area_leads} leads`;
-                document.getElementById('resConnectedText').innerHTML = `+ There are another <span style="color:#0284c7; font-weight:700;">${data.connected_area_leads} leads</span> in connected adjacent council areas`;
-                document.getElementById('resVal').innerText = `£${data.est_min_val} – £${data.est_max_val}`;
+                document.getElementById('resLocation').innerText = `📍 ${{data.postcode}} Radar (${{data.authority}})`;
+                document.getElementById('resSelectedCount').innerText = `${{data.selected_area_leads}} leads`;
+                document.getElementById('resSelectedText').innerHTML = `✓ There are <span style="font-size:19px; color:#059669; font-weight:700;">${{data.selected_area_leads}} leads</span> in the selected area (${{data.radius_miles}} miles)`;
+                document.getElementById('resConnectedCount').innerText = `${{data.connected_area_leads}} leads`;
+                document.getElementById('resConnectedText').innerHTML = `+ There are another <span style="color:#0284c7; font-weight:700;">${{data.connected_area_leads}} leads</span> in connected adjacent council areas`;
+                document.getElementById('resVal').innerText = `£${{data.est_min_val}} – £${{data.est_max_val}}`;
                 
                 initMap(data.lat, data.lng);
-            } catch (err) {
+            }} catch (err) {{
                 console.error("Map radar error:", err);
-            } finally {
+            }} finally {{
                 btn.innerText = 'Inspect Radar';
                 btn.disabled = false;
-            }
-        }
+            }}
+        }}
 
         // Initialize map with default LS1 on window load
-        window.addEventListener('DOMContentLoaded', () => {
+        window.addEventListener('DOMContentLoaded', () => {{
             scanTerritory();
-        });
+        }});
         </script>
+
 
 
 
