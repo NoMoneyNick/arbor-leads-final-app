@@ -1458,7 +1458,15 @@ def populate_2000_partners_view(request: Request, secret: Optional[str] = Query(
     </body></html>"""
 
 
+@app.get("/sweep-100")
+def sweep_100_route(request: Request, secret: Optional[str] = Query(None)):
+    verify_admin_or_secret(request, secret)
+    result = research.sweep_100_random_contractors()
+    return result
+
+
 @app.get("/trigger-populate-2000")
+
 def trigger_populate_2000_cron(secret: Optional[str] = Query(None)):
     verify_cron_secret(secret)
     threading.Thread(target=research.populate_2000_partners_into_db, daemon=True).start()
