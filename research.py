@@ -79,6 +79,57 @@ def get_director_from_ch(company_number: str):
     return None
 
 
+def search_companies_house(query: str, items_per_page: int = 50):
+    """Searches Companies House for LTD companies matching a query."""
+    if not CH_KEY or not query:
+        return []
+    try:
+        url = "https://api.company-information.service.gov.uk/search/companies"
+        res = requests.get(url, params={"q": query, "items_per_page": items_per_page}, headers=_ch_headers(), timeout=5)
+        if res.status_code == 200:
+            return res.json().get("items", [])
+    except Exception as e:
+        logger.debug(f"[CH Search] Query '{query}' failed: {e}")
+    return []
+
+
+REQUIRED_TREE_PHRASES = [
+    "tree surgery", "tree surgeon", "tree surgeons", "tree care",
+    "tree service", "tree services", "tree work", "tree works", "tree felling",
+    "arboricultural", "arboriculture", "arborist", "arborists",
+    "forestry", "woodland management", "woodland services",
+    "stump grinding", "stump removal", "hedge cutting", "hedge trimming"
+]
+
+EXCLUDED_TREE_WORDS = [
+    "breast", "plastic", "cosmetic", "dental", "medical", "clinic",
+    "hospital", "fruit", "olive", "palm", "christmas", "bonsai", "pyo",
+    "surgery centre", "surgical", "ortho", "optic", "laser", "eye", "neck", "spine",
+    "doctor", "health", "physio", "chiropractic", "therapy",
+    "hair", "skin", "beauty", "nail", "tattoo", "piercing", "ink",
+    "estate agent", "letting", "solicitor", "accountant",
+    "restaurant", "café", "cafe", "bakery", "food", "bar", "pub", "coffee",
+    "homes", "housing", "ales", "beer", "brewery", "capital", "investment", "financial",
+    "construction", "rail", "railway", "events", "properties", "property",
+    "logistics", "transport", "security", "cleaning", "plumbing", "electrical", "roofing",
+    "mot", "garage", "auto", "car", "motor", "vehicle", "repairs", "mechanic",
+    "development", "developments", "holdings", "management company", "residents", "flats", "apartments"
+]
+
+def _is_valid_tree_company_name(name: str) -> bool:
+    if not name:
+        return False
+    name_lower = name.lower()
+    has_trade_phrase = any(w in name_lower for w in REQUIRED_TREE_PHRASES)
+    has_isolated_tree = bool(re.search(r'\btree\b', name_lower))
+    if not (has_trade_phrase or has_isolated_tree):
+        return False
+    if any(w in name_lower for w in EXCLUDED_TREE_WORDS):
+        return False
+    return True
+
+
+
 
 import re
 import urllib.parse
