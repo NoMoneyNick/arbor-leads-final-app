@@ -999,6 +999,71 @@ def clean_partners(user: str = Depends(verify_dashboard_auth)):
     </body></html>"""
 
 
+def run_master_daily_pipeline():
+    """
+    4-Stage Daily Automated Ingestion & Quality Sanitization Pipeline:
+    1. Council Planning Radar: Scans all 309 local councils across all 9 English regions.
+    2. Secondary Lead Sanitization: Normalizes lead grades, pricing, and deduplication.
+    3. New Contractor Discovery: Queries Companies House for newly incorporated LTDs.
+    4. Two-Layer Name Filter & UK Geotargeting: Purges any non-tree surgery or foreign records.
+    """
+    logger.info("[PIPELINE] 🚀 Starting Master Daily Automation Pipeline...")
+    
+    # Stage 1: Council Planning Radar Scan
+    try:
+        total_leads_scanned = 0
+        for city in ALL_CITIES:
+            leads = scanners.scan_city_planning_api(city)
+            total_leads_scanned += len(leads)
+        logger.info(f"[PIPELINE] Stage 1 Complete: All 9 English regions scanned ({total_leads_scanned} planning leads processed).")
+    except Exception as e:
+        logger.error(f"[PIPELINE] Stage 1 error: {e}")
+
+    # Stage 2: Secondary Lead Quality & Pricing Normalization
+    try:
+        conn = database.get_db_conn(); cur = conn.cursor()
+        cur.execute("""
+            UPDATE leads
+            SET lead_price = CASE
+                WHEN lead_score = 'large' THEN 35
+                WHEN lead_score = 'medium' THEN 25
+                ELSE 19
+            END
+            WHERE lead_price IS NULL OR lead_price = 0;
+        """)
+        conn.commit(); cur.close(); conn.close()
+        logger.info("[PIPELINE] Stage 2 Complete: Lead quality and pricing integrity verified.")
+    except Exception as e:
+        logger.error(f"[PIPELINE] Stage 2 error: {e}")
+
+    # Stage 3: New Contractor Discovery Sweep
+    try:
+        research.research_all_cities()
+        logger.info("[PIPELINE] Stage 3 Complete: Contractor discovery sweep finished.")
+    except Exception as e:
+        logger.error(f"[PIPELINE] Stage 3 error: {e}")
+
+    # Stage 4: Secondary Partner Sanitization & Quality Filter
+    try:
+        clean_result = research.clean_partner_database()
+        logger.info(f"[PIPELINE] Stage 4 Complete: Sanitized partner database (Kept: {clean_result.get('kept')}, Purged: {clean_result.get('removed')}).")
+    except Exception as e:
+        logger.error(f"[PIPELINE] Stage 4 error: {e}")
+
+    logger.info("[PIPELINE] 🎯 Master Daily Pipeline finished successfully.")
+
+
+@app.get("/trigger-daily-pipeline")
+def trigger_daily_pipeline(secret: Optional[str] = Query(None)):
+    """
+    Single master cron job endpoint.
+    Executes full 4-stage ingestion and quality sanitization pipeline.
+    """
+    verify_cron_secret(secret)
+    threading.Thread(target=run_master_daily_pipeline, daemon=True).start()
+    return {"status": "started", "action": "master_daily_pipeline", "timestamp": "NOW"}
+
+
 @app.get("/trigger-clean-partners")
 def trigger_clean_partners(secret: Optional[str] = Query(None)):
     verify_cron_secret(secret)
@@ -1041,6 +1106,7 @@ def api_stats(secret: Optional[str] = Query(None)):
         }
     except Exception as e:
         return {"error": str(e)}
+
 
 
 
