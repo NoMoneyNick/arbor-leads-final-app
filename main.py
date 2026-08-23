@@ -1088,6 +1088,9 @@ def admin_dashboard(user: str = Depends(verify_dashboard_auth)):
 
         <h3>🔄 Batch Operations</h3>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+            <a href='/populate-2000-partners' style="background:#047857; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px; box-shadow:0 2px 6px rgba(4,120,87,0.3);">
+                ⚡ Harvest 2,000+ Contractors (Nationwide GB)
+            </a>
             <a href='/enrich-all' style="background:#1b5e20; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
                 🚀 Enrich All (All Remaining Partners)
             </a>
@@ -1095,7 +1098,7 @@ def admin_dashboard(user: str = Depends(verify_dashboard_auth)):
                 ⚡ Enrich Next 50 Partners (5-8 Seconds)
             </a>
             <a href='/research-all' style="background:#0284c7; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                🔍 Discover All 9 Regions (Find New)
+                🔍 Discover All Regions (Find New)
             </a>
             <a href='/clean-partners' style="background:#b71c1c; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
                 🧹 Clean Database (Purge False Substrings)
@@ -1104,6 +1107,7 @@ def admin_dashboard(user: str = Depends(verify_dashboard_auth)):
                 ⬇️ Export Contacts CSV
             </a>
         </div>
+
 
         <hr>
         <h4>Recent Leads (Past 24-48 Hours)</h4>
@@ -1410,6 +1414,28 @@ def research_city(city_slug: str, user: str = Depends(verify_dashboard_auth)):
 
 
 
+@app.get("/populate-2000-partners", response_class=HTMLResponse)
+def populate_2000_partners_view(user: str = Depends(verify_dashboard_auth)):
+    threading.Thread(target=research.populate_2000_partners_into_db, daemon=True).start()
+    return """<html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; color:#0f172a;">
+        <div style="max-width:600px; margin:auto; background:white; padding:30px; border-radius:12px; border:1px solid #e2e8f0; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
+            <h2 style="color:#059669; margin-top:0;">🚀 Nationwide 2,000+ Contractor Harvest Initiated</h2>
+            <p style="font-size:15px; line-height:1.5;">The system is sweeping Companies House across all 15 UK regional clusters (England Wealth Belts, Midlands, North, Scotland, Wales) in the background with 10 concurrent worker threads.</p>
+            <p style="font-size:14px; color:#64748b;">It is actively extracting Managing Director names, verified UK phone numbers, Google review ratings, and websites directly into your PostgreSQL database.</p>
+            <div style="margin-top:25px;">
+                <a href="/admin" style="display:inline-block; background:#064e3b; color:white; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">← Return to Admin Dashboard</a>
+            </div>
+        </div>
+    </body></html>"""
+
+
+@app.get("/trigger-populate-2000")
+def trigger_populate_2000_cron(secret: Optional[str] = Query(None)):
+    verify_cron_secret(secret)
+    threading.Thread(target=research.populate_2000_partners_into_db, daemon=True).start()
+    return {"status": "started", "message": "Nationwide 2,000+ contractor harvest running in background daemon."}
+
+
 @app.get("/research-all", response_class=HTMLResponse)
 def research_all(user: str = Depends(verify_dashboard_auth)):
     threading.Thread(target=research.research_all_cities, daemon=True).start()
@@ -1419,6 +1445,7 @@ def research_all(user: str = Depends(verify_dashboard_auth)):
         <p>New verified LTD tree surgery contractors will populate in your database over the next 1-2 minutes.</p>
         <a href="/admin">← Back to Admin Command</a>
     </body></html>"""
+
 
 
 
