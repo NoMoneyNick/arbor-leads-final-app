@@ -1052,8 +1052,9 @@ def sweep_100_random_contractors(target_count: int = 50) -> dict:
             co, name, company_number, addr, assigned_region = item
             md_name = get_director_from_ch(company_number)
             rating, phone, website = get_google_places_info(name, f"{addr} {assigned_region}")
-            email = scrape_email_from_website(website) if website else None
+            email = None
             return (
+
                 name, company_number, co.get("company_status"),
                 addr, assigned_region,
                 co.get("sic_codes", []), md_name, phone, rating,
