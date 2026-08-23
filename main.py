@@ -144,8 +144,16 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
     conn.close()
 
     # Dynamic calculation based on location & radius
-    selected_leads = max(int(direct_leads * (radius / 15.0)), int(radius * 0.4) + 2)
-    connected_leads = max(int(selected_leads * 1.8), 7)
+    area_factor = (radius / 15.0) ** 1.3
+    
+    if direct_leads > 0:
+        selected_leads = max(int(direct_leads * area_factor), int(radius * 0.5) + 1)
+    else:
+        # Dynamic location seed based on coordinates so different locations always have distinct lead counts
+        coord_val = int(abs(target_lat * 13 + target_lng * 17) * 10) % 35 + 10
+        selected_leads = max(int(coord_val * area_factor), int(radius * 0.4) + 1)
+
+    connected_leads = max(int(selected_leads * 1.6) + int(radius * 0.3), 6)
     
     min_val = selected_leads * 450
     max_val = selected_leads * 1450
@@ -163,6 +171,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
         "est_max_val": f"{max_val:,}",
         "exclusivity_status": "Available (Unclaimed)"
     }
+
 
 
 
@@ -602,7 +611,8 @@ def public_homepage():
 
                 // CLICK ANYWHERE ON MAP TO INSTANTLY MOVE PIN & RECALCULATE LEADS
                 map.on('click', function(e) {{
-                    // Instant Visual Jump on Click
+                    currentLat = e.latlng.lat;
+                    currentLng = e.latlng.lng;
                     if (depotMarker) depotMarker.setLatLng(e.latlng);
                     if (radiusCircle) radiusCircle.setLatLng(e.latlng);
                     fetchTerritoryData(null, e.latlng.lat, e.latlng.lng);
@@ -613,13 +623,11 @@ def public_homepage():
                 map.setView([lat, lng], 11);
             }}
 
-            if (depotMarker) map.removeLayer(depotMarker);
-            if (radiusCircle) map.removeLayer(radiusCircle);
-            leadMarkers.forEach(m => map.removeLayer(m));
-            leadMarkers = [];
-
-            // Add Depot Pin
-            depotMarker = L.marker([lat, lng], {{ interactive: false }}).addTo(map);
+            if (depotMarker) {{
+                depotMarker.setLatLng([lat, lng]);
+            }} else {{
+                depotMarker = L.marker([lat, lng], {{ interactive: false }}).addTo(map);
+            }}
 
             updateCircle(lat, lng);
         }}
@@ -691,7 +699,7 @@ def public_homepage():
                 url += `&lat=${{lat}}&lng=${{lng}}`;
             }} else if (pc) {{
                 url += `&postcode=${{encodeURIComponent(pc)}}`;
-            }} else if (input.value.trim()) {{
+            }} else if (input && input.value.trim()) {{
                 url += `&postcode=${{encodeURIComponent(input.value.trim())}}`;
             }}
 
@@ -699,16 +707,24 @@ def public_homepage():
                 const res = await fetch(url);
                 const data = await res.json();
 
-                if (data.postcode && !data.postcode.includes(',')) {{
+                if (data.postcode && input && !data.postcode.includes(',')) {{
                     input.value = data.postcode;
                 }}
 
-                document.getElementById('resLocation').innerText = `📍 ${{data.postcode}} Radar (${{data.authority}})`;
-                document.getElementById('resSelectedCount').innerText = `${{data.selected_area_leads}} leads`;
-                document.getElementById('resSelectedText').innerHTML = `✓ There are <span style="font-size:19px; color:#059669; font-weight:700;">${{data.selected_area_leads}} leads</span> in the selected area (${{data.radius_miles}} miles)`;
-                document.getElementById('resConnectedCount').innerText = `${{data.connected_area_leads}} leads`;
-                document.getElementById('resConnectedText').innerHTML = `+ There are another <span style="color:#0284c7; font-weight:700;">${{data.connected_area_leads}} leads</span> in connected adjacent council areas`;
-                document.getElementById('resVal').innerText = `£${{data.est_min_val}} – £${{data.est_max_val}}`;
+                currentLat = data.lat;
+                currentLng = data.lng;
+
+                const locEl = document.getElementById('resLocation');
+                if (locEl) locEl.innerText = `📍 ${{data.postcode}} Radar (${{data.authority}})`;
+
+                const selEl = document.getElementById('resSelectedText');
+                if (selEl) selEl.innerHTML = `✓ There are <span style="font-size:19px; color:#059669; font-weight:700;">${{data.selected_area_leads}} leads</span> in the selected area (${{data.radius_miles}} miles)`;
+
+                const connEl = document.getElementById('resConnectedText');
+                if (connEl) connEl.innerHTML = `+ There are another <span style="color:#0284c7; font-weight:700;">${{data.connected_area_leads}} leads</span> in connected adjacent council areas`;
+
+                const valEl = document.getElementById('resVal');
+                if (valEl) valEl.innerText = `£${{data.est_min_val}} – £${{data.est_max_val}}`;
 
                 initMap(data.lat, data.lng, data.postcode);
             }} catch (err) {{
@@ -723,7 +739,7 @@ def public_homepage():
 
         function scanTerritory() {{
             const input = document.getElementById('postcodeInput');
-            const pc = input.value.trim() || 'LS1';
+            const pc = (input ? input.value.trim() : '') || 'LS1';
             fetchTerritoryData(pc, null, null);
         }}
 
@@ -732,6 +748,7 @@ def public_homepage():
             fetchTerritoryData('LS1', null, null);
         }});
         </script>
+
 
 
 
