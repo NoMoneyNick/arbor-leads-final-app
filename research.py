@@ -743,8 +743,10 @@ def clean_partner_database():
         all_partners = cur.fetchall()
         logger.info(f"[Cleanup] {len(all_partners)} partners to review.")
 
-        removed = 0
-        kept = 0
+        from psycopg2.extras import execute_batch
+
+        delete_ids = []
+        update_rows = []
         updated_cities = 0
 
         for (pid, name, addr, current_city, raw_phone, raw_website, raw_email) in all_partners:
@@ -759,9 +761,7 @@ def clean_partner_database():
             has_excluded = any(w in name_lower for w in EXCLUDED_NAME_WORDS)
 
             if not has_required or has_excluded:
-                cur.execute("DELETE FROM potential_partners WHERE id = %s", (pid,))
-                logger.info(f"[Cleanup] REMOVED: {name} (has_required={has_required}, has_excluded={has_excluded})")
-                removed += 1
+                delete_ids.append((pid,))
             else:
                 # Sanitize phone numbers to strictly UK
                 valid_phone = _is_valid_uk_phone(raw_phone)
@@ -774,21 +774,29 @@ def clean_partner_database():
 
                 # Accurate real city resolution from postcode and address
                 real_city = resolve_uk_city(addr, name, default_city=current_city or "UK")
-                
-                cur.execute("""
-                    UPDATE potential_partners
-                    SET target_city = %s, phone_number = %s, website = %s, email = %s
-                    WHERE id = %s
-                """, (real_city, valid_phone, cleaned_website, cleaned_email, pid))
-
+                update_rows.append((real_city, valid_phone, cleaned_website, cleaned_email, pid))
                 if real_city != current_city:
                     updated_cities += 1
-                kept += 1
+
+        if delete_ids:
+            execute_batch(cur, "DELETE FROM potential_partners WHERE id = %s", delete_ids, page_size=100)
+            logger.info(f"[Cleanup] Batch deleted {len(delete_ids)} non-tree companies.")
+
+        if update_rows:
+            execute_batch(cur, """
+                UPDATE potential_partners
+                SET target_city = %s, phone_number = %s, website = %s, email = %s
+                WHERE id = %s
+            """, update_rows, page_size=100)
+            logger.info(f"[Cleanup] Batch sanitized {len(update_rows)} verified partners.")
 
         conn.commit()
+        kept = len(update_rows)
+        removed = len(delete_ids)
 
         cur.close()
         conn.close()
+
         logger.info(f"[Cleanup] Complete. Kept: {kept} | Removed: {removed} | Cities Re-assigned: {updated_cities}")
         return {"kept": kept, "removed": removed, "updated_cities": updated_cities}
 
