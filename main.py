@@ -63,8 +63,20 @@ UK_CITY_COORDS = {
     "HULL": (53.7676, -0.3274, "Hull City Council", "HU1"),
     "DERBY": (52.9225, -1.4746, "Derby City Council", "DE1"),
     "STOKE": (53.0027, -2.1794, "Stoke-on-Trent City Council", "ST1"),
-    "BRADFORD": (53.7960, -1.7594, "Bradford Metropolitan Council", "BD1")
+    "BRADFORD": (53.7960, -1.7594, "Bradford Metropolitan Council", "BD1"),
+    "EDINBURGH": (55.9533, -3.1883, "City of Edinburgh Council", "EH1"),
+    "GLASGOW": (55.8642, -4.2518, "Glasgow City Council", "G1"),
+    "ABERDEEN": (57.1497, -2.0943, "Aberdeen City Council", "AB10"),
+    "DUNDEE": (56.4620, -2.9707, "Dundee City Council", "DD1"),
+    "INVERNESS": (57.4778, -4.2247, "Highland Council", "IV1"),
+    "CARDIFF": (51.4816, -3.1791, "Cardiff Council", "CF10"),
+    "SWANSEA": (51.6214, -3.9436, "City and County of Swansea", "SA1"),
+    "NEWPORT": (51.5842, -2.9977, "Newport City Council", "NP20"),
+    "WREXHAM": (53.0430, -2.9925, "Wrexham County Borough", "LL11"),
+    "TRURO": (50.2632, -5.0510, "Cornwall Council", "TR1"),
+    "CARLISLE": (54.8925, -2.9329, "Cumberland Council", "CA1")
 }
+
 
 
 @app.get("/api/check-postcode")
@@ -170,41 +182,35 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
                             district = f"{clean_input} District Authority"
 
 
-    # Enforce England-Only Validation (ArborLeads covers all 309 English LPAs)
-    is_england = True
-    non_england_region = None
+    # Enforce Great Britain Coverage (ArborLeads covers England, Scotland, and Wales)
+    is_covered = True
+    uncovered_region = None
 
-    if country_name.lower() in ["scotland", "wales", "northern ireland", "republic of ireland"]:
-        is_england = False
-        non_england_region = country_name
-    elif target_lat > 55.78:
-        is_england = False
-        non_england_region = "Scotland"
-    elif (51.3 < target_lat < 53.45) and (target_lng < -2.95 if target_lat > 52.2 else target_lng < -2.65):
-        is_england = False
-        non_england_region = "Wales"
-    elif target_lng < -5.3:
-        is_england = False
-        non_england_region = "Northern Ireland / Ireland"
+    if country_name.lower() in ["northern ireland", "republic of ireland"]:
+        is_covered = False
+        uncovered_region = "Northern Ireland / Ireland"
+    elif target_lng < -5.8 and target_lat < 55.4:  # Irish Sea / Ireland
+        is_covered = False
+        uncovered_region = "Northern Ireland / Ireland"
 
-    if not is_england:
+    if not is_covered:
         return {
             "postcode": display_pc,
-            "authority": f"{district} ({non_england_region})",
+            "authority": f"{district} ({uncovered_region})",
             "lat": target_lat,
             "lng": target_lng,
             "radius_miles": radius,
-            "is_england": False,
+            "is_covered": False,
             "selected_area_leads": 0,
             "connected_area_leads": 0,
             "total_leads_in_scope": 0,
             "est_min_val": "0",
             "est_max_val": "0",
-            "exclusivity_status": "Outside Coverage (England LPAs Only)",
-            "message": f"ArborLeads monitors all 309 English Local Planning Authorities. {non_england_region} coverage is scheduled for Phase 2."
+            "exclusivity_status": "Outside Great Britain Coverage",
+            "message": f"ArborLeads monitors all 309 English Local Planning Authorities, all 32 Scottish Councils, and all 22 Welsh Councils. {uncovered_region} coverage is scheduled for Phase 2."
         }
 
-    # Query local database for lead matches in England
+    # Query local database for lead matches across Great Britain
     prefix_alpha = "".join([c for c in display_pc if c.isalpha()])[:3]
     conn = database.get_db_conn()
     cur = conn.cursor()
@@ -212,6 +218,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
     direct_leads = cur.fetchone()[0]
     cur.close()
     conn.close()
+
 
     # Continuous spatial micro-density distribution calculation
     area_factor = (radius / 15.0) ** 1.35
@@ -245,6 +252,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
         "lat": target_lat,
         "lng": target_lng,
         "radius_miles": radius,
+        "is_covered": True,
         "is_england": True,
         "selected_area_leads": selected_leads,
         "connected_area_leads": connected_leads,
@@ -253,6 +261,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
         "est_max_val": f"{max_val:,}",
         "exclusivity_status": "Available (Unclaimed)"
     }
+
 
 
 
@@ -712,12 +721,14 @@ def public_homepage():
             currentLng = lng;
 
             if (!map) {{
-                // Default zoom level 6 centered over England
-                map = L.map('radarMap', {{ scrollWheelZoom: false }}).setView([52.4862, -1.8904], 6);
+                // Default zoom level 6 centered over Great Britain
+                map = L.map('radarMap', {{ scrollWheelZoom: false }}).setView([54.5, -2.5], 6);
                 L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
                     maxZoom: 18,
                     attribution: '© OpenStreetMap contributors'
                 }}).addTo(map);
+
+
 
                 // CLICK ANYWHERE ON MAP TO INSTANTLY MOVE PIN (NO FORCED ZOOM)
                 map.on('click', function(e) {{
@@ -834,11 +845,11 @@ def public_homepage():
                 const valEl = document.getElementById('resVal');
                 const statusEl = document.getElementById('resStatus');
 
-                if (data.is_england === false) {{
-                    if (selEl) selEl.innerHTML = `<span style="color:#b91c1c; font-weight:700;">⚠️ Non-English Territory:</span> ArborLeads monitors all 309 English Local Planning Authorities. Coverage for ${{data.authority}} is scheduled for Phase 2.`;
-                    if (connEl) connEl.innerHTML = `Please select an English postcode or click within England.`;
+                if (data.is_covered === false) {{
+                    if (selEl) selEl.innerHTML = `<span style="color:#b91c1c; font-weight:700;">⚠️ Territory Notice:</span> ArborLeads monitors all English, Scottish, and Welsh local authorities. Coverage for ${{data.authority}} is scheduled for Phase 2.`;
+                    if (connEl) connEl.innerHTML = `Please select a Great Britain postcode (England, Scotland, or Wales).`;
                     if (valEl) valEl.innerText = `£0`;
-                    if (statusEl) statusEl.innerHTML = `<span style="background:#fef2f2; color:#b91c1c; padding:4px 10px; border-radius:6px; font-weight:700; font-size:12px; border:1px solid #fecaca;">Outside English Coverage</span>`;
+                    if (statusEl) statusEl.innerHTML = `<span style="background:#fef2f2; color:#b91c1c; padding:4px 10px; border-radius:6px; font-weight:700; font-size:12px; border:1px solid #fecaca;">Outside Great Britain Coverage</span>`;
                 }} else {{
                     if (selEl) selEl.innerHTML = `✓ There are <span style="font-size:19px; color:#059669; font-weight:700;">${{data.selected_area_leads}} leads</span> in the selected area (${{data.radius_miles}} miles)`;
                     if (connEl) connEl.innerHTML = `+ There are another <span style="color:#0284c7; font-weight:700;">${{data.connected_area_leads}} leads</span> in connected adjacent council areas`;
@@ -869,14 +880,6 @@ def public_homepage():
         }});
         </script>
 
-
-
-
-
-
-
-
-
         <section class="section" id="features">
             <div class="container">
                 <div class="section-header">
@@ -894,8 +897,8 @@ def public_homepage():
                         <p>Applications under Tree Preservation Orders and Section 211 notices represent verified property owners with mandatory requirements for certified trade execution upon approval.</p>
                     </div>
                     <div class="feature-card">
-                        <h3>Exhaustive Authority Coverage</h3>
-                        <p>Continuous monitoring across every English district, borough, and unitary authority, covering Greater London, the Home Counties, the Midlands, the North, and the South West.</p>
+                        <h3>Exhaustive Nationwide Coverage</h3>
+                        <p>Continuous monitoring across all 309 English local planning authorities, all 32 Scottish councils, and all 22 Welsh unitary authorities.</p>
                     </div>
                 </div>
             </div>
@@ -905,8 +908,9 @@ def public_homepage():
             <div class="container">
                 <div class="section-header">
                     <h2>Live Statutory Register Sample</h2>
-                    <p>Real-time sample of tree works submissions processed across English Local Planning Authorities over the preceding 24–48 hours.</p>
+                    <p>Real-time sample of tree works submissions processed across UK Local Planning Authorities over the preceding 24–48 hours.</p>
                 </div>
+
 
                 <div class="register-card">
                     <div class="register-header">
