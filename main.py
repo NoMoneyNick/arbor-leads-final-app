@@ -558,12 +558,12 @@ def public_homepage():
                     attribution: '© OpenStreetMap contributors'
                 }}).addTo(map);
 
-                // CLICK ANYWHERE ON MAP TO REPOSITION PIN & RECALCULATE LEADS
+                // CLICK ANYWHERE ON MAP TO INSTANTLY MOVE PIN & RECALCULATE LEADS
                 map.on('click', function(e) {{
                     fetchTerritoryData(null, e.latlng.lat, e.latlng.lng);
                 }});
             }} else {{
-                map.panTo([lat, lng]);
+                map.setView([lat, lng], 11);
             }}
 
             if (depotMarker) map.removeLayer(depotMarker);
@@ -571,9 +571,8 @@ def public_homepage():
             leadMarkers.forEach(m => map.removeLayer(m));
             leadMarkers = [];
 
-            // Add Depot Pin
-            depotMarker = L.marker([lat, lng]).addTo(map)
-                .bindPopup(`<b>📍 ${{label || 'Depot Location'}}</b><br>Click anywhere on the map to move pin.`).openPopup();
+            // Add Depot Pin (Non-blocking click)
+            depotMarker = L.marker([lat, lng], {{ interactive: false }}).addTo(map);
 
             updateCircle(lat, lng);
         }}
@@ -581,15 +580,17 @@ def public_homepage():
         function updateCircle(lat, lng) {{
             if (radiusCircle) map.removeLayer(radiusCircle);
             const meters = currentRadius * 1609.34;
+            // interactive: false ensures clicks pass directly through to map
             radiusCircle = L.circle([lat, lng], {{
                 radius: meters,
                 color: '#044332',
                 fillColor: '#059669',
                 fillOpacity: 0.15,
-                weight: 2
+                weight: 2,
+                interactive: false
             }}).addTo(map);
 
-            // Add visual sample lead markers inside radius
+            // Add sample lead markers (interactive: false so clicks pass through)
             leadMarkers.forEach(m => map.removeLayer(m));
             leadMarkers = [];
 
@@ -600,12 +601,13 @@ def public_homepage():
                 const mLat = lat + offset[0] * (currentRadius / 15);
                 const mLng = lng + offset[1] * (currentRadius / 15);
                 const m = L.circleMarker([mLat, mLng], {{
-                    radius: 6,
+                    radius: 5,
                     fillColor: '#059669',
                     color: '#ffffff',
                     weight: 2,
-                    fillOpacity: 0.9
-                }}).addTo(map).bindPopup(`<b>Protected Tree Application #${{idx + 1}}</b><br>Active Local Authority Notice`);
+                    fillOpacity: 0.9,
+                    interactive: false
+                }}).addTo(map);
                 leadMarkers.push(m);
             }});
         }}
@@ -648,7 +650,7 @@ def public_homepage():
                 const res = await fetch(url);
                 const data = await res.json();
 
-                if (data.postcode && data.postcode !== 'Selected Pin') {{
+                if (data.postcode && !data.postcode.includes(',')) {{
                     input.value = data.postcode;
                 }}
 
@@ -671,14 +673,15 @@ def public_homepage():
         function scanTerritory() {{
             const input = document.getElementById('postcodeInput');
             const pc = input.value.trim() || 'LS1';
-            fetchTerritoryData(pc);
+            fetchTerritoryData(pc, null, null);
         }}
 
         // Initialize map with default LS1 on window load
         window.addEventListener('DOMContentLoaded', () => {{
-            fetchTerritoryData('LS1');
+            fetchTerritoryData('LS1', null, null);
         }});
         </script>
+
 
 
 
