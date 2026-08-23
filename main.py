@@ -62,7 +62,7 @@ def verify_cron_secret(secret: str):
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
-# ── Public Landing Page (No Auth) ──────────────────────────────────────────
+# ── Public Landing Page (Enterprise Institutional Architecture) ───────────────
 
 @app.get("/", response_class=HTMLResponse)
 def public_homepage():
@@ -71,176 +71,458 @@ def public_homepage():
         conn = database.get_db_conn(); cur = conn.cursor()
         cur.execute("SELECT count(*) FROM potential_partners"); stats["p"] = cur.fetchone()[0]
         cur.execute("SELECT count(*) FROM leads"); stats["l"] = cur.fetchone()[0]
-        cur.execute("""SELECT address, summary, lead_score, lead_price, council_source, discovered_at
-                       FROM leads ORDER BY discovered_at DESC LIMIT 6""")
+        cur.execute("""SELECT address, summary, lead_score, lead_price, council_source, reference, discovered_at
+                       FROM leads ORDER BY discovered_at DESC LIMIT 5""")
         stats["sample_leads"] = cur.fetchall()
         cur.close(); conn.close()
     except Exception as e:
         logger.error(f"[HOMEPAGE] DB error: {e}")
 
-    import datetime
-    now = datetime.datetime.now(datetime.timezone.utc)
-
-    def get_freshness_badge(discovered_at):
-        if not discovered_at:
-            return "<span style='background:#e8f5e9; color:#2e7d32; padding:3px 8px; border-radius:12px; font-size:12px; font-weight:bold;'>🔥 FRESH</span>"
-        try:
-            delta_days = (now - discovered_at).days
-            if delta_days <= 14:
-                return f"<span style='background:#e8f5e9; color:#2e7d32; padding:3px 8px; border-radius:12px; font-size:12px; font-weight:bold;'>🔥 FRESH ({delta_days}d ago)</span>"
-            elif delta_days <= 45:
-                return f"<span style='background:#fff8e1; color:#f57f17; padding:3px 8px; border-radius:12px; font-size:12px; font-weight:bold;'>⏳ IN CONSULTATION</span>"
-            elif delta_days <= 90:
-                return f"<span style='background:#e1f5fe; color:#0277bd; padding:3px 8px; border-radius:12px; font-size:12px; font-weight:bold;'>✅ GRANTED</span>"
-            else:
-                return f"<span style='background:#f5f5f5; color:#757575; padding:3px 8px; border-radius:12px; font-size:12px;'>📦 ARCHIVED</span>"
-        except Exception:
-            return "<span style='background:#e8f5e9; color:#2e7d32; padding:3px 8px; border-radius:12px; font-size:12px; font-weight:bold;'>🔥 FRESH</span>"
-
-    SCORE_EMOJI = {"small": "🟡", "medium": "🟠", "large": "🔴"}
-    lead_cards = "".join([
-        f"""<div style='background:white; border:1px solid #e0e0e0; border-radius:12px; padding:16px; margin-bottom:12px; box-shadow:0 2px 4px rgba(0,0,0,0.03);'>
-            <div style='display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;'>
-                <b style='font-size:15px; color:#1b5e20;'>📍 {l[0]}</b>
-                {get_freshness_badge(l[5])}
-            </div>
-            <p style='color:#444; font-size:13px; margin:0 0 8px 0; line-height:1.4;'>{l[1][:120]}...</p>
-            <div style='display:flex; justify-content:space-between; font-size:12px; color:#666;'>
-                <span>Council: <b>{l[4]}</b></span>
-                <span style='font-weight:bold; color:#2e7d32;'>Est. Job Value: £{l[3]*20}–£{l[3]*50}</span>
-            </div>
-        </div>"""
+    lead_rows = "".join([
+        f"""<tr style='border-bottom:1px solid #edf2f7;'>
+            <td style='padding:14px 16px; font-weight:600; color:#0f172a; font-size:13px;'>
+                {l[5] or 'TPO-STATUTORY'}<br>
+                <span style='color:#64748b; font-weight:normal; font-size:12px;'>{l[4]}</span>
+            </td>
+            <td style='padding:14px 16px; color:#334155; font-size:13px; max-width:320px;'>
+                <b>{l[0]}</b><br>
+                <span style='color:#64748b; font-size:12px;'>{l[1][:110]}...</span>
+            </td>
+            <td style='padding:14px 16px; text-align:right;'>
+                <span style='background:#ecfdf5; color:#047857; padding:4px 10px; border-radius:6px; font-size:12px; font-weight:600; border:1px solid #a7f3d0;'>
+                    Active Consultation
+                </span>
+            </td>
+        </tr>"""
         for l in stats["sample_leads"]
-    ]) or "<p style='color:#777;'>Connecting to real-time council radar...</p>"
+    ]) or "<tr><td colspan='3' style='padding:20px; text-align:center; color:#94a3b8;'>Synchronising statutory planning feed...</td></tr>"
 
     return f"""
     <!DOCTYPE html>
-    <html lang="en">
+    <html lang="en-GB">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>ArborLeads — UK Tree Surgery Planning Radar</title>
+        <title>ArborLeads — Statutory Planning Intelligence for UK Arborists</title>
         <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin:0; padding:0; background:#f8fafc; color:#1e293b; }}
-            .container {{ max-width: 1080px; margin: auto; padding: 0 20px; }}
-            header {{ background: #064e3b; color: white; padding: 60px 0; text-align: center; }}
-            .badge {{ background: #10b981; color: #064e3b; padding: 6px 14px; border-radius: 20px; font-weight: 700; font-size: 13px; display: inline-block; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.5px; }}
-            h1 {{ font-size: 40px; margin: 0 0 16px 0; font-weight: 800; line-height: 1.2; }}
-            .subtitle {{ font-size: 19px; color: #a7f3d0; max-width: 700px; margin: 0 auto 30px auto; line-height: 1.5; }}
-            .btn-hero {{ background: #10b981; color: white; padding: 16px 36px; border-radius: 10px; font-size: 18px; font-weight: bold; text-decoration: none; display: inline-block; box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.4); }}
-            .btn-hero:hover {{ background: #059669; }}
-            .section {{ padding: 60px 0; }}
-            .grid-3 {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }}
-            .grid-5 {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; }}
-            .card {{ background: white; border-radius: 16px; padding: 28px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }}
-            .card-pricing {{ border: 2px solid #e2e8f0; text-align: center; position: relative; }}
-            .card-featured {{ border: 2px solid #10b981; transform: scale(1.03); background: #f0fdf4; }}
-            .price {{ font-size: 32px; font-weight: 800; color: #0f172a; margin: 12px 0; }}
-            .btn-buy {{ display: block; background: #064e3b; color: white; padding: 12px 20px; border-radius: 8px; font-weight: bold; text-decoration: none; margin-top: 20px; }}
-            .btn-buy:hover {{ background: #047857; }}
-            footer {{ background: #0f172a; color: #94a3b8; padding: 40px 0; text-align: center; font-size: 13px; }}
-            footer a {{ color: #cbd5e1; text-decoration: none; }}
+            :root {{
+                --brand-primary: #044332;
+                --brand-accent: #059669;
+                --brand-dark: #0f172a;
+                --brand-muted: #64748b;
+                --bg-light: #f8fafc;
+                --border-color: #e2e8f0;
+            }}
+            * {{ box-sizing: border-box; }}
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+                background-color: var(--bg-light);
+                color: var(--brand-dark);
+                line-height: 1.6;
+                -webkit-font-smoothing: antialiased;
+            }}
+            .container {{ max-width: 1140px; margin: 0 auto; padding: 0 24px; }}
+            
+            /* Navbar */
+            nav {{
+                background: #ffffff;
+                border-bottom: 1px solid var(--border-color);
+                padding: 16px 0;
+            }}
+            .nav-wrapper {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }}
+            .nav-logo {{
+                font-size: 19px;
+                font-weight: 700;
+                color: var(--brand-primary);
+                letter-spacing: -0.5px;
+                text-decoration: none;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }}
+            .nav-logo span {{
+                color: var(--brand-muted);
+                font-size: 13px;
+                font-weight: 500;
+                border-left: 1px solid var(--border-color);
+                padding-left: 8px;
+            }}
+            .nav-links a {{
+                color: var(--brand-muted);
+                text-decoration: none;
+                font-size: 14px;
+                font-weight: 500;
+                margin-left: 24px;
+                transition: color 0.15s;
+            }}
+            .nav-links a:hover {{ color: var(--brand-primary); }}
+            .nav-btn {{
+                background: var(--brand-primary);
+                color: #ffffff !important;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: 600;
+            }}
+            .nav-btn:hover {{ background: #032e23; }}
+
+            /* Hero Section */
+            .hero {{
+                background: #ffffff;
+                border-bottom: 1px solid var(--border-color);
+                padding: 72px 0 80px 0;
+            }}
+            .hero-badge {{
+                display: inline-block;
+                background: #ecfdf5;
+                color: var(--brand-primary);
+                border: 1px solid #a7f3d0;
+                padding: 4px 12px;
+                border-radius: 20px;
+                font-size: 12px;
+                font-weight: 600;
+                margin-bottom: 20px;
+                letter-spacing: 0.3px;
+                text-transform: uppercase;
+            }}
+            .hero h1 {{
+                font-size: 42px;
+                font-weight: 800;
+                color: var(--brand-dark);
+                line-height: 1.2;
+                letter-spacing: -1px;
+                max-width: 860px;
+                margin: 0 0 20px 0;
+            }}
+            .hero p.lead {{
+                font-size: 18px;
+                color: var(--brand-muted);
+                max-width: 760px;
+                margin: 0 0 32px 0;
+                line-height: 1.6;
+            }}
+            .cta-group {{ display: flex; gap: 16px; align-items: center; }}
+            .btn-primary {{
+                background: var(--brand-primary);
+                color: #ffffff;
+                padding: 14px 28px;
+                border-radius: 6px;
+                font-size: 15px;
+                font-weight: 600;
+                text-decoration: none;
+                display: inline-block;
+                transition: background 0.15s;
+            }}
+            .btn-primary:hover {{ background: #032e23; }}
+            .btn-secondary {{
+                background: #ffffff;
+                color: var(--brand-dark);
+                border: 1px solid var(--border-color);
+                padding: 14px 24px;
+                border-radius: 6px;
+                font-size: 15px;
+                font-weight: 600;
+                text-decoration: none;
+                display: inline-block;
+            }}
+            .btn-secondary:hover {{ background: #f8fafc; }}
+
+            /* Section & Grid */
+            .section {{ padding: 64px 0; }}
+            .section-header {{ text-align: center; max-width: 680px; margin: 0 auto 48px auto; }}
+            .section-header h2 {{ font-size: 28px; font-weight: 800; color: var(--brand-dark); margin: 0 0 12px 0; letter-spacing: -0.5px; }}
+            .section-header p {{ color: var(--brand-muted); font-size: 16px; margin: 0; }}
+
+            .grid-3 {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }}
+            .feature-card {{
+                background: #ffffff;
+                border: 1px solid var(--border-color);
+                border-radius: 8px;
+                padding: 28px;
+            }}
+            .feature-card h3 {{ font-size: 17px; font-weight: 700; color: var(--brand-dark); margin: 0 0 10px 0; }}
+            .feature-card p {{ font-size: 14px; color: var(--brand-muted); margin: 0; line-height: 1.6; }}
+
+            /* Table Register */
+            .register-card {{
+                background: #ffffff;
+                border: 1px solid var(--border-color);
+                border-radius: 8px;
+                overflow: hidden;
+            }}
+            .register-header {{
+                padding: 16px 20px;
+                background: #f8fafc;
+                border-bottom: 1px solid var(--border-color);
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }}
+            .register-header h3 {{ margin: 0; font-size: 14px; font-weight: 700; color: var(--brand-dark); }}
+            .register-table {{ width: 100%; border-collapse: collapse; text-align: left; }}
+            .register-table th {{
+                padding: 10px 16px;
+                font-size: 12px;
+                font-weight: 600;
+                color: var(--brand-muted);
+                text-transform: uppercase;
+                background: #fdfdfd;
+                border-bottom: 1px solid var(--border-color);
+            }}
+
+            /* Pricing */
+            .pricing-grid {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }}
+            .pricing-card {{
+                background: #ffffff;
+                border: 1px solid var(--border-color);
+                border-radius: 8px;
+                padding: 24px 20px;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+                position: relative;
+            }}
+            .pricing-card.featured {{
+                border: 2px solid var(--brand-primary);
+                box-shadow: 0 4px 12px rgba(4, 67, 50, 0.08);
+            }}
+            .pricing-card h4 {{ font-size: 15px; font-weight: 700; margin: 0 0 6px 0; color: var(--brand-dark); }}
+            .pricing-card .price {{ font-size: 26px; font-weight: 800; color: var(--brand-dark); margin: 12px 0 6px 0; }}
+            .pricing-card .price-term {{ font-size: 12px; color: var(--brand-muted); font-weight: 500; }}
+            .pricing-card .desc {{ font-size: 12px; color: var(--brand-muted); min-height: 54px; margin: 12px 0; line-height: 1.5; }}
+            .btn-tier {{
+                background: #f1f5f9;
+                color: var(--brand-dark);
+                text-decoration: none;
+                text-align: center;
+                padding: 10px;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 600;
+                display: block;
+                border: 1px solid #cbd5e1;
+            }}
+            .btn-tier:hover {{ background: #e2e8f0; }}
+            .pricing-card.featured .btn-tier {{
+                background: var(--brand-primary);
+                color: #ffffff;
+                border: none;
+            }}
+            .pricing-card.featured .btn-tier:hover {{ background: #032e23; }}
+
+            /* Compliance Callout */
+            .compliance-box {{
+                background: #ffffff;
+                border: 1px solid var(--border-color);
+                border-left: 4px solid var(--brand-primary);
+                border-radius: 6px;
+                padding: 20px 24px;
+                margin-top: 48px;
+                font-size: 13px;
+                color: var(--brand-muted);
+                line-height: 1.6;
+            }}
+
+            /* Footer */
+            footer {{
+                background: #ffffff;
+                border-top: 1px solid var(--border-color);
+                padding: 40px 0;
+                font-size: 13px;
+                color: var(--brand-muted);
+            }}
+            .footer-content {{ display: flex; justify-content: space-between; align-items: center; }}
+            .footer-links a {{ color: var(--brand-muted); text-decoration: none; margin-left: 20px; }}
+            .footer-links a:hover {{ color: var(--brand-dark); }}
+
+            @media (max-width: 900px) {{
+                .grid-3 {{ grid-template-columns: 1fr; }}
+                .pricing-grid {{ grid-template-columns: 1fr; }}
+                .footer-content {{ flex-direction: column; gap: 16px; text-align: center; }}
+                .hero h1 {{ font-size: 32px; }}
+            }}
         </style>
     </head>
     <body>
-        <header>
+        <nav>
             <div class="container">
-                <span class="badge">⚡ 100% Automated Council Planning Radar</span>
-                <h1>Win High-Value Tree Surgery Jobs<br>Before Your Competitors Even Know They Exist</h1>
-                <p class="subtitle">We scan all 309 English local council planning feeds daily to alert professional tree surgeons within 24 hours of protected tree applications (TPO & Conservation Area submissions).</p>
-                <a href="#pricing" class="btn-hero">Claim Your Territory Radar →</a>
+                <div class="nav-wrapper">
+                    <a href="/" class="nav-logo">
+                        ArborLeads
+                        <span>Statutory Planning Intelligence</span>
+                    </a>
+                    <div class="nav-links">
+                        <a href="#features">Coverage & Methodology</a>
+                        <a href="#register">Live Planning Feed</a>
+                        <a href="#pricing">Subscription Tiers</a>
+                        <a href="/admin" class="nav-btn">Contractor Portal</a>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <header class="hero">
+            <div class="container">
+                <div class="hero-badge">Direct Council Planning Datahub</div>
+                <h1>Statutory Planning Notice Intelligence for UK Arboricultural Contractors</h1>
+                <p class="lead">
+                    Algorithmic monitoring across all 309 English Local Planning Authorities. Receive verified Tree Preservation Order (TPO) applications, Section 211 Conservation Area notices, and commercial felling submissions within 24 hours of statutory lodgement.
+                </p>
+                <div class="cta-group">
+                    <a href="#pricing" class="btn-primary">Reserve Operating Territory</a>
+                    <a href="#register" class="btn-secondary">Inspect Live Notices</a>
+                </div>
             </div>
         </header>
 
-        <section class="section">
+        <section class="section" id="features">
             <div class="container">
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center;">
-                    <div>
-                        <h2 style="font-size: 30px; margin-top: 0;">Why UK Tree Surgeons Rely on ArborLeads:</h2>
-                        <ul style="line-height: 2; font-size: 16px; padding-left: 20px;">
-                            <li><b>🎯 2 to 4-Week Head Start:</b> Quoting on jobs weeks before lamp post notices are hung or general public finds out.</li>
-                            <li><b>🌳 Legally Mandated Work:</b> Homeowners and developers submitting council tree applications MUST perform the work upon permission.</li>
-                            <li><b>🛡️ High-Ticket Opportunities:</b> TPO felling, crown reduction, deadwood dismantling, and site clearance.</li>
-                            <li><b>⚡ Instant Email & WhatsApp Alerts:</b> Real-time statutory reference, tree species, and full address.</li>
-                        </ul>
+                <div class="section-header">
+                    <h2>Institutional Procurement Advantage</h2>
+                    <p>Designed specifically for qualified arboricultural contractors, tree surgeons, and land clearance operations requiring verified, early-stage client opportunities.</p>
+                </div>
+
+                <div class="grid-3">
+                    <div class="feature-card">
+                        <h3>Statutory Consultation Access</h3>
+                        <p>Access applications during the mandatory local authority consultation period (typically 6–8 weeks before determination), well in advance of public site signage or commercial directories.</p>
                     </div>
-                    <div>
-                        <div class="card" style="background:#f1f5f9;">
-                            <h3 style="margin-top:0; color:#0f172a;">📡 Live Radar Sample (Past 24-48 Hours)</h3>
-                            {lead_cards}
-                        </div>
+                    <div class="feature-card">
+                        <h3>Legally Mandated Works</h3>
+                        <p>Applications under Tree Preservation Orders and Section 211 notices represent verified property owners with mandatory requirements for certified trade execution upon approval.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>Exhaustive Authority Coverage</h3>
+                        <p>Continuous monitoring across every English district, borough, and unitary authority, covering Greater London, the Home Counties, the Midlands, the North, and the South West.</p>
                     </div>
                 </div>
             </div>
         </section>
 
-        <section class="section" id="pricing" style="background: white; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0;">
+        <section class="section" id="register" style="background:#f1f5f9; border-top:1px solid var(--border-color); border-bottom:1px solid var(--border-color);">
             <div class="container">
-                <div style="text-align: center; max-width: 700px; margin: auto; margin-bottom: 40px;">
-                    <h2 style="font-size: 32px; margin-bottom: 8px;">Simple, Transparent Pricing</h2>
-                    <p style="color: #64748b; font-size: 17px;">Choose the plan that fits your business. Cancel or pause anytime.</p>
+                <div class="section-header">
+                    <h2>Live Statutory Register Sample</h2>
+                    <p>Real-time sample of tree works submissions processed across English Local Planning Authorities over the preceding 24–48 hours.</p>
                 </div>
 
-                <div class="grid-5">
-                    <!-- 1. Single -->
-                    <div class="card card-pricing">
-                        <h4>Single Lead</h4>
-                        <div class="price">£19</div>
-                        <p style="color:#64748b; font-size:12px;">One-time purchase</p>
-                        <p style="font-size:13px; color:#334155;">1 Verified Council Lead with homeowner/architect address & description.</p>
-                        <a href="/pricing" class="btn-buy">Buy 1 Lead</a>
+                <div class="register-card">
+                    <div class="register-header">
+                        <h3>Recent Arboricultural Notices</h3>
+                        <span style="font-size:12px; color:var(--brand-muted); font-weight:600;">Updated Continuously</span>
+                    </div>
+                    <table class="register-table">
+                        <thead>
+                            <tr>
+                                <th>Statutory Ref & Authority</th>
+                                <th>Site Address & Proposed Works</th>
+                                <th style="text-align:right;">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {lead_rows}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section class="section" id="pricing">
+            <div class="container">
+                <div class="section-header">
+                    <h2>Commercial Allocation Tiers</h2>
+                    <p>Transparent single-lead and subscription options. Territory lockouts guarantee exclusive single-contractor allocation.</p>
+                </div>
+
+                <div class="pricing-grid">
+                    <!-- 1. Single Lead -->
+                    <div class="pricing-card">
+                        <div>
+                            <h4>Single Allocation</h4>
+                            <div class="price">£19</div>
+                            <div class="price-term">One-off allocation</div>
+                            <div class="desc">Single verified planning notice complete with full applicant site address, schedule of works, and authority reference.</div>
+                        </div>
+                        <a href="/pricing" class="btn-tier">Select Single</a>
                     </div>
 
-                    <!-- 2. Pack of 5 -->
-                    <div class="card card-pricing">
-                        <h4>5-Lead Pack</h4>
-                        <div class="price">£80</div>
-                        <p style="color:#64748b; font-size:12px;">£16 / lead (Save 15%)</p>
-                        <p style="font-size:13px; color:#334155;">5 Lead Credits in your depot postcode radius to redeem on demand.</p>
-                        <a href="/pricing" class="btn-buy">Buy 5 Pack</a>
+                    <!-- 2. 5-Lead Pack -->
+                    <div class="pricing-card">
+                        <div>
+                            <h4>Credit Pack</h4>
+                            <div class="price">£80</div>
+                            <div class="price-term">5 Notices (£16/ea)</div>
+                            <div class="desc">Pre-purchased allocation credits redeemable across your registered postal districts on demand.</div>
+                        </div>
+                        <a href="/pricing" class="btn-tier">Purchase Pack</a>
                     </div>
 
                     <!-- 3. City Pro -->
-                    <div class="card card-pricing card-featured">
-                        <span style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#10b981; color:white; font-size:11px; padding:2px 10px; border-radius:10px; font-weight:bold;">POPULAR</span>
-                        <h4>City Pro</h4>
-                        <div class="price">£49<span style="font-size:14px; font-weight:normal;">/mo</span></div>
-                        <p style="color:#64748b; font-size:12px;">Monthly subscription</p>
-                        <p style="font-size:13px; color:#334155;"><b>Unlimited Leads</b> in your entire regional council zone (15-mile radius).</p>
-                        <a href="/pricing" class="btn-buy" style="background:#10b981;">Subscribe City</a>
+                    <div class="pricing-card featured">
+                        <div>
+                            <span style="background:var(--brand-primary); color:#ffffff; font-size:10px; font-weight:700; padding:2px 8px; border-radius:4px; text-transform:uppercase; letter-spacing:0.5px;">Recommended</span>
+                            <h4 style="margin-top:8px;">Regional Zone</h4>
+                            <div class="price">£49<span style="font-size:13px; font-weight:normal; color:var(--brand-muted);">/mo</span></div>
+                            <div class="price-term">Monthly subscription</div>
+                            <div class="desc">Unrestricted notice stream across your designated local authority cluster within a 15-mile operating radius.</div>
+                        </div>
+                        <a href="/pricing" class="btn-tier">Subscribe Regional</a>
                     </div>
 
                     <!-- 4. National -->
-                    <div class="card card-pricing">
-                        <h4>National Pass</h4>
-                        <div class="price">£89<span style="font-size:14px; font-weight:normal;">/mo</span></div>
-                        <p style="color:#64748b; font-size:12px;">Monthly subscription</p>
-                        <p style="font-size:13px; color:#334155;">Unlimited leads across <b>all 309 English councils</b> nationwide.</p>
-                        <a href="/pricing" class="btn-buy">Subscribe National</a>
+                    <div class="pricing-card">
+                        <div>
+                            <h4>National Feed</h4>
+                            <div class="price">£89<span style="font-size:13px; font-weight:normal; color:var(--brand-muted);">/mo</span></div>
+                            <div class="price-term">Monthly subscription</div>
+                            <div class="desc">Unrestricted real-time data stream across all 309 English Local Planning Authorities nationwide.</div>
+                        </div>
+                        <a href="/pricing" class="btn-tier">Subscribe National</a>
                     </div>
 
                     <!-- 5. Exclusive Lockout -->
-                    <div class="card card-pricing" style="border:2px solid #7c3aed; background:#faf5ff;">
-                        <span style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:#7c3aed; color:white; font-size:11px; padding:2px 10px; border-radius:10px; font-weight:bold;">MONOPOLY</span>
-                        <h4 style="color:#7c3aed;">Exclusive Lockout</h4>
-                        <div class="price" style="color:#6d28d9;">£149<span style="font-size:14px; font-weight:normal;">/mo</span></div>
-                        <p style="color:#64748b; font-size:12px;">15-Mile Radius Lockout</p>
-                        <p style="font-size:13px; color:#334155;"><b>Lock out all competitors.</b> 100% exclusive access in your territory.</p>
-                        <a href="/pricing" class="btn-buy" style="background:#7c3aed;">Lock Territory</a>
+                    <div class="pricing-card" style="border:2px solid #0f172a;">
+                        <div>
+                            <span style="background:#0f172a; color:#ffffff; font-size:10px; font-weight:700; padding:2px 8px; border-radius:4px; text-transform:uppercase; letter-spacing:0.5px;">Exclusive</span>
+                            <h4 style="margin-top:8px;">Territory Lockout</h4>
+                            <div class="price">£149<span style="font-size:13px; font-weight:normal; color:var(--brand-muted);">/mo</span></div>
+                            <div class="price-term">Exclusive radial lockout</div>
+                            <div class="desc">100% exclusive territory reservation. Guaranteed zero competing contractor distribution within your 15-mile radius.</div>
+                        </div>
+                        <a href="/pricing" class="btn-tier" style="background:#0f172a; color:#ffffff; border:none;">Lock Territory</a>
                     </div>
+                </div>
+
+                <div class="compliance-box">
+                    <b>Statutory Compliance & Legal Governance:</b> ArborLeads aggregates public planning registers under the Open Government Licence (OGL v3.0) and the UK Town and Country Planning (Tree Preservation)(England) Regulations 2012. All intelligence is derived strictly from public statutory registers in full compliance with the Data Protection Act 2018 and UK GDPR regulations.
                 </div>
             </div>
         </section>
 
         <footer>
             <div class="container">
-                <p>© 2026 ArborLeads — A Vector Data Labs SaaS Platform. Operating under UK Town and Country Planning Act open data regulations.</p>
-                <p><a href="/pricing">Pricing Plans</a> &nbsp;|&nbsp; <a href="/health">System Status</a> &nbsp;|&nbsp; <a href="/admin">Contractor Portal Login</a></p>
+                <div class="footer-content">
+                    <div>
+                        <b>ArborLeads</b> — An Enterprise Planning Data Platform by Vector Data Labs.<br>
+                        Operating in compliance with UK Town and Country Planning statutory register regulations.
+                    </div>
+                    <div class="footer-links">
+                        <a href="/pricing">Commercial Terms</a>
+                        <a href="/health">Datahub Status</a>
+                        <a href="/admin">Contractor Portal</a>
+                    </div>
+                </div>
             </div>
         </footer>
     </body>
     </html>
     """
+
 
 
 # ── Management Dashboard (Basic Auth Protected at /admin) ────────────────────
@@ -451,62 +733,64 @@ def pricing():
         </div>"""
 
     return f"""
-    <html>
-    <head><title>Pricing — Exclusive Tree Surgery Leads</title></head>
-    <body style="font-family:sans-serif; background:#f4f4f9; padding:40px;">
-    <div style="max-width:560px; margin:auto;">
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Commercial Allocation Tiers — ArborLeads</title>
+        <style>
+            :root {{
+                --brand-primary: #044332;
+                --brand-dark: #0f172a;
+                --brand-muted: #64748b;
+                --bg-light: #f8fafc;
+                --border-color: #e2e8f0;
+            }}
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                background-color: var(--bg-light);
+                color: var(--brand-dark);
+                margin: 0; padding: 48px 20px;
+                line-height: 1.6;
+            }}
+            .container {{ max-width: 720px; margin: auto; }}
+            .header {{ text-align: center; margin-bottom: 32px; }}
+            .header h1 {{ font-size: 32px; font-weight: 800; color: var(--brand-dark); margin: 0 0 10px 0; }}
+            .header p {{ color: var(--brand-muted); font-size: 15px; margin: 0; }}
+            .notice-box {{
+                background: #ffffff;
+                border: 1px solid var(--border-color);
+                border-left: 4px solid var(--brand-primary);
+                border-radius: 6px;
+                padding: 16px 20px;
+                font-size: 13px;
+                color: var(--brand-muted);
+                margin-bottom: 24px;
+            }}
+        </style>
+    </head>
+    <body>
+    <div class="container">
+        <div class="header">
+            <h1>Commercial Allocation Tiers</h1>
+            <p>Direct statutory notice streams and verified planning intelligence allocations.</p>
+        </div>
 
-        <h1 style="text-align:center; color:#1b5e20;">🌳 Exclusive Tree Surgery Leads</h1>
-
-        <div style="background:#fff8e1; border-left:4px solid #f9a825; padding:16px;
-                    border-radius:8px; margin-bottom:24px; font-size:14px;">
-            <b>How it works:</b> Every time a planning application for tree surgery work
-            is filed at your local council, you get notified first —
-            before it appears on Checkatrade, Bark, or anywhere else.
-            Leads are <b>exclusive</b>: one buyer per lead, always.
+        <div class="notice-box">
+            <b>Statutory Allocation Protocol:</b> Notice allocations are distributed immediately following local planning authority registration. Exclusive radial lockouts guarantee zero competing contractor distribution within your operating territory.
         </div>
 
         {cards}
 
-        <div style="margin-top:32px; background:white; border-radius:12px; padding:24px;">
-            <h4 style="margin-top:0;">What's included in every plan</h4>
-            <table style="width:100%; font-size:13px; border-collapse:collapse;">
-                <tr style="background:#f4f4f9;">
-                    <th style="padding:8px; text-align:left;"></th>
-                    <th style="padding:8px; text-align:center;">Starter</th>
-                    <th style="padding:8px; text-align:center;">Pay As You Go</th>
-                    <th style="padding:8px; text-align:center;">City Pro</th>
-                    <th style="padding:8px; text-align:center;">National</th>
-                </tr>
-                <tr><td style="padding:8px;">Exclusive leads</td>
-                    <td style="text-align:center;">✅</td><td style="text-align:center;">✅</td>
-                    <td style="text-align:center;">✅</td><td style="text-align:center;">✅</td></tr>
-                <tr style="background:#f9f9f9;"><td style="padding:8px;">Email alert on new lead</td>
-                    <td style="text-align:center;">✅</td><td style="text-align:center;">✅</td>
-                    <td style="text-align:center;">✅</td><td style="text-align:center;">✅</td></tr>
-                <tr><td style="padding:8px;">Lead grade (Small/Medium/Large)</td>
-                    <td style="text-align:center;">✅</td><td style="text-align:center;">✅</td>
-                    <td style="text-align:center;">✅</td><td style="text-align:center;">✅</td></tr>
-                <tr style="background:#f9f9f9;"><td style="padding:8px;">Monthly lead limit</td>
-                    <td style="text-align:center;">10/month</td><td style="text-align:center;">—</td>
-                    <td style="text-align:center;">Unlimited</td><td style="text-align:center;">Unlimited</td></tr>
-                <tr><td style="padding:8px;">Cities covered</td>
-                    <td style="text-align:center;">1</td><td style="text-align:center;">1</td>
-                    <td style="text-align:center;">1</td><td style="text-align:center;">All</td></tr>
-                <tr style="background:#f9f9f9;"><td style="padding:8px;">First access to new leads</td>
-                    <td style="text-align:center;">—</td><td style="text-align:center;">—</td>
-                    <td style="text-align:center;">—</td><td style="text-align:center;">✅</td></tr>
-            </table>
+        <div style="text-align:center; margin-top:32px;">
+            <a href="/" style="color:var(--brand-muted); text-decoration:none; font-size:13px; font-weight:600;">← Return to Main Intelligence Hub</a>
         </div>
-
-        <p style="text-align:center; font-size:12px; color:#999; margin-top:24px;">
-            Cancel anytime. No long-term contracts. All leads are government public data.<br>
-            Questions? Reply to your welcome email.
-        </p>
-
     </div>
-    </body></html>
+    </body>
+    </html>
     """
+
 
 
 
