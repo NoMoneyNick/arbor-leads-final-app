@@ -266,7 +266,7 @@ def scan_london_leads() -> int:
 
 UK_PLANNING_API_KEY = os.getenv("UK_PLANNING_API_KEY", "").strip()
 
-# Exhaustive regional postcode prefixes covering all 309 English Local Planning Authorities
+# Exhaustive regional postcode prefixes covering England, Scotland, and Wales
 CITY_POSTCODE_PREFIX = {
     # 1. Greater London
     "London":          ["SW", "SE", "NW", "N", "E", "EC", "WC", "CR", "BR", "EN", "HA", "UB", "KT", "TW", "DA", "RM", "IG", "SM", "RH", "TN", "GU", "CM", "SS", "SL", "HP", "AL", "SG", "WD", "ME"],
@@ -293,7 +293,18 @@ CITY_POSTCODE_PREFIX = {
     # 9. East of England
     "East of England": ["CM", "SS", "CO", "CB", "PE", "NR", "IP", "LU", "SG"],
     "Cambridge":       ["CM", "SS", "CO", "CB", "PE", "NR", "IP", "LU", "SG"],
+    # 10. Scotland (All 32 Scottish Councils)
+    "Scotland":        ["EH", "G", "AB", "DD", "IV", "KW", "PA", "PH", "FK", "KY", "ML", "TD", "DG", "ZE", "HS"],
+    "Edinburgh":       ["EH", "KY", "FK", "TD"],
+    "Glasgow":         ["G", "PA", "ML", "KA", "DG"],
+    "Aberdeen":        ["AB", "DD", "IV", "PH", "KW"],
+    # 11. Wales (All 22 Welsh Councils)
+    "Wales":           ["CF", "SA", "NP", "LL", "LD", "SY"],
+    "Cardiff":         ["CF", "NP", "SA"],
+    "Swansea":         ["SA", "CF", "LD"],
+    "North Wales":     ["LL", "SY", "CH"]
 }
+
 
 
 
@@ -362,3 +373,13 @@ def scan_city_planning_api(city_name: str) -> int:
     except Exception as e:
         logger.error(f"[{city_name}] Fatal error in scan_city_planning_api: {e}")
         return 0
+
+
+def scan_scotland_leads() -> int:
+    """Scans all 32 Scottish local authority planning portals in parallel."""
+    return scan_city_planning_api("Scotland")
+
+
+def scan_wales_leads() -> int:
+    """Scans all 22 Welsh local authority planning portals in parallel."""
+    return scan_city_planning_api("Wales")
