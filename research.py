@@ -28,6 +28,30 @@ def get_director_from_ch(company_number: str):
     try:
         url = f"https://api.company-information.service.gov.uk/company/{company_number}/officers"
         res = requests.get(url, headers=_ch_headers(), timeout=10)
+        if res.status_code == 401:
+            import notifications
+            notifications.send_system_incident_alert(
+                category="SECURITY & API KEYS",
+                title="COMPANIES HOUSE API KEY INVALID / 401 UNAUTHORIZED",
+                description="CRITICAL: Companies House API rejected requests with HTTP 401 Unauthorized.",
+                impact="Director extraction from Companies House is failing. Newly discovered LTDs will lack verified director names.",
+                action_required="Log into Companies House Developer Hub (developer.company-information.service.gov.uk) and update COMPANIES_HOUSE_KEY in Render.",
+                severity="CRITICAL",
+                throttle_hours=4.0
+            )
+            return None
+        elif res.status_code == 429:
+            import notifications
+            notifications.send_system_incident_alert(
+                category="API RATE LIMIT",
+                title="COMPANIES HOUSE RATE LIMIT HIT (600 REQ/5 MIN)",
+                description="WARNING: Companies House API rate limit threshold reached (HTTP 429).",
+                impact="Partner discovery will pause momentarily until the 5-minute rolling window resets.",
+                action_required="No action required if temporary. If frequent, throttle batch research frequency.",
+                severity="WARNING",
+                throttle_hours=1.0
+            )
+            return None
         if res.status_code == 200:
             officers = res.json().get("items", [])
             # Prefer active directors — skip anyone with a resignation date
@@ -53,6 +77,7 @@ def get_director_from_ch(company_number: str):
     except Exception as e:
         logger.error(f"[CH Officers] Error for {company_number}: {e}")
     return None
+
 
 
 import re
@@ -172,10 +197,37 @@ def get_google_places_info(company_name: str, city_or_addr: str = ""):
                 "key": GOOGLE_MAPS_KEY
             },
             timeout=3.0
-        )
-        results = res.json().get("results", [])
+        res_data = res.json()
+        g_status = res_data.get("status")
+        if g_status == "OVER_QUERY_LIMIT":
+            import notifications
+            notifications.send_system_incident_alert(
+                category="API QUOTA & BILLING",
+                title="GOOGLE PLACES API OVER QUERY LIMIT / QUOTA EXHAUSTED",
+                description="CRITICAL: Google Places API returned OVER_QUERY_LIMIT. Monthly Google Cloud credit exhausted or billing disabled.",
+                impact="Contractor telephone and website enrichment is paused. Newly discovered tree surgeons will lack contact numbers.",
+                action_required="Log into Google Cloud Console (console.cloud.google.com), verify billing account is active, and increase Places API quota.",
+                severity="CRITICAL",
+                throttle_hours=4.0
+            )
+            return None, None, None
+        elif g_status == "REQUEST_DENIED":
+            import notifications
+            notifications.send_system_incident_alert(
+                category="SECURITY & API KEYS",
+                title="GOOGLE PLACES API KEY REQUEST DENIED",
+                description=f"CRITICAL: Google Places API rejected requests: {res_data.get('error_message', 'Invalid key or IP restriction')}",
+                impact="Google Places enrichment is completely blocked.",
+                action_required="Check GOOGLE_MAPS_KEY in Google Cloud Console. Ensure Places API is enabled and API key restrictions are valid.",
+                severity="CRITICAL",
+                throttle_hours=4.0
+            )
+            return None, None, None
+
+        results = res_data.get("results", [])
         if not results:
             return None, None, None
+
 
         first = results[0]
         rating = first.get("rating")

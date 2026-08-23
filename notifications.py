@@ -195,3 +195,89 @@ def send_api_quota_warning_email(
     """
     send_resend_email(subject, html_body)
     logging.warning(f"[URGENT QUOTA WARNING] Dispatched ALL-CAPS alert for {api_name} ({current_calls}/{cap}, projected {projected_monthly}) to {TEST_EMAIL}")
+
+
+import time
+_ALERT_THROTTLE_CACHE = {}
+
+def send_system_incident_alert(
+    category: str,
+    title: str,
+    description: str,
+    impact: str,
+    action_required: str,
+    metric_details: dict = None,
+    severity: str = "CRITICAL",
+    throttle_hours: float = 4.0
+):
+    """
+    Unified high-visibility system incident alert dispatcher.
+    Sends ultra-bold ALL-CAPS emails for any critical issue or near-term system risk.
+    """
+    cache_key = f"{category}:{title}"
+    now_ts = time.time()
+    last_sent = _ALERT_THROTTLE_CACHE.get(cache_key, 0)
+    if (now_ts - last_sent) < (throttle_hours * 3600):
+        logging.info(f"[ALERT THROTTLED] Suppressed duplicate alert for {cache_key} (sent {round((now_ts - last_sent)/60)}m ago).")
+        return
+
+    _ALERT_THROTTLE_CACHE[cache_key] = now_ts
+
+    color_map = {
+        "CRITICAL": {"border": "#b91c1c", "bg": "#b91c1c", "card_bg": "#fef2f2", "card_border": "#f87171", "btn": "#dc2626"},
+        "WARNING":  {"border": "#ea580c", "bg": "#c2410c", "card_bg": "#fffaf0", "card_border": "#fed7aa", "btn": "#ea580c"},
+        "SECURITY": {"border": "#7c2d12", "bg": "#7c2d12", "card_bg": "#fdf4ff", "card_border": "#f0abfc", "btn": "#9333ea"}
+    }
+    theme = color_map.get(severity.upper(), color_map["CRITICAL"])
+
+    metrics_html = ""
+    if metric_details:
+        rows = "".join([
+            f"<tr><td style='padding:5px 0; color:#475569; font-weight:700;'>{k.upper()}:</td><td style='padding:5px 0; font-weight:900; color:#0f172a; text-align:right;'>{v}</td></tr>"
+            for k, v in metric_details.items()
+        ])
+        metrics_html = f"""
+        <div style="background:{theme['card_bg']}; border:2px solid {theme['card_border']}; border-radius:10px; padding:16px; margin:18px 0;">
+            <div style="font-size:12px; font-weight:800; color:{theme['bg']}; text-transform:uppercase; margin-bottom:8px;">📊 INCIDENT METRICS & TELEMETRY:</div>
+            <table style="width:100%; border-collapse:collapse; font-size:14px;">{rows}</table>
+        </div>
+        """
+
+    subject = f"🚨🚨 [{severity.upper()}] {category.upper()}: {title.upper()} 🚨🚨"
+    html_body = f"""
+    <div style="font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width:640px; margin:auto; padding:0; border:4px solid {theme['border']}; border-radius:14px; overflow:hidden; background:#ffffff; box-shadow:0 10px 25px rgba(0,0,0,0.15);">
+        <!-- URGENT HEADER -->
+        <div style="background:{theme['bg']}; color:#ffffff; padding:22px 20px; text-align:center;">
+            <h1 style="margin:0; font-size:20px; font-weight:900; letter-spacing:1px; text-transform:uppercase;">
+                🚨 {category.upper()} ALERT 🚨
+            </h1>
+            <p style="margin:6px 0 0 0; font-size:14px; font-weight:700; text-transform:uppercase; opacity:0.95;">
+                {title.upper()}
+            </p>
+        </div>
+
+        <div style="padding:26px 22px;">
+            <p style="font-size:15px; font-weight:800; color:#0f172a; line-height:1.5; margin-top:0;">
+                {description}
+            </p>
+
+            {metrics_html}
+
+            <div style="background:#f8fafc; border-left:4px solid {theme['border']}; padding:14px 16px; margin:18px 0; border-radius:4px;">
+                <b style="font-size:13px; color:#0f172a; text-transform:uppercase;">💥 SYSTEM IMPACT:</b>
+                <p style="font-size:14px; color:#334155; margin:4px 0 0 0; line-height:1.5;">{impact}</p>
+            </div>
+
+            <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:16px; border-radius:8px; margin:20px 0;">
+                <b style="font-size:13px; color:#166534; text-transform:uppercase;">🛠️ ACTION REQUIRED NOW:</b>
+                <p style="font-size:14px; color:#14532d; font-weight:700; margin:6px 0 0 0; line-height:1.5;">{action_required}</p>
+            </div>
+
+            <p style="font-size:12px; color:#94a3b8; text-align:center; margin-bottom:0;">
+                Vector Data Labs Automated Resilience Sentry • Host: Render Production
+            </p>
+        </div>
+    </div>
+    """
+    send_resend_email(subject, html_body)
+    logging.warning(f"[SYSTEM INCIDENT ALERT] Sent {severity} email for {category}: {title} to {TEST_EMAIL}")

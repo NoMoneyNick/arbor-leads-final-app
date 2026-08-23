@@ -9,8 +9,27 @@ logger = logging.getLogger("vector-data-labs")
 
 
 def get_db_conn():
-    """Opens a connection to the Supabase database."""
-    return psycopg2.connect(SURL)
+    """Opens a connection to the Supabase database with automated incident tripwire."""
+    try:
+        return psycopg2.connect(SURL)
+    except Exception as e:
+        logger.error(f"[DB] Connection failed: {e}")
+        try:
+            import notifications
+            notifications.send_system_incident_alert(
+                category="DATABASE INFRASTRUCTURE",
+                title="SUPABASE POSTGRESQL CONNECTION FAILED",
+                description=f"CRITICAL: Application failed to connect to Supabase PostgreSQL database at SUPABASE_DB_URL. Error: {str(e)[:150]}",
+                impact="All lead insertions, partner discovery lookups, and customer payment webhook events are currently blocked.",
+                action_required="1. Check Supabase project status at supabase.com. 2. Verify SUPABASE_DB_URL connection string and password in Render Environment Settings. 3. Check if database project has been paused or reached storage limits.",
+                metric_details={"Host": "Supabase PostgreSQL", "Error": str(e)[:80]},
+                severity="CRITICAL",
+                throttle_hours=2.0
+            )
+        except Exception:
+            pass
+        raise e
+
 
 
 def init_db():

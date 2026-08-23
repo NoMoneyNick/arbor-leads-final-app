@@ -208,7 +208,17 @@ def scan_london_leads() -> int:
                 headers=headers,
                 timeout=15
             )
-            if res.status_code == 200:
+            if res.status_code in (401, 403):
+                notifications.send_system_incident_alert(
+                    category="SECURITY & API KEYS",
+                    title="LONDON GLA PLANNING DATAHUB TOKEN INVALID",
+                    description="CRITICAL: London GLA Planning Datahub rejected requests with HTTP 401/403 Unauthorized.",
+                    impact="Planning lead scraping across all 32 London Boroughs is paused.",
+                    action_required="Check GLA_API_KEY in Render and regenerate token at planningdata.london.gov.uk.",
+                    severity="CRITICAL",
+                    throttle_hours=6.0
+                )
+            elif res.status_code == 200:
                 records = res.json().get("data", [])
                 for item in records:
                     summary = item.get("proposal", "")
@@ -221,6 +231,7 @@ def scan_london_leads() -> int:
                         new_leads.append(lead)
         except Exception as e:
             logger.error(f"[London GLA] Error: {e}")
+
 
     # 2. Green Belt & Border Councils Scan (Tandridge/Oxted RH, Sevenoaks TN, Surrey GU, etc.)
     if UK_PLANNING_API_KEY:
@@ -343,12 +354,24 @@ def scan_city_planning_api(city_name: str) -> int:
                     headers=headers,
                     timeout=8
                 )
+                if res.status_code in (401, 403):
+                    notifications.send_system_incident_alert(
+                        category="SECURITY & API KEYS",
+                        title="UK PLANNING DATA API KEY INVALID / 401 UNAUTHORIZED",
+                        description="CRITICAL: ukplanningapi.co.uk rejected requests with HTTP 401/403 Unauthorized.",
+                        impact="Nationwide statutory planning notice scraping is halted across all UK councils.",
+                        action_required="Log into ukplanningapi.co.uk and update UK_PLANNING_API_KEY in Render Environment Settings.",
+                        severity="CRITICAL",
+                        throttle_hours=4.0
+                    )
+                    return prefix, []
                 if res.status_code == 429:
                     # 429 indicates limit hit — send immediate alert
                     notifications.send_api_quota_warning_email("UK Planning API", 500, cap=500)
                     return prefix, []
                 if res.status_code == 200:
                     return prefix, res.json().get("data", [])
+
             except Exception:
                 pass
             return prefix, []

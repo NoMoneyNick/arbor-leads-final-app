@@ -1501,10 +1501,20 @@ def run_master_daily_pipeline():
         total_leads_scanned = 0
         for city in ALL_CITIES:
             leads = scanners.scan_city_planning_api(city)
-            total_leads_scanned += len(leads)
-        logger.info(f"[PIPELINE] Stage 1 Complete: All 9 English regions scanned ({total_leads_scanned} planning leads processed).")
+            total_leads_scanned += len(leads) if isinstance(leads, list) else int(leads or 0)
+        logger.info(f"[PIPELINE] Stage 1 Complete: All UK regions scanned ({total_leads_scanned} planning leads processed).")
     except Exception as e:
         logger.error(f"[PIPELINE] Stage 1 error: {e}")
+        import notifications
+        notifications.send_system_incident_alert(
+            category="AUTOMATED SCRAPER PIPELINE",
+            title="DAILY PLANNING RADAR SWEEP (STAGE 1) FAILED",
+            description=f"CRITICAL: The automated morning planning radar sweep failed with error: {str(e)[:150]}",
+            impact="New statutory tree work applications across UK councils were not ingested for this cycle.",
+            action_required="Check Render runtime logs at dashboard.render.com for traceback details.",
+            severity="CRITICAL",
+            throttle_hours=12.0
+        )
 
     # Stage 2: Secondary Lead Quality & Pricing Normalization
     try:
@@ -1522,6 +1532,16 @@ def run_master_daily_pipeline():
         logger.info("[PIPELINE] Stage 2 Complete: Lead quality and pricing integrity verified.")
     except Exception as e:
         logger.error(f"[PIPELINE] Stage 2 error: {e}")
+        import notifications
+        notifications.send_system_incident_alert(
+            category="DATABASE & PRICING",
+            title="LEAD PRICING NORMALIZATION (STAGE 2) FAILED",
+            description=f"WARNING: Lead pricing normalization query failed: {str(e)[:150]}",
+            impact="Newly ingested leads may lack standardized pricing tiers.",
+            action_required="Check PostgreSQL database connectivity and leads table schema.",
+            severity="WARNING",
+            throttle_hours=12.0
+        )
 
     # Stage 3: New Contractor Discovery Sweep
     try:
@@ -1529,6 +1549,16 @@ def run_master_daily_pipeline():
         logger.info("[PIPELINE] Stage 3 Complete: Contractor discovery sweep finished.")
     except Exception as e:
         logger.error(f"[PIPELINE] Stage 3 error: {e}")
+        import notifications
+        notifications.send_system_incident_alert(
+            category="CONTRACTOR DISCOVERY",
+            title="NATIONWIDE CONTRACTOR HARVEST (STAGE 3) FAILED",
+            description=f"WARNING: Automated Companies House contractor discovery failed: {str(e)[:150]}",
+            impact="New tree surgery LTD incorporation discovery was interrupted.",
+            action_required="Verify COMPANIES_HOUSE_KEY in Render and check Companies House API availability.",
+            severity="WARNING",
+            throttle_hours=12.0
+        )
 
     # Stage 4: Secondary Partner Sanitization & Quality Filter
     try:
@@ -1538,6 +1568,7 @@ def run_master_daily_pipeline():
         logger.error(f"[PIPELINE] Stage 4 error: {e}")
 
     logger.info("[PIPELINE] 🎯 Master Daily Pipeline finished successfully.")
+
 
 
 @app.get("/trigger-daily-pipeline")

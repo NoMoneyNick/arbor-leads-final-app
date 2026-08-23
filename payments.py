@@ -90,14 +90,34 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
     Verifies and processes an incoming Stripe webhook event.
     Returns a dict with the event type and relevant data.
     """
+    import notifications
+
     if not STRIPE_WEBHOOK_SECRET:
         logger.error("[Stripe Webhook] STRIPE_WEBHOOK_SECRET is not set.")
+        notifications.send_system_incident_alert(
+            category="SECURITY & PAYMENTS",
+            title="STRIPE_WEBHOOK_SECRET NOT SET IN ENVIRONMENT",
+            description="CRITICAL: The Stripe Webhook listener received an event but STRIPE_WEBHOOK_SECRET is missing.",
+            impact="Subscription activations and one-off lead credit purchases cannot be fulfilled automatically.",
+            action_required="Add STRIPE_WEBHOOK_SECRET from your Stripe Dashboard (Developers > Webhooks) to Render Environment Settings.",
+            severity="CRITICAL",
+            throttle_hours=4.0
+        )
         return {"error": "Webhook secret not configured"}
 
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
     except stripe.error.SignatureVerificationError:
         logger.warning("[Stripe Webhook] Invalid signature — possible spoofed request.")
+        notifications.send_system_incident_alert(
+            category="SECURITY & PAYMENTS",
+            title="STRIPE WEBHOOK SIGNATURE MISMATCH / INVALID SIGNATURE",
+            description="WARNING: An incoming webhook payload failed cryptographic signature verification against STRIPE_WEBHOOK_SECRET.",
+            impact="The webhook was rejected to protect against spoofed transactions. If this was a legitimate Stripe event, webhook fulfillment failed.",
+            action_required="1. Verify STRIPE_WEBHOOK_SECRET in Render matches the Signing Secret in Stripe Dashboard. 2. Check if a new webhook endpoint was created in Stripe.",
+            severity="WARNING",
+            throttle_hours=2.0
+        )
         return {"error": "Invalid signature"}
     except Exception as e:
         logger.error(f"[Stripe Webhook] Parse error: {e}")
@@ -127,8 +147,20 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
 
     elif event_type == "invoice.payment_failed":
         customer_email = data.get("customer_email", "unknown")
+        amount_due = data.get("amount_due", 0) / 100
         logger.warning(f"[Stripe] Payment failed — {customer_email}")
+        notifications.send_system_incident_alert(
+            category="REVENUE & BILLING",
+            title=f"CUSTOMER PAYMENT FAILED (£{amount_due:.2f} — {customer_email})",
+            description=f"A recurring subscription renewal charge failed for customer {customer_email}.",
+            impact="Customer's card was declined. If uncollected, their territory subscription will lapse.",
+            action_required="Log into Stripe Dashboard (Payments > Failed) to check decline reason or contact the contractor directly.",
+            metric_details={"Customer": customer_email, "Amount": f"£{amount_due:.2f}"},
+            severity="WARNING",
+            throttle_hours=12.0
+        )
         return {"event": "payment_failed", "email": customer_email}
 
     logger.info(f"[Stripe] Unhandled event type: {event_type}")
     return {"event": event_type, "status": "unhandled"}
+
