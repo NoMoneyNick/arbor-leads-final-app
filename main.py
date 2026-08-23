@@ -38,7 +38,9 @@ def health():
 
 @app.get("/api/check-postcode")
 @app.get("/check-postcode")
-def api_check_postcode(postcode: str = Query(...)):
+@app.get("/check-postcode/{postcode}")
+def api_check_postcode(postcode: str = "LS1"):
+
 
     """
     Public postcode radar inspection endpoint.
