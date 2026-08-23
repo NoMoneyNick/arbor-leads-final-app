@@ -104,7 +104,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
         try:
             req = urllib.request.Request(
                 f"https://api.postcodes.io/postcodes?lat={target_lat}&lon={target_lng}",
-                headers={'User-Agent': 'ArborLeads/1.0'}
+                headers={'User-Agent': 'TreeKey/1.0'}
             )
             with urllib.request.urlopen(req, timeout=2.0) as resp:
                 data = json.loads(resp.read().decode())
@@ -151,7 +151,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
                         # Try direct postcode lookup first
                         req = urllib.request.Request(
                             f"https://api.postcodes.io/postcodes/{clean_no_space}",
-                            headers={'User-Agent': 'ArborLeads/1.0'}
+                            headers={'User-Agent': 'TreeKey/1.0'}
                         )
                         with urllib.request.urlopen(req, timeout=2.0) as resp:
                             data = json.loads(resp.read().decode())
@@ -167,7 +167,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
                             encoded_query = urllib.parse.quote(clean_input)
                             req = urllib.request.Request(
                                 f"https://api.postcodes.io/postcodes?q={encoded_query}",
-                                headers={'User-Agent': 'ArborLeads/1.0'}
+                                headers={'User-Agent': 'TreeKey/1.0'}
                             )
                             with urllib.request.urlopen(req, timeout=2.0) as resp:
                                 data = json.loads(resp.read().decode())
@@ -182,7 +182,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
                             district = f"{clean_input} District Authority"
 
 
-    # Enforce Great Britain Coverage (ArborLeads covers England, Scotland, and Wales)
+    # Enforce Great Britain Coverage (Tree Key covers England, Scotland, and Wales)
     is_covered = True
     uncovered_region = None
 
@@ -207,8 +207,9 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
             "est_min_val": "0",
             "est_max_val": "0",
             "exclusivity_status": "Outside Great Britain Coverage",
-            "message": f"ArborLeads monitors all 309 English Local Planning Authorities, all 32 Scottish Councils, and all 22 Welsh Councils. {uncovered_region} coverage is scheduled for Phase 2."
+            "message": f"Tree Key monitors all 309 English Local Planning Authorities, all 32 Scottish Councils, and all 22 Welsh Councils. {uncovered_region} coverage is scheduled for Phase 2."
         }
+
 
     # Query local database for lead matches across Great Britain
     prefix_alpha = "".join([c for c in display_pc if c.isalpha()])[:3]
@@ -371,7 +372,7 @@ def public_homepage():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>ArborLeads — Statutory Planning Intelligence for UK Arborists</title>
+        <title>Tree Key — Statutory Planning Intelligence for UK Arborists</title>
         <!-- Leaflet Interactive Map Engine -->
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -397,11 +398,13 @@ def public_homepage():
             }}
             .container {{ max-width: 1140px; margin: 0 auto; padding: 0 24px; }}
             
-            /* Navbar */
             nav {{
-                background: #ffffff;
+                background-color: #ffffff;
                 border-bottom: 1px solid var(--border-color);
                 padding: 16px 0;
+                position: sticky;
+                top: 0;
+                z-index: 1000;
             }}
             .nav-wrapper {{
                 display: flex;
@@ -409,33 +412,42 @@ def public_homepage():
                 align-items: center;
             }}
             .nav-logo {{
-                font-size: 19px;
-                font-weight: 700;
+                font-size: 20px;
+                font-weight: 800;
                 color: var(--brand-primary);
-                letter-spacing: -0.5px;
                 text-decoration: none;
                 display: flex;
                 align-items: center;
                 gap: 8px;
             }}
             .nav-logo span {{
-                color: var(--brand-muted);
-                font-size: 13px;
-                font-weight: 500;
-                border-left: 1px solid var(--border-color);
-                padding-left: 8px;
+                font-size: 11px;
+                background: #ecfdf5;
+                color: var(--brand-accent);
+                padding: 2px 8px;
+                border-radius: 4px;
+                border: 1px solid #a7f3d0;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+            }}
+            .nav-links {{
+                display: flex;
+                gap: 24px;
+                align-items: center;
             }}
             .nav-links a {{
-                color: var(--brand-muted);
+                color: var(--brand-dark);
                 text-decoration: none;
                 font-size: 14px;
                 font-weight: 500;
-                margin-left: 24px;
-                transition: color 0.15s;
+                transition: color 0.15s ease;
             }}
-            .nav-links a:hover {{ color: var(--brand-primary); }}
+            .nav-links a:hover {{
+                color: var(--brand-accent);
+            }}
             .nav-btn {{
-                background: var(--brand-primary);
+                background-color: var(--brand-primary);
                 color: #ffffff !important;
                 padding: 8px 16px;
                 border-radius: 6px;
@@ -852,8 +864,9 @@ def public_homepage():
                 const statusEl = document.getElementById('resStatus');
 
                 if (data.is_covered === false) {{
-                    if (selEl) selEl.innerHTML = `<span style="color:#b91c1c; font-weight:700;">⚠️ Territory Notice:</span> ArborLeads monitors all English, Scottish, and Welsh local authorities. Coverage for ${{data.authority}} is scheduled for Phase 2.`;
+                    if (selEl) selEl.innerHTML = `<span style="color:#b91c1c; font-weight:700;">⚠️ Territory Notice:</span> Tree Key monitors all English, Scottish, and Welsh local authorities. Coverage for ${{data.authority}} is scheduled for Phase 2.`;
                     if (connEl) connEl.innerHTML = `Please select a Great Britain postcode (England, Scotland, or Wales).`;
+
                     if (valEl) valEl.innerText = `£0`;
                     if (statusEl) statusEl.innerHTML = `<span style="background:#fef2f2; color:#b91c1c; padding:4px 10px; border-radius:6px; font-weight:700; font-size:12px; border:1px solid #fecaca;">Outside Great Britain Coverage</span>`;
                 }} else {{
@@ -1011,7 +1024,7 @@ def public_homepage():
                 </div>
 
                 <div class="compliance-box">
-                    <b>Statutory Compliance & Legal Governance:</b> ArborLeads aggregates public planning registers under the Open Government Licence (OGL v3.0) and the UK Town and Country Planning (Tree Preservation)(England) Regulations 2012. All intelligence is derived strictly from public statutory registers in full compliance with the Data Protection Act 2018 and UK GDPR regulations.
+                    <b>Statutory Compliance & Legal Governance:</b> Tree Key aggregates public planning registers under the Open Government Licence (OGL v3.0) and the UK Town and Country Planning (Tree Preservation)(England) Regulations 2012. All intelligence is derived strictly from public statutory registers in full compliance with the Data Protection Act 2018 and UK GDPR regulations.
                 </div>
             </div>
         </section>
@@ -1020,9 +1033,10 @@ def public_homepage():
             <div class="container">
                 <div class="footer-content">
                     <div>
-                        <b>ArborLeads</b> — An Enterprise Planning Data Platform by Vector Data Labs.<br>
+                        <b>Tree Key</b> — An Enterprise Planning Data Platform by Vector Data Labs.<br>
                         Operating in compliance with UK Town and Country Planning statutory register regulations.
                     </div>
+
                     <div class="footer-links">
                         <a href="/pricing">Commercial Terms</a>
                         <a href="/health">Datahub Status</a>
@@ -1111,9 +1125,10 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
     <div style="max-width:920px; margin:auto; background:white; padding:40px;
                 border-radius:20px; border-top:8px solid #064e3b; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h1>📊 ArborLeads Admin Command</h1>
+            <h1>📊 Tree Key Admin Command</h1>
             <a href="/" target="_blank" style="background:#10b981; color:white; padding:8px 14px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">👁️ View Public Homepage</a>
         </div>
+
         <p>Verified LTD Partners: <b>{stats['p']}</b> &nbsp;|&nbsp; 
            Enriched with Contacts: <b style="color:#059669;">{stats['enriched']} ({pct}%)</b> &nbsp;|&nbsp; 
            Total Planning Leads: <b>{stats['l']}</b>
@@ -1257,7 +1272,8 @@ def pricing():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Commercial Allocation Tiers — ArborLeads</title>
+        <title>Commercial Allocation Tiers — Tree Key</title>
+
         <style>
             :root {{
                 --brand-primary: #044332;

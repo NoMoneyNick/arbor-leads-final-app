@@ -1,16 +1,16 @@
-# PROJECT STATE: VECTOR DATA LABS & ARBORLEADS (V4.1-SECURE)
+# PROJECT STATE: VECTOR DATA LABS & TREE KEY (V4.2-SECURE)
 
 **Status:** 100% Deployed, Fully Enriched, Great Britain Coverage, Pre-Revenue  
-**Customer Brand:** **ArborLeads** (powered by Vector Data Labs parent umbrella)  
+**Customer Brand:** **Tree Key** (powered by Vector Data Labs parent umbrella)  
 **Live Production URL:** https://arbor-leads-final-app.onrender.com  
 **Admin Portal:** https://arbor-leads-final-app.onrender.com/admin  
-**Last Updated:** 23 Aug 2026  
+**Last Updated:** 24 Aug 2026  
 
 ---
 
 ## 🎯 CURRENT PLATFORM MILESTONES (100% OPERATIONAL)
 
-1. **Partner Database:** **1,011+ Verified UK Limited Company Tree Surgeons** (100% audited & enriched, 980 with direct Managing Director mobile/phone numbers).
+1. **Partner Database:** **1,883+ Verified UK Limited Company Tree Surgeons** (100% audited & enriched with direct Managing Director names and verified UK telephone numbers).
 2. **Planning Radar (Great Britain):** **800+ Live Statutory Planning Notices** actively monitored across all 309 English councils, all 32 Scottish local authorities, and all 22 Welsh unitary councils.
 3. **Interactive Homepage Radar (`/`):** Click-to-move pin, smooth panning (zero auto-zoom), universal postcode/city lookup, continuous harmonic micro-density lead/value recalculations, and 5–25 mile radius selector.
 4. **Master Autonomous Guardian & Alert Sentry:** Predictive burn-rate calculation for API quotas, ultra-bold ALL-CAPS incident email alerts across all failure tripwires (UK Planning API, Companies House, Google Places, London GLA, Supabase, Stripe).
@@ -21,21 +21,21 @@
 
 ## 📋 MASTER SPRINT TO-DO QUEUE
 
-### 1. 📧 Business Email & Domain Infrastructure
-- [ ] **Register / Select Email Provider:** Set up Google Workspace (Gmail) or Microsoft 365.
-- [ ] **Primary Domain Setup (`@arborleads.co.uk`):** For inbound support, customer invoicing, and system guardian alerts.
-- [ ] **Secondary Outbound Domain Setup (`@getarborleads.co.uk`):** Dedicated sending domain for cold outbound outreach to protect primary domain reputation.
-- [ ] **DNS Security Authentication:** Configure SPF, DKIM, and DMARC (`v=DMARC1; p=none;`) records on domain registrar.
-- [ ] **Update Render Environment:** Update `TEST_EMAIL` to the new business address so all high-priority alerts route to the primary inbox.
-
----
-
-### 2. 🎨 Website, Branding, Logo & Copy Polish
-- [ ] **Brand Identity & Logo:** Refine ArborLeads logo icon / SVG placement on navigation bar and favicon.
+### 1. 🎨 Website, Branding, Logo & Copy Polish
+- [ ] **Brand Identity & Logo:** Refine Tree Key logo icon / SVG placement on navigation bar and favicon.
 - [ ] **Hero Section & Value Proposition:** Review headline, subheadline, and trade authority copy for punchiness.
 - [ ] **Trade Credibility & Badges:** Add badges for BS5837 compliance, Open Government Licence (OGL v3.0), and ArbAC alignment.
 - [ ] **Pricing Table & Lockout Text:** Fine-tune exclusive 15-mile radial territory lockout copy (£149/mo) and credit pack terms (£80).
 - [ ] **FAQ Section Review:** Ensure contractor questions regarding lead exclusivity, notice speed, and cancellation are answered clearly.
+
+---
+
+### 2. 📧 Business Email & Domain Infrastructure
+- [ ] **Domain Selection & Setup:** Configure custom domain email.
+- [ ] **Primary Domain Setup:** For inbound support, customer invoicing, and system guardian alerts.
+- [ ] **DNS Security Authentication:** Configure SPF, DKIM, and DMARC (`v=DMARC1; p=none;`) records on domain registrar.
+- [ ] **Update Render Environment:** Update `TEST_EMAIL` to the new business address so all high-priority alerts route to the primary inbox.
+
 
 ---
 
