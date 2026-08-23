@@ -36,7 +36,55 @@ def health():
     return {"status": "ok", "app": "Vector Data Labs"}
 
 
+@app.get("/api/check-postcode")
+def api_check_postcode(postcode: str = Query(...)):
+    """
+    Public postcode radar inspection endpoint.
+    Returns live council planning notice count and estimated arboricultural contract values.
+    """
+    clean_pc = postcode.upper().strip()
+    outcode = clean_pc.split()[0] if " " in clean_pc else clean_pc[:4]
+    
+    # Extract alpha prefix (e.g. LS, SW, M, B, BS, NE, YO, CR, etc.)
+    prefix_alpha = "".join([c for c in outcode if c.isalpha()])
+    
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    
+    # Check leads table for matching council or address prefix
+    cur.execute("""
+        SELECT count(*), council_source
+        FROM leads
+        WHERE address ILIKE %s OR council_source ILIKE %s
+        GROUP BY council_source
+        ORDER BY count(*) DESC
+        LIMIT 1
+    """, (f"%{prefix_alpha}%", f"%{prefix_alpha}%"))
+    row = cur.fetchone()
+    
+    cur.execute("SELECT count(*) FROM leads WHERE address ILIKE %s", (f"%{prefix_alpha}%",))
+    prefix_leads = cur.fetchone()[0]
+    cur.close()
+    conn.close()
+    
+    leads_count = max(prefix_leads, 14 if prefix_alpha else 8)
+    council = (row[1] if row else None) or f"{clean_pc} & Surrounding District Authority"
+    min_val = leads_count * 450
+    max_val = leads_count * 1250
+    
+    return {
+        "postcode": clean_pc,
+        "authority": council,
+        "leads_count": leads_count,
+        "est_min_val": f"{min_val:,}",
+        "est_max_val": f"{max_val:,}",
+        "exclusivity_status": "Available (Unclaimed)",
+        "radius_miles": 15
+    }
+
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
+
 
 def verify_dashboard_auth(credentials: HTTPBasicCredentials = Depends(basic_auth)):
     DASH_USER = os.getenv("DASHBOARD_USER", "admin").strip()
@@ -1184,52 +1232,8 @@ def api_stats(secret: Optional[str] = Query(None)):
         return {"error": str(e)}
 
 
-@app.get("/api/check-postcode")
-def api_check_postcode(postcode: str = Query(...)):
 
-    """
-    Public postcode radar inspection endpoint.
-    Returns live council planning notice count and estimated arboricultural contract values.
-    """
-    clean_pc = postcode.upper().strip()
-    outcode = clean_pc.split()[0] if " " in clean_pc else clean_pc[:4]
-    
-    # Extract alpha prefix (e.g. LS, SW, M, B, BS, NE, YO, CR, etc.)
-    prefix_alpha = "".join([c for c in outcode if c.isalpha()])
-    
-    conn = database.get_db_conn()
-    cur = conn.cursor()
-    
-    # Check leads table for matching council or address prefix
-    cur.execute("""
-        SELECT count(*), council_source
-        FROM leads
-        WHERE address ILIKE %s OR council_source ILIKE %s
-        GROUP BY council_source
-        ORDER BY count(*) DESC
-        LIMIT 1
-    """, (f"%{prefix_alpha}%", f"%{prefix_alpha}%"))
-    row = cur.fetchone()
-    
-    cur.execute("SELECT count(*) FROM leads WHERE address ILIKE %s", (f"%{prefix_alpha}%",))
-    prefix_leads = cur.fetchone()[0]
-    cur.close()
-    conn.close()
-    
-    leads_count = max(prefix_leads, 14 if prefix_alpha else 8)
-    council = (row[1] if row else None) or f"{clean_pc} & Surrounding District Authority"
-    min_val = leads_count * 450
-    max_val = leads_count * 1250
-    
-    return {
-        "postcode": clean_pc,
-        "authority": council,
-        "leads_count": leads_count,
-        "est_min_val": f"{min_val:,}",
-        "est_max_val": f"{max_val:,}",
-        "exclusivity_status": "Available (Unclaimed)",
-        "radius_miles": 15
-    }
+
 
 
 
