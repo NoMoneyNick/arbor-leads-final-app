@@ -1326,8 +1326,17 @@ def _resolve_city_param(slug: str) -> Optional[str]:
         "sheffield": "Sheffield",
         "newcastle": "North East",
         "cambridge": "East of England",
+        "scotland": "Scotland",
+        "edinburgh": "Edinburgh",
+        "glasgow": "Glasgow",
+        "aberdeen": "Aberdeen",
+        "wales": "Wales",
+        "cardiff": "Cardiff",
+        "swansea": "Swansea",
+        "northwales": "North Wales",
     }
     return city_map.get(clean) or city_map.get(compact)
+
 
 
 @app.get("/scan/{city_slug}", response_class=HTMLResponse)
