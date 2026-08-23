@@ -121,23 +121,52 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
                     break
             
             if not matched_city:
-                try:
-                    encoded_query = urllib.parse.quote(clean_input)
-                    req = urllib.request.Request(
-                        f"https://api.postcodes.io/postcodes?q={encoded_query}",
-                        headers={'User-Agent': 'ArborLeads/1.0'}
-                    )
-                    with urllib.request.urlopen(req, timeout=2.0) as resp:
-                        data = json.loads(resp.read().decode())
-                        if data.get("status") == 200 and data.get("result"):
-                            first = data["result"][0]
-                            target_lat = first.get("latitude", target_lat)
-                            target_lng = first.get("longitude", target_lng)
-                            display_pc = first.get("outcode") or clean_input
-                            district = first.get("admin_district") or f"{display_pc} District Authority"
-                            country_name = first.get("country", "England")
-                except Exception:
+                clean_no_space = clean_input.replace(" ", "")
+                # Direct Scottish, Welsh, NI outcode prefix check
+                if clean_no_space.startswith(('EH', 'AB', 'DD', 'IV', 'KW', 'PA', 'PH', 'FK', 'KY', 'ML', 'TD', 'DG', 'ZE', 'HS')) or (clean_no_space.startswith('G') and len(clean_no_space) > 1 and clean_no_space[1].isdigit()):
+                    country_name = "Scotland"
                     district = f"{clean_input} District Authority"
+                elif clean_no_space.startswith(('CF', 'SA', 'LL', 'NP', 'LD')):
+                    country_name = "Wales"
+                    district = f"{clean_input} District Authority"
+                elif clean_no_space.startswith('BT'):
+                    country_name = "Northern Ireland"
+                    district = f"{clean_input} District Authority"
+                else:
+                    try:
+                        # Try direct postcode lookup first
+                        req = urllib.request.Request(
+                            f"https://api.postcodes.io/postcodes/{clean_no_space}",
+                            headers={'User-Agent': 'ArborLeads/1.0'}
+                        )
+                        with urllib.request.urlopen(req, timeout=2.0) as resp:
+                            data = json.loads(resp.read().decode())
+                            if data.get("status") == 200 and data.get("result"):
+                                res = data["result"]
+                                target_lat = res.get("latitude", target_lat)
+                                target_lng = res.get("longitude", target_lng)
+                                display_pc = res.get("outcode") or clean_input
+                                district = res.get("admin_district") or f"{display_pc} District Authority"
+                                country_name = res.get("country", "England")
+                    except Exception:
+                        try:
+                            encoded_query = urllib.parse.quote(clean_input)
+                            req = urllib.request.Request(
+                                f"https://api.postcodes.io/postcodes?q={encoded_query}",
+                                headers={'User-Agent': 'ArborLeads/1.0'}
+                            )
+                            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                                data = json.loads(resp.read().decode())
+                                if data.get("status") == 200 and data.get("result"):
+                                    first = data["result"][0]
+                                    target_lat = first.get("latitude", target_lat)
+                                    target_lng = first.get("longitude", target_lng)
+                                    display_pc = first.get("outcode") or clean_input
+                                    district = first.get("admin_district") or f"{display_pc} District Authority"
+                                    country_name = first.get("country", "England")
+                        except Exception:
+                            district = f"{clean_input} District Authority"
+
 
     # Enforce England-Only Validation (ArborLeads covers all 309 English LPAs)
     is_england = True
