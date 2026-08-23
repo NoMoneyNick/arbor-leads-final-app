@@ -115,39 +115,83 @@ def dispatch_lead_alerts(city: str, leads: list):
             )
 
 
-def send_api_quota_warning_email(api_name: str = "UK Planning Data API", current_calls: int = 400, cap: int = 500):
+def send_api_quota_warning_email(
+    api_name: str = "UK PLANNING DATA API",
+    current_calls: int = 400,
+    cap: int = 500,
+    projected_monthly: int = 650,
+    reason: str = "Pace calculation projects breach before end of month"
+):
     """
-    Dispatches a high-priority warning email when API usage approaches the 500-request limit.
+    Dispatches an ultra-bold, high-visibility warning email in ALL CAPS
+    when API usage pace is calculated to breach the 500-request limit.
     """
     pct = round((current_calls / max(cap, 1)) * 100, 1)
-    subject = f"⚠️ ACTION REQUIRED: {api_name} Approaching 500 Cap ({current_calls}/{cap} requests used)"
+    subject = f"🚨🚨 [CRITICAL WARNING] UPGRADE REQUIRED: {api_name.upper()} REACHING 500 CAP ({current_calls}/{cap} USED) 🚨🚨"
     html_body = f"""
-    <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:30px; border:2px solid #ea580c; border-radius:12px; background:#fffaf0;">
-        <h2 style="color:#c2410c; margin-top:0;">⚠️ National Planning Data API Quota Alert</h2>
-        <p style="font-size:15px; color:#1e293b; line-height:1.6;">
-            Your live planning radar usage for <b>{api_name}</b> has reached <b>{current_calls} of {cap} requests</b> ({pct}% of the monthly free tier cap).
-        </p>
-        <div style="background:#ffffff; border:1px solid #fed7aa; border-radius:8px; padding:16px; margin:20px 0;">
-            <div style="font-size:13px; color:#64748b; margin-bottom:6px;">Monthly Request Meter:</div>
-            <div style="background:#e2e8f0; border-radius:10px; height:18px; width:100%; overflow:hidden;">
-                <div style="background:#ea580c; width:{min(pct, 100)}%; height:100%;"></div>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:bold; color:#334155; margin-top:6px;">
-                <span>{current_calls} Used</span>
-                <span>{cap} Monthly Free Limit</span>
-            </div>
+    <div style="font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width:640px; margin:auto; padding:0; border:4px solid #b91c1c; border-radius:14px; overflow:hidden; background:#ffffff; box-shadow:0 10px 25px rgba(185,28,28,0.2);">
+        <!-- URGENT HEADER BANNER -->
+        <div style="background:#b91c1c; color:#ffffff; padding:24px 20px; text-align:center;">
+            <h1 style="margin:0; font-size:22px; font-weight:900; letter-spacing:1px; text-transform:uppercase;">
+                🚨 URGENT ACTION REQUIRED 🚨
+            </h1>
+            <p style="margin:6px 0 0 0; font-size:14px; font-weight:700; opacity:0.95; text-transform:uppercase;">
+                NATIONAL PLANNING DATA API REACHING MONTHLY 500 LIMIT
+            </p>
         </div>
-        <p style="font-size:14px; color:#334155; line-height:1.5;">
-            <b>Why this matters:</b> When the 500 request cap is reached, daily automated planning sweeps will pause until the monthly cycle resets or the account is upgraded.
-        </p>
-        <p style="font-size:14px; color:#334155; line-height:1.5;">
-            <b>Next Step:</b> Log into your UK Planning API account (<a href="https://ukplanningapi.co.uk" target="_blank" style="color:#0284c7; font-weight:bold;">ukplanningapi.co.uk</a>) and upgrade to the Standard / Pro tier to ensure continuous 24/7 lead scraping across all UK councils.
-        </p>
-        <hr style="border:none; border-top:1px solid #fed7aa; margin:20px 0;">
-        <p style="font-size:12px; color:#94a3b8; margin-bottom:0;">
-            Sent automatically by Vector Data Labs System Monitor.
-        </p>
+
+        <div style="padding:28px 24px;">
+            <p style="font-size:16px; font-weight:800; color:#0f172a; line-height:1.5; margin-top:0;">
+                ATTENTION OPERATOR: YOUR LIVE PLANNING DATA SCRAPER IS AT RISK OF PAUSING DUE TO FREE TIER QUOTA LIMITS.
+            </p>
+
+            <div style="background:#fef2f2; border:2px solid #f87171; border-radius:10px; padding:18px; margin:20px 0;">
+                <div style="font-size:13px; font-weight:800; color:#991b1b; text-transform:uppercase; margin-bottom:8px;">
+                    📊 PREDICTIVE QUOTA BURN RATE METRICS:
+                </div>
+                <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                    <tr>
+                        <td style="padding:6px 0; color:#475569; font-weight:600;">CURRENT REQUESTS USED:</td>
+                        <td style="padding:6px 0; font-weight:900; color:#b91c1c; text-align:right;"><b>{current_calls} / {cap} ({pct}%)</b></td>
+                    </tr>
+                    <tr>
+                        <td style="padding:6px 0; color:#475569; font-weight:600;">PROJECTED MONTH-END TOTAL:</td>
+                        <td style="padding:6px 0; font-weight:900; color:#c2410c; text-align:right;"><b>~{projected_monthly} REQUESTS</b></td>
+                    </tr>
+                    <tr>
+                        <td style="padding:6px 0; color:#475569; font-weight:600;">EARLY WARNING TRIGGER:</td>
+                        <td style="padding:6px 0; font-weight:800; color:#0f172a; text-align:right;">{reason}</td>
+                    </tr>
+                </table>
+
+                <div style="margin-top:14px;">
+                    <div style="background:#e2e8f0; border-radius:10px; height:20px; width:100%; overflow:hidden;">
+                        <div style="background:#dc2626; width:{min(pct, 100)}%; height:100%; border-radius:10px;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <p style="font-size:15px; color:#334155; line-height:1.6;">
+                <b>WHAT HAPPENS IF THE CAP IS BREACHED:</b> Once 500 requests are exhausted, the UK Planning API will reject incoming council scans with <code style="background:#fee2e2; color:#991b1b; padding:2px 6px; border-radius:4px; font-weight:bold;">429 Too Many Requests</code>, halting new statutory tree notices until the next billing cycle.
+            </p>
+
+            <!-- BIG BOLD CTA BUTTON -->
+            <div style="text-align:center; margin:30px 0 20px 0;">
+                <a href="https://ukplanningapi.co.uk" target="_blank" 
+                   style="display:inline-block; background:#dc2626; color:#ffffff; font-size:16px; font-weight:900; text-transform:uppercase; letter-spacing:0.5px; padding:16px 32px; border-radius:8px; text-decoration:none; box-shadow:0 4px 14px rgba(220,38,38,0.4);">
+                    👉 CLICK HERE TO UPGRADE ACCOUNT NOW ON UKPLANNINGAPI.CO.UK →
+                </a>
+            </div>
+
+            <p style="font-size:13px; text-align:center; color:#64748b; margin-bottom:0;">
+                Upgrading takes 60 seconds and ensures uninterrupted 24/7 planning lead monitoring across all 309 English councils, Scotland, and Wales.
+            </p>
+        </div>
+
+        <div style="background:#f8fafc; border-top:1px solid #e2e8f0; padding:14px 20px; text-align:center; font-size:12px; color:#94a3b8; font-weight:700;">
+            VECTOR DATA LABS AUTOMATED RESILIENCE MONITOR • NOTICE DISPATCHED IMMEDIATELY
+        </div>
     </div>
     """
     send_resend_email(subject, html_body)
-    logging.warning(f"[QUOTA WARNING] Dispatched API quota warning email for {api_name} ({current_calls}/{cap}) to {TEST_EMAIL}")
+    logging.warning(f"[URGENT QUOTA WARNING] Dispatched ALL-CAPS alert for {api_name} ({current_calls}/{cap}, projected {projected_monthly}) to {TEST_EMAIL}")

@@ -356,10 +356,17 @@ def scan_city_planning_api(city_name: str) -> int:
         with ThreadPoolExecutor(max_workers=6) as executor:
             prefix_results = list(executor.map(fetch_prefix, postcode_prefixes))
 
-        # Track monthly usage and trigger warning email when nearing 500 cap (400 / 80% threshold)
-        usage_info = database.increment_api_usage("UK Planning API", increment=len(postcode_prefixes), warning_threshold=400)
+        # Track monthly usage and trigger predictive warning email when burn rate will breach 500 cap
+        usage_info = database.increment_api_usage("UK Planning API", increment=len(postcode_prefixes), cap=500)
         if usage_info.get("warning_needed"):
-            notifications.send_api_quota_warning_email("UK Planning API", usage_info.get("count", 400), cap=500)
+            notifications.send_api_quota_warning_email(
+                api_name="UK PLANNING DATA API",
+                current_calls=usage_info.get("count", 350),
+                cap=500,
+                projected_monthly=usage_info.get("projected_monthly", 600),
+                reason=usage_info.get("reason", "Projected monthly pace exceeds 500 limit")
+            )
+
 
 
         conn = database.get_db_conn()

@@ -94,14 +94,33 @@ def init_db():
         logger.error(f"[DB] Initialization error: {e}")
 
 
-def increment_api_usage(api_name: str = "UK Planning API", increment: int = 1, warning_threshold: int = 400) -> dict:
+def increment_api_usage(api_name: str = "UK Planning API", increment: int = 1, cap: int = 500) -> dict:
     """
-    Increments the monthly API request counter and checks if a warning email is needed.
-    Returns: {"count": int, "warning_needed": bool}
+    Increments monthly API counter and runs predictive velocity forecasting.
+    Detects weeks in advance if current daily request pace will breach the 500 cap.
+    Returns: {
+        "count": int,
+        "projected_monthly": int,
+        "days_left": int,
+        "warning_needed": bool,
+        "reason": str
+    }
     """
     import datetime
-    period = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m")
-    out = {"count": 0, "warning_needed": False}
+    import calendar
+    now = datetime.datetime.now(datetime.timezone.utc)
+    period = now.strftime("%Y-%m")
+    day_of_month = now.day
+    _, num_days_in_month = calendar.monthrange(now.year, now.month)
+    days_left = num_days_in_month - day_of_month
+
+    out = {
+        "count": 0,
+        "projected_monthly": 0,
+        "days_left": days_left,
+        "warning_needed": False,
+        "reason": ""
+    }
     if not SURL:
         return out
     try:
@@ -120,12 +139,28 @@ def increment_api_usage(api_name: str = "UK Planning API", increment: int = 1, w
         if row:
             count, warning_sent = row
             out["count"] = count
-            if count >= warning_threshold and not warning_sent:
-                out["warning_needed"] = True
-                cur.execute("""
-                    UPDATE api_usage SET warning_sent = TRUE 
-                    WHERE api_name = %s AND period_month = %s;
-                """, (api_name, period))
+            
+            # Predictive Burn Rate Calculation:
+            daily_burn_rate = count / max(day_of_month, 1)
+            projected_monthly = int(round(daily_burn_rate * num_days_in_month))
+            out["projected_monthly"] = projected_monthly
+
+            # Trigger conditions for early warning:
+            # 1. Projected total >= 480 (pace breaches cap) and at least 30 calls made
+            # 2. OR absolute usage >= 350 requests (70% threshold)
+            if not warning_sent:
+                if count >= 350:
+                    out["warning_needed"] = True
+                    out["reason"] = f"CRITICAL: {count}/{cap} requests used ({round(count/cap*100)}% of limit)."
+                elif projected_monthly >= 480 and count >= 30:
+                    out["warning_needed"] = True
+                    out["reason"] = f"PREDICTIVE PACE: Burn rate of {round(daily_burn_rate, 1)} req/day projects {projected_monthly} total requests by day {num_days_in_month}, breaching the {cap} cap."
+
+                if out["warning_needed"]:
+                    cur.execute("""
+                        UPDATE api_usage SET warning_sent = TRUE 
+                        WHERE api_name = %s AND period_month = %s;
+                    """, (api_name, period))
         conn.commit()
         cur.close()
         conn.close()
