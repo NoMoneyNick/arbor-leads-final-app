@@ -1007,45 +1007,35 @@ def sweep_100_random_contractors(target_count: int = 50) -> dict:
         candidates = []
         seen = set(existing_numbers)
 
-        # Build list of search queries
-        search_tasks = []
+        # Fast targeted query loop — stops the millisecond target_count is reached
         for region, towns in SWEEP_TARGETS:
+            if len(candidates) >= target_count:
+                break
             for town in towns:
-                for kw in KEYWORDS[:3]:
-                    search_tasks.append((f"{kw} {town}", region))
-
-        from concurrent.futures import ThreadPoolExecutor
-        def run_search(task):
-            q, region = task
-            items = search_companies_house(q, items_per_page=20)
-            res = []
-            for co in items:
-                cnum = co.get("company_number")
-                if not cnum:
-                    continue
-                if co.get("company_status") != "active":
-                    continue
-                cname = co.get("title", "")
-                if not _is_valid_tree_company_name(cname):
-                    continue
-                addr = co.get("address_snippet", "")
-                assigned = resolve_uk_city(addr, cname, default_city=region)
-                res.append((co, cname, cnum, addr, assigned))
-            return res
-
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            for found_list in executor.map(run_search, search_tasks):
-                for item in found_list:
-                    cnum = item[2]
-                    if cnum not in seen:
-                        seen.add(cnum)
-                        candidates.append(item)
-                        if len(candidates) >= target_count:
-                            break
                 if len(candidates) >= target_count:
                     break
+                for kw in ["tree surgery", "tree surgeon", "arboricultural"]:
+                    if len(candidates) >= target_count:
+                        break
+                    items = search_companies_house(f"{kw} {town}", items_per_page=25)
+                    for co in items:
+                        cnum = co.get("company_number")
+                        if not cnum or cnum in seen:
+                            continue
+                        if co.get("company_status") != "active":
+                            continue
+                        cname = co.get("title", "")
+                        if not _is_valid_tree_company_name(cname):
+                            continue
+                        seen.add(cnum)
+                        addr = co.get("address_snippet", "")
+                        assigned = resolve_uk_city(addr, cname, default_city=region)
+                        candidates.append((co, cname, cnum, addr, assigned))
+                        if len(candidates) >= target_count:
+                            break
 
         logger.info(f"[Fast Sweep] Found {len(candidates)} brand new candidates in {time.time() - t_start:.2f}s.")
+
 
         # Enrich in parallel with 15 workers (no per-thread DB overhead)
         def enrich_item(item):
