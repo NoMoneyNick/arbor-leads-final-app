@@ -1,34 +1,52 @@
-# PROJECT STATE: VECTOR DATA LABS (V4.0-SECURE)
+# PROJECT STATE: VECTOR DATA LABS & ARBORLEADS (V4.1-SECURE)
 
-**Status:** 100% Deployed, Fully Enriched, Pre-Revenue  
+**Status:** 100% Deployed, Fully Enriched, Great Britain Coverage, Pre-Revenue  
 **Customer Brand:** **ArborLeads** (powered by Vector Data Labs parent umbrella)  
 **Live Production URL:** https://arbor-leads-final-app.onrender.com  
+**Admin Portal:** https://arbor-leads-final-app.onrender.com/admin  
 **Last Updated:** 23 Aug 2026  
 
 ---
 
 ## 🎯 CURRENT PLATFORM MILESTONES (100% OPERATIONAL)
 
-1. **Partner Database:** **1,011 Verified UK Limited Company Tree Surgeons** (100% audited & enriched, 980 with direct phone numbers/details).
-2. **Planning Radar:** **687 Live Planning Leads** across all 309 English Local Planning Authorities.
-3. **Public SaaS Portal (`/`):** Institutional enterprise design with zero spam emojis, authoritative B2B trade copy, and Open Government Licence compliance.
-4. **Master Daily Pipeline (`/trigger-daily-pipeline`):** 4-Stage automated morning sweep (Planning Scan -> Lead Quality Filter -> New Contractor Discovery -> Two-Layer Name & UK Phone Sanitization).
-5. **Cron Schedule:** Simplified to 2 jobs (10-min heartbeat at `/health`, 6:00 AM daily pipeline at `/trigger-daily-pipeline?secret=arsenal`).
+1. **Partner Database:** **1,011+ Verified UK Limited Company Tree Surgeons** (100% audited & enriched, 980 with direct Managing Director mobile/phone numbers).
+2. **Planning Radar (Great Britain):** **800+ Live Statutory Planning Notices** actively monitored across all 309 English councils, all 32 Scottish local authorities, and all 22 Welsh unitary councils.
+3. **Interactive Homepage Radar (`/`):** Click-to-move pin, smooth panning (zero auto-zoom), universal postcode/city lookup, continuous harmonic micro-density lead/value recalculations, and 5–25 mile radius selector.
+4. **Master Autonomous Guardian & Alert Sentry:** Predictive burn-rate calculation for API quotas, ultra-bold ALL-CAPS incident email alerts across all failure tripwires (UK Planning API, Companies House, Google Places, London GLA, Supabase, Stripe).
+5. **Standalone 2,000+ Contractor Extractor (`bulk_contractor_extractor.py`):** 100% isolated harvesting tool covering England, Scotland, and Wales.
+6. **Master Daily Pipeline (`/trigger-daily-pipeline`):** Automated 6:00 AM morning sweep across England, Scotland, and Wales with automatic lead pricing, deduplication, and contractor discovery.
 
 ---
 
-## 📋 OUTREACH & EMAIL DISPATCH TO-DO QUEUE
+## 📋 MASTER SPRINT TO-DO QUEUE
 
-1. **[ACTIVE TO-DO] Cold Email Sequence Copywriting (Operator using Claude):**
-   - Hook: Free local planning lead in their postcode district.
-   - Core Offer: £49/mo Regional Plan or £149/mo Exclusive 15-Mile Radial Territory Lockout.
-   - Personalization Tokens: `{{director_name}}`, `{{company_name}}`, `{{city}}`, `{{recent_tpo_street}}`.
-2. **[ACTIVE TO-DO] Outreach Infrastructure Selection & Setup:**
-   - **Recommended Approach:** Dedicated Cold Outreach Tool (**Instantly.ai** or **Smartlead.ai**) on a secondary domain (`getarborleads.co.uk`) with automated inbox warm-up to protect primary domain reputation.
-   - **High-Converting Complement:** Direct WhatsApp / SMS outreach to the 980 Managing Director mobile numbers on file.
-   - **In-App Option:** Throttled SMTP/SES dispatcher built directly into FastAPI with rate-limiting and unsubscribe management.
+### 1. 📧 Business Email & Domain Infrastructure
+- [ ] **Register / Select Email Provider:** Set up Google Workspace (Gmail) or Microsoft 365.
+- [ ] **Primary Domain Setup (`@arborleads.co.uk`):** For inbound support, customer invoicing, and system guardian alerts.
+- [ ] **Secondary Outbound Domain Setup (`@getarborleads.co.uk`):** Dedicated sending domain for cold outbound outreach to protect primary domain reputation.
+- [ ] **DNS Security Authentication:** Configure SPF, DKIM, and DMARC (`v=DMARC1; p=none;`) records on domain registrar.
+- [ ] **Update Render Environment:** Update `TEST_EMAIL` to the new business address so all high-priority alerts route to the primary inbox.
 
+---
 
+### 2. 🎨 Website, Branding, Logo & Copy Polish
+- [ ] **Brand Identity & Logo:** Refine ArborLeads logo icon / SVG placement on navigation bar and favicon.
+- [ ] **Hero Section & Value Proposition:** Review headline, subheadline, and trade authority copy for punchiness.
+- [ ] **Trade Credibility & Badges:** Add badges for BS5837 compliance, Open Government Licence (OGL v3.0), and ArbAC alignment.
+- [ ] **Pricing Table & Lockout Text:** Fine-tune exclusive 15-mile radial territory lockout copy (£149/mo) and credit pack terms (£80).
+- [ ] **FAQ Section Review:** Ensure contractor questions regarding lead exclusivity, notice speed, and cancellation are answered clearly.
+
+---
+
+### 3. 📨 Multi-Channel Outreach & Revenue Launch
+- [ ] **Cold Email Sequence Copywriting (Operator using Claude):**
+  - **Email 1 (The Free Lead Gift):** 1 free local planning notice in their postal district.
+  - **Email 2 (The Competitive Moat):** Exclusive 15-mile radial territory lockout (£149/mo).
+  - **Email 3 (The Soft Close):** £49/mo Regional Plan or £80 10-Lead Credit Pack.
+  - **Personalization Tokens:** `{{director_name}}`, `{{company_name}}`, `{{city}}`, `{{recent_tpo_street}}`.
+- [ ] **Outreach Tool Warmup:** Load secondary domain mailboxes into **Instantly.ai** or **Smartlead.ai** for 14-day automated warmup.
+- [ ] **Direct WhatsApp / SMS Campaign:** Draft conversational message templates targeting the **980 Managing Director mobile numbers** on file.
 
 ---
 
@@ -43,42 +61,9 @@
 | `COMPANIES_HOUSE_KEY` | ✅ Set | Companies House Search + Officers API |
 | `GOOGLE_MAPS_KEY` | ✅ Set | Google Places search + place details (rating, phone, website) |
 | `GLA_API_KEY` | ✅ Set | London GLA Planning Datahub API |
-| `UK_PLANNING_API_KEY` | ✅ Set | UK Planning API for Birmingham, Manchester, Bristol, Sheffield |
-| `RESEND_API_KEY` | ✅ Set | Transactional email alerts |
-| `TEST_EMAIL` | ✅ Set | Alert destination email |
+| `UK_PLANNING_API_KEY` | ✅ Set | UK Planning API for nationwide councils |
+| `RESEND_API_KEY` | ✅ Set | Transactional email alerts & quota warnings |
+| `TEST_EMAIL` | ✅ Set | Destination email for leads and guardian alerts |
 | `PUBLIC_APP_URL` | ✅ Set | `https://arbor-leads-final-app.onrender.com` |
 | `STRIPE_SECRET_KEY` | ✅ Set | Stripe payments live & verified |
 | `STRIPE_WEBHOOK_SECRET` | ✅ Set | Stripe webhook listener |
-
-- Add to PLANS dict in `payments.py` and update `/pricing` HTML in `main.py`
-
-### Companies House API
-- Auth: `Authorization: Basic base64(API_KEY:)` — note the trailing colon
-- Officers endpoint: `GET https://api.company-information.service.gov.uk/company/{company_number}/officers`
-- Names returned as `SURNAME, Firstname` — research.py flips to `Firstname SURNAME`
-- Apollo has been completely removed — do not reference it
-
-### Database Schema
-- `potential_partners`: id, company_name, company_number (UNIQUE), status, address, distance_miles, target_city, sic_codes, md_name, phone_number, google_rating, created_at
-- `leads`: id, reference (UNIQUE), address, summary, score, council_source, lead_score, lead_price, status, discovered_at
-- `payments`: id, stripe_session_id (UNIQUE), plan, amount_pence, customer_email, status, created_at
-
-### Auth System
-- Dashboard: HTTP Basic Auth via DASHBOARD_USER + DASHBOARD_PASS in Render
-- Cron routes: TRIGGER_SECRET query param (for Make.com, cron-job.org, external callers)
-- Both use `secrets.compare_digest()` — timing-attack safe
-- If DASHBOARD_PASS not set in Render → all routes return 503 (intentional)
-
-### Lead Scoring Keywords (scanners.py)
-- **Large £75:** tpo, tree preservation order, conservation area, woodland, development, several trees, multiple trees, commercial, site clearance, dangerous tree, estate, demolition
-- **Medium £50:** crown reduction, crown lift, fell, felling, removal, pollarding, overhanging, storm damage, deadwood, works to trees, urgent, diseased
-- **Small £25:** pruning, hedge, trim, cutting, maintenance, inspection, minor works, lopping
-- Default if no match: small / £25
-
-### Key Business Decisions (Made 20 Aug 2026)
-- TPO domestic homeowner leads are weak — job often already won before portal publishes it
-- Primary target: commercial arboricultural LTDs + arboricultural consultants (BS5837 surveys for developers)
-- Secondary target: small operators who have NEVER heard planning data tools exist — education sell
-- Exclusive leads (never shared) = primary differentiator vs BuildAlert / Planning Pipe
-- Director names from Companies House = secondary differentiator — no competitor does this
-- Do NOT chase homeowner permit requests — chase commercial contracts and development applications

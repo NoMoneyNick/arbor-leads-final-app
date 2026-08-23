@@ -99,15 +99,20 @@
 
 ## 6. ACTIVE SPRINT OBJECTIVES
 
-1.  **Run Remaining Individual City Partner Scans:** Manchester, Leeds, Bristol, Sheffield, London (takes 60–90s each).
-2.  **Build Public Landing Page (`/`):** ArborLeads branded homepage with value prop, live sample leads ticker, 4-tier pricing table, FAQ, and CTA.
-3.  **Move Admin Portal to `/admin`:** Protected by Basic Auth (`verify_dashboard_auth`).
-4.  **Build Interactive Territory Map Selector:**
-    - Leaflet.js + OpenStreetMap frontend.
-    - Free `postcodes.io` geocoding.
-    - 5–25 mile radius dynamic slider with live circle overlay.
-    - Smart Haversine distance lead matching router.
-5.  **Launch Phase 1 Free Email Outreach:** Using [`outreach_playbook.md`](file:///C:/Users/twobo.DESKTOP-DI088K1/.gemini/antigravity/brain/46137285-d767-4297-93ad-b75b5cbb2fa0/outreach_playbook.md) with verified LTD CSV export.
+1.  **Business Email Infrastructure:**
+    - Register Google Workspace or Microsoft 365.
+    - Set up Primary Domain (`contact@arborleads.co.uk`) and Secondary Outbound Domain (`nick@getarborleads.co.uk`).
+    - Authenticate DNS records (SPF, DKIM, DMARC).
+    - Update `TEST_EMAIL` in Render environment variables.
+2.  **Website, Branding, Logo & Copy Polish:**
+    - Refine ArborLeads logo icon, SVG typography, and favicon.
+    - Polish value proposition copy, trade trust badges (BS5837, OGL v3.0, ArbAC alignment).
+    - Review pricing terms and FAQ clarity.
+3.  **Multi-Channel Outreach Launch (1,000 to 2,000+ Contacts):**
+    - 3-touch cold email sequence copywriting with personalization tokens.
+    - Direct WhatsApp / SMS dispatch to 980 Managing Director mobile numbers.
+    - Automated warm-up and campaign launch via Instantly.ai / Smartlead.ai.
+
 
 
 
