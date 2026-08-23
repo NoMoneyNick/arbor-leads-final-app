@@ -1,101 +1,33 @@
 # PROJECT STATE: VECTOR DATA LABS (V4.0-SECURE)
 
-**Status:** Secure, Deployed, Pre-Revenue  
+**Status:** 100% Deployed, Fully Enriched, Pre-Revenue  
 **Customer Brand:** **ArborLeads** (powered by Vector Data Labs parent umbrella)  
 **Live Production URL:** https://arbor-leads-final-app.onrender.com  
-**Last Updated:** 22 Aug 2026  
+**Last Updated:** 23 Aug 2026  
 
 ---
 
-## 🚨 STANDING REMINDER FOR NEXT SESSION (READ THIS FIRST)
+## 🎯 CURRENT PLATFORM MILESTONES (100% OPERATIONAL)
 
-> [!IMPORTANT]
-> **NEXT SESSION OPENING MANDATE:** Whatever the Operator says next time we speak, the AI assistant MUST immediately remind the Operator to run the individual city partner scans on the dashboard:
-> 1. **Manchester:** `/research/manchester` (60 seconds)
-> 2. **Leeds:** `/research/leeds` (60 seconds)
-> 3. **Bristol:** `/research/bristol` (60 seconds)
-> 4. **Sheffield:** `/research/sheffield` (60 seconds)
-> 5. **London:** `/research/london` (90 seconds)
-> 
-> *Running these 5 buttons in separate tabs will complete the full nationwide sweep and unlock 1,500+ verified LTD directors across all regions!*
+1. **Partner Database:** **1,011 Verified UK Limited Company Tree Surgeons** (100% audited & enriched, 980 with direct phone numbers/details).
+2. **Planning Radar:** **687 Live Planning Leads** across all 309 English Local Planning Authorities.
+3. **Public SaaS Portal (`/`):** Institutional enterprise design with zero spam emojis, authoritative B2B trade copy, and Open Government Licence compliance.
+4. **Master Daily Pipeline (`/trigger-daily-pipeline`):** 4-Stage automated morning sweep (Planning Scan -> Lead Quality Filter -> New Contractor Discovery -> Two-Layer Name & UK Phone Sanitization).
+5. **Cron Schedule:** Simplified to 2 jobs (10-min heartbeat at `/health`, 6:00 AM daily pipeline at `/trigger-daily-pipeline?secret=arsenal`).
 
 ---
 
-## 1. FILE STRUCTURE
-## 1. CORE ARCHITECTURE OVERVIEW
+## 📋 OUTREACH & EMAIL DISPATCH TO-DO QUEUE
 
-Vector Data Labs operates **ArborLeads** — an automated, nationwide B2B lead intelligence and contractor radar platform tailored for the UK arboricultural sector.
+1. **[ACTIVE TO-DO] Cold Email Sequence Copywriting (Operator using Claude):**
+   - Hook: Free local planning lead in their postcode district.
+   - Core Offer: £49/mo Regional Plan or £149/mo Exclusive 15-Mile Radial Territory Lockout.
+   - Personalization Tokens: `{{director_name}}`, `{{company_name}}`, `{{city}}`, `{{recent_tpo_street}}`.
+2. **[ACTIVE TO-DO] Outreach Infrastructure Selection & Setup:**
+   - **Recommended Approach:** Dedicated Cold Outreach Tool (**Instantly.ai** or **Smartlead.ai**) on a secondary domain (`getarborleads.co.uk`) with automated inbox warm-up to protect primary domain reputation.
+   - **High-Converting Complement:** Direct WhatsApp / SMS outreach to the 980 Managing Director mobile numbers on file.
+   - **In-App Option:** Throttled SMTP/SES dispatcher built directly into FastAPI with rate-limiting and unsubscribe management.
 
-- **Public Landing Page:** `GET /` — High-converting customer-facing SaaS homepage with live lead sample ticker and 5-tier pricing.
-- **Admin Command Portal:** `GET /admin` — Protected behind HTTP Basic Auth (`verify_dashboard_auth`).
-- **Database Status:** **935 Verified Limited Company Tree Surgeons** + **Hundreds of Fresh Council Planning Leads**.
-- **Nationwide Council Coverage:** 100% of England's **309 Local Planning Authorities** across 9 economic regions.
-- **Lead Freshness Lifecycle Badges:** 🟢 `🔥 FRESH (0–14d)`, 🟡 `⏳ IN CONSULTATION (15–45d)`, 🔵 `✅ GRANTED (45–90d)`, ⚪ `📦 ARCHIVED (90d+)`.
-- **Pricing Matrix:**
-  1. **Single Lead:** £19 (One-time)
-  2. **5-Lead Pack:** £80 (Credits)
-  3. **City Pro:** £49/month (Unlimited regional leads in 15-mile radius)
-  4. **National Pass:** £89/month (Unlimited leads across all 309 English councils)
-  5. **Exclusive Lockout:** £149/month (100% Territory Monopoly / Competitor lockout)
-
----
-
-## 2. PILLAR PROGRESS
-
-- **Pillar 1 (WhatsApp):** ✅ Manual direct links active with lead grade + price pre-formatted.
-- **Pillar 2 (Director Enrichment):** ✅ Companies House Officers API live.
-- **Pillar 3 (Google Reputation & Contact):** ✅ Google Places API active (rating, direct phone number, website, scraped email).
-- **Pillar 4 (Telegram Bot):** ⏳ Queued — Make.com webhook → Telegram bot for internal lead alerts.
-
----
-
-## 3. SECURITY & UPTIME STATUS
-
-- ✅ HTTP Basic Auth on all dashboard & export routes (`DASHBOARD_USER` / `DASHBOARD_PASS`)
-- ✅ `TRIGGER_SECRET` security gate on all external cron lead scraping routes
-- ✅ `GET /health` deployed for 10-minute cron-job.org keep-alive pings (keeps Render awake 24/7, eliminates 502 Bad Gateway timeouts)
-- ✅ Constant-time password comparison (`secrets.compare_digest`)
-- ✅ API docs (`/docs`, `/redoc`) disabled
-
----
-
-## 4. CITY & SURROUNDING COUNCIL RADAR COVERAGE
-
-| Regional Zone | Lead Scanners & Postcode Radars | Partner Green Belt Sweep Scope | Status |
-|---|---|---|---|
-| **London & South East** | GLA Datahub (32 Boroughs) + UK Planning API (`SW, SE, NW, N, E, EC, WC, CR, BR, EN, HA, UB, KT, TW, DA, RM, IG, SM, RH, TN, GU, CM, SS, SL, HP, AL, SG, WD, ME`) | 75+ Towns (Surrey, Kent, Essex, Herts, Berks, Bucks) | ✅ Exhaustive nationwide radar |
-| **Leeds & Yorkshire** | Leeds ArcGIS MapServer + UK Planning API (`LS, BD, WF, HX, HD, YO, HG, HU, DL, TS`) | 24 Districts (West, North, East, South Yorkshire) | ✅ Exhaustive nationwide radar |
-| **Birmingham & West Midlands** | UK Planning API (`B, WS, WV, DY, CV, WR, TF, ST, HR, SY`) | 28 Towns (West Midlands, Staffs, Worcs, Shrops, Warks) | ✅ Exhaustive nationwide radar |
-| **Manchester & North West** | UK Planning API (`M, SK, WA, WN, BL, OL, CW, L, PR, BB, FY, CH`) | 22 Towns (Greater Manchester, Cheshire, Merseyside, Lancs) | ✅ Exhaustive nationwide radar |
-| **Bristol & West Country** | UK Planning API (`BS, BA, GL, SN, TA, DT, SP`) | 22 Towns (Bristol, Bath, Glos, Wilts, Somerset, Dorset) | ✅ Exhaustive nationwide radar |
-| **Sheffield & South Yorkshire** | UK Planning API (`S, DN, DE, NG, LN, LE`) | 15 Towns (South Yorks, Derbyshire, Peak District, Notts, Lincs) | ✅ Exhaustive nationwide radar |
-
----
-
-## 5. REVENUE & PRICING TIERS
-
-| Tier | Price | Model | Description |
-|---|---|---|---|
-| **Starter** | £19 / month | Recurring Subscription | Entry point, 10 leads/month, instant alerts |
-| **10-Lead Credits** | £80 one-off | Credit Pack | Pay-as-you-go, no subscription |
-| **City Pro** | £49 / month | Recurring Subscription | One chosen city/radius, unlimited daily leads, full scoring |
-| **National Pro** | £89 / month | Recurring Subscription | All 6 UK regions, priority alerts, full scoring |
-| **Exclusive Lockout** | £149 / month | Territory Monopoly | **100% Exclusive Leads** — Locks out all competing contractors in your radius |
-
----
-
-## 6. ACTIVE SPRINT QUEUE
-
-1. **Build Public Landing Page (`/`):** ArborLeads branded homepage with value prop, live sample leads ticker, 5-tier pricing table (including Exclusive Lockout), FAQ, and CTA.
-2. **Move Admin Portal to `/admin`:** Protected by Basic Auth (`verify_dashboard_auth`).
-3. **Build Interactive Territory Map Selector:**
-   - **Frontend:** Leaflet.js + OpenStreetMap (100% free, mobile-friendly).
-   - **Geocoding:** Free `postcodes.io` API.
-   - **Radius Slider:** 5 / 10 / 15 / 20 / 25 miles with live expanding circle overlay.
-   - **Lead Router:** Computes Haversine distance from planning application coordinates to subscriber pin; only routes leads within customer's active territory circle.
-4. **Implement Exclusive Lead Lockout System:** Flag leads claimed by Exclusive tier subscribers so they are suppressed from all other contractors.
-5. **Launch Outreach Campaign:** Use `/export-directors.csv` and [`outreach_playbook.md`](file:///C:/Users/twobo.DESKTOP-DI088K1/.gemini/antigravity/brain/46137285-d767-4297-93ad-b75b5cbb2fa0/outreach_playbook.md) for 100% legal B2B cold emails and WhatsApp outreach to verified LTD directors.
-6. **Build Pillar 4 (Telegram Bot):** Make.com webhook → Telegram bot for internal lead alerts.
 
 
 ---
