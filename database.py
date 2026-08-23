@@ -92,7 +92,31 @@ def init_db():
                 updated_at TIMESTAMPTZ DEFAULT NOW(),
                 UNIQUE (api_name, period_month)
             );
+
+            CREATE TABLE IF NOT EXISTS territory_claims (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                outcode TEXT UNIQUE NOT NULL,
+                customer_email TEXT NOT NULL,
+                customer_name TEXT,
+                stripe_subscription_id TEXT,
+                active BOOLEAN DEFAULT TRUE,
+                claimed_at TIMESTAMPTZ DEFAULT NOW(),
+                expires_at TIMESTAMPTZ
+            );
         """)
+
+        # Performance Indices for Instant High-Volume Queries
+        indices = [
+            "CREATE INDEX IF NOT EXISTS idx_leads_discovered_at ON leads(discovered_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_leads_council ON leads(council_source);",
+            "CREATE INDEX IF NOT EXISTS idx_leads_reference ON leads(reference);",
+            "CREATE INDEX IF NOT EXISTS idx_partners_city ON potential_partners(target_city);",
+            "CREATE INDEX IF NOT EXISTS idx_partners_created ON potential_partners(created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_partners_company_number ON potential_partners(company_number);",
+            "CREATE INDEX IF NOT EXISTS idx_territory_outcode ON territory_claims(outcode);",
+        ]
+        for idx in indices:
+            cur.execute(idx)
 
         # Resilience: add any missing columns safely
         resilience_cols = [
@@ -111,8 +135,9 @@ def init_db():
         conn.commit()
         cur.close()
         conn.close()
-        logger.info("[DB] Database initialized successfully.")
+        logger.info("[DB] Database initialized successfully with high-performance indices and territory lockout.")
     except Exception as e:
+
         logger.error(f"[DB] Initialization error: {e}")
 
 
@@ -189,3 +214,51 @@ def increment_api_usage(api_name: str = "UK Planning API", increment: int = 1, c
     except Exception as e:
         logger.debug(f"[API Usage] Tracking error: {e}")
     return out
+
+
+def is_territory_claimed(outcode: str) -> bool:
+    """Checks whether a given UK postcode district is already locked by an active subscriber."""
+    if not SURL or not outcode:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT active FROM territory_claims WHERE outcode = %s AND active = TRUE", (outcode.strip().upper(),))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return bool(row and row[0])
+    except Exception as e:
+        logger.error(f"[Territory] Check error for {outcode}: {e}")
+        return False
+
+
+def claim_territory_atomically(outcode: str, customer_email: str, stripe_sub_id: str = "") -> bool:
+    """
+    Atomically claims a 15-mile radial territory district for a paying customer.
+    Prevents race conditions: returns True if successfully locked, False if already claimed.
+    """
+    if not SURL or not outcode:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO territory_claims (outcode, customer_email, stripe_subscription_id, active, claimed_at)
+            VALUES (%s, %s, %s, TRUE, NOW())
+            ON CONFLICT (outcode) DO UPDATE SET
+                customer_email = EXCLUDED.customer_email,
+                stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+                active = TRUE,
+                claimed_at = NOW()
+            WHERE territory_claims.active = FALSE
+            RETURNING id;
+        """, (outcode.strip().upper(), customer_email.strip().lower(), stripe_sub_id))
+        row = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+        return bool(row)
+    except Exception as e:
+        logger.error(f"[Territory] Atomic claim error for {outcode}: {e}")
+        return False

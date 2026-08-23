@@ -132,9 +132,15 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
         session_id = data.get("id")
         customer_email = data.get("customer_details", {}).get("email", "unknown")
         amount = data.get("amount_total", 0)
+        outcode = data.get("client_reference_id") or data.get("metadata", {}).get("outcode")
+        if outcode:
+            import database
+            claimed = database.claim_territory_atomically(outcode, customer_email, stripe_sub_id=data.get("subscription", ""))
+            logger.info(f"[Stripe] Territory {outcode} claimed by {customer_email}: {claimed}")
         logger.info(f"[Stripe] Payment complete — {customer_email} — £{amount / 100:.2f}")
         return {"event": "payment_complete", "email": customer_email,
-                "session_id": session_id, "amount_pence": amount}
+                "session_id": session_id, "amount_pence": amount, "outcode": outcode}
+
 
     elif event_type == "customer.subscription.created":
         customer_id = data.get("customer")

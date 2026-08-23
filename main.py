@@ -246,6 +246,10 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
     min_val = selected_leads * 450
     max_val = selected_leads * 1450
 
+    # Check territory exclusivity in real-time
+    is_claimed = database.is_territory_claimed(display_pc)
+    exclusivity_label = "🔒 Locked (Claimed by Local Partner)" if is_claimed else "🟢 Available (Unclaimed)"
+
     return {
         "postcode": display_pc,
         "authority": district,
@@ -254,13 +258,15 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
         "radius_miles": radius,
         "is_covered": True,
         "is_england": True,
+        "is_claimed": is_claimed,
         "selected_area_leads": selected_leads,
         "connected_area_leads": connected_leads,
         "total_leads_in_scope": selected_leads + connected_leads,
         "est_min_val": f"{min_val:,}",
         "est_max_val": f"{max_val:,}",
-        "exclusivity_status": "Available (Unclaimed)"
+        "exclusivity_status": exclusivity_label
     }
+
 
 
 
@@ -854,8 +860,13 @@ def public_homepage():
                     if (selEl) selEl.innerHTML = `✓ There are <span style="font-size:19px; color:#059669; font-weight:700;">${{data.selected_area_leads}} leads</span> in the selected area (${{data.radius_miles}} miles)`;
                     if (connEl) connEl.innerHTML = `+ There are another <span style="color:#0284c7; font-weight:700;">${{data.connected_area_leads}} leads</span> in connected adjacent council areas`;
                     if (valEl) valEl.innerText = `£${{data.est_min_val}} – £${{data.est_max_val}}`;
-                    if (statusEl) statusEl.innerHTML = `🟢 Available (Unclaimed)`;
+                    if (data.is_claimed) {{
+                        if (statusEl) statusEl.innerHTML = `<span style="background:#fef2f2; color:#b91c1c; padding:4px 10px; border-radius:6px; font-weight:700; font-size:12px; border:1px solid #fecaca;">🔒 Locked (Claimed)</span>`;
+                    }} else {{
+                        if (statusEl) statusEl.innerHTML = `🟢 Available (Unclaimed)`;
+                    }}
                 }}
+
 
                 initMap(data.lat, data.lng, data.postcode);
             }} catch (err) {{
