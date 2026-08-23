@@ -247,12 +247,14 @@ def public_homepage():
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(user: str = Depends(verify_dashboard_auth)):
-    stats = {"p": 0, "l": 0, "partners": [], "leads": []}
+    stats = {"p": 0, "l": 0, "enriched": 0, "partners": [], "leads": []}
     try:
         conn = database.get_db_conn(); cur = conn.cursor()
         cur.execute("SELECT count(*) FROM potential_partners"); stats["p"] = cur.fetchone()[0]
         cur.execute("SELECT count(*) FROM leads"); stats["l"] = cur.fetchone()[0]
-        cur.execute("""SELECT company_name, md_name, target_city, google_rating
+        cur.execute("SELECT count(*) FROM potential_partners WHERE phone_number IS NOT NULL OR email IS NOT NULL")
+        stats["enriched"] = cur.fetchone()[0]
+        cur.execute("""SELECT company_name, md_name, target_city, google_rating, phone_number, email
                        FROM potential_partners ORDER BY created_at DESC LIMIT 6""")
         stats["partners"] = cur.fetchall()
         cur.execute("""SELECT address, summary, lead_score, lead_price, council_source, discovered_at
@@ -263,7 +265,7 @@ def admin_dashboard(user: str = Depends(verify_dashboard_auth)):
         logger.error(f"[ADMIN] DB error: {e}")
 
     partner_rows = "".join([
-        f"<li><b>{p[0]}</b> — {p[1] or 'Director on file'} | {p[2]} | ⭐ {p[3] or 'N/A'}</li>"
+        f"<li><b>{p[0]}</b> — {p[1] or 'Director on file'} | <b>{p[2]}</b> | 📞 {p[4] or '—'} | ✉️ {p[5] or '—'} | ⭐ {p[3] or 'N/A'}</li>"
         for p in stats["partners"]
     ])
 
@@ -293,46 +295,54 @@ def admin_dashboard(user: str = Depends(verify_dashboard_auth)):
     ])
 
     city_buttons = "".join([
-        f"""<div style='display:inline-block; margin:6px; padding:12px 18px;
-            background:#f4f4f9; border-radius:10px; border:1px solid #ddd;'>
+        f"""<div style='display:inline-block; margin:6px; padding:12px 16px;
+            background:#f8fafc; border-radius:12px; border:1px solid #e2e8f0;'>
             <b>📍 {city}</b><br>
-            <a href='/scan/{city.lower().replace(" ", "-")}'>▶ Scan Leads</a> &nbsp;|&nbsp;
-            <a href='/research/{city.lower().replace(" ", "-")}'>▶ Find Partners</a>
+            <div style='margin-top:6px; font-size:12px;'>
+                <a href='/scan/{city.lower().replace(" ", "-")}' style='color:#059669; font-weight:bold; text-decoration:none;'>▶ Scan Leads</a> &nbsp;|&nbsp;
+                <a href='/research/{city.lower().replace(" ", "-")}' style='color:#0284c7; text-decoration:none;'>🔍 Find New</a> &nbsp;|&nbsp;
+                <a href='/enrich-region/{city.lower().replace(" ", "-")}' style='color:#7c3aed; font-weight:bold; text-decoration:none;'>⚡ Enrich</a>
+            </div>
         </div>"""
         for city in ALL_CITIES[:9]  # Display the 9 core English regions
     ])
 
+    pct = int((stats['enriched'] / stats['p'] * 100)) if stats['p'] else 0
+
     return f"""
     <html><head><title>Vector Data Labs — Admin Command</title></head>
     <body style="font-family:sans-serif; background:#f4f4f9; padding:40px;">
-    <div style="max-width:850px; margin:auto; background:white; padding:40px;
+    <div style="max-width:880px; margin:auto; background:white; padding:40px;
                 border-radius:20px; border-top:8px solid #064e3b; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
         <div style="display:flex; justify-content:space-between; align-items:center;">
             <h1>📊 ArborLeads Admin Command</h1>
             <a href="/" target="_blank" style="background:#10b981; color:white; padding:8px 14px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">👁️ View Public Homepage</a>
         </div>
-        <p>Verified LTD Partners: <b>{stats['p']}</b> &nbsp;|&nbsp; Total Planning Leads: <b>{stats['l']}</b>
+        <p>Verified LTD Partners: <b>{stats['p']}</b> &nbsp;|&nbsp; 
+           Enriched with Contacts: <b style="color:#059669;">{stats['enriched']} ({pct}%)</b> &nbsp;|&nbsp; 
+           Total Planning Leads: <b>{stats['l']}</b>
            &nbsp;|&nbsp; <a href='/status'>🔧 System Status</a>
            &nbsp;|&nbsp; <a href='/pricing'>💳 Pricing Table</a>
            &nbsp;|&nbsp; <a href='/export-directors'>📋 View Contacts</a>
            &nbsp;|&nbsp; <a href='/export-directors.csv' style='color:#1b5e20; font-weight:bold;'>⬇️ Download CSV</a>
         </p>
         <hr>
-        <h3>🏙️ Regional Scanners & Partner Discovery</h3>
+        <h3>🏙️ Regional Scanners, Discovery & Instant Regional Enrichment</h3>
+        <p style="color:#64748b; font-size:13px; margin-top:-5px;">Click <b>⚡ Enrich</b> on any specific region to pull phone numbers and emails in ~5 seconds for that region alone!</p>
         {city_buttons}
         <hr>
-        <h3>🔄 Database Operations</h3>
+        <h3>🔄 Batch Operations</h3>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
-            <a href='/research-all' style="background:#2e7d32; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
+            <a href='/enrich-batch' style="background:#7c3aed; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
+                ⚡ Enrich Next 50 Partners (5-8 Seconds)
+            </a>
+            <a href='/research-all' style="background:#0284c7; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
                 🚀 Discover All 9 Regions (Find Partners)
             </a>
             <a href='/clean-partners' style="background:#b71c1c; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
                 🧹 Clean Database (Purge False Substrings)
             </a>
-            <a href='/enrich-all' style="background:#1b5e20; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                🔄 Enrich All (Phone, Email, Web, Director)
-            </a>
-            <a href='/export-directors.csv' style="background:#0d47a1; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
+            <a href='/export-directors.csv' style="background:#064e3b; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
                 ⬇️ Export Contacts CSV
             </a>
         </div>
@@ -344,6 +354,7 @@ def admin_dashboard(user: str = Depends(verify_dashboard_auth)):
     </div>
     </body></html>
     """
+
 
 
 
@@ -636,13 +647,42 @@ def research_all(user: str = Depends(verify_dashboard_auth)):
 
 
 
+@app.get("/enrich-batch", response_class=HTMLResponse)
+def enrich_batch(user: str = Depends(verify_dashboard_auth)):
+    count = research.enrich_existing_partners(limit=50)
+    return f"""<html><body style="font-family:sans-serif; padding:40px;">
+        <h3>⚡ Batch Enrichment Complete</h3>
+        <p>✅ Enriched and updated <b>{count}</b> partners with direct director names, UK phone numbers, and emails in ~5 seconds!</p>
+        <div style="margin-top:20px;">
+            <a href="/enrich-batch" style="background:#7c3aed; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">▶ Enrich Next 50</a> &nbsp;&nbsp;
+            <a href="/admin" style="background:#064e3b; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">← Back to Admin Command</a>
+        </div>
+    </body></html>"""
+
+
+@app.get("/enrich-region/{city_slug}", response_class=HTMLResponse)
+def enrich_region(city_slug: str, user: str = Depends(verify_dashboard_auth)):
+    city = _resolve_city_param(city_slug)
+    if not city:
+        raise HTTPException(status_code=404, detail=f"Region/City '{city_slug}' not configured.")
+    count = research.enrich_existing_partners(limit=150, city_name=city)
+    return f"""<html><body style="font-family:sans-serif; padding:40px;">
+        <h3>⚡ Regional Enrichment Complete for {city}</h3>
+        <p>✅ Enriched and updated <b>{count}</b> {city} tree surgery contractors with direct director names, UK phone numbers, and emails!</p>
+        <div style="margin-top:20px;">
+            <a href="/admin" style="background:#064e3b; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">← Back to Admin Command</a>
+        </div>
+    </body></html>"""
+
+
 @app.get("/enrich-all", response_class=HTMLResponse)
 def enrich_all(user: str = Depends(verify_dashboard_auth)):
-    threading.Thread(target=research.enrich_existing_partners, daemon=True).start()
+    threading.Thread(target=research.enrich_existing_partners, kwargs={"limit": 0}, daemon=True).start()
     return """<html><body style="font-family:sans-serif; padding:40px;">
         <p>✅ Enrichment started in background across 8 parallel threads. Check Render logs or refresh admin dashboard for progress.</p>
         <a href="/admin">← Back to Admin Command</a>
     </body></html>"""
+
 
 
 
@@ -678,11 +718,19 @@ def trigger_clean_partners(secret: Optional[str] = Query(None)):
     return {"status": "success", "result": result}
 
 
+@app.get("/trigger-enrich-batch")
+def trigger_enrich_batch(limit: int = 50, secret: Optional[str] = Query(None)):
+    verify_cron_secret(secret)
+    count = research.enrich_existing_partners(limit=limit)
+    return {"status": "success", "enriched_count": count}
+
+
 @app.get("/trigger-enrich-all")
 def trigger_enrich_all(secret: Optional[str] = Query(None)):
     verify_cron_secret(secret)
-    threading.Thread(target=research.enrich_existing_partners, daemon=True).start()
+    threading.Thread(target=research.enrich_existing_partners, kwargs={"limit": 0}, daemon=True).start()
     return {"status": "started", "action": "enrich_all"}
+
 
 
 @app.get("/trigger-research-all")

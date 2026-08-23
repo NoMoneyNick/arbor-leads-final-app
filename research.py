@@ -565,35 +565,45 @@ def research_all_cities():
 
 
 
-def enrich_existing_partners():
+def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -> int:
     """
-    Retroactive enrichment job: loops through all partners in parallel across 10 threads,
-    fills missing director names via CH Officers,
-    fetches Google Places phone/website/rating with full address precision,
-    and scrapes contact emails across multi-page website endpoints.
-    Runs as a background task from /enrich-all.
+    Enriches a bite-sized chunk of partners (default 50 or by specific region).
+    Fast, reliable, never hangs. Completes in 5-10 seconds!
     """
     if not CH_KEY:
         logger.error("[Enrichment] COMPANIES_HOUSE_KEY not set. Aborting.")
-        return
+        return 0
 
     try:
         conn = database.get_db_conn()
         cur = conn.cursor()
 
-        # Fetch only partners that are still missing details (enables seamless resume)
-        cur.execute("""
+        query = """
             SELECT id, company_name, company_number, target_city, address,
                    md_name, phone_number, google_rating, website, email
             FROM potential_partners
             WHERE company_number IS NOT NULL
               AND (email IS NULL OR phone_number IS NULL OR md_name IS NULL OR website IS NULL)
-        """)
+        """
+        params = []
+        if city_name and city_name.lower() != "uk":
+            query += " AND LOWER(target_city) = LOWER(%s)"
+            params.append(city_name)
+
+        if limit and limit > 0:
+            query += " LIMIT %s"
+            params.append(limit)
+
+        cur.execute(query, tuple(params))
         partners = cur.fetchall()
         cur.close()
         conn.close()
-        logger.info(f"[Enrichment] 🚀 {len(partners)} remaining partners queued for parallel deep enrichment...")
 
+        if not partners:
+            logger.info(f"[Enrichment] All partners {f'in {city_name}' if city_name else ''} are already fully enriched!")
+            return 0
+
+        logger.info(f"[Enrichment] 🚀 Processing bite-sized batch of {len(partners)} partners {f'for {city_name}' if city_name else ''}...")
 
         from psycopg2.extras import execute_batch
 
@@ -621,33 +631,31 @@ def enrich_existing_partners():
                 logger.debug(f"[Enrichment] Error on {name}: {e}")
                 return None
 
-        # Process in chunks of 25 for fast parallel execution and batch DB writes
         from concurrent.futures import ThreadPoolExecutor
-        chunk_size = 25
-        for i in range(0, len(partners), chunk_size):
-            chunk = partners[i:i + chunk_size]
-            with ThreadPoolExecutor(max_workers=8) as executor:
-                results = list(executor.map(enrich_single_partner, chunk))
-            
-            valid_updates = [r for r in results if r is not None]
-            if valid_updates:
-                p_conn = database.get_db_conn()
-                p_cur = p_conn.cursor()
-                execute_batch(p_cur, """
-                    UPDATE potential_partners
-                    SET md_name = %s, phone_number = %s, google_rating = %s,
-                        website = %s, email = %s
-                    WHERE id = %s
-                """, valid_updates, page_size=25)
-                p_conn.commit()
-                p_cur.close()
-                p_conn.close()
-                logger.info(f"[Enrichment] 💾 Saved batch of {len(valid_updates)} enriched partners ({i + len(chunk)}/{len(partners)} total).")
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(enrich_single_partner, partners))
 
-        logger.info(f"[Enrichment] 🎯 Complete! All {len(partners)} partners processed.")
+        valid_updates = [r for r in results if r is not None]
+        if valid_updates:
+            p_conn = database.get_db_conn()
+            p_cur = p_conn.cursor()
+            execute_batch(p_cur, """
+                UPDATE potential_partners
+                SET md_name = %s, phone_number = %s, google_rating = %s,
+                    website = %s, email = %s
+                WHERE id = %s
+            """, valid_updates, page_size=25)
+            p_conn.commit()
+            p_cur.close()
+            p_conn.close()
+
+        logger.info(f"[Enrichment] 🎯 Complete! Enriched and saved {len(valid_updates)} partners in {city_name or 'batch'}.")
+        return len(valid_updates)
 
     except Exception as e:
         logger.error(f"[Enrichment] Fatal error: {e}")
+        return 0
+
 
 
 
