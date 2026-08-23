@@ -197,7 +197,9 @@ def get_google_places_info(company_name: str, city_or_addr: str = ""):
                 "key": GOOGLE_MAPS_KEY
             },
             timeout=3.0
+        )
         res_data = res.json()
+
         g_status = res_data.get("status")
         if g_status == "OVER_QUERY_LIMIT":
             import notifications
