@@ -431,9 +431,18 @@ def public_homepage():
                 </div>
             </div>
         </nav>
+ 
+        <header class="hero">
+            <div class="container">
+                <div class="hero-badge">Direct Council Planning Datahub</div>
+                <h1>Statutory Planning Notice Intelligence for UK Arboricultural Contractors</h1>
+                <p class="lead">
+                    Algorithmic monitoring across all 309 English Local Planning Authorities. Receive verified Tree Preservation Order (TPO) applications, Section 211 Conservation Area notices, and commercial felling submissions within 24 hours of statutory lodgement.
+                </p>
 
                 <!-- Interactive Visual Territory Radar Map & Postcode Inspector -->
                 <div style="background:#ffffff; border:1px solid var(--border-color); border-radius:12px; padding:28px; max-width:820px; box-shadow:0 6px 16px rgba(0,0,0,0.06); margin-bottom:32px;">
+
                     <div style="font-weight:700; font-size:16px; margin-bottom:14px; color:var(--brand-dark); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
                         <span>Interactive Territory Radar & Planning Notice Inspector:</span>
                         <span style="font-size:12px; font-weight:600; color:var(--brand-muted); background:#f1f5f9; padding:3px 10px; border-radius:12px;">Public Access — No Account Required</span>
