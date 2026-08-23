@@ -637,9 +637,10 @@ def public_homepage():
             <div class="container">
                 <div class="nav-wrapper">
                     <a href="/" class="nav-logo">
-                        ArborLeads
+                        Tree Key
                         <span>Statutory Planning Intelligence</span>
                     </a>
+
                     <div class="nav-links">
                         <a href="#features">Coverage & Methodology</a>
                         <a href="#register">Live Planning Feed</a>
