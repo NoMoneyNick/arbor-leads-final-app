@@ -574,7 +574,7 @@ def scan_city(city_slug: str, user: str = Depends(verify_dashboard_auth)):
 
     return f"""<html><body style="font-family:sans-serif; padding:40px;">
         <p>✅ {city} scan complete. <b>{count}</b> new leads found.</p>
-        <a href="/">← Back to Dashboard</a>
+        <a href="/admin">← Back to Admin Command</a>
     </body></html>"""
 
 
@@ -607,14 +607,19 @@ def cron_trigger_slash(city_slug: str, secret: Optional[str] = Query(None)):
 
 # ── Research Routes (Basic Auth) ──────────────────────────────────────────────
 
-@app.get("/research/{city_slug}")
+@app.get("/research/{city_slug}", response_class=HTMLResponse)
 def research_city(city_slug: str, bg: BackgroundTasks,
                   user: str = Depends(verify_dashboard_auth)):
     city = _resolve_city_param(city_slug)
     if not city:
         raise HTTPException(status_code=404, detail=f"Region/City '{city_slug}' not configured.")
     bg.add_task(research.perform_research, city)
-    return {"status": "started", "city": city}
+    return f"""<html><body style="font-family:sans-serif; padding:40px;">
+        <h3>🔍 Partner Discovery Started for {city}</h3>
+        <p>Searching Companies House, officers, Google Places, and websites in the background.</p>
+        <p>New verified tree surgery LTDs will appear in your database momentarily.</p>
+        <a href="/admin">← Back to Admin Command</a>
+    </body></html>"""
 
 
 
@@ -623,9 +628,9 @@ def research_all(bg: BackgroundTasks, user: str = Depends(verify_dashboard_auth)
     bg.add_task(research.research_all_cities)
     return """<html><body style="font-family:sans-serif; padding:40px;">
         <h3>🚀 Nationwide Discovery Started</h3>
-        <p>Investigating Companies House across London, Leeds, Birmingham, Manchester, Bristol, and Sheffield in the background.</p>
-        <p>New verified LTD tree surgery contractors will populate in your database over the next 2-3 minutes.</p>
-        <a href="/">← Back to Dashboard</a>
+        <p>Investigating Companies House across all 9 English regions in the background.</p>
+        <p>New verified LTD tree surgery contractors will populate in your database over the next 1-2 minutes.</p>
+        <a href="/admin">← Back to Admin Command</a>
     </body></html>"""
 
 
@@ -634,9 +639,10 @@ def research_all(bg: BackgroundTasks, user: str = Depends(verify_dashboard_auth)
 def enrich_all(bg: BackgroundTasks, user: str = Depends(verify_dashboard_auth)):
     bg.add_task(research.enrich_existing_partners)
     return """<html><body style="font-family:sans-serif; padding:40px;">
-        <p>✅ Enrichment started in background. Check Render logs for progress.</p>
-        <a href="/">← Back to Dashboard</a>
+        <p>✅ Enrichment started in background across 10 parallel threads. Check Render logs or refresh admin dashboard for progress.</p>
+        <a href="/admin">← Back to Admin Command</a>
     </body></html>"""
+
 
 
 @app.get("/clean-partners", response_class=HTMLResponse)

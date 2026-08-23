@@ -301,71 +301,64 @@ CITY_POSTCODE_PREFIX = {
 def scan_city_planning_api(city_name: str) -> int:
     """
     Scans planning applications for a UK city and all its surrounding borough/county councils
-    using ukplanningapi.co.uk across all regional postcode prefixes.
-    API docs: https://ukplanningapi.co.uk/api-docs
+    using ukplanningapi.co.uk across all regional postcode prefixes in parallel.
     """
     if not UK_PLANNING_API_KEY:
-        logger.error(f"[{city_name}] UK_PLANNING_API_KEY is not set. "
-                     f"Get a free key at ukplanningapi.co.uk/api-signup")
+        logger.error(f"[{city_name}] UK_PLANNING_API_KEY is not set.")
         return 0
 
     postcode_prefixes = CITY_POSTCODE_PREFIX.get(city_name, [])
     if isinstance(postcode_prefixes, str):
         postcode_prefixes = [postcode_prefixes]
     if not postcode_prefixes:
-        logger.error(f"[{city_name}] No postcode prefixes configured for this city.")
         return 0
 
     headers = {"X-API-Key": UK_PLANNING_API_KEY}
     new_leads = []
 
     try:
-        conn = database.get_db_conn()
-        cur = conn.cursor()
+        from concurrent.futures import ThreadPoolExecutor
 
-        for prefix in postcode_prefixes:
+        def fetch_prefix(prefix):
             try:
                 res = requests.get(
                     "https://ukplanningapi.co.uk/v1/applications",
-                    params={
-                        "postcode": prefix,
-                        "status":   "received",
-                        "limit":    200,
-                    },
+                    params={"postcode": prefix, "status": "received", "limit": 200},
                     headers=headers,
-                    timeout=15
+                    timeout=8
                 )
+                if res.status_code == 200:
+                    return prefix, res.json().get("data", [])
+            except Exception:
+                pass
+            return prefix, []
 
-                if res.status_code == 429:
-                    logger.warning(f"[{city_name}] UK Planning API monthly quota reached.")
-                    break
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            prefix_results = list(executor.map(fetch_prefix, postcode_prefixes))
 
-                if res.status_code != 200:
-                    logger.debug(f"[{city_name}] Prefix '{prefix}' returned HTTP {res.status_code}")
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+
+        for prefix, records in prefix_results:
+            for item in records:
+                summary = item.get("description", "") or ""
+                if not _is_tree_related(summary):
                     continue
-
-                records = res.json().get("data", [])
-                for item in records:
-                    summary = item.get("description", "") or ""
-                    if not _is_tree_related(summary):
-                        continue
-                    ref  = item.get("reference") or f"{prefix}-{int(time.time())}"
-                    addr = item.get("address", city_name)
-                    lead = _insert_lead(cur, ref, addr, summary, city_name)
-                    if lead:
-                        new_leads.append(lead)
-            except Exception as pe:
-                logger.debug(f"[{city_name}] Error scanning prefix '{prefix}': {pe}")
+                ref  = item.get("reference") or f"{prefix}-{int(time.time())}"
+                addr = item.get("address", city_name)
+                lead = _insert_lead(cur, ref, addr, summary, city_name)
+                if lead:
+                    new_leads.append(lead)
 
         conn.commit()
         cur.close()
         conn.close()
 
+        if new_leads:
+            notifications.dispatch_lead_alerts(city_name, new_leads)
+        logger.info(f"[{city_name}] Parallel scan complete. {len(new_leads)} new leads found.")
+        return len(new_leads)
+
     except Exception as e:
-        logger.error(f"[{city_name}] Unexpected error in planning scan: {e}", exc_info=True)
-
-
-    if new_leads:
-        notifications.dispatch_lead_alerts(city_name, new_leads)
-    logger.info(f"[{city_name}] Scan complete. {len(new_leads)} new leads found.")
-    return len(new_leads)
+        logger.error(f"[{city_name}] Fatal error in scan_city_planning_api: {e}")
+        return 0
