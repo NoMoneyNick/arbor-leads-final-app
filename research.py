@@ -60,13 +60,27 @@ import urllib.parse
 
 import html
 
+def _is_valid_uk_phone(phone_str: Optional[str]) -> Optional[str]:
+    """Validates and formats UK phone numbers. Rejects US, Australian, NZ numbers."""
+    if not phone_str:
+        return None
+    clean = re.sub(r'[\s\(\)\-\.]', '', phone_str)
+    if clean.startswith("+44"):
+        clean = "0" + clean[3:]
+    elif clean.startswith("0044"):
+        clean = "0" + clean[4:]
+    
+    # Must start with 01, 02, 03, 07, 08 and be 10 or 11 digits
+    if clean.startswith(("01", "02", "03", "07", "08")) and len(clean) in (10, 11):
+        return phone_str.strip()
+    return None
+
+
 def _extract_emails_from_html(html_text: str) -> list[str]:
     """Helper to extract clean, valid email addresses from raw HTML text."""
     if not html_text:
         return []
-    # Decode HTML entities like &#105;&#110;&#102;&#111; or &commat;
     decoded = html.unescape(html_text)
-
     
     # 1. Mailto links
     mailto_matches = re.findall(r'mailto:([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', decoded, re.IGNORECASE)
@@ -77,8 +91,8 @@ def _extract_emails_from_html(html_text: str) -> list[str]:
     obf_emails = [f"{user}@{dom}" for user, dom in obfuscated]
 
     all_emails = mailto_matches + raw_matches + obf_emails
-    excluded_domains = ["sentry.io", "wixpress.com", "example.com", "domain.com", "schema.org", "w3.org", "googleapis.com", "cloudflare.com", "wordpress.org"]
-    excluded_exts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".js", ".css", ".ico", ".woff", ".woff2"]
+    excluded_domains = ["sentry.io", "wixpress.com", "example.com", "domain.com", "schema.org", "w3.org", "googleapis.com", "cloudflare.com", "wordpress.org", "godaddy.com"]
+    excluded_exts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".js", ".css", ".ico", ".woff", ".woff2", ".au", ".nz", ".us", ".ca"]
 
     valid_emails = []
     for email in all_emails:
@@ -95,13 +109,18 @@ def _extract_emails_from_html(html_text: str) -> list[str]:
 
 def scrape_email_from_website(website_url: str) -> Optional[str]:
     """
-    High-yield multi-page email scraper:
-    1. Fetches homepage.
-    2. If no email found, checks /contact, /contact-us, /about, /quote pages.
+    Fast non-blocking email scraper:
+    1. Fetches homepage (2.0s strict timeout).
+    2. If no email found, checks /contact (1.5s strict timeout).
     """
     if not website_url:
         return None
     try:
+        # Ignore obvious foreign TLDs
+        lower_url = website_url.lower()
+        if any(lower_url.endswith(ext) or f"{ext}/" in lower_url for ext in [".com.au", ".net.au", ".co.nz", ".nz", ".au"]):
+            return None
+
         if not website_url.startswith("http"):
             website_url = "https://" + website_url.lstrip("/")
 
@@ -109,25 +128,26 @@ def scrape_email_from_website(website_url: str) -> Optional[str]:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         
-        # 1. Fetch Homepage
-        res = requests.get(website_url, headers=headers, timeout=4, verify=False)
-        if res.status_code == 200:
-            emails = _extract_emails_from_html(res.text)
-            if emails:
-                return emails[0]
+        # 1. Fetch Homepage (fast 2s timeout)
+        try:
+            res = requests.get(website_url, headers=headers, timeout=2.0, verify=False)
+            if res.status_code == 200:
+                emails = _extract_emails_from_html(res.text)
+                if emails:
+                    return emails[0]
+        except Exception:
+            pass
 
-        # 2. Check Common Contact Sub-pages if not on homepage
+        # 2. Check /contact sub-page (fast 1.5s timeout)
         base_url = website_url.rstrip("/")
-        sub_paths = ["/contact", "/contact-us", "/about", "/about-us", "/quote", "/get-a-quote"]
-        for path in sub_paths:
-            try:
-                sub_res = requests.get(base_url + path, headers=headers, timeout=3, verify=False)
-                if sub_res.status_code == 200:
-                    sub_emails = _extract_emails_from_html(sub_res.text)
-                    if sub_emails:
-                        return sub_emails[0]
-            except Exception:
-                continue
+        try:
+            sub_res = requests.get(base_url + "/contact", headers=headers, timeout=1.5, verify=False)
+            if sub_res.status_code == 200:
+                sub_emails = _extract_emails_from_html(sub_res.text)
+                if sub_emails:
+                    return sub_emails[0]
+        except Exception:
+            pass
 
     except Exception as e:
         logger.debug(f"[Email Scraper] Could not scrape {website_url}: {e}")
@@ -136,31 +156,26 @@ def scrape_email_from_website(website_url: str) -> Optional[str]:
 
 def get_google_places_info(company_name: str, city_or_addr: str = ""):
     """
-    Pillar 3: Queries Google Places API for reputation rating,
-    direct phone number, and official website URL.
+    Pillar 3: Queries Google Places API for UK reputation rating,
+    direct UK phone number, and official website URL with region=gb restriction.
     Returns: (rating: float|None, phone_number: str|None, website: str|None)
     """
     if not GOOGLE_MAPS_KEY:
         return None, None, None
     try:
-        # Include company name + address/town for pinpoint local precision
-        query = f"{company_name} {city_or_addr}".strip()
+        query = f"{company_name} {city_or_addr} UK".strip()
         res = requests.get(
             "https://maps.googleapis.com/maps/api/place/textsearch/json",
-            params={"query": query, "key": GOOGLE_MAPS_KEY},
-            timeout=5
+            params={
+                "query": query,
+                "region": "gb",      # Strictly enforce UK (Great Britain) results!
+                "key": GOOGLE_MAPS_KEY
+            },
+            timeout=3.0
         )
         results = res.json().get("results", [])
         if not results:
-            # Fallback to just company name UK
-            res = requests.get(
-                "https://maps.googleapis.com/maps/api/place/textsearch/json",
-                params={"query": f"{company_name} tree surgery UK", "key": GOOGLE_MAPS_KEY},
-                timeout=5
-            )
-            results = res.json().get("results", [])
-            if not results:
-                return None, None, None
+            return None, None, None
 
         first = results[0]
         rating = first.get("rating")
@@ -178,11 +193,18 @@ def get_google_places_info(company_name: str, city_or_addr: str = ""):
                         "fields": "formatted_phone_number,website,rating",
                         "key": GOOGLE_MAPS_KEY
                     },
-                    timeout=5
+                    timeout=3.0
                 )
                 details = details_res.json().get("result", {})
-                phone = details.get("formatted_phone_number")
-                website = details.get("website")
+                raw_phone = details.get("formatted_phone_number")
+                phone = _is_valid_uk_phone(raw_phone)
+                
+                raw_website = details.get("website")
+                if raw_website:
+                    # Ignore foreign TLDs
+                    if not any(tld in raw_website.lower() for tld in [".com.au", ".net.au", ".co.nz", ".nz"]):
+                        website = raw_website
+                
                 if details.get("rating") is not None:
                     rating = details.get("rating")
             except Exception as de:
@@ -192,6 +214,7 @@ def get_google_places_info(company_name: str, city_or_addr: str = ""):
     except Exception as e:
         logger.debug(f"[Google] Error fetching info for {company_name}: {e}")
         return None, None, None
+
 
 
 
@@ -716,7 +739,7 @@ def clean_partner_database():
         conn = database.get_db_conn()
         cur = conn.cursor()
 
-        cur.execute("SELECT id, company_name, address, target_city FROM potential_partners")
+        cur.execute("SELECT id, company_name, address, target_city, phone_number, website, email FROM potential_partners")
         all_partners = cur.fetchall()
         logger.info(f"[Cleanup] {len(all_partners)} partners to review.")
 
@@ -724,7 +747,7 @@ def clean_partner_database():
         kept = 0
         updated_cities = 0
 
-        for (pid, name, addr, current_city) in all_partners:
+        for (pid, name, addr, current_city, raw_phone, raw_website, raw_email) in all_partners:
             name_lower = (name or "").lower()
 
             # FILTER 1: Must contain tree trade phrase OR isolated 'tree' word boundary
@@ -740,14 +763,30 @@ def clean_partner_database():
                 logger.info(f"[Cleanup] REMOVED: {name} (has_required={has_required}, has_excluded={has_excluded})")
                 removed += 1
             else:
+                # Sanitize phone numbers to strictly UK
+                valid_phone = _is_valid_uk_phone(raw_phone)
+                cleaned_website = raw_website
+                cleaned_email = raw_email
+
+                if raw_website and any(tld in raw_website.lower() for tld in [".com.au", ".net.au", ".co.nz", ".nz", ".au"]):
+                    cleaned_website = None
+                    cleaned_email = None
+
                 # Accurate real city resolution from postcode and address
                 real_city = resolve_uk_city(addr, name, default_city=current_city or "UK")
+                
+                cur.execute("""
+                    UPDATE potential_partners
+                    SET target_city = %s, phone_number = %s, website = %s, email = %s
+                    WHERE id = %s
+                """, (real_city, valid_phone, cleaned_website, cleaned_email, pid))
+
                 if real_city != current_city:
-                    cur.execute("UPDATE potential_partners SET target_city = %s WHERE id = %s", (real_city, pid))
                     updated_cities += 1
                 kept += 1
 
         conn.commit()
+
         cur.close()
         conn.close()
         logger.info(f"[Cleanup] Complete. Kept: {kept} | Removed: {removed} | Cities Re-assigned: {updated_cities}")
