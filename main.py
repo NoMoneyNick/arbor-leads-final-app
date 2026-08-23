@@ -607,13 +607,14 @@ def cron_trigger_slash(city_slug: str, secret: Optional[str] = Query(None)):
 
 # ── Research Routes (Basic Auth) ──────────────────────────────────────────────
 
+import threading
+
 @app.get("/research/{city_slug}", response_class=HTMLResponse)
-def research_city(city_slug: str, bg: BackgroundTasks,
-                  user: str = Depends(verify_dashboard_auth)):
+def research_city(city_slug: str, user: str = Depends(verify_dashboard_auth)):
     city = _resolve_city_param(city_slug)
     if not city:
         raise HTTPException(status_code=404, detail=f"Region/City '{city_slug}' not configured.")
-    bg.add_task(research.perform_research, city)
+    threading.Thread(target=research.perform_research, args=(city,), daemon=True).start()
     return f"""<html><body style="font-family:sans-serif; padding:40px;">
         <h3>🔍 Partner Discovery Started for {city}</h3>
         <p>Searching Companies House, officers, Google Places, and websites in the background.</p>
@@ -624,8 +625,8 @@ def research_city(city_slug: str, bg: BackgroundTasks,
 
 
 @app.get("/research-all", response_class=HTMLResponse)
-def research_all(bg: BackgroundTasks, user: str = Depends(verify_dashboard_auth)):
-    bg.add_task(research.research_all_cities)
+def research_all(user: str = Depends(verify_dashboard_auth)):
+    threading.Thread(target=research.research_all_cities, daemon=True).start()
     return """<html><body style="font-family:sans-serif; padding:40px;">
         <h3>🚀 Nationwide Discovery Started</h3>
         <p>Investigating Companies House across all 9 English regions in the background.</p>
@@ -636,10 +637,10 @@ def research_all(bg: BackgroundTasks, user: str = Depends(verify_dashboard_auth)
 
 
 @app.get("/enrich-all", response_class=HTMLResponse)
-def enrich_all(bg: BackgroundTasks, user: str = Depends(verify_dashboard_auth)):
-    bg.add_task(research.enrich_existing_partners)
+def enrich_all(user: str = Depends(verify_dashboard_auth)):
+    threading.Thread(target=research.enrich_existing_partners, daemon=True).start()
     return """<html><body style="font-family:sans-serif; padding:40px;">
-        <p>✅ Enrichment started in background across 10 parallel threads. Check Render logs or refresh admin dashboard for progress.</p>
+        <p>✅ Enrichment started in background across 8 parallel threads. Check Render logs or refresh admin dashboard for progress.</p>
         <a href="/admin">← Back to Admin Command</a>
     </body></html>"""
 
@@ -656,7 +657,7 @@ def clean_partners(user: str = Depends(verify_dashboard_auth)):
     if "error" in result:
         return f"""<html><body style="font-family:sans-serif; padding:40px;">
             <p>❌ Cleanup failed: {result['error']}</p>
-            <a href="/">← Back to Dashboard</a>
+            <a href="/admin">← Back to Dashboard</a>
         </body></html>"""
     return f"""<html><body style="font-family:sans-serif; padding:40px;">
         <h3>🧹 Partner Database Cleanup Complete</h3>
@@ -666,7 +667,7 @@ def clean_partners(user: str = Depends(verify_dashboard_auth)):
             Removed companies had no tree-surgery keywords in their name,
             or contained excluded terms (medical, dental, fruit, cosmetic, etc.)
         </p>
-        <a href="/">← Back to Dashboard</a>
+        <a href="/admin">← Back to Admin Command</a>
     </body></html>"""
 
 
@@ -678,17 +679,18 @@ def trigger_clean_partners(secret: Optional[str] = Query(None)):
 
 
 @app.get("/trigger-enrich-all")
-def trigger_enrich_all(bg: BackgroundTasks, secret: Optional[str] = Query(None)):
+def trigger_enrich_all(secret: Optional[str] = Query(None)):
     verify_cron_secret(secret)
-    bg.add_task(research.enrich_existing_partners)
+    threading.Thread(target=research.enrich_existing_partners, daemon=True).start()
     return {"status": "started", "action": "enrich_all"}
 
 
 @app.get("/trigger-research-all")
-def trigger_research_all(bg: BackgroundTasks, secret: Optional[str] = Query(None)):
+def trigger_research_all(secret: Optional[str] = Query(None)):
     verify_cron_secret(secret)
-    bg.add_task(research.research_all_cities)
+    threading.Thread(target=research.research_all_cities, daemon=True).start()
     return {"status": "started", "action": "research_all"}
+
 
 
 

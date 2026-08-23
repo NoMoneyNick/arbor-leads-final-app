@@ -595,6 +595,8 @@ def enrich_existing_partners():
         logger.info(f"[Enrichment] 🚀 {len(partners)} remaining partners queued for parallel deep enrichment...")
 
 
+        from psycopg2.extras import execute_batch
+
         def enrich_single_partner(row):
             (pid, name, number, city, addr, existing_md, existing_phone, existing_rating, existing_website, existing_email) = row
             try:
@@ -614,27 +616,36 @@ def enrich_existing_partners():
                 if not email and website:
                     email = scrape_email_from_website(website)
 
+                return (md_name, phone, rating, website, email, pid)
+            except Exception as e:
+                logger.debug(f"[Enrichment] Error on {name}: {e}")
+                return None
+
+        # Process in chunks of 25 for fast parallel execution and batch DB writes
+        from concurrent.futures import ThreadPoolExecutor
+        chunk_size = 25
+        for i in range(0, len(partners), chunk_size):
+            chunk = partners[i:i + chunk_size]
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                results = list(executor.map(enrich_single_partner, chunk))
+            
+            valid_updates = [r for r in results if r is not None]
+            if valid_updates:
                 p_conn = database.get_db_conn()
                 p_cur = p_conn.cursor()
-                p_cur.execute("""
+                execute_batch(p_cur, """
                     UPDATE potential_partners
                     SET md_name = %s, phone_number = %s, google_rating = %s,
                         website = %s, email = %s
                     WHERE id = %s
-                """, (md_name, phone, rating, website, email, pid))
+                """, valid_updates, page_size=25)
                 p_conn.commit()
                 p_cur.close()
                 p_conn.close()
+                logger.info(f"[Enrichment] 💾 Saved batch of {len(valid_updates)} enriched partners ({i + len(chunk)}/{len(partners)} total).")
 
-                logger.info(f"[Enrichment] ✅ {name} → Director: {md_name or 'N/A'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'}")
-            except Exception as e:
-                logger.debug(f"[Enrichment] Error on {name}: {e}")
+        logger.info(f"[Enrichment] 🎯 Complete! All {len(partners)} partners processed.")
 
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            executor.map(enrich_single_partner, partners)
-
-        logger.info(f"[Enrichment] 🎯 Complete! All {len(partners)} partners enriched.")
     except Exception as e:
         logger.error(f"[Enrichment] Fatal error: {e}")
 
