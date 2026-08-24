@@ -2,8 +2,9 @@
 
 **Status:** 100% Deployed, Fully Enriched, Great Britain Coverage, Pre-Revenue  
 **Customer Brand:** **Tree Key** (powered by Vector Data Labs parent umbrella)  
-**Live Production URL:** https://arbor-leads-final-app.onrender.com  
-**Admin Portal:** https://arbor-leads-final-app.onrender.com/admin  
+**Live Production URL:** https://treekey.uk  
+**Admin Portal:** https://treekey.uk/admin  
+**Backup URL:** https://arbor-leads-final-app.onrender.com  
 **Last Updated:** 24 Aug 2026  
 
 ---
@@ -64,6 +65,7 @@
 | `UK_PLANNING_API_KEY` | ✅ Set | UK Planning API for nationwide councils |
 | `RESEND_API_KEY` | ✅ Set | Transactional email alerts & quota warnings |
 | `TEST_EMAIL` | ✅ Set | Destination email for leads and guardian alerts |
-| `PUBLIC_APP_URL` | ✅ Set | `https://arbor-leads-final-app.onrender.com` |
+| `PUBLIC_APP_URL` | 🔄 Update to | `https://treekey.uk` |
 | `STRIPE_SECRET_KEY` | ✅ Set | Stripe payments live & verified |
 | `STRIPE_WEBHOOK_SECRET` | ✅ Set | Stripe webhook listener |
+
