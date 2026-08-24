@@ -258,6 +258,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
     exclusivity_label = "Ã°Å¸â€â€™ Locked (Claimed by Local Partner)" if is_claimed else "Ã°Å¸Å¸Â¢ Available (Unclaimed)"
 
     return {
+        "status": "ok",
         "postcode": display_pc,
         "authority": district,
         "lat": target_lat,
@@ -504,7 +505,13 @@ def public_homepage():
                 <!-- Radar UI -->
                 <div class="bg-[#020617] border border-slate-700 rounded-xl p-6 shadow-[0_0_40px_rgba(0,0,0,0.5)]">
                     <form onsubmit="event.preventDefault(); scanTerritory();" class="flex flex-col sm:flex-row gap-4 mb-6">
-                        <input type="text" id="postcodeInput" placeholder="Enter outward postcode (e.g. LS1, B1, SW1)" value="LS1" required class="flex-1 bg-slate-800 border-2 border-slate-600 text-white font-mono rounded px-4 py-3 focus:outline-none focus:border-brand-green focus:bg-slate-900 transition-colors uppercase text-lg shadow-inner">
+                        <input type="text" id="postcodeInput" placeholder="Enter outward postcode (e.g. LS1, B1, SW1)" value="B1" required class="flex-1 bg-slate-800 border-2 border-slate-600 text-white font-mono rounded px-4 py-3 focus:outline-none focus:border-brand-green focus:bg-slate-900 transition-colors uppercase text-lg shadow-inner">
+                        <select id="radiusSelect" class="bg-slate-800 border-2 border-slate-600 text-white font-mono rounded px-4 py-3 focus:outline-none focus:border-brand-green">
+                            <option value="16093">10 Miles</option>
+                            <option value="24140" selected>15 Miles</option>
+                            <option value="32186">20 Miles</option>
+                            <option value="40233">25 Miles</option>
+                        </select>
                         <button type="submit" id="scanBtn" class="bg-brand-green text-white font-bold px-8 py-3 rounded hover:bg-emerald-500 transition-colors uppercase font-mono tracking-wider shadow-lg flex justify-center items-center gap-2">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                             Run Scan
@@ -513,8 +520,6 @@ def public_homepage():
                     
                     <div class="relative">
                         <div id="map" class="h-[400px] w-full rounded border border-slate-700 z-10 grayscale contrast-125 sepia-[.2] hue-rotate-[140deg]"></div>
-                        <!-- Radar Sweep Overlay -->
-                        <div class="absolute inset-0 z-20 pointer-events-none opacity-20 radar-sweep" style="background: conic-gradient(from 0deg, transparent 70%, rgba(16, 185, 129, 0.8) 100%); border-radius: 50%;"></div>
                     </div>
                     
                     <div class="mt-6 flex flex-col sm:flex-row justify-between items-center text-sm font-mono text-slate-400 gap-4 bg-slate-900 p-4 rounded border border-slate-800">
@@ -621,7 +626,7 @@ def public_homepage():
             <div class="space-y-6">
                 <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
                     <h3 class="text-lg font-bold text-white mb-2">Are these leads exclusive?</h3>
-                    <p class="text-slate-400 leading-relaxed">Yes. If you hold the <strong class="text-emerald-400">Territory Lockout (Â£149/mo)</strong>, you secure a 15-mile radius. We physically cannot and will not sell those council notices to any other competing contractor. It is yours alone.</p>
+                    <p class="text-slate-400 leading-relaxed">Yes. If you hold the <strong class="text-emerald-400">Territory Lockout (£149/mo)</strong>, you secure a 15-mile radius. We physically cannot and will not sell those council notices to any other competing contractor. It is yours alone.</p>
                 </div>
                 
                 <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
@@ -631,7 +636,7 @@ def public_homepage():
                 
                 <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
                     <h3 class="text-lg font-bold text-white mb-2">Am I tied into a long contract?</h3>
-                    <p class="text-slate-400 leading-relaxed">No. We work with tradesmen, not corporations. The lockout is a rolling monthly agreement. You can cancel instantly at any time with zero penalty. Alternatively, buy a Â£80 credit pack for zero monthly commitment.</p>
+                    <p class="text-slate-400 leading-relaxed">No. We work with tradesmen, not corporations. The lockout is a rolling monthly agreement. You can cancel instantly at any time with zero penalty. Alternatively, buy a £80 credit pack for zero monthly commitment.</p>
                 </div>
             </div>
         </div>
@@ -641,7 +646,7 @@ def public_homepage():
     <footer class="border-t border-slate-800 bg-[#020617] py-12">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-center gap-6">
             <div class="text-slate-500 text-sm text-center md:text-left">
-                <b class="text-slate-300">Tree Key</b> â€” Built by Vector Data Labs.<br>
+                <b class="text-slate-300">Tree Key</b> — Built by Vector Data Labs.<br>
                 Operating in compliance with UK Town and Country Planning statutory register regulations.
             </div>
             <div class="flex gap-6 text-sm font-mono uppercase tracking-wider">
@@ -653,24 +658,52 @@ def public_homepage():
     </footer>
 
     <script>
-        let map = L.map('map', {{ zoomControl: false }}).setView([53.7993, -1.5498], 10);
+        // Default to zoomed out Great Britain view
+        let map = L.map('map', {{ zoomControl: false }}).setView([54.5, -4.0], 6);
         L.control.zoom({{ position: 'bottomright' }}).addTo(map);
         
         L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
             attribution: '&copy; OpenStreetMap &copy; CARTO'
         }}).addTo(map);
         
-        let currentCircle = L.circle([53.7993, -1.5498], {{
+        // Pin defaults to Birmingham (center of England)
+        let currentCircle = L.circle([52.4862, -1.8904], {{
             color: '#10b981',
             fillColor: '#059669',
             fillOpacity: 0.15,
             radius: 24140, // 15 miles in meters
-            weight: 2
+            weight: 2,
+            className: 'radar-circle'
         }}).addTo(map);
+        
+        // Allow moving the pin with a map click
+        map.on('click', async function(e) {{
+            const radSelect = document.getElementById("radiusSelect");
+            const rad = radSelect ? parseInt(radSelect.value) : 24140;
+            currentCircle.setLatLng(e.latlng);
+            currentCircle.setRadius(rad);
+            
+            document.getElementById('statusBadge').innerHTML = `
+                <div class="flex items-center gap-2 text-emerald-400 mb-1">
+                    <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span> Manual Lock: ${{e.latlng.lat.toFixed(4)}}, ${{e.latlng.lng.toFixed(4)}}
+                </div>
+            `;
+            
+            try {{
+                const res = await fetch(`/api/check-postcode?lat=${{e.latlng.lat}}&lng=${{e.latlng.lng}}`);
+                const data = await res.json();
+                if (data.status === "ok") {{
+                    document.getElementById('postcodeInput').value = data.postcode;
+                    document.getElementById('radiusReadout').innerHTML = `RADIAL BOUNDARY: ${{data.radius_miles || (rad/1609.34).toFixed(1)}} MILES`;
+                }}
+            }} catch(err) {{}}
+        }});
 
         async function scanTerritory() {{
             const btn = document.getElementById("scanBtn");
             const input = document.getElementById("postcodeInput").value;
+            const radSelect = document.getElementById("radiusSelect");
+            const radVal = radSelect ? parseInt(radSelect.value) : 24140;
             const status = document.getElementById("statusBadge");
             
             btn.innerHTML = `<svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> SCANNING...`;
@@ -692,6 +725,8 @@ def public_homepage():
                 if (data.status === "ok") {{
                     map.setView([data.lat, data.lng], 10);
                     currentCircle.setLatLng([data.lat, data.lng]);
+                    currentCircle.setRadius(radVal);
+                    document.getElementById("radiusReadout").innerHTML = `RADIAL BOUNDARY: ${{ (radVal/1609.34).toFixed(1) }} MILES`;
                     
                     // Add slight delay for psychological weight
                     setTimeout(() => {{
@@ -699,7 +734,7 @@ def public_homepage():
                             <div class="flex items-center gap-2 text-emerald-400 mb-1">
                                 <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span> Radar Locked: ${{data.postcode}}
                             </div>
-                            <span class="text-xs font-bold text-amber-500 animate-pulse mt-1 inline-block border border-amber-500/30 bg-amber-500/10 px-2 py-1 rounded">âš ï¸ 12 Local Competitors Detected</span>
+                            <span class="text-xs font-bold text-amber-500 animate-pulse mt-1 inline-block border border-amber-500/30 bg-amber-500/10 px-2 py-1 rounded">⚠️ 12 Local Competitors Detected</span>
                         `;
                     }}, 600);
                     
