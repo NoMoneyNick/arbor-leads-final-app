@@ -114,3 +114,4 @@
 
 ### 6.4 The First-Mover Edge (Early Adopter Scarcity)
 Position the platform as a **new, unique, and highly disruptive technology**. Emphasize that contractors who secure their radius *now* gain a literal, structural advantage over their competitors who do not yet know this software exists. This isn't just sales talk—it is a factual reality. If they lock down their postcode today, they intercept the high-paying jobs while their competitors are left entirely in the dark. Once a territory is gone, it's gone.
+Furthermore, make it explicitly clear that **TreeKey currently has zero direct competitors** doing this level of algorithmic statutory notice tracking for the arboriculture industry. They are getting ground-floor access to an absolute monopoly on this data.
