@@ -9,6 +9,7 @@ import csv
 import io
 from fastapi import FastAPI, Query, BackgroundTasks, HTTPException, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from typing import Optional
 
@@ -18,8 +19,12 @@ logger = logging.getLogger("vector-data-labs")
 app = FastAPI(title="Vector Data Labs V4.0", docs_url=None, redoc_url=None)
 database.init_db()
 
+if os.path.exists("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+
 T_SEC      = os.getenv("TRIGGER_SECRET", "").strip()
 basic_auth = HTTPBasic()
+
 optional_auth = HTTPBasic(auto_error=False)
 
 
@@ -637,10 +642,14 @@ def public_homepage():
         <nav>
             <div class="container">
                 <div class="nav-wrapper">
-                    <a href="/" class="nav-logo">
-                        Tree Key
-                        <span>Statutory Planning Intelligence</span>
+                    <a href="/" class="nav-logo" style="display:flex; align-items:center; gap:12px;">
+                        <img src="/static/logo.png" alt="Tree Key Logo" style="height:42px; width:auto; object-fit:contain;">
+                        <div>
+                            Tree Key
+                            <span>Statutory Planning Intelligence</span>
+                        </div>
                     </a>
+
 
                     <div class="nav-links">
                         <a href="#features">Coverage & Methodology</a>
