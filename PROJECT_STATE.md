@@ -83,3 +83,4 @@
 
 4. **Database Expansion Strategy:** Brainstorm and build new scraping pipelines to find maximum potential tree surgeon customers and emails (beyond the current 1,883).
 5. **Lead Scope Expansion (Domestic & Industrial):** Research data sources for domestic/residential and industrial tree surgery leads to diversify away from just council planning portals.
+6. **RESUME BULK EXTRACTION:** Rerun bulk_contractor_extractor.py to capture all the customers/leads that were cut off when the quotas capped out yesterday.
