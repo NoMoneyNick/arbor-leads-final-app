@@ -36,11 +36,12 @@
 ---
 
 ### 3. 🎨 Website, Branding, Logo & Copy Polish
-- [ ] **Brand Identity & Logo:** Refine Tree Key logo icon / SVG placement on navigation bar and favicon.
+- [x] **Brand Identity & Logo:** Custom transparent vector logo and square app icons crafted, anti-aliased, and mounted to navigation bar.
 - [ ] **Hero Section & Value Proposition:** Review headline, subheadline, and trade authority copy for punchiness.
 - [ ] **Trade Credibility & Badges:** Add badges for BS5837 compliance, Open Government Licence (OGL v3.0), and ArbAC alignment.
 - [ ] **Pricing Table & Lockout Text:** Fine-tune exclusive 15-mile radial territory lockout copy (£149/mo) and credit pack terms (£80).
 - [ ] **FAQ Section Review:** Ensure contractor questions regarding lead exclusivity, notice speed, and cancellation are answered clearly.
+
 
 ---
 
