@@ -254,13 +254,13 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
     adjacent_variance = 1.0 + math.cos((target_lat - target_lng) * 35.0) * 0.2
     connected_leads = max(int(selected_leads * 1.55 * adjacent_variance) + int(radius * 0.4), 4)
 
-    # Contract valuation (Ãƒâ€šÃ‚£450 to Ãƒâ€šÃ‚£1,450 per statutory notice)
-    min_val = selected_leads * 450
-    max_val = selected_leads * 1450
+    # Contract valuation (&pound;450 to 1,&pound;450 per statutory notice)
+    min_val = selected_leads * &pound;450
+    max_val = selected_leads * 1&pound;450
 
     # Check territory exclusivity in real-time
     is_claimed = database.is_territory_claimed(display_pc)
-    exclusivity_label = "ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ¢â‚¬â„¢ Locked (Claimed by Local Partner)" if is_claimed else "ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â¢ Available (Unclaimed)"
+    exclusivity_label = "&#128274; Locked (Claimed by Local Partner)" if is_claimed else "&#9989; Available (Unclaimed)"
 
     return {
         "status": "ok",
@@ -289,7 +289,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
 
 
 
-# ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Auth ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+#  Auth 
 
 
 def verify_dashboard_auth(credentials: HTTPBasicCredentials = Depends(basic_auth)):
@@ -341,9 +341,9 @@ def verify_admin_or_secret(request: Request, secret: Optional[str] = None):
 
 
 
-# ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Dashboard ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+#  Dashboard 
 
-# ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Public Landing Page (Enterprise Institutional Architecture) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+#  Public Landing Page (Enterprise Institutional Architecture) 
 
 @app.get("/", response_class=HTMLResponse)
 def public_homepage():
@@ -386,7 +386,7 @@ def public_homepage():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tree Key Ã¢â‚¬â€ Statutory Planning Intelligence</title>
+    <title>Tree Key | Statutory Planning Intelligence</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {{
@@ -622,7 +622,7 @@ def public_homepage():
             <div class="text-center mb-16">
                 <span class="text-emerald-500 font-mono font-bold tracking-widest text-sm uppercase">Zero Commitment. Cancel Anytime.</span>
                 <h2 class="text-4xl md:text-5xl font-extrabold text-white mt-4 uppercase">Dominate Your Area</h2>
-                <p class="text-lg text-slate-400 mt-4">The average commercial site clearance pays £2,500+. One job pays for the year.</p>
+                <p class="text-lg text-slate-400 mt-4">The average commercial site clearance pays 2,500+. One job pays for the year.</p>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
@@ -632,7 +632,7 @@ def public_homepage():
                     <h3 class="text-2xl font-bold text-white mb-2">Sole Trader</h3>
                     <p class="text-slate-400 mb-6 text-sm">Perfect for one-man bands and local startups aiming to grow steadily.</p>
                     <div class="flex items-baseline gap-2 mb-8">
-                        <div class="text-4xl font-extrabold text-white">£49</div>
+                        <div class="text-4xl font-extrabold text-white">49</div>
                         <div class="text-lg text-slate-500 font-normal">/month</div>
                     </div>
                     <ul class="mb-8 space-y-4 text-slate-300 text-sm font-medium">
@@ -653,7 +653,7 @@ def public_homepage():
                     <h3 class="text-3xl font-bold text-white mb-2">Commercial Pro</h3>
                     <p class="text-emerald-100/70 mb-6 text-sm h-10">The sweet spot for established 3-man crews hunting lucrative clearances.</p>
                     <div class="flex items-baseline gap-2 mb-8">
-                        <div class="text-5xl font-extrabold text-white">£149</div>
+                        <div class="text-5xl font-extrabold text-white">149</div>
                         <div class="text-lg text-emerald-500 font-normal">/month</div>
                     </div>
                     <ul class="mb-8 space-y-4 text-slate-100 text-sm font-medium">
@@ -672,7 +672,7 @@ def public_homepage():
                     <h3 class="text-2xl font-bold text-white mb-2">Regional Elite</h3>
                     <p class="text-slate-400 mb-6 text-sm">For massive operations running multiple crews across a wide geographic spread.</p>
                     <div class="flex items-baseline gap-2 mb-8">
-                        <div class="text-4xl font-extrabold text-white">£299</div>
+                        <div class="text-4xl font-extrabold text-white">299</div>
                         <div class="text-lg text-slate-500 font-normal">/month</div>
                     </div>
                     <ul class="mb-8 space-y-4 text-slate-300 text-sm font-medium">
@@ -712,7 +712,7 @@ def public_homepage():
                 
                 <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
                     <h3 class="text-lg font-bold text-white mb-2">Am I tied into a long contract?</h3>
-                    <p class="text-slate-400 leading-relaxed">No. We work with tradesmen, not corporations. The lockout is a rolling monthly agreement. You can cancel instantly at any time with zero penalty. Alternatively, buy a £80 credit pack for zero monthly commitment.</p>
+                    <p class="text-slate-400 leading-relaxed">No. We work with tradesmen, not corporations. The lockout is a rolling monthly agreement. You can cancel instantly at any time with zero penalty. Alternatively, buy a 80 credit pack for zero monthly commitment.</p>
                 </div>
             </div>
         </div>
@@ -722,7 +722,7 @@ def public_homepage():
     <footer class="border-t border-slate-800 bg-[#020617] py-12">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-center gap-6">
             <div class="text-slate-500 text-sm text-center md:text-left">
-                <b class="text-slate-300">Tree Key</b> â€” Built by Vector Data Labs.<br>
+                <b class="text-slate-300">Tree Key</b>  Built by Vector Data Labs.<br>
                 Operating in compliance with UK Town and Country Planning statutory register regulations.
             </div>
             <div class="flex gap-6 text-sm font-mono uppercase tracking-wider">
@@ -856,7 +856,7 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
         logger.error(f"[ADMIN] DB error: {e}")
 
     partner_rows = "".join([
-        f"<li><b>{p[0]}</b> ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â {p[1] or 'Director on file'} | <b>{p[2]}</b> | ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã…Â¾ {p[4] or 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'} | ÃƒÂ¢Ã…â€œÃ¢â‚¬Â°ÃƒÂ¯Ã‚Â¸Ã‚Â {p[5] or 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'} | ÃƒÂ¢Ã‚Â­Ã‚Â {p[3] or 'N/A'}</li>"
+        f"<li><b>{p[0]}</b>  {p[1] or 'Director on file'} | <b>{p[2]}</b> |  {p[4] or ''} |  {p[5] or ''} |  {p[3] or 'N/A'}</li>"
         for p in stats["partners"]
     ])
 
@@ -865,34 +865,34 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
 
     def get_freshness_badge(discovered_at):
         if not discovered_at:
-            return "ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â¢ <span style='color:#2e7d32; font-weight:bold;'>ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â¥ FRESH</span>"
+            return " <span style='color:#2e7d32; font-weight:bold;'> FRESH</span>"
         try:
             delta_days = (now - discovered_at).days
             if delta_days <= 14:
-                return f"ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â¢ <span style='color:#2e7d32; font-weight:bold;'>ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â¥ FRESH ({delta_days}d ago)</span>"
+                return f" <span style='color:#2e7d32; font-weight:bold;'> FRESH ({delta_days}d ago)</span>"
             elif delta_days <= 45:
-                return f"ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â¡ <span style='color:#f57f17; font-weight:bold;'>ÃƒÂ¢Ã‚ÂÃ‚Â³ CONSULTATION ({delta_days}d)</span>"
+                return f" <span style='color:#f57f17; font-weight:bold;'> CONSULTATION ({delta_days}d)</span>"
             elif delta_days <= 90:
-                return f"ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Âµ <span style='color:#0277bd; font-weight:bold;'>ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ GRANTED</span>"
+                return f" <span style='color:#0277bd; font-weight:bold;'> GRANTED</span>"
             else:
-                return f"ÃƒÂ¢Ã…Â¡Ã‚Âª <span style='color:#757575;'>ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â¦ ARCHIVED</span>"
+                return f" <span style='color:#757575;'> ARCHIVED</span>"
         except Exception:
-            return "ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â¢ <span style='color:#2e7d32; font-weight:bold;'>ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â¥ FRESH</span>"
+            return " <span style='color:#2e7d32; font-weight:bold;'> FRESH</span>"
 
-    SCORE_EMOJI = {"small": "ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â¡", "medium": "ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â ", "large": "ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â´"}
+    SCORE_EMOJI = {"small": "", "medium": "", "large": ""}
     lead_rows = "".join([
-        f"<li>{SCORE_EMOJI.get(l[2],'ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â¡')} <b>{l[0]}</b> {get_freshness_badge(l[5])}<br><span style='color:#555; font-size:13px;'>{l[1][:90]}... | Ãƒâ€šÃ‚£{l[3]} | {l[4]}</span></li>"
+        f"<li>{SCORE_EMOJI.get(l[2],'')} <b>{l[0]}</b> {get_freshness_badge(l[5])}<br><span style='color:#555; font-size:13px;'>{l[1][:90]}... | {l[3]} | {l[4]}</span></li>"
         for l in stats["leads"]
     ])
 
     city_buttons = "".join([
         f"""<div style='display:inline-block; margin:6px; padding:12px 16px;
             background:#f8fafc; border-radius:12px; border:1px solid #e2e8f0;'>
-            <b>ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â {city}</b><br>
+            <b> {city}</b><br>
             <div style='margin-top:6px; font-size:12px;'>
-                <a href='/scan/{city.lower().replace(" ", "-")}' style='color:#059669; font-weight:bold; text-decoration:none;'>ÃƒÂ¢Ã¢â‚¬â€œÃ‚Â¶ Scan Leads</a> &nbsp;|&nbsp;
-                <a href='/research/{city.lower().replace(" ", "-")}' style='color:#0284c7; text-decoration:none;'>ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â Find New</a> &nbsp;|&nbsp;
-                <a href='/enrich-region/{city.lower().replace(" ", "-")}' style='color:#7c3aed; font-weight:bold; text-decoration:none;'>ÃƒÂ¢Ã…Â¡Ã‚Â¡ Enrich</a>
+                <a href='/scan/{city.lower().replace(" ", "-")}' style='color:#059669; font-weight:bold; text-decoration:none;'>&#128269; Scan Leads</a> &nbsp;|&nbsp;
+                <a href='/research/{city.lower().replace(" ", "-")}' style='color:#0284c7; text-decoration:none;'>&#128373; Find New</a> &nbsp;|&nbsp;
+                <a href='/enrich-region/{city.lower().replace(" ", "-")}' style='color:#7c3aed; font-weight:bold; text-decoration:none;'>&#10024; Enrich</a>
             </div>
         </div>"""
         for city in ALL_CITIES  # Display all UK regions including Scotland and Wales
@@ -901,48 +901,48 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
     pct = int((stats['enriched'] / stats['p'] * 100)) if stats['p'] else 0
 
     return f"""
-    <html><head><title>Vector Data Labs ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Admin Command</title></head>
+    <html><head><title>Vector Data Labs  Admin Command</title></head>
     <body style="font-family:sans-serif; background:#f4f4f9; padding:40px;">
     <div style="max-width:920px; margin:auto; background:white; padding:40px;
                 border-radius:20px; border-top:8px solid #064e3b; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h1>ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã…Â  Tree Key Admin Command</h1>
-            <a href="/" target="_blank" style="background:#10b981; color:white; padding:8px 14px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ‚ÂÃƒÂ¯Ã‚Â¸Ã‚Â View Public Homepage</a>
+            <h1>&#128188; Tree Key Admin Command</h1>
+            <a href="/" target="_blank" style="background:#10b981; color:white; padding:8px 14px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;"> View Public Homepage</a>
         </div>
 
         <p>Verified LTD Partners: <b>{stats['p']}</b> &nbsp;|&nbsp; 
            Enriched with Contacts: <b style="color:#059669;">{stats['enriched']} ({pct}%)</b> &nbsp;|&nbsp; 
            Total Planning Leads: <b>{stats['l']}</b>
-           &nbsp;|&nbsp; <a href='/status'>ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â§ System Status</a>
-           &nbsp;|&nbsp; <a href='/pricing'>ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Â³ Pricing Table</a>
-           &nbsp;|&nbsp; <a href='/export-directors'>ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã¢â‚¬Â¹ View Contacts</a>
-           &nbsp;|&nbsp; <a href='/export-directors.csv' style='color:#1b5e20; font-weight:bold;'>ÃƒÂ¢Ã‚Â¬Ã¢â‚¬Â¡ÃƒÂ¯Ã‚Â¸Ã‚Â Download CSV</a>
+           &nbsp;|&nbsp; <a href='/status'> System Status</a>
+           &nbsp;|&nbsp; <a href='/pricing'> Pricing Table</a>
+           &nbsp;|&nbsp; <a href='/export-directors'> View Contacts</a>
+           &nbsp;|&nbsp; <a href='/export-directors.csv' style='color:#1b5e20; font-weight:bold;'>&#128190; Download CSV</a>
         </p>
         <hr>
-        <h3>ÃƒÂ°Ã…Â¸Ã‚ÂÃ¢â€žÂ¢ÃƒÂ¯Ã‚Â¸Ã‚Â Nationwide Territory Scanners, Discovery & Instant Enrichment</h3>
-        <p style="color:#64748b; font-size:13px; margin-top:-5px;">Click <b>ÃƒÂ¢Ã¢â‚¬â€œÃ‚Â¶ Scan Leads</b> to fetch local planning applications, <b>ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â Find New</b> to discover tree surgery LTDs via Companies House, or <b>ÃƒÂ¢Ã…Â¡Ã‚Â¡ Enrich</b> to pull direct phones and ratings in ~5 seconds.</p>
+        <h3>&#128225; Nationwide Territory Scanners, Discovery & Instant Enrichment</h3>
+        <p style="color:#64748b; font-size:13px; margin-top:-5px;">Click <b>&#128269; Scan Leads</b> to fetch local planning applications, <b>&#128373; Find New</b> to discover tree surgery LTDs via Companies House, or <b>&#10024; Enrich</b> to pull direct phones and ratings in ~5 seconds.</p>
         {city_buttons}
         <hr>
 
-        <h3>ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ¢â‚¬Å¾ Batch Operations</h3>
+        <h3> Batch Operations</h3>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
             <a href='/populate-2000-partners' style="background:#047857; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px; box-shadow:0 2px 6px rgba(4,120,87,0.3);">
-                ÃƒÂ¢Ã…Â¡Ã‚Â¡ Harvest 2,000+ Contractors (Nationwide GB)
+                 Harvest 2,000+ Contractors (Nationwide GB)
             </a>
             <a href='/enrich-all' style="background:#1b5e20; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                ÃƒÂ°Ã…Â¸Ã…Â¡Ã¢â€šÂ¬ Enrich All (All Remaining Partners)
+                &#10024; Enrich All (All Remaining Partners)
             </a>
             <a href='/enrich-batch' style="background:#7c3aed; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                ÃƒÂ¢Ã…Â¡Ã‚Â¡ Enrich Next 50 Partners (5-8 Seconds)
+                &#10024; Enrich Next 50 Partners (5-8 Seconds)
             </a>
             <a href='/research-all' style="background:#0284c7; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â Discover All Regions (Find New)
+                 Discover All Regions (Find New)
             </a>
             <a href='/clean-partners' style="background:#b71c1c; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                ÃƒÂ°Ã…Â¸Ã‚Â§Ã‚Â¹ Clean Database (Purge False Substrings)
+                 Clean Database (Purge False Substrings)
             </a>
             <a href='/export-directors.csv' style="background:#064e3b; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                ÃƒÂ¢Ã‚Â¬Ã¢â‚¬Â¡ÃƒÂ¯Ã‚Â¸Ã‚Â Export Contacts CSV
+                 Export Contacts CSV
             </a>
         </div>
 
@@ -960,7 +960,7 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
 
 
 
-# ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Status ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+#  Status 
 
 @app.get("/status", response_class=HTMLResponse)
 def status(user: str = Depends(verify_dashboard_auth)):
@@ -982,22 +982,22 @@ def status(user: str = Depends(verify_dashboard_auth)):
     rows_html = ""
     for key, label in ENV_VARS:
         val = os.getenv(key, "").strip()
-        icon, color, note = ("ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦", "#1b5e20", "Set") if val else ("ÃƒÂ¢Ã‚ÂÃ…â€™", "#b71c1c", "MISSING")
+        icon, color, note = ("", "#1b5e20", "Set") if val else ("", "#b71c1c", "MISSING")
         rows_html += f"<tr><td style='padding:8px;'>{label}</td><td style='padding:8px; color:{color}; font-weight:bold;'>{icon} {note}</td></tr>"
 
     try:
         conn = database.get_db_conn(); conn.close()
-        db_status = "<span style='color:#1b5e20; font-weight:bold;'>ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Connected</span>"
+        db_status = "<span style='color:#1b5e20; font-weight:bold;'> Connected</span>"
     except Exception as e:
-        db_status = f"<span style='color:#b71c1c; font-weight:bold;'>ÃƒÂ¢Ã‚ÂÃ…â€™ Failed: {e}</span>"
+        db_status = f"<span style='color:#b71c1c; font-weight:bold;'> Failed: {e}</span>"
 
     return f"""
     <html><head><title>System Status</title></head>
     <body style="font-family:sans-serif; background:#f4f4f9; padding:40px;">
     <div style="max-width:620px; margin:auto; background:white; padding:40px;
                 border-radius:20px; border-top:8px solid #1b5e20;">
-        <h2>ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â§ System Status</h2>
-        <p><a href='/'>ÃƒÂ¢Ã¢â‚¬Â Ã‚Â Dashboard</a></p>
+        <h2> System Status</h2>
+        <p><a href='/'> Dashboard</a></p>
         <h4>Database</h4><p>{db_status}</p>
         <h4>Environment Variables</h4>
         <table style="width:100%; border-collapse:collapse;">
@@ -1008,7 +1008,7 @@ def status(user: str = Depends(verify_dashboard_auth)):
             {rows_html}
         </table>
         <p style="margin-top:20px; font-size:12px; color:#888;">
-            Keys are never displayed ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â only presence is checked.<br>
+            Keys are never displayed  only presence is checked.<br>
             <b>Automated scanning:</b> Set up cron-job.org to hit
             <code>/trigger-leads-{{city}}?secret=YOUR_SECRET</code> on your preferred schedule.
         </p>
@@ -1016,7 +1016,7 @@ def status(user: str = Depends(verify_dashboard_auth)):
     """
 
 
-# ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Pricing Page (Public) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+#  Pricing Page (Public) 
 
 @app.get("/pricing", response_class=HTMLResponse)
 def pricing():
@@ -1025,9 +1025,9 @@ def pricing():
     cards = ""
     for key, plan in plans.items():
         if plan["mode"] == "subscription":
-            price_display = f"Ãƒâ€šÃ‚£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal;'>/month</span>"
+            price_display = f"{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal;'>/month</span>"
         else:
-            price_display = f"Ãƒâ€šÃ‚£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal;'> one-off</span>"
+            price_display = f"{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal;'> one-off</span>"
 
         highlight = "border:3px solid #1b5e20;" if key == "city_monthly" else "border:2px solid #ccc;"
 
@@ -1043,7 +1043,7 @@ def pricing():
                style="background:#1b5e20; color:white; padding:12px 28px;
                       border-radius:8px; text-decoration:none;
                       display:inline-block; font-weight:bold;">
-               Get Started ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢
+               Get Started 
             </a>
         </div>"""
 
@@ -1053,7 +1053,7 @@ def pricing():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Commercial Allocation Tiers ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Tree Key</title>
+        <title>Commercial Allocation Tiers | Tree Key</title>
 
         <style>
             :root {{
@@ -1100,7 +1100,7 @@ def pricing():
         {cards}
 
         <div style="text-align:center; margin-top:32px;">
-            <a href="/" style="color:var(--brand-muted); text-decoration:none; font-size:13px; font-weight:600;">ÃƒÂ¢Ã¢â‚¬Â Ã‚Â Return to Main Intelligence Hub</a>
+            <a href="/" style="color:var(--brand-muted); text-decoration:none; font-size:13px; font-weight:600;"> Return to Main Intelligence Hub</a>
         </div>
     </div>
     </body>
@@ -1110,7 +1110,7 @@ def pricing():
 
 
 
-# ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Checkout (Stripe) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+#  Checkout (Stripe) 
 
 @app.get("/checkout/{plan_key}")
 def checkout(plan_key: str):
@@ -1124,7 +1124,7 @@ def checkout(plan_key: str):
 def payment_success():
     return """
     <html><body style="font-family:sans-serif; text-align:center; padding:60px;">
-        <h1>ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Payment Successful!</h1>
+        <h1> Payment Successful!</h1>
         <p>Thank you. Your leads will start arriving shortly.</p>
         <p><a href="/">Back to Dashboard</a></p>
     </body></html>
@@ -1141,7 +1141,7 @@ async def stripe_webhook(request: Request):
     return {"status": "ok", "event": result.get("event")}
 
 
-# ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ City Scan Routes (Dashboard ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Basic Auth) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+#  City Scan Routes (Dashboard  Basic Auth) 
 
 def _resolve_city_param(slug: str) -> Optional[str]:
     clean = slug.lower().replace("-", " ").replace("_", " ").strip()
@@ -1202,12 +1202,12 @@ def scan_city(city_slug: str, request: Request, secret: Optional[str] = Query(No
         count = scanners.scan_city_planning_api(city)
 
     return f"""<html><body style="font-family:sans-serif; padding:40px;">
-        <p>ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ {city} scan complete. <b>{count}</b> new leads found.</p>
-        <a href="/admin">ÃƒÂ¢Ã¢â‚¬Â Ã‚Â Back to Admin Command</a>
+        <p> {city} scan complete. <b>{count}</b> new leads found.</p>
+        <a href="/admin">&#9194; Back to Admin Command</a>
     </body></html>"""
 
 
-# ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ City Cron Routes (External ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Trigger Secret) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+#  City Cron Routes (External  Trigger Secret) 
 
 @app.get("/trigger-leads/{city_slug}")
 def cron_trigger_slash(city_slug: str, secret: Optional[str] = Query(None)):
@@ -1230,7 +1230,7 @@ def cron_trigger_slash(city_slug: str, secret: Optional[str] = Query(None)):
 
 
 
-# ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Research Routes (Basic Auth & Secret) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+#  Research Routes (Basic Auth & Secret) 
 
 import threading
 
@@ -1242,10 +1242,10 @@ def research_city(city_slug: str, request: Request, secret: Optional[str] = Quer
         raise HTTPException(status_code=404, detail=f"Region/City '{city_slug}' not configured.")
     threading.Thread(target=research.perform_research, args=(city,), daemon=True).start()
     return f"""<html><body style="font-family:sans-serif; padding:40px;">
-        <h3>ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â Partner Discovery Started for {city}</h3>
+        <h3>&#128640; Partner Discovery Started for {city}</h3>
         <p>Searching Companies House, officers, Google Places, and websites in the background.</p>
         <p>New verified tree surgery LTDs will appear in your database momentarily.</p>
-        <a href="/admin">ÃƒÂ¢Ã¢â‚¬Â Ã‚Â Back to Admin Command</a>
+        <a href="/admin">&#9194; Back to Admin Command</a>
     </body></html>"""
 
 
@@ -1256,11 +1256,11 @@ def populate_2000_partners_view(request: Request, secret: Optional[str] = Query(
     threading.Thread(target=research.populate_2000_partners_into_db, daemon=True).start()
     return """<html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; color:#0f172a;">
         <div style="max-width:600px; margin:auto; background:white; padding:30px; border-radius:12px; border:1px solid #e2e8f0; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
-            <h2 style="color:#059669; margin-top:0;">ÃƒÂ°Ã…Â¸Ã…Â¡Ã¢â€šÂ¬ Nationwide 2,000+ Contractor Harvest Initiated</h2>
+            <h2 style="color:#059669; margin-top:0;">&#128640; Nationwide 2,000+ Contractor Harvest Initiated</h2>
             <p style="font-size:15px; line-height:1.5;">The system is sweeping Companies House across all 15 UK regional clusters (England Wealth Belts, Midlands, North, Scotland, Wales) in the background with 10 concurrent worker threads.</p>
             <p style="font-size:14px; color:#64748b;">It is actively extracting Managing Director names, verified UK phone numbers, Google review ratings, and websites directly into your PostgreSQL database.</p>
             <div style="margin-top:25px;">
-                <a href="/admin" style="display:inline-block; background:#064e3b; color:white; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">ÃƒÂ¢Ã¢â‚¬Â Ã‚Â Return to Admin Dashboard</a>
+                <a href="/admin" style="display:inline-block; background:#064e3b; color:white; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;"> Return to Admin Dashboard</a>
             </div>
         </div>
     </body></html>"""
@@ -1288,10 +1288,10 @@ def research_all(request: Request, secret: Optional[str] = Query(None)):
     verify_admin_or_secret(request, secret)
     threading.Thread(target=research.research_all_cities, daemon=True).start()
     return """<html><body style="font-family:sans-serif; padding:40px;">
-        <h3>ÃƒÂ°Ã…Â¸Ã…Â¡Ã¢â€šÂ¬ Nationwide Discovery Started</h3>
+        <h3>&#128640; Nationwide Discovery Started</h3>
         <p>Investigating Companies House across all 9 English regions in the background.</p>
         <p>New verified LTD tree surgery contractors will populate in your database over the next 1-2 minutes.</p>
-        <a href="/admin">ÃƒÂ¢Ã¢â‚¬Â Ã‚Â Back to Admin Command</a>
+        <a href="/admin">&#9194; Back to Admin Command</a>
     </body></html>"""
 
 
@@ -1302,11 +1302,11 @@ def enrich_batch(request: Request, secret: Optional[str] = Query(None)):
     verify_admin_or_secret(request, secret)
     count = research.enrich_existing_partners(limit=50)
     return f"""<html><body style="font-family:sans-serif; padding:40px;">
-        <h3>ÃƒÂ¢Ã…Â¡Ã‚Â¡ Batch Enrichment Complete</h3>
-        <p>ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Enriched and updated <b>{count}</b> partners with direct director names, UK phone numbers, and emails in ~5 seconds!</p>
+        <h3>&#9989; Batch Enrichment Complete</h3>
+        <p>&#10024; Enriched and updated <b>{count}</b> partners with direct director names, UK phone numbers, and emails in ~5 seconds!</p>
         <div style="margin-top:20px;">
-            <a href="/enrich-batch" style="background:#7c3aed; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">ÃƒÂ¢Ã¢â‚¬â€œÃ‚Â¶ Enrich Next 50</a> &nbsp;&nbsp;
-            <a href="/admin" style="background:#064e3b; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">ÃƒÂ¢Ã¢â‚¬Â Ã‚Â Back to Admin Command</a>
+            <a href="/enrich-batch" style="background:#7c3aed; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">&#10024; Enrich Next 50</a> &nbsp;&nbsp;
+            <a href="/admin" style="background:#064e3b; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">&#9194; Back to Admin Command</a>
         </div>
     </body></html>"""
 
@@ -1319,10 +1319,10 @@ def enrich_region(city_slug: str, request: Request, secret: Optional[str] = Quer
         raise HTTPException(status_code=404, detail=f"Region/City '{city_slug}' not configured.")
     count = research.enrich_existing_partners(limit=150, city_name=city)
     return f"""<html><body style="font-family:sans-serif; padding:40px;">
-        <h3>ÃƒÂ¢Ã…Â¡Ã‚Â¡ Regional Enrichment Complete for {city}</h3>
-        <p>ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Enriched and updated <b>{count}</b> {city} tree surgery contractors with direct director names, UK phone numbers, and emails!</p>
+        <h3>&#9989; Regional Enrichment Complete for {city}</h3>
+        <p>&#10024; Enriched and updated <b>{count}</b> {city} tree surgery contractors with direct director names, UK phone numbers, and emails!</p>
         <div style="margin-top:20px;">
-            <a href="/admin" style="background:#064e3b; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">ÃƒÂ¢Ã¢â‚¬Â Ã‚Â Back to Admin Command</a>
+            <a href="/admin" style="background:#064e3b; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">&#9194; Back to Admin Command</a>
         </div>
     </body></html>"""
 
@@ -1332,8 +1332,8 @@ def enrich_all(request: Request, secret: Optional[str] = Query(None)):
     verify_admin_or_secret(request, secret)
     threading.Thread(target=research.enrich_existing_partners, kwargs={"limit": 0}, daemon=True).start()
     return """<html><body style="font-family:sans-serif; padding:40px;">
-        <p>ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Enrichment started in background across 8 parallel threads. Check Render logs or refresh admin dashboard for progress.</p>
-        <a href="/admin">ÃƒÂ¢Ã¢â‚¬Â Ã‚Â Back to Admin Command</a>
+        <p>&#10024; Enrichment started in background across 8 parallel threads. Check Render logs or refresh admin dashboard for progress.</p>
+        <a href="/admin">&#9194; Back to Admin Command</a>
     </body></html>"""
 
 
@@ -1345,18 +1345,18 @@ def clean_partners(request: Request, secret: Optional[str] = Query(None)):
     result = research.clean_partner_database()
     if "error" in result:
         return f"""<html><body style="font-family:sans-serif; padding:40px;">
-            <p>ÃƒÂ¢Ã‚ÂÃ…â€™ Cleanup failed: {result['error']}</p>
-            <a href="/admin">ÃƒÂ¢Ã¢â‚¬Â Ã‚Â Back to Dashboard</a>
+            <p>&#10060; Cleanup failed: {result['error']}</p>
+            <a href="/admin">&#9194; Back to Dashboard</a>
         </body></html>"""
     return f"""<html><body style="font-family:sans-serif; padding:40px;">
-        <h3>ÃƒÂ°Ã…Â¸Ã‚Â§Ã‚Â¹ Partner Database Cleanup Complete</h3>
-        <p>ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Kept: <b>{result['kept']}</b> verified tree surgery companies</p>
-        <p>ÃƒÂ°Ã…Â¸Ã¢â‚¬â€Ã¢â‚¬ËœÃƒÂ¯Ã‚Â¸Ã‚Â Removed: <b>{result['removed']}</b> unrelated businesses</p>
+        <h3>&#9989; Partner Database Cleanup Complete</h3>
+        <p>&#9989; Kept: <b>{result['kept']}</b> verified tree surgery companies</p>
+        <p>&#128465; Removed: <b>{result['removed']}</b> unrelated businesses</p>
         <p style="color:#888; font-size:13px;">
             Removed companies had no tree-surgery keywords in their name,
             or contained excluded terms (medical, dental, fruit, cosmetic, etc.)
         </p>
-        <a href="/admin">ÃƒÂ¢Ã¢â‚¬Â Ã‚Â Back to Admin Command</a>
+        <a href="/admin">&#9194; Back to Admin Command</a>
     </body></html>"""
 
 
@@ -1369,7 +1369,7 @@ def run_master_daily_pipeline():
     3. New Contractor Discovery: Queries Companies House for newly incorporated LTDs.
     4. Two-Layer Name Filter & UK Geotargeting: Purges any non-tree surgery or foreign records.
     """
-    logger.info("[PIPELINE] ÃƒÂ°Ã…Â¸Ã…Â¡Ã¢â€šÂ¬ Starting Master Daily Automation Pipeline...")
+    logger.info("[PIPELINE] &#128640; Starting Master Daily Automation Pipeline...")
     
     # Stage 1: Council Planning Radar Scan
     try:
@@ -1442,7 +1442,7 @@ def run_master_daily_pipeline():
     except Exception as e:
         logger.error(f"[PIPELINE] Stage 4 error: {e}")
 
-    logger.info("[PIPELINE] ÃƒÂ°Ã…Â¸Ã…Â½Ã‚Â¯ Master Daily Pipeline finished successfully.")
+    logger.info("[PIPELINE] &#127937; Master Daily Pipeline finished successfully.")
 
 
 
@@ -1513,7 +1513,7 @@ def api_stats(secret: Optional[str] = Query(None)):
 
 
 
-# ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Export Directors (Basic Auth) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+#  Export Directors (Basic Auth) 
 
 @app.get("/export-directors", response_class=HTMLResponse)
 def export_directors(user: str = Depends(verify_dashboard_auth)):
@@ -1540,10 +1540,10 @@ def export_directors(user: str = Depends(verify_dashboard_auth)):
         f"<tr>"
         f"<td style='padding:8px; border:1px solid #ddd;'><b>{r[0]}</b><br><span style='color:#777; font-size:11px;'>#{r[1]}</span></td>"
         f"<td style='padding:8px; border:1px solid #ddd;'>{r[2] or '<span style=\"color:#888;\">Director on file</span>'}</td>"
-        f"<td style='padding:8px; border:1px solid #ddd;'>{r[3] or 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</td>"
-        f"<td style='padding:8px; border:1px solid #ddd;'>{f'<a href=\"mailto:{r[4]}\">{r[4]}</a>' if r[4] else 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</td>"
-        f"<td style='padding:8px; border:1px solid #ddd;'>{f'<a href=\"{r[5]}\" target=\"_blank\">Website</a>' if r[5] else 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</td>"
-        f"<td style='padding:8px; border:1px solid #ddd; text-align:center;'>ÃƒÂ¢Ã‚Â­Ã‚Â {r[6] or 'N/A'}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd;'>{r[3] or ''}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd;'>{f'<a href=\"mailto:{r[4]}\">{r[4]}</a>' if r[4] else ''}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd;'>{f'<a href=\"{r[5]}\" target=\"_blank\">Website</a>' if r[5] else ''}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd; text-align:center;'> {r[6] or 'N/A'}</td>"
         f"<td style='padding:8px; border:1px solid #ddd;'><b>{r[7]}</b></td>"
         f"</tr>"
         for r in rows
@@ -1555,10 +1555,10 @@ def export_directors(user: str = Depends(verify_dashboard_auth)):
     <div style="max-width:1100px; margin:auto; background:white; padding:30px;
                 border-radius:16px; border-top:8px solid #1b5e20;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-            <h2>ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã¢â‚¬Â¹ Verified Tree Surgery Contacts ({len(rows)} companies)</h2>
+            <h2>&#128101; Verified Tree Surgery Contacts ({len(rows)} companies)</h2>
             <div>
-                <a href="/export-directors.csv" style="background:#1b5e20; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold;">ÃƒÂ¢Ã‚Â¬Ã¢â‚¬Â¡ÃƒÂ¯Ã‚Â¸Ã‚Â Download CSV</a>
-                &nbsp;|&nbsp; <a href="/">ÃƒÂ¢Ã¢â‚¬Â Ã‚Â Dashboard</a>
+                <a href="/export-directors.csv" style="background:#1b5e20; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold;">&#128190; Download CSV</a>
+                &nbsp;|&nbsp; <a href="/"> Dashboard</a>
             </div>
         </div>
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
@@ -1568,7 +1568,7 @@ def export_directors(user: str = Depends(verify_dashboard_auth)):
                 <th style="padding:10px; text-align:left;">Phone</th>
                 <th style="padding:10px; text-align:left;">Email</th>
                 <th style="padding:10px; text-align:left;">Web</th>
-                <th style="padding:10px; text-align:center;">Google ÃƒÂ¢Ã‚Â­Ã‚Â</th>
+                <th style="padding:10px; text-align:center;">Google &#11088;</th>
                 <th style="padding:10px; text-align:left;">City</th>
             </tr>
             {table_rows or "<tr><td colspan='7' style='padding:16px; text-align:center;'>No verified contacts found yet. Run /enrich-all.</td></tr>"}
