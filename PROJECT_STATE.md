@@ -22,7 +22,20 @@
 
 ## 📋 MASTER SPRINT TO-DO QUEUE
 
-### 1. 🎨 Website, Branding, Logo & Copy Polish
+### 1. 📧 Business Email & Domain Infrastructure (100% Complete)
+- [x] **Custom Domain Setup:** `https://treekey.uk` live with active SSL on Cloudflare & Render.
+- [x] **Primary Business Email:** `contact@treekey.uk` active and forwarding to personal inbox.
+- [x] **Production Endpoints:** `PUBLIC_APP_URL` and Stripe webhooks updated to `treekey.uk`.
+
+---
+
+### 2. 💳 Payment Portals & Banking
+- [x] **Stripe Bank Card / Apple Pay Engine:** 100% Live, dynamic checkout accepting Visa, Mastercard, Amex, Apple Pay, Google Pay.
+- [ ] **PayPal Business Verification:** Clear photo ID verification in Resolution Centre to link Lloyds bank account.
+
+---
+
+### 3. 🎨 Website, Branding, Logo & Copy Polish
 - [ ] **Brand Identity & Logo:** Refine Tree Key logo icon / SVG placement on navigation bar and favicon.
 - [ ] **Hero Section & Value Proposition:** Review headline, subheadline, and trade authority copy for punchiness.
 - [ ] **Trade Credibility & Badges:** Add badges for BS5837 compliance, Open Government Licence (OGL v3.0), and ArbAC alignment.
@@ -31,16 +44,8 @@
 
 ---
 
-### 2. 📧 Business Email & Domain Infrastructure
-- [ ] **Domain Selection & Setup:** Configure custom domain email.
-- [ ] **Primary Domain Setup:** For inbound support, customer invoicing, and system guardian alerts.
-- [ ] **DNS Security Authentication:** Configure SPF, DKIM, and DMARC (`v=DMARC1; p=none;`) records on domain registrar.
-- [ ] **Update Render Environment:** Update `TEST_EMAIL` to the new business address so all high-priority alerts route to the primary inbox.
+### 4. 📨 Multi-Channel Outreach & Revenue Launch
 
-
----
-
-### 3. 📨 Multi-Channel Outreach & Revenue Launch
 - [ ] **Cold Email Sequence Copywriting (Operator using Claude):**
   - **Email 1 (The Free Lead Gift):** 1 free local planning notice in their postal district.
   - **Email 2 (The Competitive Moat):** Exclusive 15-mile radial territory lockout (£149/mo).
