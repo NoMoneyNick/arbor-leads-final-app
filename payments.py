@@ -68,15 +68,18 @@ def create_checkout_session(plan_key: str) -> Optional[str]:
         if plan["mode"] == "subscription":
             price_data["recurring"] = {"interval": "month"}
 
-        session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[{"price_data": price_data, "quantity": 1}],
-            mode=plan["mode"],
-            success_url=f"{PUBLIC_APP_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{PUBLIC_APP_URL}/pricing",
-        )
+        session_params = {
+            "line_items": [{"price_data": price_data, "quantity": 1}],
+            "mode": plan["mode"],
+            "success_url": f"{PUBLIC_APP_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}",
+            "cancel_url": f"{PUBLIC_APP_URL}/pricing",
+            "allow_promotion_codes": True,
+        }
+
+        session = stripe.checkout.Session.create(**session_params)
         logger.info(f"[Stripe] Checkout session created for plan '{plan_key}': {session.id}")
         return session.url
+
 
     except stripe.error.AuthenticationError:
         logger.error("[Stripe] Invalid API key.")
