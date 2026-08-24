@@ -254,9 +254,9 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
     adjacent_variance = 1.0 + math.cos((target_lat - target_lng) * 35.0) * 0.2
     connected_leads = max(int(selected_leads * 1.55 * adjacent_variance) + int(radius * 0.4), 4)
 
-    # Contract valuation (&pound;450 to 1,&pound;450 per statutory notice)
-    min_val = selected_leads * &pound;450
-    max_val = selected_leads * 1&pound;450
+    # Contract valuation (&pound;450 to &pound;1,450 per statutory notice)
+    min_val = selected_leads * 450
+    max_val = selected_leads * 1450
 
     # Check territory exclusivity in real-time
     is_claimed = database.is_territory_claimed(display_pc)
