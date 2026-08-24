@@ -538,9 +538,11 @@ def public_homepage():
                             </div>
                             <span class="text-xs text-slate-500 mt-1">Awaiting outward postcode input...</span>
                         </div>
-                        <div class="text-right">
-                            <div id="radiusReadout" class="text-slate-300 font-bold">RADIAL BOUNDARY: 15.0 MILES</div>
-                            <div class="text-xs text-amber-500 font-bold mt-1 animate-pulse">WARNING: TERRITORY OPEN</div>
+                        <div class="text-left sm:text-right flex flex-col gap-1 sm:items-end">
+                            <div id="radiusReadout" class="text-slate-300 font-bold tracking-wider">RADIAL BOUNDARY: 15.0 MILES</div>
+                            <div id="targetIntel" class="text-xs text-slate-500 font-mono mt-1 bg-slate-900/80 p-2 rounded border border-slate-700 inline-block text-left">
+                                Awaiting scan to calculate territory volume...
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -704,6 +706,7 @@ def public_homepage():
                 if (data.status === "ok") {{
                     document.getElementById('postcodeInput').value = data.postcode;
                     document.getElementById('radiusReadout').innerHTML = `RADIAL BOUNDARY: ${{data.radius_miles || (rad/1609.34).toFixed(1)}} MILES`;
+                    document.getElementById('targetIntel').innerHTML = `<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>`;
                 }}
             }} catch(err) {{}}
         }});
@@ -743,7 +746,7 @@ def public_homepage():
                             <div class="flex items-center gap-2 text-emerald-400 mb-1">
                                 <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span> Radar Locked: ${{data.postcode}}
                             </div>
-                            <span class="text-xs font-bold text-amber-500 animate-pulse mt-1 inline-block border border-amber-500/30 bg-amber-500/10 px-2 py-1 rounded">âš ï¸ 12 Local Competitors Detected</span>
+                            <span class="text-xs font-bold text-amber-500 animate-pulse mt-1 inline-block border border-amber-500/30 bg-amber-500/10 px-2 py-1 rounded">&#9888;&#65039; 12 Local Competitors Detected</span>
                         `;
                     }}, 600);
                     
