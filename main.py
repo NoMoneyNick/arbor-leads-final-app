@@ -1,4 +1,4 @@
-﻿import os
+import os
 import logging
 import secrets
 import database
@@ -361,7 +361,7 @@ def public_homepage():
             </td>
             <td class='p-4 text-slate-200 text-sm max-w-md'>
                 <b class='text-white'>{l[0]}</b><br>
-                <span class='text-slate-400 text-xs'>{l[1][:120]}...</span>
+                <span class='text-slate-400 text-xs'>{(l[1] or '')[:120]}...</span>
             </td>
             <td class='p-4 text-right'>
                 <span class='bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full text-xs font-bold border border-emerald-500/20 uppercase tracking-wider shadow-[0_0_10px_rgba(16,185,129,0.2)]'>
@@ -653,8 +653,8 @@ def public_homepage():
     </footer>
 
     <script>
-        let map = L.map('map', { zoomControl: false }).setView([53.7993, -1.5498], 10);
-        L.control.zoom({ position: 'bottomright' }).addTo(map);
+        let map = L.map('map', {{ zoomControl: false }}).setView([53.7993, -1.5498], 10);
+        L.control.zoom({{ position: 'bottomright' }}).addTo(map);
         
         L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
             attribution: '&copy; OpenStreetMap &copy; CARTO'
