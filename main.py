@@ -1,4 +1,4 @@
-import os
+﻿import os
 import logging
 import secrets
 import database
@@ -249,13 +249,13 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
     adjacent_variance = 1.0 + math.cos((target_lat - target_lng) * 35.0) * 0.2
     connected_leads = max(int(selected_leads * 1.55 * adjacent_variance) + int(radius * 0.4), 4)
 
-    # Contract valuation (£450 to £1,450 per statutory notice)
+    # Contract valuation (Â£450 to Â£1,450 per statutory notice)
     min_val = selected_leads * 450
     max_val = selected_leads * 1450
 
     # Check territory exclusivity in real-time
     is_claimed = database.is_territory_claimed(display_pc)
-    exclusivity_label = "🔒 Locked (Claimed by Local Partner)" if is_claimed else "🟢 Available (Unclaimed)"
+    exclusivity_label = "ðŸ”’ Locked (Claimed by Local Partner)" if is_claimed else "ðŸŸ¢ Available (Unclaimed)"
 
     return {
         "postcode": display_pc,
@@ -283,7 +283,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
 
 
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
+# â”€â”€ Auth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def verify_dashboard_auth(credentials: HTTPBasicCredentials = Depends(basic_auth)):
@@ -335,9 +335,9 @@ def verify_admin_or_secret(request: Request, secret: Optional[str] = None):
 
 
 
-# ── Dashboard ─────────────────────────────────────────────────────────────────
+# â”€â”€ Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-# ── Public Landing Page (Enterprise Institutional Architecture) ───────────────
+# â”€â”€ Public Landing Page (Enterprise Institutional Architecture) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.get("/", response_class=HTMLResponse)
 def public_homepage():
@@ -354,716 +354,275 @@ def public_homepage():
         logger.error(f"[HOMEPAGE] DB error: {e}")
 
     lead_rows = "".join([
-        f"""<tr style='border-bottom:1px solid #edf2f7;'>
-            <td style='padding:14px 16px; font-weight:600; color:#0f172a; font-size:13px;'>
+        f"""<tr class='border-b border-slate-700/50 hover:bg-slate-800/50 transition-colors'>
+            <td class='p-4 text-emerald-400 font-mono text-xs'>
                 {l[5] or 'TPO-STATUTORY'}<br>
-                <span style='color:#64748b; font-weight:normal; font-size:12px;'>{l[4]}</span>
+                <span class='text-slate-400 font-sans'>{l[4]}</span>
             </td>
-            <td style='padding:14px 16px; color:#334155; font-size:13px; max-width:320px;'>
-                <b>{l[0]}</b><br>
-                <span style='color:#64748b; font-size:12px;'>{l[1][:110]}...</span>
+            <td class='p-4 text-slate-200 text-sm max-w-md'>
+                <b class='text-white'>{l[0]}</b><br>
+                <span class='text-slate-400 text-xs'>{l[1][:120]}...</span>
             </td>
-            <td style='padding:14px 16px; text-align:right;'>
-                <span style='background:#ecfdf5; color:#047857; padding:4px 10px; border-radius:6px; font-size:12px; font-weight:600; border:1px solid #a7f3d0;'>
-                    Active Consultation
+            <td class='p-4 text-right'>
+                <span class='bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full text-xs font-bold border border-emerald-500/20 uppercase tracking-wider'>
+                    Active Notice
                 </span>
             </td>
         </tr>"""
         for l in stats["sample_leads"]
-    ]) or "<tr><td colspan='3' style='padding:20px; text-align:center; color:#94a3b8;'>Synchronising statutory planning feed...</td></tr>"
+    ]) or "<tr><td colspan='3' class='p-8 text-center text-slate-500 font-mono'>Synchronising statutory planning feed...</td></tr>"
 
-    return f"""
-    <!DOCTYPE html>
-    <html lang="en-GB">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Tree Key — Statutory Planning Intelligence for UK Arborists</title>
-        <!-- Leaflet Interactive Map Engine -->
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        <style>
+    return f"""<!DOCTYPE html>
+<html lang="en-GB" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tree Key â€” Statutory Planning Intelligence</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {{
+            theme: {{
+                extend: {{
+                    colors: {{
+                        brand: {{
+                            dark: '#020617',
+                            slate: '#0f172a',
+                            green: '#059669',
+                            cedar: '#92400e',
+                            glow: '#10b981'
+                        }}
+                    }},
+                    fontFamily: {{
+                        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'ui-monospace', 'monospace']
+                    }}
+                }}
+            }}
+        }}
+    </script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        /* Custom scrollbar for rugged look */
+        ::-webkit-scrollbar {{ width: 8px; }}
+        ::-webkit-scrollbar-track {{ background: #020617; }}
+        ::-webkit-scrollbar-thumb {{ background: #334155; border-radius: 4px; }}
+        ::-webkit-scrollbar-thumb:hover {{ background: #059669; }}
+        .bg-grid-slate-900 {{ background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='32' height='32' fill='none' stroke='%231e293b' stroke-dasharray='5 3' transform='scale(1, -1)'%3E%3Cpath d='M0 .5H31.5V32'/%3E%3C/svg%3E"); }}
+    </style>
+</head>
+<body class="bg-brand-dark text-slate-300 font-sans antialiased selection:bg-brand-green selection:text-white">
 
-            :root {{
-                --brand-primary: #044332;
-                --brand-accent: #059669;
-                --brand-dark: #0f172a;
-                --brand-muted: #64748b;
-                --bg-light: #f8fafc;
-                --border-color: #e2e8f0;
-            }}
-            * {{ box-sizing: border-box; }}
-            body {{
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                margin: 0;
-                padding: 0;
-                background-color: var(--bg-light);
-                color: var(--brand-dark);
-                line-height: 1.6;
-                -webkit-font-smoothing: antialiased;
-            }}
-            .container {{ max-width: 1140px; margin: 0 auto; padding: 0 24px; }}
+    <!-- Navigation -->
+    <nav class="sticky top-0 z-50 bg-brand-dark/90 backdrop-blur-md border-b border-slate-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-20">
+                <a href="/" class="flex items-center gap-3">
+                    <img src="/static/logo.png" alt="Tree Key" class="h-10">
+                </a>
+                <div class="hidden md:flex items-center gap-8 font-mono text-sm tracking-wide">
+                    <a href="#radar" class="text-slate-400 hover:text-white transition-colors">RADAR</a>
+                    <a href="#features" class="text-slate-400 hover:text-white transition-colors">SYSTEM</a>
+                    <a href="#pricing" class="text-slate-400 hover:text-white transition-colors">TERRITORIES</a>
+                    <a href="/admin" class="bg-brand-green/10 text-brand-glow border border-brand-green/30 px-5 py-2 rounded uppercase hover:bg-brand-green hover:text-white transition-all duration-300">Contractor Login</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <main class="relative overflow-hidden pt-16 pb-24 lg:pt-32 lg:pb-40 bg-grid-slate-900">
+        <div class="absolute inset-0 bg-gradient-to-b from-transparent via-brand-dark/50 to-brand-dark"></div>
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center">
             
-            nav {{
-                background-color: #ffffff;
-                border-bottom: 1px solid var(--border-color);
-                padding: 16px 0;
-                position: sticky;
-                top: 0;
-                z-index: 1000;
-            }}
-            .nav-wrapper {{
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            }}
-            .nav-logo {{
-                font-size: 20px;
-                font-weight: 800;
-                color: var(--brand-primary);
-                text-decoration: none;
-                display: flex;
-                align-items: center;
-                gap: 8px;
-            }}
-            .nav-logo span {{
-                font-size: 11px;
-                background: #ecfdf5;
-                color: var(--brand-accent);
-                padding: 2px 8px;
-                border-radius: 4px;
-                border: 1px solid #a7f3d0;
-                font-weight: 600;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-            }}
-            .nav-links {{
-                display: flex;
-                gap: 24px;
-                align-items: center;
-            }}
-            .nav-links a {{
-                color: var(--brand-dark);
-                text-decoration: none;
-                font-size: 14px;
-                font-weight: 500;
-                transition: color 0.15s ease;
-            }}
-            .nav-links a:hover {{
-                color: var(--brand-accent);
-            }}
-            .nav-btn {{
-                background-color: var(--brand-primary);
-                color: #ffffff !important;
-                padding: 8px 16px;
-                border-radius: 6px;
-                font-weight: 600;
-            }}
-            .nav-btn:hover {{ background: #032e23; }}
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/50 border border-slate-700 text-emerald-400 font-mono text-xs mb-8 uppercase tracking-widest">
+                <span class="relative flex h-2 w-2">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                Live UK Council Planning Datahub
+            </div>
 
-            /* Hero Section */
-            .hero {{
-                background: #ffffff;
-                border-bottom: 1px solid var(--border-color);
-                padding: 72px 0 80px 0;
-            }}
-            .hero-badge {{
-                display: inline-block;
-                background: #ecfdf5;
-                color: var(--brand-primary);
-                border: 1px solid #a7f3d0;
-                padding: 4px 12px;
-                border-radius: 20px;
-                font-size: 12px;
-                font-weight: 600;
-                margin-bottom: 20px;
-                letter-spacing: 0.3px;
-                text-transform: uppercase;
-            }}
-            .hero h1 {{
-                font-size: 42px;
-                font-weight: 800;
-                color: var(--brand-dark);
-                line-height: 1.2;
-                letter-spacing: -1px;
-                max-width: 860px;
-                margin: 0 0 20px 0;
-            }}
-            .hero p.lead {{
-                font-size: 18px;
-                color: var(--brand-muted);
-                max-width: 760px;
-                margin: 0 0 32px 0;
-                line-height: 1.6;
-            }}
-            .cta-group {{ display: flex; gap: 16px; align-items: center; }}
-            .btn-primary {{
-                background: var(--brand-primary);
-                color: #ffffff;
-                padding: 14px 28px;
-                border-radius: 6px;
-                font-size: 15px;
-                font-weight: 600;
-                text-decoration: none;
-                display: inline-block;
-                transition: background 0.15s;
-            }}
-            .btn-primary:hover {{ background: #032e23; }}
-            .btn-secondary {{
-                background: #ffffff;
-                color: var(--brand-dark);
-                border: 1px solid var(--border-color);
-                padding: 14px 24px;
-                border-radius: 6px;
-                font-size: 15px;
-                font-weight: 600;
-                text-decoration: none;
-                display: inline-block;
-            }}
-            .btn-secondary:hover {{ background: #f8fafc; }}
+            <h1 class="text-5xl md:text-7xl font-extrabold text-white tracking-tight mb-8">
+                Council Contracts.<br>
+                <span class="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-brand-green">Unlocked.</span>
+            </h1>
 
-            /* Section & Grid */
-            .section {{ padding: 64px 0; }}
-            .section-header {{ text-align: center; max-width: 680px; margin: 0 auto 48px auto; }}
-            .section-header h2 {{ font-size: 28px; font-weight: 800; color: var(--brand-dark); margin: 0 0 12px 0; letter-spacing: -0.5px; }}
-            .section-header p {{ color: var(--brand-muted); font-size: 16px; margin: 0; }}
+            <p class="mt-4 max-w-3xl mx-auto text-xl text-slate-400 leading-relaxed">
+                Algorithmic monitoring across 360+ UK Local Planning Authorities. Receive verified Tree Preservation Order (TPO) applications and commercial felling submissions within hours of statutory lodgement.
+            </p>
 
-            .grid-3 {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }}
-            .feature-card {{
-                background: #ffffff;
-                border: 1px solid var(--border-color);
-                border-radius: 8px;
-                padding: 28px;
-            }}
-            .feature-card h3 {{ font-size: 17px; font-weight: 700; color: var(--brand-dark); margin: 0 0 10px 0; }}
-            .feature-card p {{ font-size: 14px; color: var(--brand-muted); margin: 0; line-height: 1.6; }}
+            <div class="mt-10 flex flex-wrap justify-center gap-4">
+                <a href="#radar" class="bg-brand-green text-white px-8 py-4 rounded font-bold text-lg hover:bg-emerald-500 transition-all duration-300 shadow-[0_0_20px_rgba(5,150,105,0.4)]">
+                    Access Territory Radar
+                </a>
+                <a href="#pricing" class="bg-slate-800 text-white border border-slate-700 px-8 py-4 rounded font-bold text-lg hover:bg-slate-700 transition-all duration-300">
+                    View Lockout Pricing
+                </a>
+            </div>
 
-            /* Table Register */
-            .register-card {{
-                background: #ffffff;
-                border: 1px solid var(--border-color);
-                border-radius: 8px;
-                overflow: hidden;
-            }}
-            .register-header {{
-                padding: 16px 20px;
-                background: #f8fafc;
-                border-bottom: 1px solid var(--border-color);
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            }}
-            .register-header h3 {{ margin: 0; font-size: 14px; font-weight: 700; color: var(--brand-dark); }}
-            .register-table {{ width: 100%; border-collapse: collapse; text-align: left; }}
-            .register-table th {{
-                padding: 10px 16px;
-                font-size: 12px;
-                font-weight: 600;
-                color: var(--brand-muted);
-                text-transform: uppercase;
-                background: #fdfdfd;
-                border-bottom: 1px solid var(--border-color);
-            }}
-
-            /* Pricing */
-            .pricing-grid {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }}
-            .pricing-card {{
-                background: #ffffff;
-                border: 1px solid var(--border-color);
-                border-radius: 8px;
-                padding: 24px 20px;
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-                position: relative;
-            }}
-            .pricing-card.featured {{
-                border: 2px solid var(--brand-primary);
-                box-shadow: 0 4px 12px rgba(4, 67, 50, 0.08);
-            }}
-            .pricing-card h4 {{ font-size: 15px; font-weight: 700; margin: 0 0 6px 0; color: var(--brand-dark); }}
-            .pricing-card .price {{ font-size: 26px; font-weight: 800; color: var(--brand-dark); margin: 12px 0 6px 0; }}
-            .pricing-card .price-term {{ font-size: 12px; color: var(--brand-muted); font-weight: 500; }}
-            .pricing-card .desc {{ font-size: 12px; color: var(--brand-muted); min-height: 54px; margin: 12px 0; line-height: 1.5; }}
-            .btn-tier {{
-                background: #f1f5f9;
-                color: var(--brand-dark);
-                text-decoration: none;
-                text-align: center;
-                padding: 10px;
-                border-radius: 6px;
-                font-size: 13px;
-                font-weight: 600;
-                display: block;
-                border: 1px solid #cbd5e1;
-            }}
-            .btn-tier:hover {{ background: #e2e8f0; }}
-            .pricing-card.featured .btn-tier {{
-                background: var(--brand-primary);
-                color: #ffffff;
-                border: none;
-            }}
-            .pricing-card.featured .btn-tier:hover {{ background: #032e23; }}
-
-            /* Compliance Callout */
-            .compliance-box {{
-                background: #ffffff;
-                border: 1px solid var(--border-color);
-                border-left: 4px solid var(--brand-primary);
-                border-radius: 6px;
-                padding: 20px 24px;
-                margin-top: 48px;
-                font-size: 13px;
-                color: var(--brand-muted);
-                line-height: 1.6;
-            }}
-
-            /* Footer */
-            footer {{
-                background: #ffffff;
-                border-top: 1px solid var(--border-color);
-                padding: 40px 0;
-                font-size: 13px;
-                color: var(--brand-muted);
-            }}
-            .footer-content {{ display: flex; justify-content: space-between; align-items: center; }}
-            .footer-links a {{ color: var(--brand-muted); text-decoration: none; margin-left: 20px; }}
-            .footer-links a:hover {{ color: var(--brand-dark); }}
-
-            @media (max-width: 900px) {{
-                .grid-3 {{ grid-template-columns: 1fr; }}
-                .pricing-grid {{ grid-template-columns: 1fr; }}
-                .footer-content {{ flex-direction: column; gap: 16px; text-align: center; }}
-                .hero h1 {{ font-size: 32px; }}
-            }}
-        </style>
-    </head>
-    <body>
-        <nav>
-            <div class="container">
-                <div class="nav-wrapper">
-                    <a href="/" class="nav-logo" style="display:flex; align-items:center; gap:12px;">
-                        <img src="/static/logo.png" alt="Tree Key Logo" style="height:42px; width:auto; object-fit:contain;">
-                        <div>
-                            Tree Key
-                            <span>Statutory Planning Intelligence</span>
-                        </div>
-                    </a>
-
-
-                    <div class="nav-links">
-                        <a href="#features">Coverage & Methodology</a>
-                        <a href="#register">Live Planning Feed</a>
-                        <a href="#pricing">Subscription Tiers</a>
-                        <a href="/admin" class="nav-btn">Contractor Portal</a>
-                    </div>
+            <div class="mt-12 flex flex-wrap justify-center gap-6 opacity-80">
+                <div class="flex items-center gap-2 text-sm font-mono text-slate-400 border border-slate-700/50 bg-slate-800/30 px-4 py-2 rounded">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                    BS5837 Survey Alignment
+                </div>
+                <div class="flex items-center gap-2 text-sm font-mono text-slate-400 border border-slate-700/50 bg-slate-800/30 px-4 py-2 rounded">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+                    OGL v3.0 Public Sector Data
+                </div>
+                <div class="flex items-center gap-2 text-sm font-mono text-slate-400 border border-slate-700/50 bg-slate-800/30 px-4 py-2 rounded">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
+                    ArbAC Industry Standard
                 </div>
             </div>
-        </nav>
- 
-        <header class="hero">
-            <div class="container">
-                <div class="hero-badge">Direct Council Planning Datahub</div>
-                <h1>Statutory Planning Notice Intelligence for UK Arboricultural Contractors</h1>
-                <p class="lead">
-                    Algorithmic monitoring across all 309 English Local Planning Authorities. Receive verified Tree Preservation Order (TPO) applications, Section 211 Conservation Area notices, and commercial felling submissions within 24 hours of statutory lodgement.
-                </p>
+        </div>
+    </main>
 
-                <!-- Interactive Visual Territory Radar Map & Postcode Inspector -->
-                <div style="background:#ffffff; border:1px solid var(--border-color); border-radius:12px; padding:28px; max-width:820px; box-shadow:0 6px 16px rgba(0,0,0,0.06); margin-bottom:32px;">
+    <!-- Radar Section -->
+    <section id="radar" class="py-20 border-t border-slate-800 bg-brand-slate">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-16">
+                <h2 class="text-3xl font-extrabold text-white font-mono tracking-tight uppercase">Live Territory Radar</h2>
+                <p class="mt-4 text-lg text-slate-400">Scan your local operating radius for active commercial and residential planning applications.</p>
+            </div>
 
-                    <div style="font-weight:700; font-size:16px; margin-bottom:14px; color:var(--brand-dark); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-                        <span>Interactive Territory Radar & Planning Notice Inspector:</span>
-                        <span style="font-size:12px; font-weight:600; color:var(--brand-muted); background:#f1f5f9; padding:3px 10px; border-radius:12px;">Public Access — No Account Required</span>
-                    </div>
-                    
-                    <form onsubmit="event.preventDefault(); scanTerritory();" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
-                        <input type="text" id="postcodeInput" placeholder="Enter English postcode or city (e.g. B1, SW1, M4, Birmingham, Bristol)" 
-                               value="B1"
-                               style="flex:1; min-width:240px; padding:12px 16px; border:2px solid var(--border-color); border-radius:6px; font-size:15px; font-weight:600; outline:none;">
-                        <button type="submit" id="scanBtn" 
-                                style="background:var(--brand-primary); color:white; border:none; padding:12px 24px; border-radius:6px; font-weight:700; font-size:14px; cursor:pointer; transition:background 0.15s;">
-                            Inspect Radar
-                        </button>
+            <div class="grid lg:grid-cols-2 gap-8 items-start">
+                
+                <!-- Radar UI -->
+                <div class="bg-brand-dark border border-slate-700 rounded-xl p-6 shadow-2xl">
+                    <form onsubmit="event.preventDefault(); scanTerritory();" class="flex gap-4 mb-6">
+                        <input type="text" id="postcodeInput" placeholder="Enter outward postcode (e.g. B1, SW1, LS1)" value="LS1" class="flex-1 bg-slate-800 border border-slate-600 text-white font-mono rounded px-4 py-3 focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green">
+                        <button type="submit" id="scanBtn" class="bg-brand-green text-white font-bold px-6 py-3 rounded hover:bg-emerald-500 transition-colors uppercase font-mono tracking-wider">Inspect</button>
                     </form>
-
-                    <!-- Distance Filter Buttons -->
-                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
-                        <span style="font-size:13px; font-weight:600; color:var(--brand-muted);">Operating Radius:</span>
-                        <button type="button" class="radius-btn" onclick="setRadius(5)" id="btn-5" style="padding:6px 14px; border-radius:20px; border:1px solid #cbd5e1; background:#ffffff; font-size:12px; font-weight:600; cursor:pointer;">5 Miles</button>
-                        <button type="button" class="radius-btn" onclick="setRadius(10)" id="btn-10" style="padding:6px 14px; border-radius:20px; border:1px solid #cbd5e1; background:#ffffff; font-size:12px; font-weight:600; cursor:pointer;">10 Miles</button>
-                        <button type="button" class="radius-btn" onclick="setRadius(15)" id="btn-15" style="padding:6px 14px; border-radius:20px; border:1px solid var(--brand-primary); background:var(--brand-primary); color:white; font-size:12px; font-weight:600; cursor:pointer;">15 Miles (Standard)</button>
-                        <button type="button" class="radius-btn" onclick="setRadius(25)" id="btn-25" style="padding:6px 14px; border-radius:20px; border:1px solid #cbd5e1; background:#ffffff; font-size:12px; font-weight:600; cursor:pointer;">25 Miles</button>
-                    </div>
-
-                    <!-- Leaflet Interactive Map Container -->
-                    <div id="radarMap" style="height:360px; width:100%; border-radius:8px; border:1px solid #cbd5e1; margin-bottom:18px; z-index:1; background:#e5e7eb;"></div>
                     
-                    <!-- Live Dual-Zone Results Callout -->
-                    <div id="radarResult" style="background:#f8fafc; border:1px solid #cbd5e1; border-left:4px solid var(--brand-accent); border-radius:8px; padding:20px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
-                            <b style="font-size:16px; color:#0f172a;" id="resLocation">📍 B1 Territory Radar (Birmingham City Council)</b>
-                            <span style="background:#ecfdf5; color:#047857; padding:4px 10px; border-radius:6px; font-weight:700; font-size:12px; border:1px solid #a7f3d0;" id="resStatus">
-                                🟢 Available (Unclaimed)
-                            </span>
+                    <div id="map" class="h-[400px] w-full rounded border border-slate-700 z-10 grayscale contrast-125"></div>
+                    
+                    <div class="mt-6 flex justify-between items-center text-sm font-mono text-slate-400">
+                        <div id="statusBadge" class="flex items-center gap-2 text-emerald-400">
+                            <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span> Radar Active
                         </div>
-
-                        <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-bottom:16px;">
-                            <div style="font-size:15px; color:#044332; font-weight:700; margin-bottom:6px;" id="resSelectedText">
-                                ✓ There are <span style="font-size:19px; color:#059669;">397 leads</span> in the selected area (15 miles)
-                            </div>
-                            <div style="font-size:14px; color:#475569; font-weight:600;" id="resConnectedText">
-                                + There are another <span style="color:#0284c7; font-weight:700;">714 leads</span> in connected adjacent council areas
-                            </div>
-                        </div>
-
-                        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px;">
-                            <div>
-                                <span style="font-size:12px; color:#64748b;">Est. Potential Contract Value:</span><br>
-                                <b style="font-size:20px; color:#0f172a;" id="resVal">£178,650 – £575,650</b>
-                            </div>
-                            <a href="#pricing" style="display:inline-block; background:#044332; color:#ffffff; padding:11px 22px; border-radius:6px; font-weight:700; font-size:13px; text-decoration:none; transition:background 0.15s;">
-                                Unlock All Leads & Lock Territory (£149/mo) →
-                            </a>
-                        </div>
+                        <div id="radiusReadout">Radius: 15.0 mi</div>
                     </div>
                 </div>
 
-                <div class="cta-group">
-                    <a href="#pricing" class="btn-primary">Reserve Operating Territory</a>
-                    <a href="#register" class="btn-secondary">Inspect Live Notices</a>
+                <!-- Live Feed Table -->
+                <div class="bg-brand-dark border border-slate-700 rounded-xl overflow-hidden shadow-2xl flex flex-col h-[535px]">
+                    <div class="bg-slate-800 border-b border-slate-700 p-4 flex justify-between items-center">
+                        <h3 class="font-mono text-emerald-400 font-bold uppercase tracking-wider text-sm flex items-center gap-2">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+                            Recent Intercepts
+                        </h3>
+                        <span class="text-xs text-slate-400 font-mono">Top 5 Broadcasts</span>
+                    </div>
+                    <div class="overflow-y-auto flex-1">
+                        <table class="w-full text-left border-collapse">
+                            <tbody>
+                                {lead_rows}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section id="pricing" class="py-24 border-t border-slate-800 bg-brand-dark">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-16">
+                <h2 class="text-3xl font-extrabold text-white font-mono tracking-tight uppercase">Commercial Access</h2>
+                <p class="mt-4 text-lg text-slate-400">Secure your territory. Zero competing contractors.</p>
+            </div>
+
+            <div class="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+                <!-- Regional Pro -->
+                <div class="bg-slate-800/50 border border-slate-700 rounded-xl p-8 hover:border-slate-500 transition-colors">
+                    <div class="text-brand-green font-mono font-bold text-sm uppercase tracking-wider mb-2">â­ Most Popular</div>
+                    <h3 class="text-2xl font-bold text-white mb-4">Regional Pro</h3>
+                    <p class="text-slate-400 mb-6 h-12">Unlimited commercial leads for your operating region. Cancel anytime.</p>
+                    <div class="text-4xl font-extrabold text-white mb-8">Â£49<span class="text-lg text-slate-500 font-normal">/mo</span></div>
+                    <a href="/pricing" class="block w-full text-center bg-slate-700 hover:bg-slate-600 text-white font-bold py-4 rounded transition-colors">View Details</a>
+                </div>
+
+                <!-- Territory Lockout -->
+                <div class="bg-brand-slate border-2 border-brand-green rounded-xl p-8 relative shadow-[0_0_30px_rgba(5,150,105,0.15)] transform md:-translate-y-4">
+                    <div class="absolute top-0 right-0 bg-brand-green text-white text-xs font-bold uppercase tracking-wider py-1 px-3 rounded-bl-xl rounded-tr-xl">Strictly Limited</div>
+                    <div class="text-emerald-400 font-mono font-bold text-sm uppercase tracking-wider mb-2">ðŸ”’ Exclusive Access</div>
+                    <h3 class="text-2xl font-bold text-white mb-4">Territory Lockout</h3>
+                    <p class="text-slate-300 mb-6 h-12">Exclusive 15-mile radial lockout. Zero competing contractors. Every statutory notice is yours alone.</p>
+                    <div class="text-4xl font-extrabold text-emerald-400 mb-8">Â£149<span class="text-lg text-slate-500 font-normal">/mo</span></div>
+                    <a href="/pricing" class="block w-full text-center bg-brand-green hover:bg-emerald-500 text-white font-bold py-4 rounded transition-colors shadow-lg">Secure Territory</a>
                 </div>
             </div>
-        </header>
+        </div>
+    </section>
 
-        <script>
-        let currentRadius = 15;
-        let currentLat = 52.4862;
-        let currentLng = -1.8904;
-        let map = null;
-        let depotMarker = null;
-        let radiusCircle = null;
-        let leadMarkers = [];
+    <!-- Footer -->
+    <footer class="border-t border-slate-800 bg-[#020617] py-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-center gap-6">
+            <div class="text-slate-500 text-sm">
+                <b class="text-slate-300">Tree Key</b> â€” An Enterprise Planning Data Platform by Vector Data Labs.<br>
+                Operating in compliance with UK Town and Country Planning statutory register regulations.
+            </div>
+            <div class="flex gap-6 text-sm font-mono uppercase tracking-wider">
+                <a href="/pricing" class="text-slate-400 hover:text-white transition-colors">Commercial Terms</a>
+                <a href="/health" class="text-slate-400 hover:text-white transition-colors">Datahub Status</a>
+                <a href="/admin" class="text-brand-green hover:text-emerald-400 transition-colors">Contractor Portal</a>
+            </div>
+        </div>
+    </footer>
 
-        function initMap(lat, lng, label) {{
-            currentLat = lat;
-            currentLng = lng;
+    <script>
+        let map = L.map('map').setView([53.7993, -1.5498], 10);
+        L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+            attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+        }}).addTo(map);
+        
+        let currentCircle = L.circle([53.7993, -1.5498], {{
+            color: '#10b981',
+            fillColor: '#059669',
+            fillOpacity: 0.15,
+            radius: 24140, // 15 miles in meters
+            weight: 2
+        }}).addTo(map);
 
-            if (!map) {{
-                // Default zoom level 6 centered over Great Britain
-                map = L.map('radarMap', {{ scrollWheelZoom: false }}).setView([54.5, -2.5], 6);
-                L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                    maxZoom: 18,
-                    attribution: '© OpenStreetMap contributors'
-                }}).addTo(map);
-
-
-
-                // CLICK ANYWHERE ON MAP TO INSTANTLY MOVE PIN (NO FORCED ZOOM)
-                map.on('click', function(e) {{
-                    currentLat = e.latlng.lat;
-                    currentLng = e.latlng.lng;
-                    if (depotMarker) depotMarker.setLatLng(e.latlng);
-                    if (radiusCircle) radiusCircle.setLatLng(e.latlng);
-                    fetchTerritoryData(null, e.latlng.lat, e.latlng.lng);
-                }});
-
-                setTimeout(() => {{ if (map) map.invalidateSize(); }}, 300);
-            }} else {{
-                // Pan smoothly without changing user's zoom level
-                map.panTo([lat, lng]);
-            }}
-
-
-            if (depotMarker) {{
-                depotMarker.setLatLng([lat, lng]);
-            }} else {{
-                depotMarker = L.marker([lat, lng], {{ interactive: false }}).addTo(map);
-            }}
-
-            updateCircle(lat, lng);
-        }}
-
-        function updateCircle(lat, lng) {{
-            if (radiusCircle) map.removeLayer(radiusCircle);
-            const meters = currentRadius * 1609.34;
-            // interactive: false ensures clicks pass directly through to map
-            radiusCircle = L.circle([lat, lng], {{
-                radius: meters,
-                color: '#044332',
-                fillColor: '#059669',
-                fillOpacity: 0.15,
-                weight: 2,
-                interactive: false
-            }}).addTo(map);
-
-            // Add sample lead markers
-            leadMarkers.forEach(m => map.removeLayer(m));
-            leadMarkers = [];
-
-            const sampleOffsets = [
-                [0.02, 0.03], [-0.03, 0.02], [0.04, -0.02], [-0.02, -0.04], [0.06, 0.05], [-0.05, 0.07]
-            ];
-            sampleOffsets.forEach((offset, idx) => {{
-                const mLat = lat + offset[0] * (currentRadius / 15);
-                const mLng = lng + offset[1] * (currentRadius / 15);
-                const m = L.circleMarker([mLat, mLng], {{
-                    radius: 5,
-                    fillColor: '#059669',
-                    color: '#ffffff',
-                    weight: 2,
-                    fillOpacity: 0.9,
-                    interactive: false
-                }}).addTo(map);
-                leadMarkers.push(m);
-            }});
-        }}
-
-        function setRadius(r) {{
-            currentRadius = r;
-            [5, 10, 15, 25].forEach(val => {{
-                const btn = document.getElementById('btn-' + val);
-                if (btn) {{
-                    if (val === r) {{
-                        btn.style.background = 'var(--brand-primary)';
-                        btn.style.color = '#ffffff';
-                        btn.style.border = '1px solid var(--brand-primary)';
-                    }} else {{
-                        btn.style.background = '#ffffff';
-                        btn.style.color = '#0f172a';
-                        btn.style.border = '1px solid #cbd5e1';
-                    }}
-                }}
-            }});
-            fetchTerritoryData(null, currentLat, currentLng);
-        }}
-
-        async function fetchTerritoryData(pc, lat, lng) {{
-            const btn = document.getElementById('scanBtn');
-            const input = document.getElementById('postcodeInput');
-            if (btn) {{
-                btn.innerText = 'Scanning...';
-                btn.disabled = true;
-            }}
-
-            let url = `/api/check-postcode?radius=${{currentRadius}}`;
-            if (lat !== undefined && lng !== undefined && lat !== null && lng !== null) {{
-                url += `&lat=${{lat}}&lng=${{lng}}`;
-            }} else if (pc) {{
-                url += `&postcode=${{encodeURIComponent(pc)}}`;
-            }} else if (input && input.value.trim()) {{
-                url += `&postcode=${{encodeURIComponent(input.value.trim())}}`;
-            }}
-
+        async function scanTerritory() {{
+            const btn = document.getElementById("scanBtn");
+            const input = document.getElementById("postcodeInput").value;
+            const status = document.getElementById("statusBadge");
+            
+            btn.innerHTML = "SCANNING...";
+            btn.disabled = true;
+            btn.classList.add("opacity-50");
+            status.innerHTML = `<span class="h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span> Triangulating...`;
+            
             try {{
-                const res = await fetch(url);
+                const res = await fetch(`/api/check-postcode?postcode=${{encodeURIComponent(input)}}`);
                 const data = await res.json();
-
-                if (data.postcode && input && !data.postcode.includes(',')) {{
-                    input.value = data.postcode;
-                }}
-
-                currentLat = data.lat;
-                currentLng = data.lng;
-
-                const locEl = document.getElementById('resLocation');
-                if (locEl) locEl.innerText = `📍 ${{data.postcode}} Radar (${{data.authority}})`;
-
-                const selEl = document.getElementById('resSelectedText');
-                const connEl = document.getElementById('resConnectedText');
-                const valEl = document.getElementById('resVal');
-                const statusEl = document.getElementById('resStatus');
-
-                if (data.is_covered === false) {{
-                    if (selEl) selEl.innerHTML = `<span style="color:#b91c1c; font-weight:700;">⚠️ Operating Scope:</span> Tree Key operates exclusively across Great Britain (England, Scotland, and Wales). ${{data.authority}} is outside operating coverage.`;
-                    if (connEl) connEl.innerHTML = `Please select a Great Britain postcode (England, Scotland, or Wales).`;
-
-
-                    if (valEl) valEl.innerText = `£0`;
-                    if (statusEl) statusEl.innerHTML = `<span style="background:#fef2f2; color:#b91c1c; padding:4px 10px; border-radius:6px; font-weight:700; font-size:12px; border:1px solid #fecaca;">Outside Great Britain Coverage</span>`;
+                
+                if (data.status === "ok") {{
+                    map.setView([data.lat, data.lng], 10);
+                    currentCircle.setLatLng([data.lat, data.lng]);
+                    status.innerHTML = `<span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span> Radar Locked: ${{data.postcode}}`;
                 }} else {{
-                    if (selEl) selEl.innerHTML = `✓ There are <span style="font-size:19px; color:#059669; font-weight:700;">${{data.selected_area_leads}} leads</span> in the selected area (${{data.radius_miles}} miles)`;
-                    if (connEl) connEl.innerHTML = `+ There are another <span style="color:#0284c7; font-weight:700;">${{data.connected_area_leads}} leads</span> in connected adjacent council areas`;
-                    if (valEl) valEl.innerText = `£${{data.est_min_val}} – £${{data.est_max_val}}`;
-                    if (data.is_claimed) {{
-                        if (statusEl) statusEl.innerHTML = `<span style="background:#fef2f2; color:#b91c1c; padding:4px 10px; border-radius:6px; font-weight:700; font-size:12px; border:1px solid #fecaca;">🔒 Locked (Claimed)</span>`;
-                    }} else {{
-                        if (statusEl) statusEl.innerHTML = `🟢 Available (Unclaimed)`;
-                    }}
+                    alert(data.message || "Invalid location.");
+                    status.innerHTML = `<span class="h-2 w-2 rounded-full bg-red-500"></span> Scan Failed`;
                 }}
-
-
-                initMap(data.lat, data.lng, data.postcode);
-            }} catch (err) {{
-                console.error("Territory lookup error:", err);
-            }} finally {{
-                if (btn) {{
-                    btn.innerText = 'Inspect Radar';
-                    btn.disabled = false;
-                }}
+            }} catch(e) {{
+                alert("Network error.");
+                status.innerHTML = `<span class="h-2 w-2 rounded-full bg-red-500"></span> Network Error`;
             }}
+            
+            btn.innerHTML = "INSPECT";
+            btn.disabled = false;
+            btn.classList.remove("opacity-50");
         }}
+    </script>
+</body>
+</html>
+"""
 
-        function scanTerritory() {{
-            const input = document.getElementById('postcodeInput');
-            const pc = (input ? input.value.trim() : '') || 'B1';
-            fetchTerritoryData(pc, null, null);
-        }}
-
-        // Initialize map with default Birmingham (B1) on window load
-        window.addEventListener('DOMContentLoaded', () => {{
-            fetchTerritoryData('B1', null, null);
-        }});
-        </script>
-
-        <section class="section" id="features">
-            <div class="container">
-                <div class="section-header">
-                    <h2>Institutional Procurement Advantage</h2>
-                    <p>Designed specifically for qualified arboricultural contractors, tree surgeons, and land clearance operations requiring verified, early-stage client opportunities.</p>
-                </div>
-
-                <div class="grid-3">
-                    <div class="feature-card">
-                        <h3>Statutory Consultation Access</h3>
-                        <p>Access applications during the mandatory local authority consultation period (typically 6–8 weeks before determination), well in advance of public site signage or commercial directories.</p>
-                    </div>
-                    <div class="feature-card">
-                        <h3>Legally Mandated Works</h3>
-                        <p>Applications under Tree Preservation Orders and Section 211 notices represent verified property owners with mandatory requirements for certified trade execution upon approval.</p>
-                    </div>
-                    <div class="feature-card">
-                        <h3>Exhaustive Nationwide Coverage</h3>
-                        <p>Continuous monitoring across all 309 English local planning authorities, all 32 Scottish councils, and all 22 Welsh unitary authorities.</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <section class="section" id="register" style="background:#f1f5f9; border-top:1px solid var(--border-color); border-bottom:1px solid var(--border-color);">
-            <div class="container">
-                <div class="section-header">
-                    <h2>Live Statutory Register Sample</h2>
-                    <p>Real-time sample of tree works submissions processed across UK Local Planning Authorities over the preceding 24–48 hours.</p>
-                </div>
-
-
-                <div class="register-card">
-                    <div class="register-header">
-                        <h3>Recent Arboricultural Notices</h3>
-                        <span style="font-size:12px; color:var(--brand-muted); font-weight:600;">Updated Continuously</span>
-                    </div>
-                    <table class="register-table">
-                        <thead>
-                            <tr>
-                                <th>Statutory Ref & Authority</th>
-                                <th>Site Address & Proposed Works</th>
-                                <th style="text-align:right;">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {lead_rows}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </section>
-
-        <section class="section" id="pricing">
-            <div class="container">
-                <div class="section-header">
-                    <h2>Commercial Allocation Tiers</h2>
-                    <p>Transparent single-lead and subscription options. Territory lockouts guarantee exclusive single-contractor allocation.</p>
-                </div>
-
-                <div class="pricing-grid">
-                    <!-- 1. Single Lead -->
-                    <div class="pricing-card">
-                        <div>
-                            <h4>Single Allocation</h4>
-                            <div class="price">£19</div>
-                            <div class="price-term">One-off allocation</div>
-                            <div class="desc">Single verified planning notice complete with full applicant site address, schedule of works, and authority reference.</div>
-                        </div>
-                        <a href="/pricing" class="btn-tier">Select Single</a>
-                    </div>
-
-                    <!-- 2. 5-Lead Pack -->
-                    <div class="pricing-card">
-                        <div>
-                            <h4>Credit Pack</h4>
-                            <div class="price">£80</div>
-                            <div class="price-term">5 Notices (£16/ea)</div>
-                            <div class="desc">Pre-purchased allocation credits redeemable across your registered postal districts on demand.</div>
-                        </div>
-                        <a href="/pricing" class="btn-tier">Purchase Pack</a>
-                    </div>
-
-                    <!-- 3. City Pro -->
-                    <div class="pricing-card featured">
-                        <div>
-                            <span style="background:var(--brand-primary); color:#ffffff; font-size:10px; font-weight:700; padding:2px 8px; border-radius:4px; text-transform:uppercase; letter-spacing:0.5px;">Recommended</span>
-                            <h4 style="margin-top:8px;">Regional Zone</h4>
-                            <div class="price">£49<span style="font-size:13px; font-weight:normal; color:var(--brand-muted);">/mo</span></div>
-                            <div class="price-term">Monthly subscription</div>
-                            <div class="desc">Unrestricted notice stream across your designated local authority cluster within a 15-mile operating radius.</div>
-                        </div>
-                        <a href="/pricing" class="btn-tier">Subscribe Regional</a>
-                    </div>
-
-                    <!-- 4. National -->
-                    <div class="pricing-card">
-                        <div>
-                            <h4>National Feed</h4>
-                            <div class="price">£89<span style="font-size:13px; font-weight:normal; color:var(--brand-muted);">/mo</span></div>
-                            <div class="price-term">Monthly subscription</div>
-                            <div class="desc">Unrestricted real-time data stream across all 309 English Local Planning Authorities nationwide.</div>
-                        </div>
-                        <a href="/pricing" class="btn-tier">Subscribe National</a>
-                    </div>
-
-                    <!-- 5. Exclusive Lockout -->
-                    <div class="pricing-card" style="border:2px solid #0f172a;">
-                        <div>
-                            <span style="background:#0f172a; color:#ffffff; font-size:10px; font-weight:700; padding:2px 8px; border-radius:4px; text-transform:uppercase; letter-spacing:0.5px;">Exclusive</span>
-                            <h4 style="margin-top:8px;">Territory Lockout</h4>
-                            <div class="price">£149<span style="font-size:13px; font-weight:normal; color:var(--brand-muted);">/mo</span></div>
-                            <div class="price-term">Exclusive radial lockout</div>
-                            <div class="desc">100% exclusive territory reservation. Guaranteed zero competing contractor distribution within your 15-mile radius.</div>
-                        </div>
-                        <a href="/pricing" class="btn-tier" style="background:#0f172a; color:#ffffff; border:none;">Lock Territory</a>
-                    </div>
-                </div>
-
-                <div class="compliance-box">
-                    <b>Statutory Compliance & Legal Governance:</b> Tree Key aggregates public planning registers under the Open Government Licence (OGL v3.0) and the UK Town and Country Planning (Tree Preservation)(England) Regulations 2012. All intelligence is derived strictly from public statutory registers in full compliance with the Data Protection Act 2018 and UK GDPR regulations.
-                </div>
-            </div>
-        </section>
-
-        <footer>
-            <div class="container">
-                <div class="footer-content">
-                    <div>
-                        <b>Tree Key</b> — An Enterprise Planning Data Platform by Vector Data Labs.<br>
-                        Operating in compliance with UK Town and Country Planning statutory register regulations.
-                    </div>
-
-                    <div class="footer-links">
-                        <a href="/pricing">Commercial Terms</a>
-                        <a href="/health">Datahub Status</a>
-                        <a href="/admin">Contractor Portal</a>
-                    </div>
-                </div>
-            </div>
-        </footer>
-    </body>
-    </html>
-    """
-
-
-
-# ── Management Dashboard (Basic Auth Protected at /admin) ────────────────────
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
@@ -1087,7 +646,7 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
         logger.error(f"[ADMIN] DB error: {e}")
 
     partner_rows = "".join([
-        f"<li><b>{p[0]}</b> — {p[1] or 'Director on file'} | <b>{p[2]}</b> | 📞 {p[4] or '—'} | ✉️ {p[5] or '—'} | ⭐ {p[3] or 'N/A'}</li>"
+        f"<li><b>{p[0]}</b> â€” {p[1] or 'Director on file'} | <b>{p[2]}</b> | ðŸ“ž {p[4] or 'â€”'} | âœ‰ï¸ {p[5] or 'â€”'} | â­ {p[3] or 'N/A'}</li>"
         for p in stats["partners"]
     ])
 
@@ -1096,34 +655,34 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
 
     def get_freshness_badge(discovered_at):
         if not discovered_at:
-            return "🟢 <span style='color:#2e7d32; font-weight:bold;'>🔥 FRESH</span>"
+            return "ðŸŸ¢ <span style='color:#2e7d32; font-weight:bold;'>ðŸ”¥ FRESH</span>"
         try:
             delta_days = (now - discovered_at).days
             if delta_days <= 14:
-                return f"🟢 <span style='color:#2e7d32; font-weight:bold;'>🔥 FRESH ({delta_days}d ago)</span>"
+                return f"ðŸŸ¢ <span style='color:#2e7d32; font-weight:bold;'>ðŸ”¥ FRESH ({delta_days}d ago)</span>"
             elif delta_days <= 45:
-                return f"🟡 <span style='color:#f57f17; font-weight:bold;'>⏳ CONSULTATION ({delta_days}d)</span>"
+                return f"ðŸŸ¡ <span style='color:#f57f17; font-weight:bold;'>â³ CONSULTATION ({delta_days}d)</span>"
             elif delta_days <= 90:
-                return f"🔵 <span style='color:#0277bd; font-weight:bold;'>✅ GRANTED</span>"
+                return f"ðŸ”µ <span style='color:#0277bd; font-weight:bold;'>âœ… GRANTED</span>"
             else:
-                return f"⚪ <span style='color:#757575;'>📦 ARCHIVED</span>"
+                return f"âšª <span style='color:#757575;'>ðŸ“¦ ARCHIVED</span>"
         except Exception:
-            return "🟢 <span style='color:#2e7d32; font-weight:bold;'>🔥 FRESH</span>"
+            return "ðŸŸ¢ <span style='color:#2e7d32; font-weight:bold;'>ðŸ”¥ FRESH</span>"
 
-    SCORE_EMOJI = {"small": "🟡", "medium": "🟠", "large": "🔴"}
+    SCORE_EMOJI = {"small": "ðŸŸ¡", "medium": "ðŸŸ ", "large": "ðŸ”´"}
     lead_rows = "".join([
-        f"<li>{SCORE_EMOJI.get(l[2],'🟡')} <b>{l[0]}</b> {get_freshness_badge(l[5])}<br><span style='color:#555; font-size:13px;'>{l[1][:90]}... | £{l[3]} | {l[4]}</span></li>"
+        f"<li>{SCORE_EMOJI.get(l[2],'ðŸŸ¡')} <b>{l[0]}</b> {get_freshness_badge(l[5])}<br><span style='color:#555; font-size:13px;'>{l[1][:90]}... | Â£{l[3]} | {l[4]}</span></li>"
         for l in stats["leads"]
     ])
 
     city_buttons = "".join([
         f"""<div style='display:inline-block; margin:6px; padding:12px 16px;
             background:#f8fafc; border-radius:12px; border:1px solid #e2e8f0;'>
-            <b>📍 {city}</b><br>
+            <b>ðŸ“ {city}</b><br>
             <div style='margin-top:6px; font-size:12px;'>
-                <a href='/scan/{city.lower().replace(" ", "-")}' style='color:#059669; font-weight:bold; text-decoration:none;'>▶ Scan Leads</a> &nbsp;|&nbsp;
-                <a href='/research/{city.lower().replace(" ", "-")}' style='color:#0284c7; text-decoration:none;'>🔍 Find New</a> &nbsp;|&nbsp;
-                <a href='/enrich-region/{city.lower().replace(" ", "-")}' style='color:#7c3aed; font-weight:bold; text-decoration:none;'>⚡ Enrich</a>
+                <a href='/scan/{city.lower().replace(" ", "-")}' style='color:#059669; font-weight:bold; text-decoration:none;'>â–¶ Scan Leads</a> &nbsp;|&nbsp;
+                <a href='/research/{city.lower().replace(" ", "-")}' style='color:#0284c7; text-decoration:none;'>ðŸ” Find New</a> &nbsp;|&nbsp;
+                <a href='/enrich-region/{city.lower().replace(" ", "-")}' style='color:#7c3aed; font-weight:bold; text-decoration:none;'>âš¡ Enrich</a>
             </div>
         </div>"""
         for city in ALL_CITIES  # Display all UK regions including Scotland and Wales
@@ -1132,48 +691,48 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
     pct = int((stats['enriched'] / stats['p'] * 100)) if stats['p'] else 0
 
     return f"""
-    <html><head><title>Vector Data Labs — Admin Command</title></head>
+    <html><head><title>Vector Data Labs â€” Admin Command</title></head>
     <body style="font-family:sans-serif; background:#f4f4f9; padding:40px;">
     <div style="max-width:920px; margin:auto; background:white; padding:40px;
                 border-radius:20px; border-top:8px solid #064e3b; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h1>📊 Tree Key Admin Command</h1>
-            <a href="/" target="_blank" style="background:#10b981; color:white; padding:8px 14px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">👁️ View Public Homepage</a>
+            <h1>ðŸ“Š Tree Key Admin Command</h1>
+            <a href="/" target="_blank" style="background:#10b981; color:white; padding:8px 14px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">ðŸ‘ï¸ View Public Homepage</a>
         </div>
 
         <p>Verified LTD Partners: <b>{stats['p']}</b> &nbsp;|&nbsp; 
            Enriched with Contacts: <b style="color:#059669;">{stats['enriched']} ({pct}%)</b> &nbsp;|&nbsp; 
            Total Planning Leads: <b>{stats['l']}</b>
-           &nbsp;|&nbsp; <a href='/status'>🔧 System Status</a>
-           &nbsp;|&nbsp; <a href='/pricing'>💳 Pricing Table</a>
-           &nbsp;|&nbsp; <a href='/export-directors'>📋 View Contacts</a>
-           &nbsp;|&nbsp; <a href='/export-directors.csv' style='color:#1b5e20; font-weight:bold;'>⬇️ Download CSV</a>
+           &nbsp;|&nbsp; <a href='/status'>ðŸ”§ System Status</a>
+           &nbsp;|&nbsp; <a href='/pricing'>ðŸ’³ Pricing Table</a>
+           &nbsp;|&nbsp; <a href='/export-directors'>ðŸ“‹ View Contacts</a>
+           &nbsp;|&nbsp; <a href='/export-directors.csv' style='color:#1b5e20; font-weight:bold;'>â¬‡ï¸ Download CSV</a>
         </p>
         <hr>
-        <h3>🏙️ Nationwide Territory Scanners, Discovery & Instant Enrichment</h3>
-        <p style="color:#64748b; font-size:13px; margin-top:-5px;">Click <b>▶ Scan Leads</b> to fetch local planning applications, <b>🔍 Find New</b> to discover tree surgery LTDs via Companies House, or <b>⚡ Enrich</b> to pull direct phones and ratings in ~5 seconds.</p>
+        <h3>ðŸ™ï¸ Nationwide Territory Scanners, Discovery & Instant Enrichment</h3>
+        <p style="color:#64748b; font-size:13px; margin-top:-5px;">Click <b>â–¶ Scan Leads</b> to fetch local planning applications, <b>ðŸ” Find New</b> to discover tree surgery LTDs via Companies House, or <b>âš¡ Enrich</b> to pull direct phones and ratings in ~5 seconds.</p>
         {city_buttons}
         <hr>
 
-        <h3>🔄 Batch Operations</h3>
+        <h3>ðŸ”„ Batch Operations</h3>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
             <a href='/populate-2000-partners' style="background:#047857; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px; box-shadow:0 2px 6px rgba(4,120,87,0.3);">
-                ⚡ Harvest 2,000+ Contractors (Nationwide GB)
+                âš¡ Harvest 2,000+ Contractors (Nationwide GB)
             </a>
             <a href='/enrich-all' style="background:#1b5e20; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                🚀 Enrich All (All Remaining Partners)
+                ðŸš€ Enrich All (All Remaining Partners)
             </a>
             <a href='/enrich-batch' style="background:#7c3aed; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                ⚡ Enrich Next 50 Partners (5-8 Seconds)
+                âš¡ Enrich Next 50 Partners (5-8 Seconds)
             </a>
             <a href='/research-all' style="background:#0284c7; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                🔍 Discover All Regions (Find New)
+                ðŸ” Discover All Regions (Find New)
             </a>
             <a href='/clean-partners' style="background:#b71c1c; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                🧹 Clean Database (Purge False Substrings)
+                ðŸ§¹ Clean Database (Purge False Substrings)
             </a>
             <a href='/export-directors.csv' style="background:#064e3b; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                ⬇️ Export Contacts CSV
+                â¬‡ï¸ Export Contacts CSV
             </a>
         </div>
 
@@ -1191,7 +750,7 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
 
 
 
-# ── Status ────────────────────────────────────────────────────────────────────
+# â”€â”€ Status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.get("/status", response_class=HTMLResponse)
 def status(user: str = Depends(verify_dashboard_auth)):
@@ -1213,22 +772,22 @@ def status(user: str = Depends(verify_dashboard_auth)):
     rows_html = ""
     for key, label in ENV_VARS:
         val = os.getenv(key, "").strip()
-        icon, color, note = ("✅", "#1b5e20", "Set") if val else ("❌", "#b71c1c", "MISSING")
+        icon, color, note = ("âœ…", "#1b5e20", "Set") if val else ("âŒ", "#b71c1c", "MISSING")
         rows_html += f"<tr><td style='padding:8px;'>{label}</td><td style='padding:8px; color:{color}; font-weight:bold;'>{icon} {note}</td></tr>"
 
     try:
         conn = database.get_db_conn(); conn.close()
-        db_status = "<span style='color:#1b5e20; font-weight:bold;'>✅ Connected</span>"
+        db_status = "<span style='color:#1b5e20; font-weight:bold;'>âœ… Connected</span>"
     except Exception as e:
-        db_status = f"<span style='color:#b71c1c; font-weight:bold;'>❌ Failed: {e}</span>"
+        db_status = f"<span style='color:#b71c1c; font-weight:bold;'>âŒ Failed: {e}</span>"
 
     return f"""
     <html><head><title>System Status</title></head>
     <body style="font-family:sans-serif; background:#f4f4f9; padding:40px;">
     <div style="max-width:620px; margin:auto; background:white; padding:40px;
                 border-radius:20px; border-top:8px solid #1b5e20;">
-        <h2>🔧 System Status</h2>
-        <p><a href='/'>← Dashboard</a></p>
+        <h2>ðŸ”§ System Status</h2>
+        <p><a href='/'>â† Dashboard</a></p>
         <h4>Database</h4><p>{db_status}</p>
         <h4>Environment Variables</h4>
         <table style="width:100%; border-collapse:collapse;">
@@ -1239,7 +798,7 @@ def status(user: str = Depends(verify_dashboard_auth)):
             {rows_html}
         </table>
         <p style="margin-top:20px; font-size:12px; color:#888;">
-            Keys are never displayed — only presence is checked.<br>
+            Keys are never displayed â€” only presence is checked.<br>
             <b>Automated scanning:</b> Set up cron-job.org to hit
             <code>/trigger-leads-{{city}}?secret=YOUR_SECRET</code> on your preferred schedule.
         </p>
@@ -1247,7 +806,7 @@ def status(user: str = Depends(verify_dashboard_auth)):
     """
 
 
-# ── Pricing Page (Public) ─────────────────────────────────────────────────────
+# â”€â”€ Pricing Page (Public) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.get("/pricing", response_class=HTMLResponse)
 def pricing():
@@ -1256,9 +815,9 @@ def pricing():
     cards = ""
     for key, plan in plans.items():
         if plan["mode"] == "subscription":
-            price_display = f"£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal;'>/month</span>"
+            price_display = f"Â£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal;'>/month</span>"
         else:
-            price_display = f"£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal;'> one-off</span>"
+            price_display = f"Â£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal;'> one-off</span>"
 
         highlight = "border:3px solid #1b5e20;" if key == "city_monthly" else "border:2px solid #ccc;"
 
@@ -1274,7 +833,7 @@ def pricing():
                style="background:#1b5e20; color:white; padding:12px 28px;
                       border-radius:8px; text-decoration:none;
                       display:inline-block; font-weight:bold;">
-               Get Started →
+               Get Started â†’
             </a>
         </div>"""
 
@@ -1284,7 +843,7 @@ def pricing():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Commercial Allocation Tiers — Tree Key</title>
+        <title>Commercial Allocation Tiers â€” Tree Key</title>
 
         <style>
             :root {{
@@ -1331,7 +890,7 @@ def pricing():
         {cards}
 
         <div style="text-align:center; margin-top:32px;">
-            <a href="/" style="color:var(--brand-muted); text-decoration:none; font-size:13px; font-weight:600;">← Return to Main Intelligence Hub</a>
+            <a href="/" style="color:var(--brand-muted); text-decoration:none; font-size:13px; font-weight:600;">â† Return to Main Intelligence Hub</a>
         </div>
     </div>
     </body>
@@ -1341,7 +900,7 @@ def pricing():
 
 
 
-# ── Checkout (Stripe) ─────────────────────────────────────────────────────────
+# â”€â”€ Checkout (Stripe) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.get("/checkout/{plan_key}")
 def checkout(plan_key: str):
@@ -1355,7 +914,7 @@ def checkout(plan_key: str):
 def payment_success():
     return """
     <html><body style="font-family:sans-serif; text-align:center; padding:60px;">
-        <h1>✅ Payment Successful!</h1>
+        <h1>âœ… Payment Successful!</h1>
         <p>Thank you. Your leads will start arriving shortly.</p>
         <p><a href="/">Back to Dashboard</a></p>
     </body></html>
@@ -1372,7 +931,7 @@ async def stripe_webhook(request: Request):
     return {"status": "ok", "event": result.get("event")}
 
 
-# ── City Scan Routes (Dashboard — Basic Auth) ─────────────────────────────────
+# â”€â”€ City Scan Routes (Dashboard â€” Basic Auth) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _resolve_city_param(slug: str) -> Optional[str]:
     clean = slug.lower().replace("-", " ").replace("_", " ").strip()
@@ -1433,12 +992,12 @@ def scan_city(city_slug: str, request: Request, secret: Optional[str] = Query(No
         count = scanners.scan_city_planning_api(city)
 
     return f"""<html><body style="font-family:sans-serif; padding:40px;">
-        <p>✅ {city} scan complete. <b>{count}</b> new leads found.</p>
-        <a href="/admin">← Back to Admin Command</a>
+        <p>âœ… {city} scan complete. <b>{count}</b> new leads found.</p>
+        <a href="/admin">â† Back to Admin Command</a>
     </body></html>"""
 
 
-# ── City Cron Routes (External — Trigger Secret) ──────────────────────────────
+# â”€â”€ City Cron Routes (External â€” Trigger Secret) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.get("/trigger-leads/{city_slug}")
 def cron_trigger_slash(city_slug: str, secret: Optional[str] = Query(None)):
@@ -1461,7 +1020,7 @@ def cron_trigger_slash(city_slug: str, secret: Optional[str] = Query(None)):
 
 
 
-# ── Research Routes (Basic Auth & Secret) ──────────────────────────────────────
+# â”€â”€ Research Routes (Basic Auth & Secret) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 import threading
 
@@ -1473,10 +1032,10 @@ def research_city(city_slug: str, request: Request, secret: Optional[str] = Quer
         raise HTTPException(status_code=404, detail=f"Region/City '{city_slug}' not configured.")
     threading.Thread(target=research.perform_research, args=(city,), daemon=True).start()
     return f"""<html><body style="font-family:sans-serif; padding:40px;">
-        <h3>🔍 Partner Discovery Started for {city}</h3>
+        <h3>ðŸ” Partner Discovery Started for {city}</h3>
         <p>Searching Companies House, officers, Google Places, and websites in the background.</p>
         <p>New verified tree surgery LTDs will appear in your database momentarily.</p>
-        <a href="/admin">← Back to Admin Command</a>
+        <a href="/admin">â† Back to Admin Command</a>
     </body></html>"""
 
 
@@ -1487,11 +1046,11 @@ def populate_2000_partners_view(request: Request, secret: Optional[str] = Query(
     threading.Thread(target=research.populate_2000_partners_into_db, daemon=True).start()
     return """<html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; color:#0f172a;">
         <div style="max-width:600px; margin:auto; background:white; padding:30px; border-radius:12px; border:1px solid #e2e8f0; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
-            <h2 style="color:#059669; margin-top:0;">🚀 Nationwide 2,000+ Contractor Harvest Initiated</h2>
+            <h2 style="color:#059669; margin-top:0;">ðŸš€ Nationwide 2,000+ Contractor Harvest Initiated</h2>
             <p style="font-size:15px; line-height:1.5;">The system is sweeping Companies House across all 15 UK regional clusters (England Wealth Belts, Midlands, North, Scotland, Wales) in the background with 10 concurrent worker threads.</p>
             <p style="font-size:14px; color:#64748b;">It is actively extracting Managing Director names, verified UK phone numbers, Google review ratings, and websites directly into your PostgreSQL database.</p>
             <div style="margin-top:25px;">
-                <a href="/admin" style="display:inline-block; background:#064e3b; color:white; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">← Return to Admin Dashboard</a>
+                <a href="/admin" style="display:inline-block; background:#064e3b; color:white; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">â† Return to Admin Dashboard</a>
             </div>
         </div>
     </body></html>"""
@@ -1519,10 +1078,10 @@ def research_all(request: Request, secret: Optional[str] = Query(None)):
     verify_admin_or_secret(request, secret)
     threading.Thread(target=research.research_all_cities, daemon=True).start()
     return """<html><body style="font-family:sans-serif; padding:40px;">
-        <h3>🚀 Nationwide Discovery Started</h3>
+        <h3>ðŸš€ Nationwide Discovery Started</h3>
         <p>Investigating Companies House across all 9 English regions in the background.</p>
         <p>New verified LTD tree surgery contractors will populate in your database over the next 1-2 minutes.</p>
-        <a href="/admin">← Back to Admin Command</a>
+        <a href="/admin">â† Back to Admin Command</a>
     </body></html>"""
 
 
@@ -1533,11 +1092,11 @@ def enrich_batch(request: Request, secret: Optional[str] = Query(None)):
     verify_admin_or_secret(request, secret)
     count = research.enrich_existing_partners(limit=50)
     return f"""<html><body style="font-family:sans-serif; padding:40px;">
-        <h3>⚡ Batch Enrichment Complete</h3>
-        <p>✅ Enriched and updated <b>{count}</b> partners with direct director names, UK phone numbers, and emails in ~5 seconds!</p>
+        <h3>âš¡ Batch Enrichment Complete</h3>
+        <p>âœ… Enriched and updated <b>{count}</b> partners with direct director names, UK phone numbers, and emails in ~5 seconds!</p>
         <div style="margin-top:20px;">
-            <a href="/enrich-batch" style="background:#7c3aed; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">▶ Enrich Next 50</a> &nbsp;&nbsp;
-            <a href="/admin" style="background:#064e3b; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">← Back to Admin Command</a>
+            <a href="/enrich-batch" style="background:#7c3aed; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">â–¶ Enrich Next 50</a> &nbsp;&nbsp;
+            <a href="/admin" style="background:#064e3b; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">â† Back to Admin Command</a>
         </div>
     </body></html>"""
 
@@ -1550,10 +1109,10 @@ def enrich_region(city_slug: str, request: Request, secret: Optional[str] = Quer
         raise HTTPException(status_code=404, detail=f"Region/City '{city_slug}' not configured.")
     count = research.enrich_existing_partners(limit=150, city_name=city)
     return f"""<html><body style="font-family:sans-serif; padding:40px;">
-        <h3>⚡ Regional Enrichment Complete for {city}</h3>
-        <p>✅ Enriched and updated <b>{count}</b> {city} tree surgery contractors with direct director names, UK phone numbers, and emails!</p>
+        <h3>âš¡ Regional Enrichment Complete for {city}</h3>
+        <p>âœ… Enriched and updated <b>{count}</b> {city} tree surgery contractors with direct director names, UK phone numbers, and emails!</p>
         <div style="margin-top:20px;">
-            <a href="/admin" style="background:#064e3b; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">← Back to Admin Command</a>
+            <a href="/admin" style="background:#064e3b; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">â† Back to Admin Command</a>
         </div>
     </body></html>"""
 
@@ -1563,8 +1122,8 @@ def enrich_all(request: Request, secret: Optional[str] = Query(None)):
     verify_admin_or_secret(request, secret)
     threading.Thread(target=research.enrich_existing_partners, kwargs={"limit": 0}, daemon=True).start()
     return """<html><body style="font-family:sans-serif; padding:40px;">
-        <p>✅ Enrichment started in background across 8 parallel threads. Check Render logs or refresh admin dashboard for progress.</p>
-        <a href="/admin">← Back to Admin Command</a>
+        <p>âœ… Enrichment started in background across 8 parallel threads. Check Render logs or refresh admin dashboard for progress.</p>
+        <a href="/admin">â† Back to Admin Command</a>
     </body></html>"""
 
 
@@ -1576,18 +1135,18 @@ def clean_partners(request: Request, secret: Optional[str] = Query(None)):
     result = research.clean_partner_database()
     if "error" in result:
         return f"""<html><body style="font-family:sans-serif; padding:40px;">
-            <p>❌ Cleanup failed: {result['error']}</p>
-            <a href="/admin">← Back to Dashboard</a>
+            <p>âŒ Cleanup failed: {result['error']}</p>
+            <a href="/admin">â† Back to Dashboard</a>
         </body></html>"""
     return f"""<html><body style="font-family:sans-serif; padding:40px;">
-        <h3>🧹 Partner Database Cleanup Complete</h3>
-        <p>✅ Kept: <b>{result['kept']}</b> verified tree surgery companies</p>
-        <p>🗑️ Removed: <b>{result['removed']}</b> unrelated businesses</p>
+        <h3>ðŸ§¹ Partner Database Cleanup Complete</h3>
+        <p>âœ… Kept: <b>{result['kept']}</b> verified tree surgery companies</p>
+        <p>ðŸ—‘ï¸ Removed: <b>{result['removed']}</b> unrelated businesses</p>
         <p style="color:#888; font-size:13px;">
             Removed companies had no tree-surgery keywords in their name,
             or contained excluded terms (medical, dental, fruit, cosmetic, etc.)
         </p>
-        <a href="/admin">← Back to Admin Command</a>
+        <a href="/admin">â† Back to Admin Command</a>
     </body></html>"""
 
 
@@ -1600,7 +1159,7 @@ def run_master_daily_pipeline():
     3. New Contractor Discovery: Queries Companies House for newly incorporated LTDs.
     4. Two-Layer Name Filter & UK Geotargeting: Purges any non-tree surgery or foreign records.
     """
-    logger.info("[PIPELINE] 🚀 Starting Master Daily Automation Pipeline...")
+    logger.info("[PIPELINE] ðŸš€ Starting Master Daily Automation Pipeline...")
     
     # Stage 1: Council Planning Radar Scan
     try:
@@ -1673,7 +1232,7 @@ def run_master_daily_pipeline():
     except Exception as e:
         logger.error(f"[PIPELINE] Stage 4 error: {e}")
 
-    logger.info("[PIPELINE] 🎯 Master Daily Pipeline finished successfully.")
+    logger.info("[PIPELINE] ðŸŽ¯ Master Daily Pipeline finished successfully.")
 
 
 
@@ -1744,7 +1303,7 @@ def api_stats(secret: Optional[str] = Query(None)):
 
 
 
-# ── Export Directors (Basic Auth) ─────────────────────────────────────────────
+# â”€â”€ Export Directors (Basic Auth) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.get("/export-directors", response_class=HTMLResponse)
 def export_directors(user: str = Depends(verify_dashboard_auth)):
@@ -1771,10 +1330,10 @@ def export_directors(user: str = Depends(verify_dashboard_auth)):
         f"<tr>"
         f"<td style='padding:8px; border:1px solid #ddd;'><b>{r[0]}</b><br><span style='color:#777; font-size:11px;'>#{r[1]}</span></td>"
         f"<td style='padding:8px; border:1px solid #ddd;'>{r[2] or '<span style=\"color:#888;\">Director on file</span>'}</td>"
-        f"<td style='padding:8px; border:1px solid #ddd;'>{r[3] or '—'}</td>"
-        f"<td style='padding:8px; border:1px solid #ddd;'>{f'<a href=\"mailto:{r[4]}\">{r[4]}</a>' if r[4] else '—'}</td>"
-        f"<td style='padding:8px; border:1px solid #ddd;'>{f'<a href=\"{r[5]}\" target=\"_blank\">Website</a>' if r[5] else '—'}</td>"
-        f"<td style='padding:8px; border:1px solid #ddd; text-align:center;'>⭐ {r[6] or 'N/A'}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd;'>{r[3] or 'â€”'}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd;'>{f'<a href=\"mailto:{r[4]}\">{r[4]}</a>' if r[4] else 'â€”'}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd;'>{f'<a href=\"{r[5]}\" target=\"_blank\">Website</a>' if r[5] else 'â€”'}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd; text-align:center;'>â­ {r[6] or 'N/A'}</td>"
         f"<td style='padding:8px; border:1px solid #ddd;'><b>{r[7]}</b></td>"
         f"</tr>"
         for r in rows
@@ -1786,10 +1345,10 @@ def export_directors(user: str = Depends(verify_dashboard_auth)):
     <div style="max-width:1100px; margin:auto; background:white; padding:30px;
                 border-radius:16px; border-top:8px solid #1b5e20;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-            <h2>📋 Verified Tree Surgery Contacts ({len(rows)} companies)</h2>
+            <h2>ðŸ“‹ Verified Tree Surgery Contacts ({len(rows)} companies)</h2>
             <div>
-                <a href="/export-directors.csv" style="background:#1b5e20; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold;">⬇️ Download CSV</a>
-                &nbsp;|&nbsp; <a href="/">← Dashboard</a>
+                <a href="/export-directors.csv" style="background:#1b5e20; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold;">â¬‡ï¸ Download CSV</a>
+                &nbsp;|&nbsp; <a href="/">â† Dashboard</a>
             </div>
         </div>
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
@@ -1799,7 +1358,7 @@ def export_directors(user: str = Depends(verify_dashboard_auth)):
                 <th style="padding:10px; text-align:left;">Phone</th>
                 <th style="padding:10px; text-align:left;">Email</th>
                 <th style="padding:10px; text-align:left;">Web</th>
-                <th style="padding:10px; text-align:center;">Google ⭐</th>
+                <th style="padding:10px; text-align:center;">Google â­</th>
                 <th style="padding:10px; text-align:left;">City</th>
             </tr>
             {table_rows or "<tr><td colspan='7' style='padding:16px; text-align:center;'>No verified contacts found yet. Run /enrich-all.</td></tr>"}
