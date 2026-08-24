@@ -249,7 +249,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
     adjacent_variance = 1.0 + math.cos((target_lat - target_lng) * 35.0) * 0.2
     connected_leads = max(int(selected_leads * 1.55 * adjacent_variance) + int(radius * 0.4), 4)
 
-    # Contract valuation (Ãƒâ€šÃ‚Â£450 to Ãƒâ€šÃ‚Â£1,450 per statutory notice)
+    # Contract valuation (Ãƒâ€šÃ‚£450 to Ãƒâ€šÃ‚£1,450 per statutory notice)
     min_val = selected_leads * 450
     max_val = selected_leads * 1450
 
@@ -574,60 +574,120 @@ def public_homepage():
         </div>
     </section>
 
-    <!-- Pricing Section (Anchoring & Scarcity) -->
-    <section id="pricing" class="py-24 border-t border-slate-800 bg-brand-dark relative">
-        <!-- Background Glow -->
-        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-4xl h-[400px] bg-brand-green/5 blur-[120px] rounded-full pointer-events-none"></div>
-        
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-            <div class="text-center mb-16">
-                <h2 class="text-4xl font-extrabold text-white font-mono tracking-tight uppercase">Secure Your Area.</h2>
-                <p class="mt-4 text-xl text-slate-400 font-medium">The average commercial site clearance pays <span class="text-emerald-400 font-bold">Ã‚Â£2,500+</span>.<br>One locked territory. Zero competitors.</p>
+        <!-- The TreeKey Advantage (Psychology & Logic) -->
+    <section class="max-w-7xl mx-auto px-4 mt-24 mb-12 relative z-10">
+        <div class="text-center mb-16">
+            <h2 class="text-3xl md:text-5xl font-extrabold text-white mb-6 uppercase tracking-tight">The <span class="text-emerald-500">TreeKey</span> Advantage</h2>
+            <p class="text-lg text-slate-400 max-w-2xl mx-auto">We don't just supply leads. We engineer market dominance. Here is exactly why our contractors win.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <!-- Pillar 1: Lead-Level Exclusivity -->
+            <div class="bg-brand-dark/50 border border-slate-800 p-8 rounded-xl hover:border-emerald-500/50 transition-colors">
+                <div class="h-12 w-12 rounded bg-emerald-500/10 flex items-center justify-center mb-6 border border-emerald-500/30 text-emerald-400">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                </div>
+                <h3 class="text-xl font-bold text-white mb-3">100% Exclusive Leads</h3>
+                <p class="text-slate-400 text-sm leading-relaxed">Most lead-gen sites sell the same job to 5 different contractors, forcing a race to the bottom on price. At TreeKey, every commercial lead you claim is <strong class="text-slate-200">never sold twice.</strong> If it hits your phone, it is exclusively yours to win.</p>
             </div>
 
-            <div class="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto items-center">
-                <!-- Regional Pro (Decoy / Downsell) -->
-                <div class="bg-slate-800/40 border border-slate-700 rounded-xl p-8 hover:border-slate-500 transition-colors">
-                    <div class="text-slate-400 font-mono font-bold text-sm uppercase tracking-wider mb-2">Non-Exclusive</div>
-                    <h3 class="text-2xl font-bold text-white mb-4">Pay-As-You-Go Credits</h3>
-                    <p class="text-slate-400 mb-6 h-12">Buy 10 exclusive planning leads. Zero monthly commitment. Use strictly at your own pace.</p>
-                    <div class="text-4xl font-extrabold text-white mb-8">Ã‚Â£80<span class="text-lg text-slate-500 font-normal"> /10 Leads</span></div>
-                    <ul class="mb-8 space-y-3 text-slate-400 text-sm">
-                        <li class="flex gap-2"><svg width="20" class="text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg> No contract</li>
-                        <li class="flex gap-2"><svg width="20" class="text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg> Instant alerts</li>
-                    </ul>
-                    <a href="/checkout/credits_10" class="block w-full text-center bg-slate-700 hover:bg-slate-600 text-white font-bold py-4 rounded transition-colors uppercase tracking-wider text-sm">Buy Credits</a>
+            <!-- Pillar 2: The Network Effect -->
+            <div class="bg-brand-dark/50 border border-slate-800 p-8 rounded-xl hover:border-emerald-500/50 transition-colors">
+                <div class="h-12 w-12 rounded bg-amber-500/10 flex items-center justify-center mb-6 border border-amber-500/30 text-amber-400">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
                 </div>
+                <h3 class="text-xl font-bold text-white mb-3">Multi-Council Network Effect</h3>
+                <p class="text-slate-400 text-sm leading-relaxed">Commercial clearance jobs often span across borough borders. Our algorithms aggregate planning portals across <strong class="text-slate-200">connected local authorities</strong> simultaneously, granting you access to massive 'bonus' jobs just outside your immediate boundary.</p>
+            </div>
 
-                <!-- Commercial Pro (The Target) -->
-                <div class="bg-[#020617] border-2 border-emerald-500 rounded-xl p-8 relative shadow-[0_0_40px_rgba(16,185,129,0.15)] transform md:scale-105 z-10">
-                    <div class="absolute -top-4 left-1/2 -translate-x-1/2 bg-emerald-500 text-white text-xs font-bold uppercase tracking-wider py-1 px-4 rounded-full shadow-lg border border-emerald-400 whitespace-nowrap animate-pulse">100% Exclusive Leads</div>
-                    
-                    <h3 class="text-3xl font-bold text-white mb-4 mt-2">Commercial Pro</h3>
-                    <p class="text-slate-300 mb-6 h-16 text-sm">You secure exclusive routing for a 15-mile boundary. <strong class="text-emerald-400">Every lead you receive is 100% yours.</strong> We never sell the same job twice.</p>
-                    
+            <!-- Pillar 3: Beat Local Competitors -->
+            <div class="bg-brand-dark/50 border border-slate-800 p-8 rounded-xl hover:border-emerald-500/50 transition-colors">
+                <div class="h-12 w-12 rounded bg-blue-500/10 flex items-center justify-center mb-6 border border-blue-500/30 text-blue-400">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                </div>
+                <h3 class="text-xl font-bold text-white mb-3">Intercept Before Competitors</h3>
+                <p class="text-slate-400 text-sm leading-relaxed">We detect competitor density in your area and route the highest-paying council jobs to you <strong class="text-slate-200">before they ever hit the public market.</strong> Win the contract while your competitors are still waiting for the phone to ring.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing Section (Anchoring & Scarcity) -->
+    <section id="pricing" class="relative z-10 py-24 bg-brand-dark/50 border-t border-slate-800/50">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="text-center mb-16">
+                <span class="text-emerald-500 font-mono font-bold tracking-widest text-sm uppercase">Zero Commitment. Cancel Anytime.</span>
+                <h2 class="text-4xl md:text-5xl font-extrabold text-white mt-4 uppercase">Dominate Your Area</h2>
+                <p class="text-lg text-slate-400 mt-4">The average commercial site clearance pays £2,500+. One job pays for the year.</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
+                
+                <!-- Tier 1: Sole Trader -->
+                <div class="bg-[#0f172a] border border-slate-800 rounded-2xl p-8 relative hover:border-slate-600 transition-colors">
+                    <h3 class="text-2xl font-bold text-white mb-2">Sole Trader</h3>
+                    <p class="text-slate-400 mb-6 text-sm">Perfect for one-man bands and local startups aiming to grow steadily.</p>
                     <div class="flex items-baseline gap-2 mb-8">
-                        <div class="text-5xl font-extrabold text-white">Ã‚Â£149</div>
+                        <div class="text-4xl font-extrabold text-white">£49</div>
                         <div class="text-lg text-slate-500 font-normal">/month</div>
                     </div>
-                    
                     <ul class="mb-8 space-y-4 text-slate-300 text-sm font-medium">
+                        <li class="flex items-start gap-3"><svg width="20" class="text-slate-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 10-Mile Radial Boundary</li>
                         <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 100% Exclusive Lead Routing</li>
-                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Unlimited Commercial Leads</li>
-                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Instant Phone Notifications</li>
-                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> No Contract. Cancel Anytime.</li>
+                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Daily Email Notifications</li>
                     </ul>
-                    
-                    <a href="/checkout/territory_lockout" class="block w-full text-center bg-brand-green hover:bg-emerald-500 text-white font-extrabold py-5 rounded-lg transition-all duration-300 uppercase tracking-widest text-sm shadow-[0_4px_14px_0_rgba(16,185,129,0.39)] hover:shadow-[0_6px_20px_rgba(16,185,129,0.23)] hover:-translate-y-0.5">
+                    <a href="/checkout/sole_trader" class="block w-full text-center border border-slate-700 hover:border-slate-500 text-white font-bold py-4 rounded-lg transition-all duration-300 uppercase tracking-wider text-sm">
+                        Start Local
+                    </a>
+                </div>
+
+                <!-- Tier 2: Commercial Pro (Hero) -->
+                <div class="bg-gradient-to-b from-[#064e3b] to-[#022c22] border-2 border-emerald-500 rounded-2xl p-8 relative transform md:-translate-y-4 shadow-[0_0_40px_rgba(16,185,129,0.15)]">
+                    <div class="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+                        <span class="bg-emerald-500 text-white text-xs font-bold uppercase tracking-widest py-1 px-3 rounded-full">Most Popular</span>
+                    </div>
+                    <h3 class="text-3xl font-bold text-white mb-2">Commercial Pro</h3>
+                    <p class="text-emerald-100/70 mb-6 text-sm h-10">The sweet spot for established 3-man crews hunting lucrative clearances.</p>
+                    <div class="flex items-baseline gap-2 mb-8">
+                        <div class="text-5xl font-extrabold text-white">£149</div>
+                        <div class="text-lg text-emerald-500 font-normal">/month</div>
+                    </div>
+                    <ul class="mb-8 space-y-4 text-slate-100 text-sm font-medium">
+                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 25-Mile Radial Boundary</li>
+                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 100% Exclusive Lead Routing</li>
+                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Instant SMS/Phone Notifications</li>
+                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Connected-Council Job Access</li>
+                    </ul>
+                    <a href="/checkout/commercial_pro" class="block w-full text-center bg-emerald-500 hover:bg-emerald-400 text-white font-extrabold py-5 rounded-lg transition-all duration-300 uppercase tracking-widest text-sm shadow-[0_4px_14px_0_rgba(16,185,129,0.39)]">
                         Secure Priority Access
                     </a>
-                    <p class="text-center text-xs text-slate-500 font-mono mt-4">Takes 60 seconds. Secures your area instantly.</p>
                 </div>
+
+                <!-- Tier 3: Regional Dominator -->
+                <div class="bg-[#0f172a] border border-slate-800 rounded-2xl p-8 relative hover:border-slate-600 transition-colors">
+                    <h3 class="text-2xl font-bold text-white mb-2">Regional Elite</h3>
+                    <p class="text-slate-400 mb-6 text-sm">For massive operations running multiple crews across a wide geographic spread.</p>
+                    <div class="flex items-baseline gap-2 mb-8">
+                        <div class="text-4xl font-extrabold text-white">£299</div>
+                        <div class="text-lg text-slate-500 font-normal">/month</div>
+                    </div>
+                    <ul class="mb-8 space-y-4 text-slate-300 text-sm font-medium">
+                        <li class="flex items-start gap-3"><svg width="20" class="text-amber-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 50-Mile Radial Boundary</li>
+                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 100% Exclusive Lead Routing</li>
+                        <li class="flex items-start gap-3"><svg width="20" class="text-amber-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> First-Priority API Routing</li>
+                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Dedicated Account Manager</li>
+                    </ul>
+                    <a href="/checkout/regional_elite" class="block w-full text-center border border-slate-700 hover:border-slate-500 text-white font-bold py-4 rounded-lg transition-all duration-300 uppercase tracking-wider text-sm">
+                        Dominate Region
+                    </a>
+                </div>
+
             </div>
         </div>
     </section>
 
     <!-- FAQ Section (Objection Handling) -->
+
+
     <section class="section py-20 bg-[#020617] border-t border-slate-800">
         <div class="container mx-auto px-4 max-w-3xl">
             <div class="text-center mb-12">
@@ -647,7 +707,7 @@ def public_homepage():
                 
                 <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
                     <h3 class="text-lg font-bold text-white mb-2">Am I tied into a long contract?</h3>
-                    <p class="text-slate-400 leading-relaxed">No. We work with tradesmen, not corporations. The lockout is a rolling monthly agreement. You can cancel instantly at any time with zero penalty. Alternatively, buy a Â£80 credit pack for zero monthly commitment.</p>
+                    <p class="text-slate-400 leading-relaxed">No. We work with tradesmen, not corporations. The lockout is a rolling monthly agreement. You can cancel instantly at any time with zero penalty. Alternatively, buy a £80 credit pack for zero monthly commitment.</p>
                 </div>
             </div>
         </div>
@@ -816,7 +876,7 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
 
     SCORE_EMOJI = {"small": "ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â¡", "medium": "ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â ", "large": "ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â´"}
     lead_rows = "".join([
-        f"<li>{SCORE_EMOJI.get(l[2],'ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â¡')} <b>{l[0]}</b> {get_freshness_badge(l[5])}<br><span style='color:#555; font-size:13px;'>{l[1][:90]}... | Ãƒâ€šÃ‚Â£{l[3]} | {l[4]}</span></li>"
+        f"<li>{SCORE_EMOJI.get(l[2],'ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â¡')} <b>{l[0]}</b> {get_freshness_badge(l[5])}<br><span style='color:#555; font-size:13px;'>{l[1][:90]}... | Ãƒâ€šÃ‚£{l[3]} | {l[4]}</span></li>"
         for l in stats["leads"]
     ])
 
@@ -960,9 +1020,9 @@ def pricing():
     cards = ""
     for key, plan in plans.items():
         if plan["mode"] == "subscription":
-            price_display = f"Ãƒâ€šÃ‚Â£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal;'>/month</span>"
+            price_display = f"Ãƒâ€šÃ‚£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal;'>/month</span>"
         else:
-            price_display = f"Ãƒâ€šÃ‚Â£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal;'> one-off</span>"
+            price_display = f"Ãƒâ€šÃ‚£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal;'> one-off</span>"
 
         highlight = "border:3px solid #1b5e20;" if key == "city_monthly" else "border:2px solid #ccc;"
 
