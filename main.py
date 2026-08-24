@@ -1,4 +1,4 @@
-﻿import os
+import os
 import logging
 import secrets
 import database
@@ -420,11 +420,12 @@ def public_homepage():
                 <a href="/" class="flex items-center gap-3">
                     <img src="/static/logo.png" alt="Tree Key" class="h-10">
                 </a>
-                <div class="hidden md:flex items-center gap-8 font-mono text-sm tracking-wide">
-                    <a href="#radar" class="text-slate-400 hover:text-white transition-colors">RADAR</a>
-                    <a href="#features" class="text-slate-400 hover:text-white transition-colors">SYSTEM</a>
-                    <a href="#pricing" class="text-slate-400 hover:text-white transition-colors">TERRITORIES</a>
-                    <a href="/admin" class="bg-brand-green/10 text-brand-glow border border-brand-green/30 px-5 py-2 rounded uppercase hover:bg-brand-green hover:text-white transition-all duration-300">Contractor Login</a>
+                <div class="flex items-center gap-4 md:gap-8 font-mono text-xs md:text-sm tracking-wide">
+                    <div class="hidden md:flex items-center gap-8">
+                        <a href="#radar" class="text-slate-400 hover:text-white transition-colors">RADAR</a>
+                        <a href="#pricing" class="text-slate-400 hover:text-white transition-colors">TERRITORIES</a>
+                    </div>
+                    <a href="/admin" class="bg-brand-green/10 text-brand-glow border border-brand-green/30 px-3 py-1.5 md:px-5 md:py-2 rounded uppercase hover:bg-brand-green hover:text-white transition-all duration-300">Login</a>
                 </div>
             </div>
         </div>
