@@ -75,3 +75,11 @@
 | `STRIPE_SECRET_KEY` | ✅ Set | Stripe payments live & verified |
 | `STRIPE_WEBHOOK_SECRET` | ✅ Set | Stripe webhook listener |
 
+ 
+## TOMORROW TO-DO LIST
+1. Fix Map Lead Bug: North Wales shows 779 leads. Algorithm must strictly clip to radius and not use national baseline.
+2. PayPal Verification loop.
+3. Add stock photos.
+
+4. **Database Expansion Strategy:** Brainstorm and build new scraping pipelines to find maximum potential tree surgeon customers and emails (beyond the current 1,883).
+5. **Lead Scope Expansion (Domestic & Industrial):** Research data sources for domestic/residential and industrial tree surgery leads to diversify away from just council planning portals.
