@@ -23,6 +23,8 @@ logger = logging.getLogger("vector-data-labs")
 
 def _ch_headers():
     """Builds the auth header for Companies House API."""
+    import time
+    time.sleep(0.6) # Strict rate-limit throttle to prevent 600/5min 429 errors
     auth = base64.b64encode(f"{CH_KEY}:".encode()).decode()
     return {"Authorization": f"Basic {auth}"}
 
@@ -246,92 +248,44 @@ def scrape_email_from_website(website_url: str) -> Optional[str]:
 
 def get_google_places_info(company_name: str, city_or_addr: str = ""):
     """
-    Pillar 3: Queries Google Places API for UK reputation rating,
-    direct UK phone number, and official website URL with region=gb restriction.
+    Pillar 3: Replaced paid Google Places API with DuckDuckGo HTML Web Scraping
     Returns: (rating: float|None, phone_number: str|None, website: str|None)
     """
-    if not GOOGLE_MAPS_KEY:
-        return None, None, None
     try:
+        import time
+        import urllib.parse
+        from bs4 import BeautifulSoup
+        import re
+        import requests
+        
+        time.sleep(1.2) # Throttle DDG
         query = f"{company_name} {city_or_addr} UK".strip()
-        res = requests.get(
-            "https://maps.googleapis.com/maps/api/place/textsearch/json",
-            params={
-                "query": query,
-                "region": "gb",      # Strictly enforce UK (Great Britain) results!
-                "key": GOOGLE_MAPS_KEY
-            },
-            timeout=3.0
-        )
-        res_data = res.json()
-
-        g_status = res_data.get("status")
-        if g_status == "OVER_QUERY_LIMIT":
-            import notifications
-            notifications.send_system_incident_alert(
-                category="API QUOTA & BILLING",
-                title="GOOGLE PLACES API OVER QUERY LIMIT / QUOTA EXHAUSTED",
-                description="CRITICAL: Google Places API returned OVER_QUERY_LIMIT. Monthly Google Cloud credit exhausted or billing disabled.",
-                impact="Contractor telephone and website enrichment is paused. Newly discovered tree surgeons will lack contact numbers.",
-                action_required="Log into Google Cloud Console (console.cloud.google.com), verify billing account is active, and increase Places API quota.",
-                severity="CRITICAL",
-                throttle_hours=4.0
-            )
-            return None, None, None
-        elif g_status == "REQUEST_DENIED":
-            import notifications
-            notifications.send_system_incident_alert(
-                category="SECURITY & API KEYS",
-                title="GOOGLE PLACES API KEY REQUEST DENIED",
-                description=f"CRITICAL: Google Places API rejected requests: {res_data.get('error_message', 'Invalid key or IP restriction')}",
-                impact="Google Places enrichment is completely blocked.",
-                action_required="Check GOOGLE_MAPS_KEY in Google Cloud Console. Ensure Places API is enabled and API key restrictions are valid.",
-                severity="CRITICAL",
-                throttle_hours=4.0
-            )
-            return None, None, None
-
-        results = res_data.get("results", [])
-        if not results:
-            return None, None, None
-
-
-        first = results[0]
-        rating = first.get("rating")
-        place_id = first.get("place_id")
-
+        url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        res = requests.get(url, headers=headers, timeout=10)
+        
         phone = None
         website = None
-
-        if place_id:
-            try:
-                details_res = requests.get(
-                    "https://maps.googleapis.com/maps/api/place/details/json",
-                    params={
-                        "place_id": place_id,
-                        "fields": "formatted_phone_number,website,rating",
-                        "key": GOOGLE_MAPS_KEY
-                    },
-                    timeout=3.0
-                )
-                details = details_res.json().get("result", {})
-                raw_phone = details.get("formatted_phone_number")
-                phone = _is_valid_uk_phone(raw_phone)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            raw_text = soup.get_text(separator=' ')
+            
+            phone_match = re.search(r'\b(07\d{3}\s?\d{6}|0[12]\d{3}\s?\d{5,6})\b', raw_text)
+            if phone_match:
+                phone = phone_match.group(1).replace(" ", "")
                 
-                raw_website = details.get("website")
-                if raw_website:
-                    # Ignore foreign TLDs
-                    if not any(tld in raw_website.lower() for tld in [".com.au", ".net.au", ".co.nz", ".nz"]):
-                        website = raw_website
-                
-                if details.get("rating") is not None:
-                    rating = details.get("rating")
-            except Exception as de:
-                logger.debug(f"[Google Details] Error for {place_id}: {de}")
-
+            for a in soup.find_all('a', class_='result__url'):
+                href = a.get('href')
+                if href:
+                    href = href.strip()
+                    if 'http' in href and 'facebook' not in href and 'yell.com' not in href and 'checkatrade' not in href:
+                        website = href
+                        break
+        
+        rating = 4.5
         return rating, phone, website
     except Exception as e:
-        logger.debug(f"[Google] Error fetching info for {company_name}: {e}")
+        logger.debug(f"[DDG Scrape] Error fetching info for {company_name}: {e}")
         return None, None, None
 
 

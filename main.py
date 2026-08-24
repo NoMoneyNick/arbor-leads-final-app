@@ -217,11 +217,16 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
 
 
 
-    # Query local database for lead matches across Great Britain
+    # Query local database for lead matches (Strict bounding to prevent 'LL' double-letter wildcard explosion)
     prefix_alpha = "".join([c for c in display_pc if c.isalpha()])[:3]
     conn = database.get_db_conn()
     cur = conn.cursor()
-    cur.execute("SELECT count(*) FROM leads WHERE address ILIKE %s OR council_source ILIKE %s", (f"%{prefix_alpha}%", f"%{district[:6]}%"))
+    if len(prefix_alpha) > 1:
+        # Match postcode prefix exactly with a space or at the end
+        cur.execute("SELECT count(*) FROM leads WHERE address ~* %s OR council_source ILIKE %s", 
+        (f"\\y{prefix_alpha}[0-9]", f"%{district[:6]}%"))
+    else:
+        cur.execute("SELECT count(*) FROM leads WHERE council_source ILIKE %s", (f"%{district[:6]}%",))
     direct_leads = cur.fetchone()[0]
     cur.close()
     conn.close()

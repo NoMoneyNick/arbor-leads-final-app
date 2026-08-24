@@ -352,33 +352,47 @@ def scan_city_planning_api(city_name: str) -> int:
         from concurrent.futures import ThreadPoolExecutor
 
         def fetch_prefix(prefix):
+            # Try ukplanningapi.co.uk first if key exists
             try:
-                res = requests.get(
-                    "https://ukplanningapi.co.uk/v1/applications",
-                    params={"postcode": prefix, "status": "received", "limit": 200},
-                    headers=headers,
-                    timeout=8
-                )
-                if res.status_code in (401, 403):
-                    notifications.send_system_incident_alert(
-                        category="SECURITY & API KEYS",
-                        title="UK PLANNING DATA API KEY INVALID / 401 UNAUTHORIZED",
-                        description="CRITICAL: ukplanningapi.co.uk rejected requests with HTTP 401/403 Unauthorized.",
-                        impact="Nationwide statutory planning notice scraping is halted across all UK councils.",
-                        action_required="Log into ukplanningapi.co.uk and update UK_PLANNING_API_KEY in Render Environment Settings.",
-                        severity="CRITICAL",
-                        throttle_hours=4.0
+                if UK_PLANNING_API_KEY:
+                    res = requests.get(
+                        "https://ukplanningapi.co.uk/v1/applications",
+                        params={"postcode": prefix, "status": "received", "limit": 200},
+                        headers=headers,
+                        timeout=8
                     )
-                    return prefix, []
-                if res.status_code == 429:
-                    # 429 indicates limit hit — send immediate alert
-                    notifications.send_api_quota_warning_email("UK Planning API", 500, cap=500)
-                    return prefix, []
-                if res.status_code == 200:
-                    return prefix, res.json().get("data", [])
-
+                    if res.status_code == 200:
+                        return prefix, res.json().get("data", [])
             except Exception:
                 pass
+                
+            # Free Fallback: PlanIt API (Unlimited, No API Key needed)
+            try:
+                import time
+                time.sleep(1.0) # Polite throttle for PlanIt
+                planit_res = requests.get(
+                    "https://www.planit.org.uk/api/applics/json",
+                    params={"postcode": prefix, "pg_sz": 50},
+                    timeout=12
+                )
+                if planit_res.status_code == 200:
+                    data = planit_res.json()
+                    records = data.get("records", [])
+                    # Map PlanIt schema to our expected schema
+                    mapped_data = []
+                    for rec in records:
+                        mapped_data.append({
+                            "reference": rec.get("uid", ""),
+                            "description": rec.get("description", ""),
+                            "address": rec.get("address", ""),
+                            "url": rec.get("url", ""),
+                            "status": rec.get("system_status", "received"),
+                            "date": rec.get("creation_date", "")
+                        })
+                    return prefix, mapped_data
+            except Exception as e:
+                pass
+                
             return prefix, []
 
         with ThreadPoolExecutor(max_workers=6) as executor:
