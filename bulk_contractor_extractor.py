@@ -91,7 +91,7 @@ def ch_headers():
     if not CH_KEY:
         return {}
     import time
-    time.sleep(0.6) # Strict rate-limit throttle to prevent 600/5min 429 errors
+    time.sleep(1.5) # Strict rate-limit throttle to prevent 600/5min 429 errors at 6am cron
     auth = base64.b64encode(f"{CH_KEY}:".encode()).decode()
     return {"Authorization": f"Basic {auth}"}
 

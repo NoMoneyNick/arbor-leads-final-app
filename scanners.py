@@ -157,6 +157,8 @@ def scan_leeds_leads() -> int:
         headers = {"X-API-Key": UK_PLANNING_API_KEY}
         for prefix in yorkshire_prefixes:
             try:
+                import time
+                time.sleep(1.5) # Cron job throttle to prevent 6am ban
                 res = requests.get(
                     "https://ukplanningapi.co.uk/v1/applications",
                     params={"postcode": prefix, "status": "received", "limit": 200},
@@ -207,6 +209,8 @@ def scan_london_leads() -> int:
     if GLA_API_KEY:
         try:
             headers = {"Authorization": GLA_API_KEY, "Accept": "application/json"}
+            import time
+            time.sleep(1.0) # London throttle
             res = requests.get(
                 "https://planningdata.london.gov.uk/api/applications",
                 params={"limit": 50},
@@ -244,6 +248,8 @@ def scan_london_leads() -> int:
         headers = {"X-API-Key": UK_PLANNING_API_KEY}
         for prefix in green_belt_prefixes:
             try:
+                import time
+                time.sleep(1.5) # Cron job throttle to prevent 6am ban
                 res = requests.get(
                     "https://ukplanningapi.co.uk/v1/applications",
                     params={"postcode": prefix, "status": "received", "limit": 200},
@@ -355,6 +361,8 @@ def scan_city_planning_api(city_name: str) -> int:
             # Try ukplanningapi.co.uk first if key exists
             try:
                 if UK_PLANNING_API_KEY:
+                    import time
+                    time.sleep(1.5) # Cron job throttle to prevent 6am ban
                     res = requests.get(
                         "https://ukplanningapi.co.uk/v1/applications",
                         params={"postcode": prefix, "status": "received", "limit": 200},
