@@ -545,17 +545,21 @@ def public_homepage():
                         <div id="map" class="h-[400px] w-full rounded border border-slate-700 z-10 grayscale contrast-125 sepia-[.2] hue-rotate-[140deg]"></div>
                     </div>
                     
-                    <div class="mt-6 flex flex-col sm:flex-row justify-between items-center text-sm font-mono text-slate-400 gap-4 bg-slate-900 p-4 rounded border border-slate-800">
-                        <div id="statusBadge" class="flex flex-col text-left">
-                            <div class="flex items-center gap-2 text-emerald-400">
-                                <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span> SYSTEM STANDBY
-                            </div>
-                            <span class="text-xs text-slate-500 mt-1">Awaiting outward postcode input...</span>
-                        </div>
-                        <div class="text-left sm:text-right flex flex-col gap-1 sm:items-end">
-                            <div id="radiusReadout" class="text-slate-300 font-bold tracking-wider">RADIAL BOUNDARY: 15.0 MILES</div>
-                            <div id="targetIntel" class="text-xs text-slate-500 font-mono mt-1 bg-slate-900/80 p-2 rounded border border-slate-700 inline-block text-left">
+                    <div class="mt-6 flex flex-col sm:flex-row justify-between items-start sm:items-center text-sm font-mono text-slate-400 gap-4 bg-slate-900 p-4 rounded border border-slate-800">
+                        <div class="text-left flex flex-col gap-1 items-start w-full sm:w-1/2">
+                            <div id="targetIntel" class="text-xs text-slate-400 font-mono bg-slate-900/80 p-3 rounded border border-slate-700 w-full text-left min-h-[50px] shadow-inner">
                                 Awaiting scan to calculate territory volume...
+                            </div>
+                        </div>
+                        <div class="text-left sm:text-right flex flex-col gap-1 sm:items-end w-full sm:w-1/2">
+                            <div id="radiusReadout" class="text-slate-300 font-bold tracking-wider text-xs mb-1">RADIAL BOUNDARY: 15.0 MILES</div>
+                            <div id="statusBadge" class="flex flex-col text-left sm:text-right items-start sm:items-end w-full">
+                                <div class="flex items-center gap-2 text-emerald-400">
+                                    <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse sm:hidden"></span>
+                                    SYSTEM STANDBY 
+                                    <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse hidden sm:inline-block"></span>
+                                </div>
+                                <span class="text-xs text-slate-500 mt-1">Awaiting outward postcode input...</span>
                             </div>
                         </div>
                     </div>
@@ -835,8 +839,10 @@ def public_homepage():
                     // Add slight delay for psychological weight
                     setTimeout(() => {{
                         status.innerHTML = `
-                            <div class="flex items-center gap-2 text-emerald-400 mb-1">
-                                <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span> Radar Locked: ${{data.postcode}}
+                            <div class="flex items-center gap-2 text-emerald-400 mb-1 sm:justify-end">
+                                <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse sm:hidden"></span>
+                                Radar Locked: ${{data.postcode}}
+                                <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse hidden sm:inline-block"></span>
                             </div>
                             <span class="text-xs font-bold text-amber-500 animate-pulse mt-1 inline-block border border-amber-500/30 bg-amber-500/10 px-2 py-1 rounded">&#9888;&#65039; 12 Local Competitors Detected</span>
                         `;
