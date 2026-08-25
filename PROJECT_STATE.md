@@ -76,11 +76,10 @@
 | `STRIPE_WEBHOOK_SECRET` | ✅ Set | Stripe webhook listener |
 
  
-## TOMORROW TO-DO LIST
-1. Fix Map Lead Bug: North Wales shows 779 leads. Algorithm must strictly clip to radius and not use national baseline.
-2. PayPal Verification loop.
-3. Add stock photos.
-
-4. **Database Expansion Strategy:** Brainstorm and build new scraping pipelines to find maximum potential tree surgeon customers and emails (beyond the current 1,883).
-5. **Lead Scope Expansion (Domestic & Industrial):** Research data sources for domestic/residential and industrial tree surgery leads to diversify away from just council planning portals.
-6. **RESUME BULK EXTRACTION:** Rerun bulk_contractor_extractor.py to capture all the customers/leads that were cut off when the quotas capped out yesterday.
+## REMAINING PRE-LAUNCH TO-DO LIST
+1. **[BLOCKED] Overturn PayPal Ban:** Call PayPal UK Business Support (020 8080 6500) to demand a human review of the automated ID ban glitch. (Priority: Low - Stripe is functioning).
+2. **DNS Email Deliverability:** Configure SPF, DKIM, and DMARC on Cloudflare/Namecheap so the 2,172 cold emails do not go to spam.
+3. **Cold Email Copywriting:** Write the high-converting 3-step email sequence.
+4. **ICO Registration:** Register Vector Data Labs with the ICO and pay the Â£40 fee.
+5. **Database Expansion Strategy (Phase 2):** Brainstorm and build new scraping pipelines to find maximum potential tree surgeon customers and emails (beyond the current 2,172).
+6. **Lead Scope Expansion (Phase 2):** Research data sources for domestic/residential and industrial tree surgery leads to diversify away from just council planning portals.
