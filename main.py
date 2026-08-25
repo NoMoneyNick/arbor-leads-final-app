@@ -790,8 +790,10 @@ def public_homepage():
             currentCircle.setRadius(rad);
             
             document.getElementById('statusBadge').innerHTML = `
-                <div class="flex items-center gap-2 text-emerald-400 mb-1">
-                    <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span> Manual Lock: ${{e.latlng.lat.toFixed(4)}}, ${{e.latlng.lng.toFixed(4)}}
+                <div class="flex items-center gap-2 text-emerald-400 mb-1 sm:justify-end">
+                    <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse sm:hidden"></span> 
+                    Manual Lock: ${{e.latlng.lat.toFixed(4)}}, ${{e.latlng.lng.toFixed(4)}}
+                    <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse hidden sm:inline-block"></span>
                 </div>
             `;
             
@@ -802,6 +804,15 @@ def public_homepage():
                     document.getElementById('postcodeInput').value = data.postcode;
                     document.getElementById('radiusReadout').innerHTML = `RADIAL BOUNDARY: ${{data.radius_miles || (rad/1609.34).toFixed(1)}} MILES`;
                     document.getElementById('targetIntel').innerHTML = `<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>`;
+                    
+                    document.getElementById('statusBadge').innerHTML = `
+                        <div class="flex items-center gap-2 text-emerald-400 mb-1 sm:justify-end">
+                            <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse sm:hidden"></span>
+                            Manual Lock: ${{e.latlng.lat.toFixed(4)}}, ${{e.latlng.lng.toFixed(4)}}
+                            <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse hidden sm:inline-block"></span>
+                        </div>
+                        <span class="text-xs font-bold text-amber-500 animate-pulse mt-1 inline-block border border-amber-500/30 bg-amber-500/10 px-2 py-1 rounded">&#9888;&#65039; 12 Local Competitors Detected</span>
+                    `;
                 }}
             }} catch(err) {{}}
         }});
