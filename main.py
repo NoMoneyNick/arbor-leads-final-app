@@ -451,6 +451,14 @@ def public_homepage():
         <div class="absolute inset-0 bg-gradient-to-t from-brand-dark via-transparent to-brand-dark/50"></div>
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center">
             
+            <!-- Animated Radar Graphic -->
+            <div class="relative w-24 h-24 mx-auto mb-8 rounded-full border border-emerald-500/30 bg-emerald-500/5 shadow-[0_0_30px_rgba(16,185,129,0.2)] flex items-center justify-center overflow-hidden">
+                <div class="absolute inset-0 rounded-full border border-emerald-500/20 m-2"></div>
+                <div class="absolute inset-0 rounded-full border border-emerald-500/10 m-5"></div>
+                <div class="w-1/2 h-1/2 absolute top-0 right-0 bg-gradient-to-bl from-emerald-400/40 to-transparent rounded-tr-full radar-sweep"></div>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-400 relative z-10"><path d="M12 2v20M2 12h20M12 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0 -12 0"></path></svg>
+            </div>
+
             <!-- Authority Trigger: Government Data -->
             <div class="flex flex-col items-center gap-3 mb-8">
                 <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/80 border border-slate-600 text-slate-300 font-mono text-xs uppercase tracking-widest shadow-xl">
@@ -734,12 +742,18 @@ def public_homepage():
                     &copy; 2024 Vector Data Labs. All rights reserved. Tree Key is a trading name of Vector Data Labs. 
                     Platform is 256-bit SSL Encrypted & GDPR Compliant. 
                 </p>
+                <p class="text-slate-400 mt-4 mb-1 flex items-center justify-center md:justify-start gap-2">
+                    Proudly engineered in the United Kingdom 🇬🇧
+                </p>
                 <p class="text-slate-600">Contact: nick@treekey.uk</p>
             </div>
             <div class="flex gap-6 text-xs font-mono uppercase tracking-wider flex-wrap justify-center md:justify-end shrink-0 pt-2">
                 <a href="/privacy-policy" class="text-slate-400 hover:text-white transition-colors">Privacy</a>
                 <a href="/terms-of-service" class="text-slate-400 hover:text-white transition-colors">Terms</a>
-                <a href="/health" class="text-slate-400 hover:text-white transition-colors">Datahub</a>
+                <a href="/health" class="text-slate-400 hover:text-white transition-colors flex items-center gap-2">
+                    <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
+                    Datahub
+                </a>
                 <a href="/admin" class="text-brand-green hover:text-emerald-400 transition-colors">Login</a>
             </div>
         </div>
