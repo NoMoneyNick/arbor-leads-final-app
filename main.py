@@ -721,13 +721,22 @@ def public_homepage():
 
     <!-- Footer -->
     <footer class="border-t border-slate-800 bg-[#020617] py-12">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-center gap-6">
-            <div class="text-slate-500 text-sm text-center md:text-left">
-                <b class="text-slate-300">Tree Key</b> by Vector Data Labs.<br>
-                Operating in compliance with UK Town and Country Planning statutory register regulations.<br>
-                <span class="text-xs text-slate-600 mt-2 block">Contact: nick@treekey.uk | Registered in England & Wales. Company No. [ENTER_NUMBER_HERE]</span>
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-start gap-8">
+            <div class="text-slate-500 text-xs text-center md:text-left max-w-2xl">
+                <div class="mb-3">
+                    <b class="text-slate-300 text-sm">Tree Key</b> by Vector Data Labs.<br>
+                </div>
+                <p class="mb-2">
+                    Operating in compliance with UK Town and Country Planning statutory register regulations. 
+                    Data is aggregated from UK Local Planning Authorities under the Open Government Licence v3.0.
+                </p>
+                <p class="mb-2">
+                    &copy; 2024 Vector Data Labs. All rights reserved. Tree Key is a trading name of Vector Data Labs. 
+                    Platform is 256-bit SSL Encrypted & GDPR Compliant. 
+                </p>
+                <p class="text-slate-600">Contact: nick@treekey.uk</p>
             </div>
-            <div class="flex gap-6 text-sm font-mono uppercase tracking-wider flex-wrap justify-center">
+            <div class="flex gap-6 text-xs font-mono uppercase tracking-wider flex-wrap justify-center md:justify-end shrink-0 pt-2">
                 <a href="/privacy-policy" class="text-slate-400 hover:text-white transition-colors">Privacy</a>
                 <a href="/terms-of-service" class="text-slate-400 hover:text-white transition-colors">Terms</a>
                 <a href="/health" class="text-slate-400 hover:text-white transition-colors">Datahub</a>
