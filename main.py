@@ -830,6 +830,7 @@ def public_homepage():
                     currentCircle.setLatLng([data.lat, data.lng]);
                     currentCircle.setRadius(radVal);
                     document.getElementById("radiusReadout").innerHTML = `RADIAL BOUNDARY: ${{ (radVal/1609.34).toFixed(1) }} MILES`;
+                    document.getElementById("targetIntel").innerHTML = `<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>`;
                     
                     // Add slight delay for psychological weight
                     setTimeout(() => {{
