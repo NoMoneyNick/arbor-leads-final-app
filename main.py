@@ -465,13 +465,13 @@ def public_homepage():
 
             <!-- The Big Claim -->
             <h1 class="text-5xl md:text-7xl font-extrabold text-white tracking-tight mb-6 leading-tight">
-                Council Contracts.<br>
-                <span class="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-emerald-600">Unlocked Before Your Competitors.</span>
+                The Ultimate Lead Radar For<br>
+                <span class="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-emerald-600">UK Tree Surgeons.</span>
             </h1>
 
             <!-- The Pain/Solution Frame -->
             <p class="mt-6 max-w-3xl mx-auto text-xl text-slate-400 leading-relaxed font-medium">
-                We monitor all 360+ UK council planning portals 24/7. 
+                We intercept high-value TPO and Conservation Area tree work from 360+ UK council planning portals 24/7. 
                 <br><strong class="text-slate-200">You receive high-value commercial tree surgery notices instantly to your phone.</strong>
             </p>
 
