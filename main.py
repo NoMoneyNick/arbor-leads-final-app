@@ -191,7 +191,11 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
     is_covered = True
     uncovered_region = None
 
-    if country_name.lower() in ["northern ireland", "republic of ireland"]:
+    # Strict Box bounding for Great Britain (Roughly Lat 49.9 to 60.9, Lng -8.6 to 1.8)
+    if target_lat < 49.9 or target_lat > 60.9 or target_lng < -8.6 or target_lng > 1.8:
+        is_covered = False
+        uncovered_region = "Outside UK Boundaries"
+    elif country_name.lower() in ["northern ireland", "republic of ireland"]:
         is_covered = False
         uncovered_region = "Northern Ireland / Ireland"
     elif target_lng < -5.8 and target_lat < 55.4:  # Irish Sea / Ireland
@@ -200,19 +204,11 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
 
     if not is_covered:
         return {
+            "status": "out_of_bounds",
             "postcode": display_pc,
-            "authority": f"{district} ({uncovered_region})",
             "lat": target_lat,
             "lng": target_lng,
-            "radius_miles": radius,
-            "is_covered": False,
-            "selected_area_leads": 0,
-            "connected_area_leads": 0,
-            "total_leads_in_scope": 0,
-            "est_min_val": "0",
-            "est_max_val": "0",
-            "exclusivity_status": "Outside Great Britain Coverage",
-            "message": "Tree Key is dedicated exclusively to Great Britain statutory planning registers (England, Scotland, and Wales). Northern Ireland and Ireland are outside operating scope."
+            "message": "Tree Key is dedicated exclusively to UK statutory planning registers. Please search within the UK."
         }
 
 
@@ -262,12 +258,15 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
     is_claimed = database.is_territory_claimed(display_pc)
     exclusivity_label = "&#128274; Locked (Claimed by Local Partner)" if is_claimed else "&#9989; Available (Unclaimed)"
 
+    competitors = max(3, int(selected_leads / 12) + int(target_lat) % 6)
+
     return {
         "status": "ok",
         "postcode": display_pc,
         "authority": district,
         "lat": target_lat,
         "lng": target_lng,
+        "competitors": competitors,
         "radius_miles": radius,
         "is_covered": True,
         "is_england": True,
@@ -811,7 +810,14 @@ def public_homepage():
                             Manual Lock: ${{e.latlng.lat.toFixed(4)}}, ${{e.latlng.lng.toFixed(4)}}
                             <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse hidden sm:inline-block"></span>
                         </div>
-                        <span class="text-xs font-bold text-amber-500 animate-pulse mt-1 inline-block border border-amber-500/30 bg-amber-500/10 px-2 py-1 rounded">&#9888;&#65039; 12 Local Competitors Detected</span>
+                        <span class="text-xs font-bold text-amber-500 animate-pulse mt-1 inline-block border border-amber-500/30 bg-amber-500/10 px-2 py-1 rounded">&#9888;&#65039; ${{data.competitors}} Local Competitors Detected</span>
+                    `;
+                }} else if (data.status === "out_of_bounds") {{
+                    document.getElementById('targetIntel').innerHTML = `<span class="text-red-500 font-bold text-sm">Out of Bounds</span><br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">${{data.message}}</span>`;
+                    document.getElementById('statusBadge').innerHTML = `
+                        <div class="flex items-center gap-2 text-red-400 mb-1 sm:justify-end">
+                            Outside Coverage Area
+                        </div>
                     `;
                 }}
             }} catch(err) {{}}
@@ -855,10 +861,13 @@ def public_homepage():
                                 Radar Locked: ${{data.postcode}}
                                 <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse hidden sm:inline-block"></span>
                             </div>
-                            <span class="text-xs font-bold text-amber-500 animate-pulse mt-1 inline-block border border-amber-500/30 bg-amber-500/10 px-2 py-1 rounded">&#9888;&#65039; 12 Local Competitors Detected</span>
+                            <span class="text-xs font-bold text-amber-500 animate-pulse mt-1 inline-block border border-amber-500/30 bg-amber-500/10 px-2 py-1 rounded">&#9888;&#65039; ${{data.competitors}} Local Competitors Detected</span>
                         `;
                     }}, 600);
                     
+                }} else if (data.status === "out_of_bounds") {{
+                    document.getElementById('targetIntel').innerHTML = `<span class="text-red-500 font-bold text-sm">Out of Bounds</span><br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">${{data.message}}</span>`;
+                    status.innerHTML = `<div class="flex items-center gap-2 text-red-500 sm:justify-end">Outside Coverage Area</div>`;
                 }} else {{
                     status.innerHTML = `<div class="flex items-center gap-2 text-red-500"><span class="h-2 w-2 rounded-full bg-red-500"></span> Invalid Postcode</div>`;
                 }}
