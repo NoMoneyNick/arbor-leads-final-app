@@ -446,8 +446,9 @@ def public_homepage():
     </nav>
 
     <!-- Hero Section -->
-    <main class="relative overflow-hidden pt-16 pb-24 lg:pt-32 lg:pb-40 bg-grid-slate-900">
-        <div class="absolute inset-0 bg-gradient-to-b from-transparent via-brand-dark/80 to-brand-dark"></div>
+    <main class="relative overflow-hidden pt-16 pb-24 lg:pt-32 lg:pb-40 bg-brand-dark bg-cover bg-center" style="background-image: url('/static/hero_bg.jpg');">
+        <div class="absolute inset-0 bg-brand-dark/80 backdrop-blur-[2px]"></div>
+        <div class="absolute inset-0 bg-gradient-to-t from-brand-dark via-transparent to-brand-dark/50"></div>
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center">
             
             <!-- Authority Trigger: Government Data -->
