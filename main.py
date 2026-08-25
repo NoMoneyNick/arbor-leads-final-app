@@ -208,7 +208,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
             "postcode": display_pc,
             "lat": target_lat,
             "lng": target_lng,
-            "message": "Tree Key is dedicated exclusively to UK statutory planning registers. Please search within the UK."
+            "message": "Tree Key is dedicated exclusively to Great Britain statutory planning registers (England, Scotland, and Wales). We do not currently serve Northern Ireland."
         }
 
 
