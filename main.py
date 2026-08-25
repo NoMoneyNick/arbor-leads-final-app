@@ -1643,3 +1643,69 @@ def export_directors_csv(request: Request, secret: Optional[str] = Query(None)):
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=tree_surgeons_outreach.csv"}
     )
+# --- LEGAL PAGES ---
+@app.get("/privacy-policy", response_class=HTMLResponse)
+async def privacy_policy():
+    return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Privacy Policy - Tree Key</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-300 font-sans p-8 md:p-16">
+    <div class="max-w-3xl mx-auto bg-slate-800 p-8 rounded-lg shadow-xl border border-slate-700">
+        <h1 class="text-3xl font-bold text-white mb-6">Privacy Policy</h1>
+        <p class="mb-4 text-sm text-slate-500">Last updated: August 2026</p>
+        
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">1. Information We Collect</h2>
+        <p class="mb-4">Tree Key ("we", "us", "our") collects basic contact information (name, email, phone number) when you register for an account or when your business information is retrieved from public registries such as Companies House and public local authority planning portals in the UK.</p>
+        
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">2. How We Use Your Information</h2>
+        <p class="mb-4">We use your information strictly to provide our commercial lead-generation service, notify you of relevant council planning applications, and for billing purposes. We do not sell your personal data to third parties.</p>
+        
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">3. GDPR Rights</h2>
+        <p class="mb-4">Under the UK General Data Protection Regulation (UK GDPR), you have the right to access, rectify, or erase your personal data. If you are receiving commercial outreach from us and wish to opt-out, you may do so at any time using the unsubscribe link provided in our communications.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">4. Contact Us</h2>
+        <p class="mb-4">For any privacy-related requests, please contact us at: <strong>contact@treekey.uk</strong></p>
+
+        <a href="/" class="text-emerald-500 hover:text-emerald-400 mt-8 inline-block font-bold">&larr; Back to Home</a>
+    </div>
+</body>
+</html>
+"""
+
+@app.get("/terms-of-service", response_class=HTMLResponse)
+async def terms_of_service():
+    return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Terms of Service - Tree Key</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-300 font-sans p-8 md:p-16">
+    <div class="max-w-3xl mx-auto bg-slate-800 p-8 rounded-lg shadow-xl border border-slate-700">
+        <h1 class="text-3xl font-bold text-white mb-6">Terms of Service</h1>
+        <p class="mb-4 text-sm text-slate-500">Last updated: August 2026</p>
+        
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">1. Service Description</h2>
+        <p class="mb-4">Tree Key provides an online radar and notification platform that aggregates public statutory planning applications from UK local authorities. We are an independent commercial entity and are not affiliated with any government body.</p>
+        
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">2. Subscriptions & Billing</h2>
+        <p class="mb-4">By subscribing to a Tree Key tier, you are paying for access to our proprietary software platform and notification systems. Subscriptions are billed monthly and can be cancelled at any time.</p>
+        
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">3. No Guarantee of Lead Volume (Refund Policy)</h2>
+        <p class="mb-4 border-l-4 border-amber-500 pl-4 bg-amber-500/10 py-3 text-slate-200"><strong>Crucial Notice:</strong> The volume of leads you receive is entirely dependent on the organic activity of homeowners and local councils in your chosen radial territory. Tree Key does not guarantee a specific number of leads per month. <strong>Because you are granted immediate access to proprietary data upon subscribing, all subscription payments are non-refundable.</strong> We do not offer prorated refunds for mid-cycle cancellations.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">4. Acceptable Use</h2>
+        <p class="mb-4">You agree not to scrape, redistribute, or resell the data provided by Tree Key. The platform is strictly for your own business's direct marketing and operational use.</p>
+
+        <a href="/" class="text-emerald-500 hover:text-emerald-400 mt-8 inline-block font-bold">&larr; Back to Home</a>
+    </div>
+</body>
+</html>
+"""
