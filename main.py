@@ -633,7 +633,7 @@ def public_homepage():
                     <h3 class="text-2xl font-bold text-white mb-2">Sole Trader</h3>
                     <p class="text-slate-400 mb-6 text-sm">Perfect for one-man bands and local startups aiming to grow steadily.</p>
                     <div class="flex items-baseline gap-2 mb-8">
-                        <div class="text-4xl font-extrabold text-white">49</div>
+                        <div class="text-4xl font-extrabold text-white">&pound;49</div>
                         <div class="text-lg text-slate-500 font-normal">/month</div>
                     </div>
                     <ul class="mb-8 space-y-4 text-slate-300 text-sm font-medium">
@@ -654,7 +654,7 @@ def public_homepage():
                     <h3 class="text-3xl font-bold text-white mb-2">Commercial Pro</h3>
                     <p class="text-emerald-100/70 mb-6 text-sm h-10">The sweet spot for established 3-man crews hunting lucrative clearances.</p>
                     <div class="flex items-baseline gap-2 mb-8">
-                        <div class="text-5xl font-extrabold text-white">149</div>
+                        <div class="text-5xl font-extrabold text-white">&pound;149</div>
                         <div class="text-lg text-emerald-500 font-normal">/month</div>
                     </div>
                     <ul class="mb-8 space-y-4 text-slate-100 text-sm font-medium">
@@ -673,7 +673,7 @@ def public_homepage():
                     <h3 class="text-2xl font-bold text-white mb-2">Regional Elite</h3>
                     <p class="text-slate-400 mb-6 text-sm">For massive operations running multiple crews across a wide geographic spread.</p>
                     <div class="flex items-baseline gap-2 mb-8">
-                        <div class="text-4xl font-extrabold text-white">299</div>
+                        <div class="text-4xl font-extrabold text-white">&pound;299</div>
                         <div class="text-lg text-slate-500 font-normal">/month</div>
                     </div>
                     <ul class="mb-8 space-y-4 text-slate-300 text-sm font-medium">
