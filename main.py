@@ -429,7 +429,7 @@ def public_homepage():
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center h-20">
                 <a href="/" class="flex items-center gap-3">
-                    <img src="/static/logo.png" alt="Tree Key" class="h-10">
+                    <img src="/static/logo.png" alt="Tree Key" class="h-14 w-auto">
                 </a>
                 <div class="flex items-center gap-4 md:gap-8 font-mono text-xs md:text-sm tracking-wide">
                     <div class="hidden md:flex items-center gap-8">
