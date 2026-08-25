@@ -13,33 +13,26 @@ logger = logging.getLogger("vector-data-labs")
 # ── Pricing Plans ─────────────────────────────────────────────────────────────
 # All amounts in pence (GBP)
 PLANS = {
-    "starter_monthly": {
-        "name": "Starter",
-        "description": "10 leads per month in one city. Email alert the moment a new application drops. No setup required.",
-        "amount": 1900,   # £19/month
-        "mode": "subscription",
-        "badge": "🌱 Try It Out",
-    },
-    "credits_10": {
-        "name": "10 Lead Credits",
-        "description": "Buy 10 exclusive planning application leads. Never shared. Use them at your own pace.",
-        "amount": 8000,   # £80 one-off
-        "mode": "payment",
-        "badge": "🟡 Pay As You Go",
-    },
-    "city_monthly": {
-        "name": "City Pro",
-        "description": "Unlimited exclusive leads for one city. Graded by job size. Cancel anytime.",
+    "sole_trader": {
+        "name": "Sole Trader (10-Mile Radius)",
+        "description": "10-Mile Radial Boundary. 100% Exclusive Lead Routing. Daily Email Notifications.",
         "amount": 4900,   # £49/month
         "mode": "subscription",
-        "badge": "📍 Most Popular",
+        "badge": "Starter",
     },
-    "national_monthly": {
-        "name": "National",
-        "description": "All cities. Every new city added automatically. First access before lower tiers.",
-        "amount": 8900,   # £89/month
+    "commercial_pro": {
+        "name": "Commercial Pro (25-Mile Radius)",
+        "description": "25-Mile Radial Boundary. 100% Exclusive. Instant SMS Alerts. Connected-Council Access.",
+        "amount": 14900,  # £149/month
         "mode": "subscription",
-        "badge": "🇬🇧 Best Value",
+        "badge": "Most Popular",
+    },
+    "regional_elite": {
+        "name": "Regional Elite (50-Mile Radius)",
+        "description": "50-Mile Radial Boundary. First-Priority API Routing. Dedicated Account Manager.",
+        "amount": 29900,  # £299/month
+        "mode": "subscription",
+        "badge": "Premium",
     },
 }
 
