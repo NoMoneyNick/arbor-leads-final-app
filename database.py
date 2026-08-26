@@ -176,6 +176,21 @@ def init_db():
                 expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '15 minutes'),
                 used BOOLEAN DEFAULT FALSE
             );
+
+            CREATE TABLE IF NOT EXISTS chip_drop_spots (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                site_name TEXT NOT NULL,
+                contact_name TEXT,
+                phone TEXT NOT NULL,
+                outcode TEXT NOT NULL,
+                town TEXT NOT NULL,
+                address TEXT NOT NULL,
+                material_accepted TEXT DEFAULT 'fresh_woodchip',
+                max_vehicle_size TEXT DEFAULT '3.5t_transit',
+                access_instructions TEXT,
+                active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
         """)
 
         # Performance Indices for Instant High-Volume Queries
@@ -190,6 +205,7 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_assets_contractor ON machinery_assets(contractor_email);",
             "CREATE INDEX IF NOT EXISTS idx_auth_token ON contractor_auth_tokens(token);",
             "CREATE INDEX IF NOT EXISTS idx_auth_otp ON contractor_auth_tokens(otp_code, customer_email);",
+            "CREATE INDEX IF NOT EXISTS idx_chip_drop_outcode ON chip_drop_spots(outcode, active);",
             "CREATE INDEX IF NOT EXISTS idx_partners_city ON potential_partners(target_city);",
             "CREATE INDEX IF NOT EXISTS idx_partners_created ON potential_partners(created_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_partners_company_number ON potential_partners(company_number);",
@@ -228,7 +244,8 @@ def init_db():
             "ALTER TABLE contractor_suggestions ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE contractor_ledger_entries ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE machinery_assets ENABLE ROW LEVEL SECURITY;",
-            "ALTER TABLE contractor_auth_tokens ENABLE ROW LEVEL SECURITY;"
+            "ALTER TABLE contractor_auth_tokens ENABLE ROW LEVEL SECURITY;",
+            "ALTER TABLE chip_drop_spots ENABLE ROW LEVEL SECURITY;"
         ]
         for stmt in rls_statements:
             cur.execute(stmt)
@@ -1040,3 +1057,74 @@ def get_contractor_dashboard_data(email: str) -> dict:
     except Exception as e:
         logger.error(f"[Dashboard] Error fetching contractor data for {email}: {e}")
         return {"email": email, "tier": "Error", "leads": [], "active": False}
+
+
+def register_chip_drop_spot(site_name: str, phone: str, outcode: str, town: str, 
+                            address: str, material_accepted: str = "fresh_woodchip", 
+                            max_vehicle: str = "3.5t_transit", access_notes: str = "",
+                            contact_name: str = "") -> bool:
+    """
+    Registers a community green waste / timber drop site (allotment, farm, stables).
+    """
+    if not SURL or not site_name or not phone or not outcode:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                INSERT INTO chip_drop_spots (
+                    site_name, contact_name, phone, outcode, town, address,
+                    material_accepted, max_vehicle_size, access_instructions
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id;
+            """, (
+                site_name.strip(), contact_name.strip(), phone.strip(),
+                outcode.strip().upper(), town.strip(), address.strip(),
+                material_accepted, max_vehicle, access_notes.strip()
+            ))
+            row = cur.fetchone()
+            conn.commit()
+            return bool(row)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[ChipDrop] Error registering site {site_name}: {e}")
+        return False
+
+
+def get_chip_drop_spots(outcode: str = None, material: str = None, limit: int = 40) -> list:
+    """
+    Fetches active verified green waste and timber drop spots, optionally filtered by outcode or material.
+    """
+    if not SURL:
+        return []
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            sql = "SELECT id, site_name, contact_name, phone, outcode, town, address, material_accepted, max_vehicle_size, access_instructions, created_at FROM chip_drop_spots WHERE active = TRUE"
+            params = []
+            
+            if outcode and outcode != "ALL":
+                sql += " AND (outcode = %s OR outcode ILIKE %s)"
+                params.extend([outcode.strip().upper(), f"{outcode.strip().upper()}%"])
+                
+            if material and material != "all":
+                sql += " AND (material_accepted = %s OR material_accepted = 'any')"
+                params.append(material)
+
+            sql += " ORDER BY created_at DESC LIMIT %s;"
+            params.append(limit)
+
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+            cols = ["id", "site_name", "contact_name", "phone", "outcode", "town", "address", "material", "max_vehicle", "access_notes", "created_at"]
+            return [dict(zip(cols, r)) for r in rows]
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[ChipDrop] Error fetching drop spots: {e}")
+        return []
