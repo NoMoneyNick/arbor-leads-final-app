@@ -1693,6 +1693,232 @@ async def stripe_webhook(request: Request):
     return {"status": "ok", "event": result.get("event")}
 
 
+
+
+# ── 3. "TreeKey Ledger" (Verticalized Arborist Accounting Engine) ───────────────
+
+@app.get("/ledger", response_class=HTMLResponse)
+def ledger_dashboard(email: Optional[str] = "partner@treecare.co.uk"):
+    """
+    TreeKey Ledger: Verticalized financial command center for UK tree surgeons.
+    Includes Van-Day true costing, CIS developer tax deductions, and £90k VAT gauge.
+    """
+    summary = database.get_contractor_financial_summary(email)
+    turnover = summary["rolling_turnover"]
+    headroom = summary["vat_headroom"]
+    vat_status = summary["vat_status"]
+    vat_color = summary["vat_color"]
+    cis_held = summary["cis_tax_held"]
+    net_profit = summary["net_profit_total"]
+    
+    # Progress percentage toward £90k VAT threshold
+    vat_pct = min(100.0, (turnover / 90000.0) * 100.0)
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>TreeKey Ledger | Arborist Financial Engine</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; line-height:1.5; }}
+            .container {{ max-width: 900px; margin: auto; }}
+            .card {{ background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }}
+            .grid-stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }}
+            .stat-box {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }}
+            .stat-val {{ font-size: 24px; font-weight: 800; color: #044332; margin-top: 4px; }}
+            input, select {{ width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; margin-top: 4px; font-family: inherit; }}
+            .btn {{ background: #044332; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; }}
+        </style>
+    </head>
+    <body>
+    <div class="container">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; flex-wrap:wrap; gap:10px;">
+            <div>
+                <h1 style="margin:0; font-size:28px; color:#044332;">📊 TreeKey Ledger</h1>
+                <p style="margin:4px 0 0 0; color:#64748b; font-size:14px;">Verticalized Arborist Financial Engine • Van-Day Costing & CIS Tax Tracker</p>
+            </div>
+            <a href="/" style="background:#0f172a; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold;">← Live Radar Map</a>
+        </div>
+
+        <!-- 1. £90,000 UK VAT Threshold Early-Warning Radar -->
+        <div class="card" style="border-left: 4px solid {vat_color};">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <h3 style="margin:0; font-size:18px; color:#0f172a;">🇬🇧 HMRC £90,000 Rolling VAT Radar</h3>
+                <span style="font-size:12px; font-weight:bold; color:{vat_color};">{vat_status}</span>
+            </div>
+            <p style="color:#64748b; font-size:13px; margin:8px 0 14px 0;">Tracks your rolling 12-month domestic turnover to prevent accidental VAT penalties or losing sole-trader price advantage.</p>
+            <div style="background:#e2e8f0; border-radius:8px; height:12px; overflow:hidden;">
+                <div style="background:{vat_color}; width:{vat_pct:.1f}%; height:100%; border-radius:8px;"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:12px; color:#64748b; margin-top:8px;">
+                <span>Current 12M: <b>£{turnover:,.2f}</b></span>
+                <span>Limit: <b>£90,000.00</b></span>
+            </div>
+        </div>
+
+        <!-- 2. Financial Metrics -->
+        <div class="grid-stats">
+            <div class="stat-box">
+                <div style="font-size:12px; color:#64748b; font-weight:bold; text-transform:uppercase;">12-Month Gross Invoiced</div>
+                <div class="stat-val">£{turnover:,.2f}</div>
+            </div>
+            <div class="stat-box">
+                <div style="font-size:12px; color:#64748b; font-weight:bold; text-transform:uppercase;">CIS Developer Tax Held</div>
+                <div class="stat-val" style="color:#2563eb;">£{cis_held:,.2f}</div>
+                <div style="font-size:11px; color:#64748b;">Claimable on Self-Assessment</div>
+            </div>
+            <div class="stat-box">
+                <div style="font-size:12px; color:#64748b; font-weight:bold; text-transform:uppercase;">Calculated Net Profit</div>
+                <div class="stat-val" style="color:#059669;">£{net_profit:,.2f}</div>
+            </div>
+        </div>
+
+        <!-- 3. Van-Day Job Cost & Minimum Profitable Quote Calculator -->
+        <div class="card">
+            <h3 style="margin-top:0; color:#044332; font-size:18px;">🌲 Van & Crew-Day Profit Calculator (True Costing)</h3>
+            <p style="color:#64748b; font-size:13px;">Never underquote a large tree removal again. Input your crew size and expected waste to compute your exact breakeven and recommended quotation.</p>
+            
+            <form id="quoteForm" onsubmit="event.preventDefault(); calcQuote();" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-top:16px;">
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Climbers (£180/day):</label>
+                    <input type="number" id="climbers" value="1" min="0" max="5">
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Ground Crew (£120/day):</label>
+                    <input type="number" id="groundies" value="1" min="0" max="10">
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Tipping Loads (£90/ea):</label>
+                    <input type="number" id="tips" value="1" min="0" max="10">
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Fuel & Consumables (£):</label>
+                    <input type="number" id="fuel" value="30" min="0">
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Days on Job:</label>
+                    <input type="number" id="days" value="1" step="0.5" min="0.5">
+                </div>
+                <div style="display:flex; align-items:flex-end;">
+                    <button type="submit" class="btn" style="width:100%;">Calculate Quote ⚡</button>
+                </div>
+            </form>
+
+            <div id="quoteResult" style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:16px; margin-top:20px; display:none;">
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;">
+                    <div>
+                        <span style="font-size:11px; color:#065f46; font-weight:bold;">TRUE BASELINE COST:</span>
+                        <div id="resCost" style="font-size:20px; font-weight:800; color:#0f172a;">£0.00</div>
+                    </div>
+                    <div>
+                        <span style="font-size:11px; color:#065f46; font-weight:bold;">RECOMMENDED QUOTE (40% Margin):</span>
+                        <div id="resStd" style="font-size:22px; font-weight:800; color:#044332;">£0.00</div>
+                    </div>
+                    <div>
+                        <span style="font-size:11px; color:#065f46; font-weight:bold;">PREMIUM QUOTE (55% Margin):</span>
+                        <div id="resPrem" style="font-size:22px; font-weight:800; color:#059669;">£0.00</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. Quick Job Entry / CIS Deduction Form -->
+        <div class="card">
+            <h3 style="margin-top:0; color:#044332; font-size:18px;">📝 Log Completed Job & CIS Deduction</h3>
+            <p style="color:#64748b; font-size:13px;">Save an invoice to track your 12-month VAT position and commercial CIS tax balances.</p>
+            <form action="/api/save-ledger-entry" method="POST" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">
+                <input type="hidden" name="email" value="{email}">
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Job / Property Name:</label>
+                    <input type="text" name="job_name" placeholder="e.g. 14 Elm Grove Dismantle" required>
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Client Classification:</label>
+                    <select name="client_type">
+                        <option value="domestic">Private Homeowner (Standard VAT/Cash)</option>
+                        <option value="commercial_cis">Commercial Developer (20% CIS Deduction)</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Gross Invoiced Total (£):</label>
+                    <input type="number" name="gross_amount" step="0.01" placeholder="e.g. 850.00" required>
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Labor Portion (for CIS) (£):</label>
+                    <input type="number" name="labor_amount" step="0.01" placeholder="e.g. 600.00">
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Tipping Cost (£):</label>
+                    <input type="number" name="tipping_cost" step="0.01" value="0.00">
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Fuel / Consumables (£):</label>
+                    <input type="number" name="fuel_cost" step="0.01" value="25.00">
+                </div>
+                <div style="grid-column:1/-1; margin-top:8px;">
+                    <button type="submit" class="btn">Save Entry to TreeKey Ledger 💾</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function calcQuote() {{
+            const c = parseFloat(document.getElementById('climbers').value) || 0;
+            const g = parseFloat(document.getElementById('groundies').value) || 0;
+            const t = parseFloat(document.getElementById('tips').value) || 0;
+            const f = parseFloat(document.getElementById('fuel').value) || 0;
+            const d = parseFloat(document.getElementById('days').value) || 1;
+
+            const labor = (c * 180 + g * 120) * d;
+            const tipping = t * 90;
+            const fuel = f * d;
+            const base = labor + tipping + fuel;
+            const overhead = base * 0.15;
+            const total = base + overhead;
+
+            const stdQuote = total / 0.60;
+            const premQuote = total / 0.45;
+
+            document.getElementById('resCost').innerText = '£' + total.toFixed(2);
+            document.getElementById('resStd').innerText = '£' + stdQuote.toFixed(2);
+            document.getElementById('resPrem').innerText = '£' + premQuote.toFixed(2);
+            document.getElementById('quoteResult').style.display = 'block';
+        }}
+    </script>
+    </body>
+    </html>
+    """
+
+
+@app.post("/api/save-ledger-entry")
+async def handle_save_ledger(request: Request):
+    form = await request.form()
+    email = form.get("email", "partner@treecare.co.uk")
+    job_name = form.get("job_name", "Untitled Job")
+    client_type = form.get("client_type", "domestic")
+    gross = float(form.get("gross_amount", 0) or 0)
+    labor = float(form.get("labor_amount", 0) or gross)
+    tipping = float(form.get("tipping_cost", 0) or 0)
+    fuel = float(form.get("fuel_cost", 0) or 0)
+    
+    cis_rate = 20.0 if client_type == "commercial_cis" else 0.0
+    
+    database.save_ledger_entry(
+        contractor_email=email,
+        job_name=job_name,
+        client_type=client_type,
+        gross_amount=gross,
+        labor_amount=labor,
+        cis_rate=cis_rate,
+        tipping_cost=tipping,
+        fuel_cost=fuel
+    )
+    return RedirectResponse(url=f"/ledger?email={email}", status_code=303)
+
+
 #  City Scan Routes (Dashboard  Basic Auth) 
 
 def _resolve_city_param(slug: str) -> Optional[str]:

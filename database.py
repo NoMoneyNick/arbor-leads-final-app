@@ -136,6 +136,36 @@ def init_db():
                 dispatch_type TEXT DEFAULT 'standard',
                 dispatched_at TIMESTAMPTZ DEFAULT NOW()
             );
+
+            CREATE TABLE IF NOT EXISTS contractor_ledger_entries (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                contractor_id UUID REFERENCES contractor_subscriptions(id) ON DELETE CASCADE,
+                contractor_email TEXT,
+                job_name TEXT NOT NULL,
+                client_type TEXT DEFAULT 'domestic',
+                gross_amount NUMERIC NOT NULL,
+                labor_amount NUMERIC DEFAULT 0,
+                materials_plant_amount NUMERIC DEFAULT 0,
+                cis_rate_pct NUMERIC DEFAULT 0,
+                cis_tax_deducted NUMERIC DEFAULT 0,
+                tipping_costs NUMERIC DEFAULT 0,
+                fuel_consumables NUMERIC DEFAULT 0,
+                net_profit NUMERIC,
+                profit_margin_pct NUMERIC,
+                job_date DATE DEFAULT CURRENT_DATE,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS machinery_assets (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                contractor_id UUID REFERENCES contractor_subscriptions(id) ON DELETE CASCADE,
+                contractor_email TEXT,
+                asset_name TEXT NOT NULL,
+                purchase_price NUMERIC NOT NULL,
+                purchase_date DATE DEFAULT CURRENT_DATE,
+                aia_tax_shield_val NUMERIC,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
         """)
 
         # Performance Indices for Instant High-Volume Queries
@@ -146,6 +176,8 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_subs_active ON contractor_subscriptions(active, center_outcode, subscribed_at ASC);",
             "CREATE INDEX IF NOT EXISTS idx_dispatches_lead ON lead_dispatches(lead_id);",
             "CREATE INDEX IF NOT EXISTS idx_dispatches_contractor ON lead_dispatches(contractor_id);",
+            "CREATE INDEX IF NOT EXISTS idx_ledger_contractor ON contractor_ledger_entries(contractor_email, job_date DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_assets_contractor ON machinery_assets(contractor_email);",
             "CREATE INDEX IF NOT EXISTS idx_partners_city ON potential_partners(target_city);",
             "CREATE INDEX IF NOT EXISTS idx_partners_created ON potential_partners(created_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_partners_company_number ON potential_partners(company_number);",
@@ -181,7 +213,9 @@ def init_db():
             "ALTER TABLE territory_claims ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE contractor_subscriptions ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE lead_dispatches ENABLE ROW LEVEL SECURITY;",
-            "ALTER TABLE contractor_suggestions ENABLE ROW LEVEL SECURITY;"
+            "ALTER TABLE contractor_suggestions ENABLE ROW LEVEL SECURITY;",
+            "ALTER TABLE contractor_ledger_entries ENABLE ROW LEVEL SECURITY;",
+            "ALTER TABLE machinery_assets ENABLE ROW LEVEL SECURITY;"
         ]
         for stmt in rls_statements:
             cur.execute(stmt)
@@ -717,3 +751,153 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
     except Exception as e:
         logger.error(f"[Marketplace] Error fetching enriched leads: {e}")
         return []
+
+
+def calculate_crew_job_cost(climbers: int = 1, groundies: int = 1, tipping_loads: int = 1, 
+                            fuel_cost: float = 30.0, days: float = 1.0) -> dict:
+    """
+    Vertical Arborist Job Costing Model:
+    Calculates true operating cost based on day rates, tipping fees, and 2-stroke/diesel consumables.
+    """
+    climber_rate = 180.0  # £180/day standard UK climber
+    groundy_rate = 120.0  # £120/day standard UK groundy
+    tipping_rate = 90.0   # £90/load commercial transfer station fee
+
+    labor_cost = (climbers * climber_rate + groundies * groundy_rate) * days
+    tipping_total = tipping_loads * tipping_rate
+    fuel_total = fuel_cost * days
+    base_cost = labor_cost + tipping_total + fuel_total
+
+    # Overheads (insurance, chains, ropes, PPE reserve): 15%
+    overhead = base_cost * 0.15
+    total_true_cost = base_cost + overhead
+
+    # Recommended quotes based on profit margins
+    quote_40pct = total_true_cost / 0.60   # 40% net margin
+    quote_55pct = total_true_cost / 0.45   # 55% premium margin
+
+    return {
+        "labor_cost": round(labor_cost, 2),
+        "tipping_cost": round(tipping_total, 2),
+        "fuel_cost": round(fuel_total, 2),
+        "overhead_reserve": round(overhead, 2),
+        "total_true_cost": round(total_true_cost, 2),
+        "recommended_quote_standard": round(quote_40pct, 2),
+        "recommended_quote_premium": round(quote_55pct, 2),
+        "estimated_net_profit": round(quote_40pct - total_true_cost, 2)
+    }
+
+
+def save_ledger_entry(contractor_email: str, job_name: str, client_type: str, 
+                      gross_amount: float, labor_amount: float = 0.0, 
+                      materials_plant: float = 0.0, cis_rate: float = 0.0, 
+                      tipping_cost: float = 0.0, fuel_cost: float = 0.0) -> bool:
+    """
+    Saves an arborist invoice entry, automatically calculating CIS deductions and true net profit.
+    """
+    if not SURL or not contractor_email or not job_name:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            # CIS is only deducted from the LABOR portion, never materials or plant machinery
+            cis_tax_deducted = (labor_amount * (cis_rate / 100.0)) if client_type == "commercial_cis" else 0.0
+            cash_received = gross_amount - cis_tax_deducted
+            net_profit = cash_received - (tipping_cost + fuel_cost)
+            margin_pct = (net_profit / gross_amount * 100.0) if gross_amount > 0 else 0.0
+
+            cur.execute("""
+                INSERT INTO contractor_ledger_entries (
+                    contractor_email, job_name, client_type, gross_amount, labor_amount,
+                    materials_plant_amount, cis_rate_pct, cis_tax_deducted, tipping_costs,
+                    fuel_consumables, net_profit, profit_margin_pct
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id;
+            """, (
+                contractor_email.strip().lower(), job_name.strip(), client_type,
+                gross_amount, labor_amount, materials_plant, cis_rate, cis_tax_deducted,
+                tipping_cost, fuel_cost, net_profit, margin_pct
+            ))
+            row = cur.fetchone()
+            conn.commit()
+            return bool(row)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Ledger] Error saving ledger entry for {contractor_email}: {e}")
+        return False
+
+
+def get_contractor_financial_summary(contractor_email: str) -> dict:
+    """
+    Aggregates financial performance, CIS deductions held by developers, and proximity to the £90,000 UK VAT threshold.
+    """
+    if not SURL or not contractor_email:
+        return {
+            "rolling_turnover": 0.0,
+            "vat_threshold": 90000.0,
+            "vat_headroom": 90000.0,
+            "vat_status": "Safe Zone (Unregistered Sole Trader)",
+            "cis_tax_held": 0.0,
+            "net_profit_total": 0.0,
+            "job_count": 0
+        }
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            # 12-Month rolling aggregate
+            cur.execute("""
+                SELECT 
+                    COALESCE(SUM(gross_amount), 0),
+                    COALESCE(SUM(cis_tax_deducted), 0),
+                    COALESCE(SUM(net_profit), 0),
+                    COUNT(*)
+                FROM contractor_ledger_entries
+                WHERE contractor_email = %s AND job_date >= CURRENT_DATE - INTERVAL '12 months';
+            """, (contractor_email.strip().lower(),))
+            row = cur.fetchone()
+            turnover = float(row[0])
+            cis_held = float(row[1])
+            net_profit = float(row[2])
+            job_count = int(row[3])
+
+            vat_limit = 90000.0
+            headroom = max(0.0, vat_limit - turnover)
+            
+            if turnover >= vat_limit:
+                vat_status = "🚨 EXCEEDED: Mandatory VAT Registration Required with HMRC"
+                vat_color = "#dc2626"
+            elif turnover >= 80000.0:
+                vat_status = f"⚠️ WARNING: Only £{headroom:,.0f} Headroom Remaining Before £90k VAT Trap"
+                vat_color = "#ea580c"
+            else:
+                vat_status = f"✅ Safe Zone: £{headroom:,.0f} Remaining in VAT Exemption"
+                vat_color = "#059669"
+
+            return {
+                "rolling_turnover": round(turnover, 2),
+                "vat_threshold": vat_limit,
+                "vat_headroom": round(headroom, 2),
+                "vat_status": vat_status,
+                "vat_color": vat_color,
+                "cis_tax_held": round(cis_held, 2),
+                "net_profit_total": round(net_profit, 2),
+                "job_count": job_count
+            }
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Ledger] Error generating summary for {contractor_email}: {e}")
+        return {
+            "rolling_turnover": 0.0,
+            "vat_threshold": 90000.0,
+            "vat_headroom": 90000.0,
+            "vat_status": "Unknown",
+            "cis_tax_held": 0.0,
+            "net_profit_total": 0.0,
+            "job_count": 0
+        }
