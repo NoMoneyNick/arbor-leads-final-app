@@ -3069,8 +3069,9 @@ def run_domestic_scan_now():
     except Exception:
         pass
 
-    # 2. Trigger fresh background scraper
+    # 2. Trigger fresh background scrapers for both domestic and nationwide council feeds
     threading.Thread(target=domestic_scrapers.ingest_and_route_domestic_leads, daemon=True).start()
+    threading.Thread(target=scanners.scan_nationwide_bulk_crawler, daemon=True).start()
     
     # 3. Query database breakdown
     db_stats = {}
