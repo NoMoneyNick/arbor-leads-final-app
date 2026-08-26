@@ -807,7 +807,7 @@ def public_homepage():
             `;
             
             try {{
-                const res = await fetch(`/api/check-postcode?lat=${{e.latlng.lat}}&lng=${{e.latlng.lng}}`);
+                const res = await fetch(`/api/check-postcode?lat=${{e.latlng.lat}}&lng=${{e.latlng.lng}}&radius=${{Math.round(rad/1609.34)}}`);
                 const data = await res.json();
                 if (data.status === "ok") {{
                     document.getElementById('postcodeInput').value = data.postcode;
@@ -853,7 +853,7 @@ def public_homepage():
             `;
             
             try {{
-                const res = await fetch(`/api/check-postcode?postcode=${{encodeURIComponent(input)}}`);
+                const res = await fetch(`/api/check-postcode?postcode=${{encodeURIComponent(input)}}&radius=${{Math.round(radVal/1609.34)}}`);
                 const data = await res.json();
                 
                 if (data.status === "ok") {{
