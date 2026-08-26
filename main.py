@@ -956,12 +956,15 @@ def public_homepage():
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
     verify_admin_or_secret(request, secret)
-    stats = {"p": 0, "l": 0, "enriched": 0, "partners": [], "leads": []}
+    stats = {"p": 0, "l": 0, "l_council": 0, "l_domestic": 0, "enriched": 0, "partners": [], "leads": []}
 
     try:
         conn = database.get_db_conn(); cur = conn.cursor()
         cur.execute("SELECT count(*) FROM potential_partners"); stats["p"] = cur.fetchone()[0]
         cur.execute("SELECT count(*) FROM leads"); stats["l"] = cur.fetchone()[0]
+        cur.execute("SELECT count(*) FROM leads WHERE source_type IN ('direct_homeowner', 'domestic_classified')")
+        stats["l_domestic"] = cur.fetchone()[0]
+        stats["l_council"] = stats["l"] - stats["l_domestic"]
         cur.execute("SELECT count(*) FROM potential_partners WHERE phone_number IS NOT NULL OR email IS NOT NULL")
         stats["enriched"] = cur.fetchone()[0]
         cur.execute("""SELECT company_name, md_name, target_city, google_rating, phone_number, email
@@ -1031,9 +1034,13 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
         </div>
 
         <p>Verified LTD Partners: <b>{stats['p']}</b> &nbsp;|&nbsp; 
-           Enriched with Contacts: <b style="color:#059669;">{stats['enriched']} ({pct}%)</b> &nbsp;|&nbsp; 
-           Total Planning Leads: <b>{stats['l']}</b>
-           &nbsp;|&nbsp; <a href='/status'> System Status</a>
+           Enriched with Contacts: <b style="color:#059669;">{stats['enriched']} ({pct}%)</b> 
+           <br><br>
+           <span style="background:#0f172a; color:white; padding:4px 8px; border-radius:4px;">Total Planning Council Leads: <b>{stats['l_council']}</b></span>
+           &nbsp;
+           <span style="background:#ea580c; color:white; padding:4px 8px; border-radius:4px;">Total Domestic Leads: <b>{stats['l_domestic']}</b></span>
+           <br><br>
+           <a href='/status'> System Status</a>
            &nbsp;|&nbsp; <a href='/pricing'> Pricing Table</a>
            &nbsp;|&nbsp; <a href='/export-directors'> View Contacts</a>
            &nbsp;|&nbsp; <a href='/export-directors.csv' style='color:#1b5e20; font-weight:bold;'>&#128190; Download CSV</a>
