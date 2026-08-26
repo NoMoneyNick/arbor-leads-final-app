@@ -563,6 +563,15 @@ def scan_nationwide_bulk_crawler() -> dict:
     total_leads = 0
     region_results = {}
 
+    # 1. Run direct council Idox mesh scrapers across 50+ UK local planning authorities
+    try:
+        mesh_count = run_mesh_network_scan()
+        region_results["Direct Council Idox Mesh (50+ Authorities)"] = mesh_count
+        total_leads += mesh_count
+    except Exception as e:
+        region_results["Direct Council Idox Mesh"] = f"error: {e}"
+
+    # 2. Run Regional and Open Data Scanners
     for reg in regions:
         try:
             if reg == "London":

@@ -17,7 +17,7 @@ logger = logging.getLogger("vector-data-labs")
 # The Council Registry maps city/region names to their direct Idox Public Access URLs.
 # This cuts out the 3rd party API middleman for these regions.
 COUNCIL_REGISTRY = {
-    # England & Regional Metros
+    # England Metros & Regions
     "CORNWALL": "https://planning.cornwall.gov.uk/online-applications",
     "NOTTINGHAM": "https://publicaccess.nottinghamcity.gov.uk/online-applications",
     "MANCHESTER": "https://pa.manchester.gov.uk/online-applications",
@@ -26,7 +26,34 @@ COUNCIL_REGISTRY = {
     "FIFE": "https://planning.fife.gov.uk/online",
     "BRISTOL": "https://planningonline.bristol.gov.uk/online-applications",
     "LEEDS": "https://publicaccess.leeds.gov.uk/online-applications",
-    # London Boroughs (Direct Public Access Mesh)
+    "SHEFFIELD": "https://planningapps.sheffield.gov.uk/online-applications",
+    "NEWCASTLE": "https://publicaccess.newcastle.gov.uk/online-applications",
+    "OXFORD": "https://public.oxford.gov.uk/online-applications",
+    "CAMBRIDGE": "https://applications.greatercambridgeplanning.org/online-applications",
+    "BATH & NORTH EAST SOMERSET": "https://www.bathnes.gov.uk/developmentmanagement/Detail.aspx",
+    "YORK": "https://planningaccess.york.gov.uk/online-applications",
+    "EXETER": "https://publicaccess.exeter.gov.uk/online-applications",
+    "PLYMOUTH": "https://planning.plymouth.gov.uk/online-applications",
+    "NORWICH": "https://planning.norwich.gov.uk/online-applications",
+    "SOUTHAMPTON": "https://planningpublicaccess.southampton.gov.uk/online-applications",
+    "PORTSMOUTH": "https://publicaccess.portsmouth.gov.uk/online-applications",
+    "BRIGHTON": "https://planningapps.brighton-hove.gov.uk/online-applications",
+    "COVENTRY": "https://planapp.coventry.gov.uk/online-applications",
+    "DERBY": "https://eplanning.derby.gov.uk/active-applications",
+    "LEICESTER": "https://planning.leicester.gov.uk/online-applications",
+    "CHESHIRE EAST": "https://planning.cheshireeast.gov.uk/online-applications",
+    "CHESHIRE WEST": "https://pa.cheshirewestandchester.gov.uk/online-applications",
+    "NORTH NORTHAMPTONSHIRE": "https://publicaccess.northnorthants.gov.uk/online-applications",
+    "WEST NORTHAMPTONSHIRE": "https://wnc.planning-register.co.uk",
+    "MILTON KEYNES": "https://publicaccess.milton-keynes.gov.uk/online-applications",
+    "WARWICK": "https://planningdocuments.warwickdc.gov.uk/online-applications",
+    "STRATFORD-ON-AVON": "https://apps.stratford.gov.uk/eplanning",
+    "CHELTENHAM": "https://publicaccess.cheltenham.gov.uk/online-applications",
+    "GLOUCESTER": "https://planning.gloucester.gov.uk/online-applications",
+    "WILTSHIRE": "https://development.wiltshire.gov.uk/pr/s",
+    "DORSET": "https://planning.dorsetcouncil.gov.uk",
+
+    # London Boroughs Mesh (Direct Public Access)
     "WESTMINSTER": "https://idoxpa.westminster.gov.uk/online-applications",
     "BROMLEY": "https://searchapplications.bromley.gov.uk/online-applications",
     "CROYDON": "https://publicaccess3.croydon.gov.uk/online-applications",
@@ -45,12 +72,23 @@ COUNCIL_REGISTRY = {
     "BEXLEY": "https://pa.bexley.gov.uk/online-applications",
     "HAVERING": "https://development.havering.gov.uk/online-applications",
     "SUTTON": "https://planning.sutton.gov.uk/online-applications",
+    "RICHMOND": "https://www2.richmond.gov.uk/lbrplanning/Planning_Search.aspx",
+    "WANDSWORTH": "https://planning1.wandsworth.gov.uk/Northgate/PlanningExplorer/GeneralSearch.aspx",
+    "HAMMERSMITH & FULHAM": "https://public-access.lbhf.gov.uk/online-applications",
+    "KENSINGTON & CHELSEA": "https://www.rbkc.gov.uk/planning/searches/default.aspx",
+    "CAMDEN": "https://planningrecords.camden.gov.uk",
+
     # Home Counties / Green Belt
     "SURREY HEATH": "https://publicaccess.surreyheath.gov.uk/online-applications",
     "GUILDFORD": "https://publicaccess.guildford.gov.uk/online-applications",
     "SEVENOAKS": "https://pa.sevenoaks.gov.uk/online-applications",
     "DARTFORD": "https://publicaccess.dartford.gov.uk/online-applications",
-    "MAIDSTONE": "https://pa.midkent.gov.uk/online-applications"
+    "MAIDSTONE": "https://pa.midkent.gov.uk/online-applications",
+    "TUNBRIDGE WELLS": "https://twbcpa.midkent.gov.uk/online-applications",
+    "WINCHESTER": "https://planningapps.winchester.gov.uk/online-applications",
+    "NEW FOREST": "https://forms.newforest.gov.uk/planning",
+    "ST ALBANS": "https://planningapplications.stalbans.gov.uk/rpa/online-applications",
+    "DACORUM": "https://planning.dacorum.gov.uk/publicaccess"
 }
 
 def is_tree_related(description: str) -> bool:
