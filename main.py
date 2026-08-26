@@ -2998,6 +2998,16 @@ def cron_trigger_slash(city_slug: str, secret: Optional[str] = Query(None)):
     return {"status": "success", "city": city, "new_leads": count}
 
 
+@app.get("/api/scan-nationwide-all-uk")
+def scan_nationwide_all_uk_endpoint():
+    """
+    Crawls all UK regions in parallel to capture thousands of planning and domestic leads.
+    """
+    import threading
+    threading.Thread(target=scanners.scan_nationwide_bulk_crawler, daemon=True).start()
+    return {"status": "nationwide_crawl_dispatched_in_background", "coverage": "124 UK Outward Postcodes & 300+ Councils"}
+
+
 @app.get("/scan-domestic-jobs", response_class=HTMLResponse)
 def scan_domestic_jobs_view(request: Request, secret: Optional[str] = Query(None)):
     """

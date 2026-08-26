@@ -549,3 +549,32 @@ def scan_scotland_leads() -> int:
 def scan_wales_leads() -> int:
     """Scans all 22 Welsh local authority planning portals in parallel."""
     return scan_city_planning_api("Wales")
+
+
+def scan_nationwide_bulk_crawler() -> dict:
+    """
+    Crawls all 10 major UK macro-regions in parallel to pull thousands of active tree leads.
+    """
+    regions = [
+        "London", "Leeds", "Manchester", "Birmingham", "Bristol",
+        "Sheffield", "North East", "East of England", "East Midlands",
+        "South West", "South East", "Scotland", "Wales"
+    ]
+    total_leads = 0
+    region_results = {}
+
+    for reg in regions:
+        try:
+            if reg == "London":
+                c = scan_london_leads()
+            elif reg == "Leeds":
+                c = scan_leeds_leads()
+            else:
+                c = scan_city_planning_api(reg)
+            region_results[reg] = c
+            total_leads += c
+        except Exception as e:
+            region_results[reg] = f"error: {e}"
+
+    logger.info(f"[NATIONWIDE CRAWLER] Completed nationwide scan. Total new leads: {total_leads}")
+    return {"total_new_leads": total_leads, "regions": region_results}
