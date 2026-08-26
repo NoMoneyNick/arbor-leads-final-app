@@ -1046,6 +1046,9 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
 
         <h3> Batch Operations</h3>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+            <a href='/scan-domestic-jobs' style="background:#ea580c; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px; box-shadow:0 2px 6px rgba(234,88,12,0.3);">
+                 🏡 Sweep Domestic Homeowner Leads
+            </a>
             <a href='/populate-2000-partners' style="background:#047857; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px; box-shadow:0 2px 6px rgba(4,120,87,0.3);">
                  Harvest 2,000+ Contractors (Nationwide GB)
             </a>
