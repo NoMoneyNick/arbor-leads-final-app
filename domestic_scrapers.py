@@ -17,7 +17,8 @@ DOMESTIC_KEYWORDS = [
     "conifers", "oak", "ash", "sycamore", "pine", "birch", "willow",
     "garden clearance", "tree surgeon", "tree surgery", "chainsaw",
     "deadwood", "dangerous tree", "storm damage", "sectional dismantle",
-    "pollard", "pollarding", "woodland", "overhanging", "stump grinding"
+    "pollard", "pollarding", "woodland", "overhanging", "stump grinding",
+    "arborist", "timber", "root", "roots", "leylandii", "eucalyptus"
 ]
 
 UK_MAJOR_CITIES = [
@@ -32,27 +33,43 @@ UK_MAJOR_CITIES = [
     ("Swansea", "SA1"), ("Aberdeen", "AB10"), ("Dundee", "DD1"),
     ("Coventry", "CV1"), ("Derby", "DE1"), ("Stoke-on-Trent", "ST1"),
     ("Sunderland", "SR1"), ("Wolverhampton", "WV1"), ("Hull", "HU1"),
-    ("Reading", "RG1"), ("Milton Keynes", "MK9"), ("Northampton", "NN1")
+    ("Reading", "RG1"), ("Milton Keynes", "MK9"), ("Northampton", "NN1"),
+    ("Bournemouth", "BH1"), ("Middlesbrough", "TS1"), ("Blackpool", "FY1"),
+    ("Ipswich", "IP1"), ("Peterborough", "PE1"), ("Gloucester", "GL1")
+]
+
+UK_LOCAL_PAPERS = [
+    ("Yorkshire Post / Evening Post", "https://www.yorkshirepost.co.uk", "Yorkshire", "LS1"),
+    ("Manchester Evening News", "https://www.manchestereveningnews.co.uk", "Manchester", "M1"),
+    ("Liverpool Echo", "https://www.liverpoolecho.co.uk", "Liverpool", "L1"),
+    ("Birmingham Mail", "https://www.birminghammail.co.uk", "Birmingham", "B1"),
+    ("Eastern Daily Press", "https://www.edp24.co.uk", "Norfolk & Norwich", "NR1"),
+    ("Oxford Mail", "https://www.oxfordmail.co.uk", "Oxfordshire", "OX1"),
+    ("Bristol Post", "https://www.bristolpost.co.uk", "Bristol", "BS1"),
+    ("The Scotsman", "https://www.scotsman.com", "Edinburgh & Lothians", "EH1"),
+    ("Western Mail", "https://www.walesonline.co.uk", "Cardiff & South Wales", "CF10"),
+    ("The Northern Echo", "https://www.thenorthernecho.co.uk", "North East", "DL1"),
+    ("Kent Messenger", "https://www.kentonline.co.uk", "Kent", "ME14"),
+    ("Surrey Live", "https://www.getsurrey.co.uk", "Surrey", "GU1")
 ]
 
 
 def _score_domestic_job(text: str) -> str:
     """Classifies domestic job size based on keywords."""
     text_lower = text.lower()
-    if any(k in text_lower for k in ["large tree", "huge tree", "dismantle", "sectional", "mewp", "crane", "dangerous", "multiple trees", "site clearance", "woodland", "mature oak", "tall pine"]):
+    if any(k in text_lower for k in ["large tree", "huge tree", "dismantle", "sectional", "mewp", "crane", "dangerous", "multiple trees", "site clearance", "woodland", "mature oak", "tall pine", "felling of 3", "felling of 4"]):
         return "large"
-    elif any(k in text_lower for k in ["fell", "felling", "take down", "removal", "crown reduction", "conifer hedge", "stump", "pollard", "branch removal"]):
+    elif any(k in text_lower for k in ["fell", "felling", "take down", "removal", "crown reduction", "conifer hedge", "stump", "pollard", "branch removal", "crown lift"]):
         return "medium"
     return "small"
 
 
-# ── 1. Gumtree Domestic Job Board Scraper ─────────────────────────────────────
+# ── 1. Gumtree UK Domestic Job Board Scraper ──────────────────────────────────
 
 def scrape_gumtree_domestic_jobs() -> List[Dict[str, Any]]:
     found_leads = []
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
     search_queries = [
@@ -67,7 +84,7 @@ def scrape_gumtree_domestic_jobs() -> List[Dict[str, Any]]:
     for q in search_queries:
         try:
             url = f"https://www.gumtree.com/search?search_category=all&q={urllib.parse.quote(q)}"
-            resp = requests.get(url, headers=headers, timeout=12)
+            resp = requests.get(url, headers=headers, timeout=10)
             if resp.status_code != 200:
                 continue
 
@@ -119,7 +136,7 @@ def scrape_freeads_domestic_jobs() -> List[Dict[str, Any]]:
     found_leads = []
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     
-    queries = ["tree surgeon", "tree removal", "hedge cutting", "stump removal"]
+    queries = ["tree surgeon", "tree removal", "hedge cutting", "stump removal", "tree felling"]
     for q in queries:
         try:
             url = f"https://www.freeads.co.uk/search.aspx?keyword={urllib.parse.quote(q)}&category=services"
@@ -167,15 +184,118 @@ def scrape_freeads_domestic_jobs() -> List[Dict[str, Any]]:
     return found_leads
 
 
-# ── 3. Reddit UK Homeowner Gardening & Trade Board Harvester ──────────────────
+# ── 3. Preloved UK Domestic Classifieds Scraper ───────────────────────────────
 
-def scrape_reddit_domestic_leads() -> List[Dict[str, Any]]:
+def scrape_preloved_domestic_jobs() -> List[Dict[str, Any]]:
+    found_leads = []
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    
+    queries = ["tree work", "tree removal", "hedge cutting", "logs woodchip"]
+    for q in queries:
+        try:
+            url = f"https://www.preloved.co.uk/classifieds/all/uk/{urllib.parse.quote(q)}"
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                continue
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            items = soup.find_all(["li", "div"], class_=re.compile(r"search-result|listing"))
+
+            for item in items[:15]:
+                try:
+                    title_el = item.find(["h2", "h3", "span"], class_=re.compile(r"title|header"))
+                    if not title_el:
+                        continue
+                    title = title_el.get_text(strip=True)
+                    if not any(k in title.lower() for k in DOMESTIC_KEYWORDS):
+                        continue
+
+                    loc_el = item.find(["span", "div"], class_=re.compile(r"location|town"))
+                    loc = loc_el.get_text(strip=True) if loc_el else "United Kingdom"
+
+                    ref = f"PRE-{abs(hash(title + loc)) % 1000000}"
+                    score = _score_domestic_job(title)
+                    price = 39 if score == "large" else 25
+
+                    found_leads.append({
+                        "reference": ref,
+                        "council_source": f"Preloved Classified ({loc})",
+                        "address": f"{loc}, UK",
+                        "summary": f"🏡 Preloved Classified Request: {title}",
+                        "lead_score": score,
+                        "lead_price": price,
+                        "lead_source_type": "domestic_classified",
+                        "discovered_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    })
+                except Exception:
+                    continue
+        except Exception:
+            continue
+
+    return found_leads
+
+
+# ── 4. UK Local Newspaper Public Notices & Trade Classifieds Network ──────────
+
+def scrape_local_newspaper_notices() -> List[Dict[str, Any]]:
     """
-    Monitors UK homeowner subreddits (r/GardeningUK, r/DIYUK, r/HousingUK)
-    for homeowners asking for tree removal recommendations, quotes, and advice.
+    Scrapes UK regional press public notice feeds and local paper community classifieds.
+    Captures tree surgery tenders, hazardous roadside notices, and private domestic adverts.
     """
     found_leads = []
-    subreddits = ["GardeningUK", "DIYUK", "HousingUK"]
+    headers = {"User-Agent": "TreeKey-Regional-Paper-Monitor/2.0 (UK Editorial Research)"}
+
+    for paper_name, domain, region, outcode in UK_LOCAL_PAPERS:
+        try:
+            # Query the search feed of the regional news group
+            search_url = f"{domain}/search/?q=tree+felling"
+            resp = requests.get(search_url, headers=headers, timeout=8)
+            if resp.status_code != 200:
+                continue
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            articles = soup.find_all(["article", "div", "li"], class_=re.compile(r"article|teaser|story|card"))
+
+            for art in articles[:8]:
+                try:
+                    head_el = art.find(["h2", "h3", "a", "strong"])
+                    if not head_el:
+                        continue
+                    headline = head_el.get_text(strip=True)
+
+                    if len(headline) < 12 or not any(k in headline.lower() for k in ["tree", "fell", "felling", "branch", "conifer", "tpo", "conservation", "woodland"]):
+                        continue
+
+                    snippet_el = art.find(["p", "div"], class_=re.compile(r"summary|desc|text"))
+                    snippet = snippet_el.get_text(strip=True) if snippet_el else headline
+
+                    ref = f"NEWS-{abs(hash(headline + region)) % 1000000}"
+                    score = _score_domestic_job(headline + " " + snippet)
+                    price = 49 if score == "large" else 29
+
+                    found_leads.append({
+                        "reference": ref,
+                        "council_source": f"{paper_name} ({region})",
+                        "address": f"{region} ({outcode}), UK",
+                        "summary": f"📰 Local Press Notice: {headline}. Details: {snippet[:260]}",
+                        "lead_score": score,
+                        "lead_price": price,
+                        "lead_source_type": "domestic_classified",
+                        "discovered_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    })
+                except Exception:
+                    continue
+        except Exception:
+            continue
+
+    return found_leads
+
+
+# ── 5. Reddit UK Homeowner Gardening & Trade Board Harvester ──────────────────
+
+def scrape_reddit_domestic_leads() -> List[Dict[str, Any]]:
+    found_leads = []
+    subreddits = ["GardeningUK", "DIYUK", "HousingUK", "UKPersonalFinance"]
     headers = {"User-Agent": "TreeKey-Arbor-Monitor/2.0 (UK Public Forestry Research)"}
 
     search_terms = [
@@ -207,7 +327,6 @@ def scrape_reddit_domestic_leads() -> List[Dict[str, Any]]:
                     if not any(k in full_text for k in DOMESTIC_KEYWORDS):
                         continue
 
-                    # Extract UK location if mentioned
                     city_match = "United Kingdom"
                     for city, outcode in UK_MAJOR_CITIES:
                         if city.lower() in full_text or outcode.lower() in full_text:
@@ -234,13 +353,13 @@ def scrape_reddit_domestic_leads() -> List[Dict[str, Any]]:
     return found_leads
 
 
-# ── 4. FixMyStreet UK Dangerous & Fallen Tree Hazard Scraper ───────────────────
+# ── 6. FixMyStreet UK Dangerous & Fallen Tree Hazard Scraper ───────────────────
 
 def scrape_fixmystreet_tree_hazards() -> List[Dict[str, Any]]:
     found_leads = []
     headers = {"User-Agent": "TreeKey-Arbor-Radar/2.0 (UK Green Waste & Hazard Prevention)"}
 
-    for city_name, outcode in UK_MAJOR_CITIES[:18]:
+    for city_name, outcode in UK_MAJOR_CITIES[:25]:
         try:
             url = f"https://www.fixmystreet.com/reports/{urllib.parse.quote(city_name)}?service=Trees"
             resp = requests.get(url, headers=headers, timeout=10)
@@ -294,6 +413,8 @@ def ingest_and_route_domestic_leads() -> int:
     all_leads = []
     all_leads.extend(scrape_gumtree_domestic_jobs())
     all_leads.extend(scrape_freeads_domestic_jobs())
+    all_leads.extend(scrape_preloved_domestic_jobs())
+    all_leads.extend(scrape_local_newspaper_notices())
     all_leads.extend(scrape_reddit_domestic_leads())
     all_leads.extend(scrape_fixmystreet_tree_hazards())
 
