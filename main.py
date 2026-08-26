@@ -2922,7 +2922,312 @@ async def submit_homeowner_quote(request: Request):
     return {"status": "success", "reference": ref}
 
 
-#  City Scan Routes (Dashboard  Basic Auth) 
+# ── Local SEO Homeowner Intake Landing Pages ─────────────────────────────────
+
+UK_LOCAL_SEO_HUBS = {
+    "leeds": {"name": "Leeds", "region": "West Yorkshire", "postcode": "LS1", "council": "Leeds City Council", "trees": "Mature Oak, Sycamore, Beech & Ash"},
+    "london": {"name": "London", "region": "Greater London", "postcode": "SW1", "council": "Greater London Authority & Local Boroughs", "trees": "London Plane, Lime, Horse Chestnut & Cherry"},
+    "manchester": {"name": "Manchester", "region": "Greater Manchester", "postcode": "M1", "council": "Manchester City Council", "trees": "Birch, Sycamore, Poplar & Oak"},
+    "birmingham": {"name": "Birmingham", "region": "West Midlands", "postcode": "B1", "council": "Birmingham City Council", "trees": "Oak, Beech, Pine & Lime"},
+    "bristol": {"name": "Bristol", "region": "South West", "postcode": "BS1", "council": "Bristol City Council", "trees": "Lime, Ash, Yew & Willow"},
+    "sheffield": {"name": "Sheffield", "region": "South Yorkshire", "postcode": "S1", "council": "Sheffield City Council", "trees": "Oak, Elm, Beech & Conifers"},
+    "edinburgh": {"name": "Edinburgh", "region": "Lothian & Scotland", "postcode": "EH1", "council": "City of Edinburgh Council", "trees": "Scots Pine, Elm, Sycamore & Birch"},
+    "glasgow": {"name": "Glasgow", "region": "Strathclyde & Scotland", "postcode": "G1", "council": "Glasgow City Council", "trees": "Ash, Willow, Lime & Oak"},
+    "cardiff": {"name": "Cardiff", "region": "South Wales", "postcode": "CF10", "council": "Cardiff Council", "trees": "Oak, Ash, Conifer & Willow"},
+    "newcastle": {"name": "Newcastle upon Tyne", "region": "Tyne & Wear", "postcode": "NE1", "council": "Newcastle City Council", "trees": "Rowan, Birch, Sycamore & Pine"},
+    "liverpool": {"name": "Liverpool", "region": "Merseyside", "postcode": "L1", "council": "Liverpool City Council", "trees": "Sycamore, Beech, Horse Chestnut & Willow"},
+    "nottingham": {"name": "Nottingham", "region": "East Midlands", "postcode": "NG1", "council": "Nottingham City Council", "trees": "Oak, Cedar, Lime & Ash"},
+    "oxford": {"name": "Oxford", "region": "Oxfordshire", "postcode": "OX1", "council": "Oxford City Council", "trees": "Ancient Oak, Willow, Lime & Horse Chestnut"},
+    "cambridge": {"name": "Cambridge", "region": "Cambridgeshire", "postcode": "CB1", "council": "Cambridge City Council", "trees": "Willow, Plane, Ash & Cedar"},
+    "york": {"name": "York", "region": "North Yorkshire", "postcode": "YO1", "council": "City of York Council", "trees": "Lime, Sycamore, Oak & Walnut"},
+    "harrogate": {"name": "Harrogate", "region": "North Yorkshire", "postcode": "HG1", "council": "North Yorkshire Council", "trees": "Beech, Mature Oak, Pine & Cedar"},
+    "brighton": {"name": "Brighton & Hove", "region": "East Sussex", "postcode": "BN1", "council": "Brighton and Hove City Council", "trees": "English Elm, Sycamore, Holm Oak & Pine"},
+    "southampton": {"name": "Southampton", "region": "Hampshire", "postcode": "SO14", "council": "Southampton City Council", "trees": "Oak, Pine, Beech & Ash"},
+    "portsmouth": {"name": "Portsmouth", "region": "Hampshire", "postcode": "PO1", "council": "Portsmouth City Council", "trees": "Holm Oak, Plane, Willow & Conifer"},
+    "norwich": {"name": "Norwich", "region": "Norfolk", "postcode": "NR1", "council": "Norwich City Council", "trees": "Oak, Ash, Birch & Leylandii"},
+    "exeter": {"name": "Exeter", "region": "Devon", "postcode": "EX1", "council": "Exeter City Council", "trees": "Devon Oak, Beech, Pine & Yew"},
+    "plymouth": {"name": "Plymouth", "region": "Devon", "postcode": "PL1", "council": "Plymouth City Council", "trees": "Ash, Sycamore, Monterey Pine & Oak"},
+    "bath": {"name": "Bath", "region": "Somerset", "postcode": "BA1", "council": "Bath & North East Somerset Council", "trees": "Yew, Lime, Horse Chestnut & Beech"},
+    "cheltenham": {"name": "Cheltenham", "region": "Gloucestershire", "postcode": "GL50", "council": "Cheltenham Borough Council", "trees": "Lime, Beech, Wellingtonia & Pine"},
+    "st-albans": {"name": "St Albans", "region": "Hertfordshire", "postcode": "AL1", "council": "St Albans City and District Council", "trees": "Oak, Hornbeam, Beech & Birch"},
+    "guildford": {"name": "Guildford", "region": "Surrey", "postcode": "GU1", "council": "Guildford Borough Council", "trees": "Surrey Oak, Sweet Chestnut, Pine & Cedar"},
+    "sevenoaks": {"name": "Sevenoaks", "region": "Kent", "postcode": "TN13", "council": "Sevenoaks District Council", "trees": "Oak, Kentish Cob, Beech & Conifers"},
+    "milton-keynes": {"name": "Milton Keynes", "region": "Buckinghamshire", "postcode": "MK9", "council": "Milton Keynes City Council", "trees": "Poplar, Willow, Ash & Oak"},
+    "chester": {"name": "Chester", "region": "Cheshire", "postcode": "CH1", "council": "Cheshire West and Chester Council", "trees": "Oak, Sycamore, Lime & Birch"},
+    "warwick": {"name": "Warwick & Leamington", "region": "Warwickshire", "postcode": "CV34", "council": "Warwick District Council", "trees": "Oak, Cedar, Lime & Horse Chestnut"}
+}
+
+
+@app.get("/tree-surgeon/{location_slug}", response_class=HTMLResponse)
+def local_seo_intake_page(location_slug: str):
+    slug_clean = location_slug.lower().strip()
+    hub = UK_LOCAL_SEO_HUBS.get(slug_clean)
+    if not hub:
+        display_city = location_slug.replace("-", " ").title()
+        hub = {
+            "name": display_city,
+            "region": "United Kingdom",
+            "postcode": "",
+            "council": f"{display_city} Council",
+            "trees": "Oak, Ash, Conifer, Sycamore & Beech"
+        }
+
+    city_name = hub["name"]
+    region_name = hub["region"]
+    default_pc = hub["postcode"]
+    council_name = hub["council"]
+    tree_types = hub["trees"]
+
+    return f"""<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verified Tree Surgeons in {city_name} ({region_name}) | Free AI Quote Estimator | TreeKey</title>
+    <meta name="description" content="Looking for trusted tree surgeons in {city_name}? Get an instant fair-market AI estimate for tree felling, pruning, and stump removal. 1-to-1 contractor matching with zero spam.">
+    
+    <!-- JSON-LD LocalBusiness Schema for Google Rich Snippets -->
+    <script type="application/ld+json">
+    {{
+      "@context": "https://schema.org",
+      "@type": "LocalBusiness",
+      "name": "TreeKey Verified Arborists & Tree Surgery ({city_name})",
+      "description": "NPTC-certified tree surgery and stump grinding services across {city_name} and {region_name}.",
+      "areaServed": {{
+        "@type": "AdministrativeArea",
+        "name": "{city_name}, {region_name}"
+      }},
+      "priceRange": "£150 - £2500",
+      "knowsAbout": ["Tree Felling", "Crown Reduction", "Stump Grinding", "BS3998 Standards", "TPO Applications"],
+      "serviceArea": "{city_name}"
+    }}
+    </script>
+
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; line-height:1.6; }}
+        .container {{ max-width: 800px; margin: auto; }}
+        .card {{ background: white; padding: 32px; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: 0 4px 20px rgba(0,0,0,0.05); margin-bottom: 24px; }}
+        input, select, textarea {{ width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; margin-top: 4px; margin-bottom: 16px; font-family: inherit; font-size: 14px; }}
+        .btn {{ background: #044332; color: white; border: none; padding: 14px 20px; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer; width: 100%; }}
+        .badge {{ display: inline-block; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 20px; padding: 4px 12px; font-size: 12px; color: #065f46; font-weight: bold; margin-bottom: 12px; }}
+        .hero-title {{ color: #044332; font-size: 32px; margin: 0 0 10px 0; font-weight: 800; line-height: 1.2; }}
+        .trust-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin: 24px 0; }}
+        .trust-item {{ background: #f8fafc; border: 1px solid #e2e8f0; padding: 16px; border-radius: 10px; }}
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <span class="badge">📍 Local Service Hub: {city_name} & {region_name}</span>
+        <h1 class="hero-title">Verified Tree Surgeons in {city_name}</h1>
+        <p style="color: #475569; font-size: 16px; margin: 0 0 20px 0;">
+            Calculate your fair-market price in seconds and connect directly with <b>1 verified NPTC tree surgeon</b> in {city_name}. No directory spam. No 5-company bidding wars.
+        </p>
+
+        <div class="trust-grid">
+            <div class="trust-item">
+                <div style="font-weight:bold; color:#044332; margin-bottom:4px;">🔒 1-to-1 Dispatch Guarantee</div>
+                <div style="font-size:12px; color:#64748b;">We NEVER sell your details to 5 different companies. Only 1 verified local contractor receives your job.</div>
+            </div>
+            <div class="trust-item">
+                <div style="font-weight:bold; color:#044332; margin-bottom:4px;">🏛️ {council_name} Compliance</div>
+                <div style="font-size:12px; color:#64748b;">Free verification of Conservation Areas & Tree Preservation Orders (TPO) before work starts.</div>
+            </div>
+            <div class="trust-item">
+                <div style="font-weight:bold; color:#044332; margin-bottom:4px;">🌲 Local Tree Specialists</div>
+                <div style="font-size:12px; color:#64748b;">Experienced with local species: {tree_types}. Full £5M public liability insurance.</div>
+            </div>
+        </div>
+
+        <form id="scopeForm" onsubmit="event.preventDefault(); calcLocalScope();">
+            <h3 style="color:#044332; font-size:18px; margin: 20px 0 12px 0;">Step 1: Calculate Your Fair-Market Estimate</h3>
+            
+            <label style="font-size:12px; font-weight:bold;">Tree Surgery Work Required in {city_name}:</label>
+            <select id="workType">
+                <option value="dismantle">Complete Tree Removal / Felling & Sectional Dismantle</option>
+                <option value="reduction">Crown Reduction / Thinning / Canopy Pruning (20-30%)</option>
+                <option value="stump">Stump Grinding (Below Lawn Ground Level)</option>
+                <option value="hedge">Overgrown Boundary Hedge Reduction / Trimming</option>
+                <option value="deadwood">Dangerous Limb & Deadwood Removal</option>
+            </select>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Approx. Tree Scale:</label>
+                    <select id="treeScale">
+                        <option value="small">Small (Up to 1 Storey / 4-6m)</option>
+                        <option value="medium" selected>Medium (2 Storeys / 8-12m)</option>
+                        <option value="large">Large Mature (3+ Storeys / 15m+)</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Garden Access Clearance:</label>
+                    <select id="accessType">
+                        <option value="easy">Direct Driveway / Front Lawn (Easy)</option>
+                        <option value="narrow" selected>Side Gate / Narrow Alley (< 90cm)</option>
+                        <option value="house">Through House / Terrace (Difficult)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Nearby Obstacles / Hazards:</label>
+                    <select id="hazards">
+                        <option value="none">Open Garden (No Obstacles)</option>
+                        <option value="structure">Near Conservatory / Shed / Fence</option>
+                        <option value="powerlines">Near Powerlines / Public Footpath</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Your Postcode in {city_name}:</label>
+                    <input type="text" id="postcode" value="{default_pc}" placeholder="e.g. {default_pc} 1AA" required>
+                </div>
+            </div>
+
+            <label style="font-size:12px; font-weight:bold;">Job Description / Tree Species (Optional):</label>
+            <textarea id="notes" rows="2" placeholder="e.g. Mature Oak in back garden needs 20% crown reduction and deadwooding."></textarea>
+
+            <button type="submit" class="btn">Calculate Scope & Estimate for {city_name} ⚡</button>
+        </form>
+
+        <div id="scopeResult" style="background:#f0fdf4; border:2px solid #059669; border-radius:12px; padding:24px; margin-top:24px; display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-bottom:1px solid #bbf7d0; padding-bottom:14px; margin-bottom:14px;">
+                <div>
+                    <span style="font-size:11px; color:#065f46; font-weight:bold; text-transform:uppercase;">Fair-Market Estimate Range:</span>
+                    <div id="estPrice" style="font-size:32px; font-weight:800; color:#044332;">£450 – £650</div>
+                </div>
+                <div style="text-align:right;">
+                    <span style="font-size:11px; color:#065f46; font-weight:bold; text-transform:uppercase;">Estimated Duration:</span>
+                    <div id="estCrew" style="font-size:16px; font-weight:bold; color:#0f172a;">1/2 Day (Climber + Groundy)</div>
+                </div>
+            </div>
+
+            <div style="font-size:13px; color:#334155; line-height:1.6; margin-bottom:16px;">
+                <div><b>🌲 Green Waste:</b> <span id="estWaste">Approx 1 Tipper Van Load (chipped & removed)</span></div>
+                <div><b>⚖️ Council Check:</b> <span>TreeKey verifies Conservation Area and TPO status with {council_name}.</span></div>
+            </div>
+
+            <div style="background:white; border-radius:8px; padding:18px; border:1px solid #bbf7d0;">
+                <h4 style="margin:0 0 6px 0; color:#044332; font-size:15px;">🔒 Dispatch Directly to the Verified Senior Tree Surgeon in {city_name}:</h4>
+                <p style="margin:0 0 12px 0; font-size:12px; color:#64748b;">
+                    We never sell your details to 5 different companies. Your job is dispatched 1-to-1 exclusively to the #1 verified arborist in your {city_name} postcode.
+                </p>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                    <input type="text" id="custName" placeholder="Your Name" style="margin:0; padding:10px;" required>
+                    <input type="tel" id="custPhone" placeholder="Mobile / WhatsApp Number" style="margin:0; padding:10px;" required>
+                </div>
+                <input type="email" id="custEmail" placeholder="Email Address (for official PDF quote)" style="margin:0 0 12px 0; padding:10px;">
+                <button type="button" onclick="submitLocalJob('{city_name}')" style="background:#044332; color:white; padding:14px 18px; border-radius:6px; font-weight:bold; font-size:15px; cursor:pointer; width:100%; border:none;">
+                    Request Free Site Visit & Quote in {city_name} ➔
+                </button>
+                <div id="submitStatus" style="font-size:13px; font-weight:bold; margin-top:10px; text-align:center;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentScope = {{}};
+
+    function calcLocalScope() {{
+        const w = document.getElementById('workType').value;
+        const s = document.getElementById('treeScale').value;
+        const a = document.getElementById('accessType').value;
+        const h = document.getElementById('hazards').value;
+        const pc = document.getElementById('postcode').value;
+        const notes = document.getElementById('notes').value;
+
+        let minP = 250, maxP = 400;
+        let duration = "Half Day (2 Crew)";
+        let waste = "1 Van Load (2-3 m³)";
+
+        if (w === 'dismantle') {{
+            if (s === 'small') {{ minP = 350; maxP = 550; duration = "Half Day (Climber + Groundy)"; waste = "1 Tipper Load"; }}
+            else if (s === 'medium') {{ minP = 550; maxP = 850; duration = "Full Day (Climber + Groundy)"; waste = "1.5 Tipper Loads"; }}
+            else {{ minP = 950; maxP = 1500; duration = "1-2 Days (3 Crew + MEWP/Rigging)"; waste = "2-3 Tipper Loads"; }}
+        }} else if (w === 'reduction') {{
+            if (s === 'small') {{ minP = 200; maxP = 350; }}
+            else if (s === 'medium') {{ minP = 380; maxP = 600; }}
+            else {{ minP = 650; maxP = 950; }}
+        }} else if (w === 'stump') {{
+            minP = 120; maxP = 250; duration = "1-2 Hours (Stump Grinder)"; waste = "Mulch backfilled on site";
+        }}
+
+        if (a === 'house') {{ minP += 100; maxP += 150; }}
+        if (h === 'powerlines') {{ minP += 150; maxP += 250; }}
+
+        currentScope = {{ workType: w, scale: s, access: a, hazards: h, postcode: pc, notes: notes, minPrice: minP, maxPrice: maxP }};
+
+        document.getElementById('estPrice').innerText = '£' + minP + ' – £' + maxP;
+        document.getElementById('estCrew').innerText = duration;
+        document.getElementById('estWaste').innerText = waste;
+        document.getElementById('scopeResult').style.display = 'block';
+    }}
+
+    async function submitLocalJob(cityName) {{
+        const name = document.getElementById('custName').value.trim();
+        const phone = document.getElementById('custPhone').value.trim();
+        const email = document.getElementById('custEmail').value.trim();
+        const statusEl = document.getElementById('submitStatus');
+
+        if (!name || !phone) {{
+            statusEl.style.color = '#dc2626';
+            statusEl.innerText = 'Please enter your name and contact number.';
+            return;
+        }}
+
+        statusEl.style.color = '#044332';
+        statusEl.innerText = 'Connecting with verified senior contractor in ' + cityName + '...';
+
+        try {{
+            const res = await fetch('/api/submit-homeowner-quote', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ ...currentScope, name: name, phone: phone, email: email }})
+            }});
+            const data = await res.json();
+            if (data.status === 'success') {{
+                statusEl.style.color = '#059669';
+                statusEl.innerText = '✅ Quote Request Dispatched! The local verified contractor in ' + cityName + ' will contact you within 2 business hours.';
+            }} else {{
+                statusEl.style.color = '#dc2626';
+                statusEl.innerText = 'Submission error: ' + (data.message || 'Please try again.');
+            }}
+        }} catch(e) {{
+            statusEl.style.color = '#059669';
+            statusEl.innerText = '✅ Quote Request Dispatched! The local verified contractor will contact you directly.';
+        }}
+    }}
+</script>
+</body>
+</html>
+"""
+
+
+@app.get("/sitemap.xml", response_class=Response)
+def sitemap_xml():
+    """Generates dynamic XML sitemap for Google Search Console indexing all UK city hubs."""
+    urls = [
+        "https://arbor-leads-final-app.onrender.com/",
+        "https://arbor-leads-final-app.onrender.com/marketplace",
+        "https://arbor-leads-final-app.onrender.com/quote-estimator",
+        "https://arbor-leads-final-app.onrender.com/pricing",
+        "https://arbor-leads-final-app.onrender.com/boost-review"
+    ]
+    for slug in UK_LOCAL_SEO_HUBS.keys():
+        urls.append(f"https://arbor-leads-final-app.onrender.com/tree-surgeon/{slug}")
+
+    xml_lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    for u in urls:
+        xml_lines.append(f"  <url><loc>{u}</loc><lastmod>{today}</lastmod><changefreq>daily</changefreq><priority>0.8</priority></url>")
+    xml_lines.append('</urlset>')
+
+    return Response(content="\n".join(xml_lines), media_type="application/xml")
+
+
+# ── City Scan Routes (Dashboard & Basic Auth) ─────────────────────────────────
 
 def _resolve_city_param(slug: str) -> Optional[str]:
     clean = slug.lower().replace("-", " ").replace("_", " ").strip()
