@@ -2920,6 +2920,48 @@ def cron_trigger_domestic_scan(secret: Optional[str] = Query(None)):
     return {"status": "success", "source": "domestic_multi_source", "new_leads": count}
 
 
+@app.get("/api/run-domestic-scan-now")
+def run_domestic_scan_now():
+    """
+    Direct scan trigger returning live intercepted leads and Supabase database breakdown.
+    """
+    import domestic_scrapers
+    count = domestic_scrapers.ingest_and_route_domestic_leads()
+    
+    # Query database breakdown
+    db_stats = {}
+    recent_leads = []
+    try:
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT lead_source_type, count(*) 
+            FROM leads 
+            GROUP BY lead_source_type;
+        """)
+        db_stats = dict(cur.fetchall())
+
+        cur.execute("""
+            SELECT reference, council_source, address, summary, lead_score, lead_price, lead_source_type, discovered_at
+            FROM leads
+            ORDER BY discovered_at DESC
+            LIMIT 15;
+        """)
+        cols = ["ref", "source", "addr", "summary", "score", "price", "source_type", "discovered_at"]
+        recent_leads = [dict(zip(cols, r)) for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+    except Exception as e:
+        db_stats = {"error": str(e)}
+
+    return {
+        "status": "success",
+        "newly_ingested_this_scan": count,
+        "database_breakdown": db_stats,
+        "recent_intercepted_leads": recent_leads
+    }
+
+
 
 
 
