@@ -1,4 +1,4 @@
-﻿import os
+import os
 import requests
 import re
 import logging
@@ -484,7 +484,7 @@ def scrape_reddit_domestic_leads() -> List[Dict[str, Any]]:
 
 def scrape_fixmystreet_tree_hazards() -> List[Dict[str, Any]]:
     found_leads = []
-    for city_name, outcode in UK_MAJOR_CITIES[:15]:
+    for city_name, outcode in UK_MAJOR_CITIES:
         url = f"https://www.fixmystreet.com/reports/{urllib.parse.quote(city_name)}?service=Trees"
         html = fetch_unblocked_html(url, render_js=False)
         if not html:
@@ -505,7 +505,19 @@ def scrape_fixmystreet_tree_hazards() -> List[Dict[str, Any]]:
                     snippet = snippet_elem.get_text(strip=True) if snippet_elem else title
                     full_raw = f"{title} {snippet}"
                     
-                    # Reject historical archive years
+                    # Strict 7-day age filter for domestic leads
+                    dt_str = item.get("data-lastupdate")
+                    if dt_str:
+                        try:
+                            report_dt = datetime.datetime.fromisoformat(dt_str)
+                            if report_dt.tzinfo is None:
+                                report_dt = report_dt.replace(tzinfo=datetime.timezone.utc)
+                            if (datetime.datetime.now(datetime.timezone.utc) - report_dt).days > 7:
+                                continue
+                        except Exception:
+                            pass
+                    
+                    # Reject historical archive years if date parsing failed
                     if any(y in full_raw for y in ["2008", "2009", "2010", "2011", "2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025"]):
                         continue
 
