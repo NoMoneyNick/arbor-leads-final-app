@@ -113,11 +113,20 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
             )
             with urllib.request.urlopen(req, timeout=2.0) as resp:
                 data = json.loads(resp.read().decode())
-                if data.get("status") == 200 and data.get("result"):
-                    first = data["result"][0]
-                    display_pc = first.get("outcode") or first.get("postcode", "Local Area")
-                    district = first.get("admin_district") or f"{display_pc} District Authority"
-                    country_name = first.get("country", "England")
+                if data.get("status") == 200:
+                    if data.get("result"):
+                        first = data["result"][0]
+                        display_pc = first.get("outcode") or first.get("postcode", "Local Area")
+                        district = first.get("admin_district") or f"{display_pc} District Authority"
+                        country_name = first.get("country", "England")
+                    else:
+                        return {
+                            "status": "out_of_bounds",
+                            "postcode": f"{target_lat:.2f}, {target_lng:.2f}",
+                            "lat": target_lat,
+                            "lng": target_lng,
+                            "message": "No valid UK postcode detected at these coordinates (Sea/Ocean). Please click on a valid UK landmass."
+                        }
         except Exception:
             display_pc = f"{target_lat:.2f}, {target_lng:.2f}"
             district = "Operating Territory"
