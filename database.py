@@ -223,6 +223,7 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_partners_city ON potential_partners(target_city);",
             "CREATE INDEX IF NOT EXISTS idx_partners_created ON potential_partners(created_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_partners_company_number ON potential_partners(company_number);",
+            "CREATE INDEX IF NOT EXISTS idx_leads_source_type ON leads(lead_source_type);",
             "CREATE INDEX IF NOT EXISTS idx_territory_outcode ON territory_claims(outcode);",
         ]
         for idx in indices:
@@ -507,14 +508,14 @@ def save_contractor_suggestion(name: str, contact: str, suggestion_text: str) ->
         return False
 
 
-def burn_lead_inventory(lead_id: str, buyer_email: str) -> bool:
+def burn_lead_inventory(lead_id: str, buyer_email: str) -> dict:
     """
     Single-Sale Inventory Burn Protocol:
     The millisecond a lead is purchased or claimed, it is permanently marked as 'claimed'
     and assigned to buyer_email so it is impossible to be displayed or sold to anyone else.
     """
     if not SURL or not lead_id:
-        return False
+        return None
     try:
         conn = get_db_conn()
         cur = conn.cursor()
@@ -522,21 +523,29 @@ def burn_lead_inventory(lead_id: str, buyer_email: str) -> bool:
             cur.execute("""
                 UPDATE leads 
                 SET status = 'claimed'
-                WHERE id = %s AND (status = 'new' OR status IS NULL)
-                RETURNING id;
-            """, (lead_id,))
+                WHERE (id::text = %s OR reference = %s) AND (status = 'new' OR status IS NULL)
+                RETURNING id, reference, address, summary, council_source, lead_score, lead_price;
+            """, (lead_id, lead_id))
             row = cur.fetchone()
             conn.commit()
             if row:
                 logger.info(f"[Inventory Burn] Lead {lead_id} permanently claimed & burned by {buyer_email}.")
-                return True
-            return False
+                return {
+                    "id": row[0],
+                    "reference": row[1],
+                    "address": row[2],
+                    "summary": row[3],
+                    "council_source": row[4],
+                    "lead_score": row[5],
+                    "lead_price": row[6]
+                }
+            return None
         finally:
             cur.close()
             conn.close()
     except Exception as e:
         logger.error(f"[Inventory Burn] Error burning lead {lead_id}: {e}")
-        return False
+        return None
 
 
 def register_or_update_subscription(customer_email: str, outcode: str, tier: str = "climber_domestic", 
@@ -702,7 +711,10 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "tier": "granted",
             "badge_color": "#059669",
             "badge_bg": "#ecfdf5",
-            "badge_text": "✅ Officially Approved (Ready to Fell)"
+            "badge_text": "✅ Officially Approved (Ready to Fell)",
+            "price": 25,
+            "days_left": "Approved by Council",
+            "plan_key": "single_lead_medium"
         }
     days_old = 0
 
@@ -752,18 +764,8 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
                 "plan_key": "single_lead_small"
             }
 
-    # 2. Council Statutory Planning Notices (30-day max window)
-    if planning_status and planning_status.lower() in ["granted", "approved"]:
-        return {
-            "tier": "granted",
-            "badge_color": "#059669",
-            "badge_bg": "#ecfdf5",
-            "badge_text": "✅ Officially Approved (Ready to Fell)",
-            "price": 25,
-            "days_left": "Approved by Council",
-            "plan_key": "single_lead_medium"
-        }
 
+    # 2. Council Statutory Planning Notices - multi-tier time decay
     is_tpo = "tpo" in (summary or "").lower() or "preservation" in (summary or "").lower()
     total_window = 56 if is_tpo else 42
     days_left = max(0, total_window - days_old)
