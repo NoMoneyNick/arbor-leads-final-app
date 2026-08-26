@@ -43,6 +43,16 @@ def health():
     return {"status": "ok", "app": "Vector Data Labs"}
 
 
+@app.get("/scan-nationwide")
+def scan_nationwide_fast():
+    """
+    Crawls all UK regions in parallel to capture thousands of planning and domestic leads.
+    """
+    import threading
+    threading.Thread(target=scanners.scan_nationwide_bulk_crawler, daemon=True).start()
+    return {"status": "nationwide_crawl_dispatched_in_background", "coverage": "124 UK Outward Postcodes & 300+ Councils"}
+
+
 UK_CITY_COORDS = {
     "LONDON": (51.5074, -0.1278, "Greater London Authority", "SW1"),
     "MANCHESTER": (53.4808, -2.2426, "Manchester City Council", "M1"),
