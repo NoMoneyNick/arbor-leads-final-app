@@ -62,16 +62,76 @@ def create_whatsapp_link(lead_ref: str, city: str, address: str, summary: str,
 def dispatch_lead_alerts(city: str, leads: list):
     """
     Sends email alerts for new leads.
-    Batches into a digest if volume exceeds threshold to avoid inbox spam.
+    1. Routes leads directly to paying customers if the lead falls in their locked outcode.
+    2. Sends a master digest to the Admin (TEST_EMAIL).
     """
     if not leads:
         return
 
-    if len(leads) > ALERT_BATCH_THRESHOLD:
-        # Digest email
+    import database
+    import re
+    
+    # 1. Route to Paying Customers
+    active_claims = database.get_active_territory_claims()
+    customer_leads = {}  # {email: [leads]}
+    
+    for lead in leads:
+        addr = lead.get("addr", "").upper()
+        # Check if any active outcode is in the address (e.g., "NG22 9DD" -> "NG22")
+        for claim in active_claims:
+            outcode = claim["outcode"].upper()
+            # Regex to match outcode as a distinct word in the address
+            if re.search(r'\b' + re.escape(outcode) + r'\b', addr):
+                email = claim["customer_email"]
+                if email not in customer_leads:
+                    customer_leads[email] = []
+                customer_leads[email].append(lead)
+
+    for email, routed_leads in customer_leads.items():
         rows = "".join([
             f"<tr>"
-            f"<td style='padding:6px;'>{SCORE_EMOJI.get(l.get('lead_score','small'), '🟡')}</td>"
+            f"<td style='padding:6px;'>{SCORE_EMOJI.get(l.get('lead_score','small'), '🌳')}</td>"
+            f"<td style='padding:6px;'><b>{l['addr']}</b></td>"
+            f"<td style='padding:6px;'>{l['summary'][:80]}...</td>"
+            f"<td style='padding:6px; font-weight:bold;'>£{l.get('lead_price', 25)}</td>"
+            f"</tr>"
+            for l in routed_leads
+        ])
+        body = f"""
+            <h2>🌳 Tree Key Exclusive Leads - {len(routed_leads)} New Matches</h2>
+            <p>Here are the latest statutory tree work applications approved in your locked territory:</p>
+            <table border='1' cellspacing='0' style='border-collapse:collapse; width:100%;'>
+                <tr style='background:#f4f4f9;'>
+                    <th style='padding:6px;'>Grade</th>
+                    <th style='padding:6px;'>Location</th>
+                    <th style='padding:6px;'>Description</th>
+                    <th style='padding:6px;'>Est. Value</th>
+                </tr>
+                {rows}
+            </table>
+            <p><a href='{PUBLIC_APP_URL or "#"}'>Log in to Dashboard ➔</a></p>
+        """
+        if RESEND_API_KEY:
+            try:
+                requests.post(
+                    "https://api.resend.com/emails",
+                    headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+                    json={
+                        "from": "Tree Key <leads@treekey.uk>",
+                        "to": [email],
+                        "subject": f"🌳 {len(routed_leads)} New Exclusive Leads in your Territory",
+                        "html": body
+                    }
+                )
+                logging.info(f"[Lead Router] Successfully routed {len(routed_leads)} leads to customer {email}")
+            except Exception as e:
+                logging.error(f"[Lead Router] Failed to route to {email}: {e}")
+
+    # 2. Master Digest for Admin
+    if len(leads) > ALERT_BATCH_THRESHOLD:
+        rows = "".join([
+            f"<tr>"
+            f"<td style='padding:6px;'>{SCORE_EMOJI.get(l.get('lead_score','small'), '🌳')}</td>"
             f"<td style='padding:6px;'><b>{l['addr']}</b></td>"
             f"<td style='padding:6px;'>{l['summary'][:80]}...</td>"
             f"<td style='padding:6px; font-weight:bold;'>£{l.get('lead_price', 25)}</td>"
@@ -79,7 +139,8 @@ def dispatch_lead_alerts(city: str, leads: list):
             for l in leads[:15]
         ])
         body = f"""
-            <h2>🌳 {city} Lead Digest — {len(leads)} New Leads</h2>
+            <h2>📍 {city} Admin Lead Digest — {len(leads)} New Leads</h2>
+            <p>Total leads routed to customers this cycle: {sum(len(v) for v in customer_leads.values())}</p>
             <table border='1' cellspacing='0' style='border-collapse:collapse; width:100%;'>
                 <tr style='background:#f4f4f9;'>
                     <th style='padding:6px;'>Grade</th>
@@ -89,9 +150,8 @@ def dispatch_lead_alerts(city: str, leads: list):
                 </tr>
                 {rows}
             </table>
-            <p><a href='{PUBLIC_APP_URL or "#"}'>Open Dashboard →</a></p>
         """
-        send_resend_email(f"🔥 {city} Digest: {len(leads)} New Tree Surgery Leads", body)
+        send_resend_email(f"🛡️ ADMIN: {city} Digest: {len(leads)} New Tree Surgery Leads", body)
     else:
         # Individual emails per lead
         for lead in leads:
