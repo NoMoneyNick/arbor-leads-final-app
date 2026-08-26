@@ -13,7 +13,7 @@ PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
 ALERT_BATCH_THRESHOLD = 5
 
 SCORE_EMOJI = {"small": "🟡", "medium": "🟠", "large": "🔴"}
-SCORE_LABEL = {"small": "Small — £25", "medium": "Medium — £50", "large": "Large — £75"}
+SCORE_LABEL = {"small": "Small — £19", "medium": "Medium — £29", "large": "Large — £49"}
 
 
 def send_resend_email(subject: str, html_body: str):
@@ -43,6 +43,57 @@ def send_resend_email(subject: str, html_body: str):
     except Exception as e:
         logging.error(f"[Email] Unexpected error: {e}")
 
+
+def send_purchased_lead_email(customer_email: str, lead_data: dict):
+    """Emails the completely unlocked lead details to the buyer after a successful Stripe payment."""
+    if not RESEND_API_KEY:
+        logging.warning("[Email] RESEND_API_KEY not set — cannot send purchased lead.")
+        return
+        
+    subject = f"🌳 Unlocked Lead: {lead_data.get('council_source', 'Local')} Tree Surgery"
+    html = f"""
+    <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
+        <h2 style="color: #059669; margin-top: 0;">Lead Unlocked Successfully!</h2>
+        <p style="color: #374151;">Thank you for your purchase. Here are the exclusive details for the lead you just secured. This lead has been permanently removed from the marketplace.</p>
+        
+        <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
+            <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {lead_data.get('reference', 'N/A')}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {lead_data.get('address', 'N/A')}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source', 'N/A')}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Estimated Value Grade:</strong> {lead_data.get('lead_score', 'Medium').title()}</p>
+            <p style="margin: 0;"><strong>Description / Summary:</strong><br/>
+               <span style="color: #475569; font-size: 14px;">{lead_data.get('summary', 'No summary available.')}</span>
+            </p>
+        </div>
+        
+        <p style="font-size: 13px; color: #64748b;">
+            To view this property on Google Maps, click here: 
+            <a href="https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(lead_data.get('address', ''))}" style="color: #0ea5e9;">View on Map</a>
+        </p>
+    </div>
+    """
+    
+    try:
+        res = requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "from": "TreeKey Support <onboarding@resend.dev>",
+                "to": [customer_email],
+                "subject": subject,
+                "html": html
+            },
+            timeout=10
+        )
+        if res.status_code not in (200, 201):
+            logging.error(f"[Email] Failed to send purchased lead to {customer_email}: {res.text[:200]}")
+        else:
+            logging.info(f"[Email] Sent purchased lead details to {customer_email}")
+    except Exception as e:
+        logging.error(f"[Email] Error sending purchased lead to {customer_email}: {e}")
 
 def create_whatsapp_link(lead_ref: str, city: str, address: str, summary: str,
                          lead_score: str = "small", lead_price: int = 25) -> str:
