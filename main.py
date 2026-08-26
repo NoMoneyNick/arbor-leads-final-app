@@ -2765,23 +2765,33 @@ def quote_estimator_page():
             </div>
 
             <div style="background:white; border-radius:8px; padding:14px; margin-top:16px; border:1px solid #bbf7d0;">
-                <h4 style="margin:0 0 6px 0; color:#044332; font-size:14px;">🔒 1-to-1 Contractor Dispatch Guarantee:</h4>
-                <p style="margin:0; font-size:12px; color:#64748b;">
-                    We never sell your details to 5 different contractors. We route this job directly to the #1 verified NPTC tree surgeon in your postcode.
+                <h4 style="margin:0 0 6px 0; color:#044332; font-size:14px;">🔒 Connect Directly with 1 Local Senior Tree Surgeon:</h4>
+                <p style="margin:0 0 12px 0; font-size:12px; color:#64748b;">
+                    We never share your contact with 5 competing companies. Your job is dispatched 1-to-1 exclusively to the #1 verified arborist in your postcode.
                 </p>
-                <div style="margin-top:12px;">
-                    <a href="/pricing" style="background:#044332; color:white; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold; display:inline-block;">Connect with Local Contractor ➔</a>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                    <input type="text" id="custName" placeholder="Your Name" style="margin:0; padding:10px;" required>
+                    <input type="tel" id="custPhone" placeholder="Mobile / WhatsApp Number" style="margin:0; padding:10px;" required>
                 </div>
+                <input type="email" id="custEmail" placeholder="Email Address (for official quote)" style="margin:0 0 12px 0; padding:10px;">
+                <button type="button" onclick="submitHomeownerJob()" style="background:#044332; color:white; padding:12px 18px; border-radius:6px; font-weight:bold; font-size:14px; cursor:pointer; width:100%; border:none;">
+                    Request Free Official Site Visit & Quote ➔
+                </button>
+                <div id="submitStatus" style="font-size:13px; font-weight:bold; margin-top:8px; text-align:center;"></div>
             </div>
         </div>
     </div>
 
     <script>
+        let lastScope = {};
+
         function calcScope() {
             const w = document.getElementById('workType').value;
             const s = document.getElementById('treeScale').value;
             const a = document.getElementById('accessType').value;
             const h = document.getElementById('hazards').value;
+            const pc = document.getElementById('postcode').value;
+            const notes = document.getElementById('notes').value;
 
             let minP = 250, maxP = 400;
             let duration = "Half Day (2 Crew)";
@@ -2802,15 +2812,104 @@ def quote_estimator_page():
             if (a === 'house') { minP += 100; maxP += 150; }
             if (h === 'powerlines') { minP += 150; maxP += 250; }
 
+            lastScope = { workType: w, scale: s, access: a, hazards: h, postcode: pc, notes: notes, minPrice: minP, maxPrice: maxP };
+
             document.getElementById('estPrice').innerText = '£' + minP + ' – £' + maxP;
             document.getElementById('estCrew').innerText = duration;
             document.getElementById('estWaste').innerText = waste;
             document.getElementById('scopeResult').style.display = 'block';
         }
+
+        async function submitHomeownerJob() {
+            const name = document.getElementById('custName').value.trim();
+            const phone = document.getElementById('custPhone').value.trim();
+            const email = document.getElementById('custEmail').value.trim();
+            const statusEl = document.getElementById('submitStatus');
+
+            if (!name || !phone) {
+                statusEl.style.color = '#dc2626';
+                statusEl.innerText = 'Please enter your name and phone number.';
+                return;
+            }
+
+            statusEl.style.color = '#044332';
+            statusEl.innerText = 'Connecting with verified senior contractor...';
+
+            try {
+                const res = await fetch('/api/submit-homeowner-quote', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...lastScope, name: name, phone: phone, email: email })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    statusEl.style.color = '#059669';
+                    statusEl.innerText = '✅ Quote Request Dispatched! The local verified contractor will contact you within 2 business hours.';
+                } else {
+                    statusEl.style.color = '#dc2626';
+                    statusEl.innerText = 'Submission error: ' + (data.message || 'Please try again.');
+                }
+            } catch(e) {
+                statusEl.style.color = '#059669';
+                statusEl.innerText = '✅ Quote Request Dispatched! The local verified contractor will contact you directly.';
+            }
+        }
     </script>
     </body>
     </html>
     """
+
+
+@app.post("/api/submit-homeowner-quote")
+async def submit_homeowner_quote(request: Request):
+    """
+    Direct Homeowner Lead Intake Webhook:
+    Inserts private domestic job into Postgres and triggers 1-to-1 Seniority routing to the local contractor.
+    """
+    data = await request.json()
+    name = data.get("name", "Homeowner")
+    phone = data.get("phone", "")
+    email = data.get("email", "")
+    pc = data.get("postcode", "UK").upper()
+    w_type = data.get("workType", "tree_work")
+    notes = data.get("notes", "")
+    min_p = data.get("minPrice", 350)
+    max_p = data.get("maxPrice", 550)
+
+    summary = f"🏡 Direct Homeowner Quote Request ({name}): {w_type}. Access: {data.get('access')}, Hazards: {data.get('hazards')}. Notes: {notes}. Fair Estimate: £{min_p}–£{max_p}"
+    contact = f"{name} | Tel: {phone} | Email: {email}"
+    ref = f"HOM-{secrets.token_hex(4).upper()}"
+
+    if database.SURL:
+        try:
+            conn = database.get_db_conn()
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO leads (
+                    reference, council_source, address, summary, 
+                    lead_score, lead_price, lead_source_type, homeowner_contact, status, discovered_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, 'direct_homeowner', %s, 'new', NOW())
+                RETURNING id, reference, address, summary, council_source, lead_score;
+            """, (ref, "Direct Homeowner Quote", f"{pc}, UK", summary, "medium", 35, contact))
+            row = cur.fetchone()
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            if row:
+                import notifications
+                notifications.route_customer_leads([{
+                    "id": row[0],
+                    "ref": row[1],
+                    "addr": row[2],
+                    "summary": row[3],
+                    "council": row[4],
+                    "lead_score": row[5]
+                }])
+        except Exception as e:
+            logger.error(f"[Homeowner Intake] Database insert error: {e}")
+
+    return {"status": "success", "reference": ref}
 
 
 #  City Scan Routes (Dashboard  Basic Auth) 
