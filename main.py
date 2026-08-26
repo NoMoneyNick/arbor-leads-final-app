@@ -662,7 +662,7 @@ def public_homepage():
                         <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 100% Exclusive Lead Routing</li>
                         <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Daily Email Notifications</li>
                     </ul>
-                    <a href="/checkout/sole_trader" class="block w-full text-center border border-slate-700 hover:border-slate-500 text-white font-bold py-4 rounded-lg transition-all duration-300 uppercase tracking-wider text-sm">
+                    <a id="btn-checkout-sole" href="#map" class="block w-full text-center border border-slate-700 hover:border-slate-500 text-white font-bold py-4 rounded-lg transition-all duration-300 uppercase tracking-wider text-sm">
                         Start Local
                     </a>
                 </div>
@@ -684,7 +684,7 @@ def public_homepage():
                         <li class="flex items-start gap-3"><svg width="20" class="text-emerald-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Instant SMS/Phone Notifications</li>
                         <li class="flex items-start gap-3"><svg width="20" class="text-emerald-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Connected-Council Job Access</li>
                     </ul>
-                    <a href="/checkout/commercial_pro" class="block w-full text-center bg-emerald-500 hover:bg-emerald-400 text-white font-extrabold py-5 rounded-lg transition-all duration-300 uppercase tracking-widest text-sm shadow-[0_4px_14px_0_rgba(16,185,129,0.39)]">
+                    <a id="btn-checkout-pro" href="#map" class="block w-full text-center bg-emerald-500 hover:bg-emerald-400 text-white font-extrabold py-5 rounded-lg transition-all duration-300 uppercase tracking-widest text-sm shadow-[0_4px_14px_0_rgba(16,185,129,0.39)]">
                         Secure Priority Access
                     </a>
                 </div>
@@ -703,7 +703,7 @@ def public_homepage():
                         <li class="flex items-start gap-3"><svg width="20" class="text-amber-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> First-Priority API Routing</li>
                         <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Dedicated Account Manager</li>
                     </ul>
-                    <a href="/checkout/regional_elite" class="block w-full text-center border border-slate-700 hover:border-slate-500 text-white font-bold py-4 rounded-lg transition-all duration-300 uppercase tracking-wider text-sm">
+                    <a id="btn-checkout-elite" href="#map" class="block w-full text-center border border-slate-700 hover:border-slate-500 text-white font-bold py-4 rounded-lg transition-all duration-300 uppercase tracking-wider text-sm">
                         Dominate Region
                     </a>
                 </div>
@@ -812,6 +812,9 @@ def public_homepage():
                 if (data.status === "ok") {{
                     document.getElementById('postcodeInput').value = data.postcode;
                     document.getElementById('radiusReadout').innerHTML = `RADIAL BOUNDARY: ${{data.radius_miles || (rad/1609.34).toFixed(1)}} MILES`;
+                    document.getElementById('btn-checkout-sole').href = `/checkout/sole_trader?outcode=${{data.postcode}}`;
+                    document.getElementById('btn-checkout-pro').href = `/checkout/commercial_pro?outcode=${{data.postcode}}`;
+                    document.getElementById('btn-checkout-elite').href = `/checkout/regional_elite?outcode=${{data.postcode}}`;
                     document.getElementById('targetIntel').innerHTML = `<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>`;
                     
                     document.getElementById('statusBadge').innerHTML = `
@@ -861,6 +864,9 @@ def public_homepage():
                     currentCircle.setLatLng([data.lat, data.lng]);
                     currentCircle.setRadius(radVal);
                     document.getElementById("radiusReadout").innerHTML = `RADIAL BOUNDARY: ${{ (radVal/1609.34).toFixed(1) }} MILES`;
+                    document.getElementById('btn-checkout-sole').href = `/checkout/sole_trader?outcode=${{data.postcode}}`;
+                    document.getElementById('btn-checkout-pro').href = `/checkout/commercial_pro?outcode=${{data.postcode}}`;
+                    document.getElementById('btn-checkout-elite').href = `/checkout/regional_elite?outcode=${{data.postcode}}`;
                     document.getElementById("targetIntel").innerHTML = `<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>`;
                     
                     // Add slight delay for psychological weight
@@ -1176,8 +1182,17 @@ def pricing():
 #  Checkout (Stripe) 
 
 @app.get("/checkout/{plan_key}")
-def checkout(plan_key: str):
-    url = payments.create_checkout_session(plan_key)
+def checkout(plan_key: str, request: Request):
+    outcode = request.query_params.get("outcode")
+    if not outcode:
+        return HTMLResponse("<h1>Error</h1><p>No territory selected. Please go back and scan a territory on the map before checking out.</p>", status_code=400)
+    
+    # Check if claimed
+    import database
+    if database.is_territory_claimed(outcode):
+        return HTMLResponse("<h1>Territory Unavailable</h1><p>Sorry, this territory is already locked by another partner.</p>", status_code=403)
+        
+    url = payments.create_checkout_session(plan_key, outcode)
     if not url:
         raise HTTPException(status_code=503, detail="Payment system unavailable. Contact support.")
     return RedirectResponse(url=url)

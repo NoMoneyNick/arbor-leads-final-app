@@ -37,7 +37,7 @@ PLANS = {
 }
 
 
-def create_checkout_session(plan_key: str) -> Optional[str]:
+def create_checkout_session(plan_key: str, outcode: str = None) -> Optional[str]:
 
     """
     Creates a Stripe Checkout session for the given plan.
@@ -68,6 +68,10 @@ def create_checkout_session(plan_key: str) -> Optional[str]:
             "cancel_url": f"{PUBLIC_APP_URL}/pricing",
             "allow_promotion_codes": True,
         }
+        
+        if outcode:
+            session_params["client_reference_id"] = outcode
+            session_params["metadata"] = {"outcode": outcode}
 
         session = stripe.checkout.Session.create(**session_params)
         logger.info(f"[Stripe] Checkout session created for plan '{plan_key}': {session.id}")
