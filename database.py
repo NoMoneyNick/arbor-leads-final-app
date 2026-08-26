@@ -262,3 +262,51 @@ def claim_territory_atomically(outcode: str, customer_email: str, stripe_sub_id:
     except Exception as e:
         logger.error(f"[Territory] Atomic claim error for {outcode}: {e}")
         return False
+
+
+def unlock_territory_by_subscription(stripe_sub_id: str) -> bool:
+    """
+    Unlocks a territory when a customer's Stripe subscription is cancelled or fails.
+    """
+    if not SURL or not stripe_sub_id:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE territory_claims 
+            SET active = FALSE 
+            WHERE stripe_subscription_id = %s
+            RETURNING outcode;
+        """, (stripe_sub_id,))
+        row = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+        if row:
+            logger.info(f"[Territory] Unlocked territory {row[0]} due to subscription cancellation: {stripe_sub_id}")
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"[Territory] Unlock error for sub {stripe_sub_id}: {e}")
+        return False
+
+
+def get_active_territory_claims() -> list:
+    """
+    Returns a list of dictionaries containing active territory claims for lead routing.
+    Format: [{"outcode": "NG22", "customer_email": "...", "customer_name": "..."}]
+    """
+    if not SURL:
+        return []
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT outcode, customer_email, customer_name FROM territory_claims WHERE active = TRUE;")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [{"outcode": r[0], "customer_email": r[1], "customer_name": r[2]} for r in rows]
+    except Exception as e:
+        logger.error(f"[Territory] Fetch active claims error: {e}")
+        return []
