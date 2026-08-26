@@ -668,7 +668,7 @@ def ingest_and_route_domestic_leads() -> int:
 
         # Trigger Seniority Routing for newly intercepted domestic leads
         if new_leads_for_routing:
-            notifications.route_customer_leads(new_leads_for_routing)
+            notifications.dispatch_lead_alerts("Nationwide Domestic", new_leads_for_routing)
 
         return inserted_count
     except Exception as e:
