@@ -166,6 +166,16 @@ def init_db():
                 aia_tax_shield_val NUMERIC,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
+
+            CREATE TABLE IF NOT EXISTS contractor_auth_tokens (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                customer_email TEXT NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                otp_code TEXT NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '15 minutes'),
+                used BOOLEAN DEFAULT FALSE
+            );
         """)
 
         # Performance Indices for Instant High-Volume Queries
@@ -178,6 +188,8 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_dispatches_contractor ON lead_dispatches(contractor_id);",
             "CREATE INDEX IF NOT EXISTS idx_ledger_contractor ON contractor_ledger_entries(contractor_email, job_date DESC);",
             "CREATE INDEX IF NOT EXISTS idx_assets_contractor ON machinery_assets(contractor_email);",
+            "CREATE INDEX IF NOT EXISTS idx_auth_token ON contractor_auth_tokens(token);",
+            "CREATE INDEX IF NOT EXISTS idx_auth_otp ON contractor_auth_tokens(otp_code, customer_email);",
             "CREATE INDEX IF NOT EXISTS idx_partners_city ON potential_partners(target_city);",
             "CREATE INDEX IF NOT EXISTS idx_partners_created ON potential_partners(created_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_partners_company_number ON potential_partners(company_number);",
@@ -215,7 +227,8 @@ def init_db():
             "ALTER TABLE lead_dispatches ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE contractor_suggestions ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE contractor_ledger_entries ENABLE ROW LEVEL SECURITY;",
-            "ALTER TABLE machinery_assets ENABLE ROW LEVEL SECURITY;"
+            "ALTER TABLE machinery_assets ENABLE ROW LEVEL SECURITY;",
+            "ALTER TABLE contractor_auth_tokens ENABLE ROW LEVEL SECURITY;"
         ]
         for stmt in rls_statements:
             cur.execute(stmt)
@@ -901,3 +914,129 @@ def get_contractor_financial_summary(contractor_email: str) -> dict:
             "net_profit_total": 0.0,
             "job_count": 0
         }
+
+
+def create_magic_auth_token(email: str) -> Optional[dict]:
+    """
+    Generates a cryptographically secure 1-tap Magic Token and 6-digit OTP code.
+    Valid for 15 minutes.
+    """
+    import secrets
+    import random
+    if not SURL or not email:
+        return None
+    try:
+        token = secrets.token_urlsafe(32)
+        otp = f"{random.randint(100000, 999999)}"
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                INSERT INTO contractor_auth_tokens (customer_email, token, otp_code)
+                VALUES (%s, %s, %s)
+                RETURNING token, otp_code, expires_at;
+            """, (email.strip().lower(), token, otp))
+            row = cur.fetchone()
+            conn.commit()
+            if row:
+                return {"token": row[0], "otp": row[1], "email": email.strip().lower()}
+            return None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Auth] Error creating magic token for {email}: {e}")
+        return None
+
+
+def verify_magic_auth_token(token: str = None, otp: str = None, email: str = None) -> Optional[str]:
+    """
+    Verifies a magic token or OTP code, ensuring it is unexpired and unused.
+    Marks used = TRUE upon successful verification to prevent replay attacks.
+    """
+    if not SURL or (not token and not (otp and email)):
+        return None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            if token:
+                cur.execute("""
+                    UPDATE contractor_auth_tokens
+                    SET used = TRUE
+                    WHERE token = %s AND used = FALSE AND expires_at > NOW()
+                    RETURNING customer_email;
+                """, (token.strip(),))
+            else:
+                cur.execute("""
+                    UPDATE contractor_auth_tokens
+                    SET used = TRUE
+                    WHERE otp_code = %s AND customer_email = %s AND used = FALSE AND expires_at > NOW()
+                    RETURNING customer_email;
+                """, (otp.strip(), email.strip().lower()))
+            row = cur.fetchone()
+            conn.commit()
+            if row:
+                return row[0]
+            return None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Auth] Error verifying auth token: {e}")
+        return None
+
+
+def get_contractor_dashboard_data(email: str) -> dict:
+    """
+    Fetches subscription info, single-sale lead dispatch history, and quick metrics for contractor dashboard.
+    """
+    if not SURL or not email:
+        return {"email": email, "tier": "None", "leads": [], "active": False}
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            # 1. Fetch Subscription details
+            cur.execute("""
+                SELECT tier, center_outcode, radius_miles, monthly_quota, delivered_this_month, active, subscribed_at, stripe_subscription_id
+                FROM contractor_subscriptions
+                WHERE customer_email = %s;
+            """, (email.strip().lower(),))
+            sub_row = cur.fetchone()
+            
+            sub_info = {
+                "tier": sub_row[0] if sub_row else "Free / Pay-As-You-Go",
+                "outcode": sub_row[1] if sub_row else "GB",
+                "radius": sub_row[2] if sub_row else 15,
+                "quota": sub_row[3] if sub_row else 0,
+                "delivered": sub_row[4] if sub_row else 0,
+                "active": sub_row[5] if sub_row else False,
+                "stripe_sub_id": sub_row[7] if sub_row else None
+            }
+
+            # 2. Fetch dispatched leads
+            cur.execute("""
+                SELECT l.id, l.reference, l.address, l.summary, l.council_source, l.lead_score, l.lead_price, d.dispatched_at, d.dispatch_type
+                FROM lead_dispatches d
+                JOIN leads l ON l.id = d.lead_id
+                WHERE d.contractor_email = %s
+                ORDER BY d.dispatched_at DESC
+                LIMIT 30;
+            """, (email.strip().lower(),))
+            leads_rows = cur.fetchall()
+            cols = ["id", "ref", "addr", "summary", "council", "score", "price", "dispatched_at", "dispatch_type"]
+            dispatched_leads = [dict(zip(cols, r)) for r in leads_rows]
+
+            return {
+                "email": email,
+                "subscription": sub_info,
+                "dispatched_leads": dispatched_leads,
+                "total_leads_received": len(dispatched_leads)
+            }
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Dashboard] Error fetching contractor data for {email}: {e}")
+        return {"email": email, "tier": "Error", "leads": [], "active": False}

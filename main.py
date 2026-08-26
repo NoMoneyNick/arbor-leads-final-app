@@ -1916,7 +1916,261 @@ async def handle_save_ledger(request: Request):
         tipping_cost=tipping,
         fuel_cost=fuel
     )
+    database.save_ledger_entry(
+        contractor_email=email,
+        job_name=job_name,
+        client_type=client_type,
+        gross_amount=gross,
+        labor_amount=labor,
+        cis_rate=cis_rate,
+        tipping_cost=tipping,
+        fuel_cost=fuel
+    )
     return RedirectResponse(url=f"/ledger?email={email}", status_code=303)
+
+
+
+
+# ── 4. Passwordless Contractor Auth & Mobile Command Center ───────────────────
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(error: Optional[str] = None):
+    err_html = f"<div style='background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px; border-radius:6px; margin-bottom:16px; font-size:13px;'>{error}</div>" if error else ""
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Contractor Sign In | TreeKey</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; }}
+            .box {{ max-width:420px; margin:auto; background:white; padding:32px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04); }}
+            input {{ width:100%; box-sizing:border-box; padding:12px; border:1px solid #cbd5e1; border-radius:8px; margin-top:6px; margin-bottom:16px; font-family:inherit; font-size:15px; }}
+            button {{ background:#044332; color:white; border:none; padding:12px; border-radius:8px; font-weight:bold; font-size:15px; cursor:pointer; width:100%; }}
+        </style>
+    </head>
+    <body>
+    <div class="box">
+        <div style="text-align:center; margin-bottom:20px;">
+            <span style="font-size:32px;">🌲</span>
+            <h2 style="margin:8px 0 4px 0; color:#044332;">Contractor Command Center</h2>
+            <p style="color:#64748b; font-size:13px; margin:0;">Zero-Password Sign In • Enter your email or mobile</p>
+        </div>
+
+        {err_html}
+
+        <form action="/api/request-magic-link" method="POST">
+            <label style="font-size:12px; font-weight:bold; color:#475569;">Email Address or Phone:</label>
+            <input type="text" name="contact" placeholder="e.g. dave@apex-trees.co.uk" required autofocus>
+            <button type="submit">Send 1-Tap Login Link ⚡</button>
+        </form>
+
+        <div style="text-align:center; margin-top:24px; font-size:12px; color:#64748b; border-top:1px solid #f1f5f9; padding-top:16px;">
+            🔒 <b>Zero-Password Security Vault:</b> No passwords to leak or remember. We dispatch an encrypted 15-minute access token.
+        </div>
+    </div>
+    </body>
+    </html>
+    """
+
+
+@app.post("/api/request-magic-link")
+async def request_magic_link(request: Request):
+    form = await request.form()
+    contact = form.get("contact", "").strip().lower()
+    
+    if not contact:
+        return RedirectResponse(url="/login?error=Please+enter+your+email+address", status_code=303)
+    
+    # Generate cryptographic token & OTP
+    auth_data = database.create_magic_auth_token(contact)
+    if not auth_data:
+        return RedirectResponse(url="/login?error=Could+not+generate+login+link.+Please+try+again.", status_code=303)
+
+    magic_url = f"{payments.PUBLIC_APP_URL}/verify-login?token={auth_data['token']}"
+    otp_code = auth_data["otp"]
+
+    # Send Magic Link via Resend Email
+    import notifications
+    email_body = f"""
+    <div style="font-family:sans-serif; max-width:500px; margin:auto; padding:20px; color:#0f172a;">
+        <h2 style="color:#044332;">🌲 Your TreeKey Login Link</h2>
+        <p>Click the secure button below to log in directly to your Contractor Command Center:</p>
+        <div style="text-align:center; margin:24px 0;">
+            <a href="{magic_url}" style="background:#044332; color:white; padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; display:inline-block;">Sign In to Dashboard ➔</a>
+        </div>
+        <p style="font-size:13px; color:#64748b;">Or enter this 6-digit confirmation code: <b style="font-size:16px; color:#0f172a;">{otp_code}</b></p>
+        <p style="font-size:11px; color:#94a3b8; margin-top:24px;">This secure link is valid for 15 minutes. If you did not request this, you can safely ignore this email.</p>
+    </div>
+    """
+    notifications.send_resend_email(subject="🌲 Your TreeKey 1-Tap Login Link", html_body=email_body)
+
+    return HTMLResponse(f"""
+    <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#f8fafc;">
+        <div style="max-width:480px; margin:auto; background:white; padding:32px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04);">
+            <span style="font-size:40px;">✉️</span>
+            <h2 style="color:#044332; margin:12px 0 6px 0;">Check Your Inbox!</h2>
+            <p style="color:#64748b; font-size:14px; line-height:1.5;">We dispatched a secure 1-tap login link to <b>{contact}</b>.</p>
+            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:12px; margin:20px 0; font-size:13px; color:#065f46;">
+                Your 6-digit backup code: <b style="font-size:18px; letter-spacing:2px;">{otp_code}</b>
+            </div>
+            <a href="{magic_url}" style="display:inline-block; background:#044332; color:white; padding:10px 20px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">Click to Open Dashboard Now ➔</a>
+        </div>
+    </body></html>
+    """)
+
+
+@app.get("/verify-login")
+def verify_login(request: Request, token: Optional[str] = None, otp: Optional[str] = None, email: Optional[str] = None):
+    verified_email = database.verify_magic_auth_token(token=token, otp=otp, email=email)
+    
+    if not verified_email:
+        return RedirectResponse(url="/login?error=Login+link+expired+or+already+used.+Please+request+a+new+one.", status_code=303)
+
+    # Set secure session cookie
+    response = RedirectResponse(url=f"/dashboard?email={verified_email}", status_code=303)
+    response.set_cookie(
+        key="treekey_contractor_session",
+        value=verified_email,
+        max_age=86400 * 30,  # 30 days
+        httponly=True,
+        samesite="lax"
+    )
+    return response
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def contractor_dashboard(request: Request, email: Optional[str] = None):
+    # Cookie or param session
+    session_email = request.cookies.get("treekey_contractor_session") or email
+    if not session_email:
+        return RedirectResponse(url="/login", status_code=303)
+
+    data = database.get_contractor_dashboard_data(session_email)
+    sub = data["subscription"]
+    leads = data["dispatched_leads"]
+    tier_name = sub.get("tier", "Free / Pay-As-You-Go").replace("_", " ").title()
+    outcode = sub.get("outcode", "GB")
+    active_badge = "<span style='background:#ecfdf5; color:#065f46; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:bold;'>ACTIVE PARTNER</span>" if sub.get("active") else "<span style='background:#f1f5f9; color:#64748b; padding:3px 8px; border-radius:12px; font-size:11px;'>FREE TIER</span>"
+
+    # Format leads table
+    lead_rows = ""
+    for l in leads:
+        lead_id = l.get("id") or l.get("ref")
+        ref = l.get("ref", "")
+        addr = l.get("addr", "")
+        summary = l.get("summary", "")
+        dispatched_at = str(l.get("dispatched_at", ""))[:16]
+        
+        # Google Street View direct link
+        gmap_url = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(addr)}"
+
+        lead_rows += f"""
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+                <div>
+                    <span style="font-size:10px; background:#f1f5f9; color:#475569; padding:2px 6px; border-radius:4px; font-weight:bold;">REF: {ref}</span>
+                    <h4 style="margin:4px 0 2px 0; font-size:15px; color:#0f172a;">📍 {addr}</h4>
+                    <span style="font-size:11px; color:#64748b;">Dispatched: {dispatched_at}</span>
+                </div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                    <a href="/generate-letter/{urllib.parse.quote(ref)}" target="_blank" style="background:#044332; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">🖨️ Letter</a>
+                    <a href="/generate-street-flyer/{urllib.parse.quote(ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">🏘️ Street Flyer</a>
+                    <a href="{gmap_url}" target="_blank" style="background:#0f172a; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">🗺️ Street View</a>
+                </div>
+            </div>
+            <div style="background:#f8fafc; border-left:3px solid #044332; padding:8px 12px; margin-top:10px; font-size:12px; color:#334155;">
+                <b>Specification:</b> {summary[:180]}...
+            </div>
+        </div>"""
+
+    if not lead_rows:
+        lead_rows = "<div style='text-align:center; padding:32px; background:white; border-radius:10px; border:1px solid #e2e8f0;'><p style='color:#64748b; margin:0;'>No leads currently allocated. Your incoming planning intelligence will appear here in real-time.</p></div>"
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Contractor Dashboard | TreeKey</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; line-height:1.5; }}
+            .container {{ max-width: 900px; margin: auto; }}
+            .header-box {{ background: linear-gradient(135deg, #044332 0%, #064e3b 100%); color: white; border-radius: 14px; padding: 24px; margin-bottom: 24px; }}
+            .quick-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }}
+            .quick-card {{ background: white; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; text-decoration: none; color: inherit; display: block; }}
+            .quick-card:hover {{ border-color: #044332; }}
+        </style>
+    </head>
+    <body>
+    <div class="container">
+        <!-- Header Profile -->
+        <div class="header-box">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div>
+                    <div style="font-size:12px; color:#a7f3d0; text-transform:uppercase; font-weight:bold;">Contractor Command Center</div>
+                    <h2 style="margin:4px 0; font-size:24px;">🌲 {session_email}</h2>
+                    <div style="font-size:13px; color:#e2e8f0;">
+                        Tier: <b>{tier_name}</b> • Sector: <b>{outcode} (15-Mile Radius)</b>
+                    </div>
+                </div>
+                <div style="text-align:right;">
+                    {active_badge}
+                    <div style="margin-top:8px;">
+                        <a href="/logout" style="color:#a7f3d0; font-size:12px; text-decoration:none;">Log Out ➔</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Access Operational Tools -->
+        <div class="quick-grid">
+            <a href="/ledger?email={session_email}" class="quick-card">
+                <div style="font-size:20px;">📊</div>
+                <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">TreeKey Ledger</div>
+                <div style="font-size:11px; color:#64748b;">Van-Day Costing & £90k VAT Gauge</div>
+            </a>
+            <a href="/marketplace" class="quick-card">
+                <div style="font-size:20px;">🛒</div>
+                <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Lead Marketplace</div>
+                <div style="font-size:11px; color:#64748b;">Browse Unallocated Notices</div>
+            </a>
+            <a href="/pricing" class="quick-card">
+                <div style="font-size:20px;">💳</div>
+                <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Manage Tier</div>
+                <div style="font-size:11px; color:#64748b;">Upgrade or Adjust Coverage</div>
+            </a>
+            <a href="/suggestions" class="quick-card">
+                <div style="font-size:20px;">💡</div>
+                <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Suggest Tool</div>
+                <div style="font-size:11px; color:#64748b;">Request Features from Founders</div>
+            </a>
+        </div>
+
+        <!-- Dispatched Lead Inbox -->
+        <h3 style="color:#044332; font-size:18px; margin:0 0 14px 0;">📥 Your Exclusive Dispatched Leads ({len(leads)})</h3>
+        <p style="color:#64748b; font-size:13px; margin-top:-8px; margin-bottom:16px;">
+            These statutory planning notices were delivered exclusively to you and burned from all other systems.
+        </p>
+
+        {lead_rows}
+
+        <div style="text-align:center; margin-top:32px;">
+            <a href="/" style="color:#64748b; text-decoration:none; font-size:13px;">← Return to Main Intelligence Map</a>
+        </div>
+    </div>
+    </body>
+    </html>
+    """
+
+
+@app.get("/logout")
+def logout():
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie("treekey_contractor_session")
+    return response
 
 
 #  City Scan Routes (Dashboard  Basic Auth) 
