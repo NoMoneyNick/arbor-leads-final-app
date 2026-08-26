@@ -120,13 +120,9 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
                         district = first.get("admin_district") or f"{display_pc} District Authority"
                         country_name = first.get("country", "England")
                     else:
-                        return {
-                            "status": "out_of_bounds",
-                            "postcode": f"{target_lat:.2f}, {target_lng:.2f}",
-                            "lat": target_lat,
-                            "lng": target_lng,
-                            "message": "No valid UK postcode detected at these coordinates (Sea/Ocean). Please click on a valid UK landmass."
-                        }
+                        display_pc = f"{target_lat:.2f}, {target_lng:.2f}"
+                        district = "Unregistered Sector (Sea/Rural)"
+                        country_name = "England" # Default to pass bounding box if inside UK
         except Exception:
             display_pc = f"{target_lat:.2f}, {target_lng:.2f}"
             district = "Operating Territory"
@@ -246,18 +242,23 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
     fine_harmonic = math.sin((target_lat + target_lng) * 45.0) * 0.15
     spatial_variance = 1.0 + lat_harmonic + lng_harmonic + fine_harmonic
 
-    if direct_leads > 0:
-        base_count = direct_leads
+    if "Unregistered" in district:
+        base_count = 0
+        selected_leads = 0
+        connected_leads = 0
     else:
-        # Dynamic coordinate seed
-        base_count = int(abs(target_lat * 19.3 + target_lng * 23.7) * 7) % 28 + 12
+        if direct_leads > 0:
+            base_count = direct_leads
+        else:
+            # Dynamic coordinate seed
+            base_count = int(abs(target_lat * 19.3 + target_lng * 23.7) * 7) % 28 + 12
 
-    # Selected leads inside the exact circular catchment zone
-    selected_leads = max(int(base_count * area_factor * spatial_variance), int(radius * 0.5) + 1)
+        # Selected leads inside the exact circular catchment zone
+        selected_leads = max(int(base_count * area_factor * spatial_variance), int(radius * 0.5) + 1)
 
-    # Connected adjacent council leads in surrounding buffer
-    adjacent_variance = 1.0 + math.cos((target_lat - target_lng) * 35.0) * 0.2
-    connected_leads = max(int(selected_leads * 1.55 * adjacent_variance) + int(radius * 0.4), 4)
+        # Connected adjacent council leads in surrounding buffer
+        adjacent_variance = 1.0 + math.cos((target_lat - target_lng) * 35.0) * 0.2
+        connected_leads = max(int(selected_leads * 1.55 * adjacent_variance) + int(radius * 0.4), 4)
 
     # Contract valuation (&pound;450 to &pound;1,450 per statutory notice)
     min_val = selected_leads * 450
@@ -267,7 +268,7 @@ def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = No
     is_claimed = database.is_territory_claimed(display_pc)
     exclusivity_label = "&#128274; Locked (Claimed by Local Partner)" if is_claimed else "&#9989; Available (Unclaimed)"
 
-    competitors = max(3, int(selected_leads / 12) + int(target_lat) % 6)
+    competitors = 0 if "Unregistered" in district else max(3, int(selected_leads / 12) + int(target_lat) % 6)
 
     return {
         "status": "ok",
