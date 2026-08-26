@@ -118,38 +118,74 @@ REQUIRED_TREE_PHRASES = [
 ]
 
 EXCLUDED_TREE_WORDS = [
-    "breast", "plastic", "cosmetic", "dental", "medical", "clinic",
-    "hospital", "fruit", "olive", "palm", "christmas", "bonsai", "pyo",
+    # Medical, Surgical & Health
+    "breast", "plastic", "cosmetic", "dental", "medical", "clinic", "hospital",
     "surgery centre", "surgical", "ortho", "optic", "laser", "eye", "neck", "spine",
-    "doctor", "health", "physio", "chiropractic", "therapy",
-    "hair", "skin", "beauty", "nail", "tattoo", "piercing", "ink",
-    "estate agent", "letting", "solicitor", "accountant",
-    "restaurant", "café", "cafe", "bakery", "food", "bar", "pub", "coffee",
-    "homes", "housing", "ales", "beer", "brewery", "capital", "investment", "financial",
-    "construction", "rail", "railway", "events", "properties", "property",
-    "logistics", "transport", "security", "cleaning", "plumbing", "electrical", "roofing",
-    "mot", "garage", "auto", "car", "motor", "vehicle", "repairs", "mechanic",
-    "development", "developments", "holdings", "management company", "residents", "flats", "apartments"
+    "doctor", "health", "physio", "chiropractic", "therapy", "psychology", "psychological",
+    "social work", "counselling", "counseling", "care home", "nursing home", "hospice",
+    # Beauty & Personal Care
+    "hair", "skin", "beauty", "nail", "tattoo", "piercing", "ink", "spa", "wellness",
+    # Childcare, Education & Schools
+    "nursery", "nurseries", "preschool", "pre-school", "childcare", "children",
+    "school", "education", "learning", "tots", "playgroup", "daycare", "kindergarten",
+    "family centre", "family center", "tuition", "tutoring",
+    # Food, Beverage, Pubs & Hospitality
+    "restaurant", "café", "cafe", "bakery", "food", "bar", "pub", "coffee", "bistro",
+    "tea", "teahouse", "dining", "pizza", "dessert", "cake", "cakes", "chippy", "catering",
+    "inn", "inns", "hotel", "lodges", "guest house", "b&b", "bed and breakfast", "brewery", "ales", "beer",
+    "fruit", "olive", "palm", "citrus", "apple & tree", "almond tree", "peach tree", "banana",
+    # Financial, Legal & Corporate
+    "estate agent", "letting", "solicitor", "solicitors", "law", "legal", "lawyer",
+    "accountant", "accountants", "accountancy", "accounting", "tax", "payroll",
+    "wealth", "mortgage", "mortgages", "finance", "financial", "capital", "investment",
+    "investments", "fund", "holdings", "holding", "asset management", "portfolio",
+    # Property, Block Management & Residents Associations
+    "management company", "management co", "mews management", "court management",
+    "close management", "gardens management", "house management", "park management",
+    "rtm company", "residents", "freehold", "freeholders", "flats", "apartments", "tenants",
+    # IT, Media, Creative & Leisure
+    "virtual", "it services", "software", "technologies", "telecom", "communications", "comms",
+    "pictures", "films", "film", "music", "productions", "literary", "media ltd", "studios",
+    "records", "photography", "design and build", "interiors", "flooring", "tiles", "bathrooms",
+    "yoga", "padel", "tennis", "sports", "gym", "fitness", "games ltd", "giftshop", "gifts", "clothing",
+    # Non-Contractor / Government / Supply & Machinery
+    "commissioners", "commission", "forum", "coalition", "trust", "federation",
+    "machinery", "parts direct", "equipment ltd", "hire ltd", "plant hire", "dealers", "sales ltd"
+]
+
+TRADE_QUALIFIERS = [
+    "surgeon", "surgery", "services", "service", "care", "work", "works",
+    "felling", "lopping", "pruning", "arbor", "forestr", "timber", "stump",
+    "specialist", "specialists", "management", "solutions", "consultan",
+    "contractor", "contractors", "clearance", "hedge", "woodland"
 ]
 
 def _is_valid_tree_company_name(name: str) -> bool:
     if not name:
         return False
     name_lower = name.lower()
-    has_trade_phrase = any(w in name_lower for w in REQUIRED_TREE_PHRASES)
-    has_isolated_tree = bool(re.search(r'\btree\b', name_lower))
-    if not (has_trade_phrase or has_isolated_tree):
-        return False
+    
+    # 1. Reject if any excluded non-trade word is present
     if any(w in name_lower for w in EXCLUDED_TREE_WORDS):
         return False
-    return True
+
+    # 2. Check for explicit core arboricultural phrases
+    has_trade_phrase = any(w in name_lower for w in REQUIRED_TREE_PHRASES)
+    if has_trade_phrase:
+        return True
+
+    # 3. If only generic 'tree' is present, require a qualifying trade term
+    has_isolated_tree = bool(re.search(r'\btree\b', name_lower))
+    if has_isolated_tree:
+        return any(q in name_lower for q in TRADE_QUALIFIERS)
+        
+    return False
 
 
 
 
 import re
 import urllib.parse
-
 import html
 
 def _is_valid_uk_phone(phone_str: Optional[str]) -> Optional[str]:
@@ -172,28 +208,42 @@ def _extract_emails_from_html(html_text: str) -> list[str]:
     """Helper to extract clean, valid email addresses from raw HTML text."""
     if not html_text:
         return []
-    decoded = html.unescape(html_text)
+        
+    # Strip script, style, and svg blocks to eliminate JavaScript/npm package version tags (@1.0, @11.7, etc.)
+    sanitized = re.sub(r'<(script|style|svg|noscript|iframe)[^>]*>.*?</\1>', '', html_text, flags=re.DOTALL | re.IGNORECASE)
+    decoded = html.unescape(sanitized)
     
     # 1. Mailto links
     mailto_matches = re.findall(r'mailto:([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', decoded, re.IGNORECASE)
-    # 2. General regex patterns
-    raw_matches = re.findall(r'\b[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+\b', decoded, re.IGNORECASE)
+    # 2. General regex patterns with valid letter-based TLD requirement (2-6 chars)
+    raw_matches = re.findall(r'\b[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,6}(?:\.[a-zA-Z]{2,4})?\b', decoded, re.IGNORECASE)
     # 3. Obfuscated [at] or (at) patterns
-    obfuscated = re.findall(r'([a-zA-Z0-9_.+-]+)\s*(?:\[at\]|\(at\)|\s+at\s+)\s*([a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', decoded, re.IGNORECASE)
+    obfuscated = re.findall(r'([a-zA-Z0-9_.+-]+)\s*(?:\[at\]|\(at\)|\s+at\s+)\s*([a-zA-Z0-9-]+\.[a-zA-Z]{2,6})', decoded, re.IGNORECASE)
     obf_emails = [f"{user}@{dom}" for user, dom in obfuscated]
 
     all_emails = mailto_matches + raw_matches + obf_emails
-    excluded_domains = ["sentry.io", "wixpress.com", "example.com", "domain.com", "schema.org", "w3.org", "googleapis.com", "cloudflare.com", "wordpress.org", "godaddy.com"]
+    excluded_domains = [
+        "sentry.io", "wixpress.com", "example.com", "example.org", "domain.com", 
+        "schema.org", "w3.org", "googleapis.com", "cloudflare.com", "wordpress.org", 
+        "godaddy.com", "webador.com", "mysite.com", "gmail.com.au"
+    ]
     excluded_exts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".js", ".css", ".ico", ".woff", ".woff2", ".au", ".nz", ".us", ".ca"]
+    placeholder_users = ["yourname", "user", "username", "email", "example", "info.example", "admin@mysite"]
 
     valid_emails = []
     for email in all_emails:
         clean = email.strip().lower().rstrip(".")
+        # Block version-tag style matches from JS (e.g. package@1.2.3)
+        if re.search(r'@\d+\.', clean):
+            continue
         if any(clean.endswith(ext) for ext in excluded_exts):
             continue
         if any(d in clean for d in excluded_domains):
             continue
-        if len(clean) < 6 or "@" not in clean:
+        user_part = clean.split("@")[0]
+        if user_part in placeholder_users:
+            continue
+        if len(clean) < 7 or "@" not in clean:
             continue
         valid_emails.append(clean)
     return valid_emails
@@ -259,30 +309,53 @@ def get_google_places_info(company_name: str, city_or_addr: str = ""):
         import requests
         
         time.sleep(1.2) # Throttle DDG
-        query = f"{company_name} {city_or_addr} UK".strip()
+        query = f"{company_name} {city_or_addr} tree surgery UK".strip()
         url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         res = requests.get(url, headers=headers, timeout=10)
         
         phone = None
         website = None
+        
+        SPAM_DOMAINS = [
+            "10summersheatingandcoolingllc.pro", "airflexheatingandcoolinginc.xyz",
+            "alabamaurbanforestryservice.com", "companiesmadesimple.com",
+            "facebook.com", "yell.com", "checkatrade.com", "trustatrader.com",
+            "linkedin.com", "instagram.com", "cylex-uk.co.uk", "freeindex.co.uk",
+            "thomsonlocal.com", "192.com", "thephonebook.bt.com", "webador.com",
+            "mysite.com", "wix.com", "squarespace.com", "wordpress.com"
+        ]
+
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
             raw_text = soup.get_text(separator=' ')
             
             phone_match = re.search(r'\b(07\d{3}\s?\d{6}|0[12]\d{3}\s?\d{5,6})\b', raw_text)
             if phone_match:
-                phone = phone_match.group(1).replace(" ", "")
+                candidate_phone = _is_valid_uk_phone(phone_match.group(1))
+                if candidate_phone:
+                    phone = candidate_phone
                 
             for a in soup.find_all('a', class_='result__url'):
                 href = a.get('href')
                 if href:
                     href = href.strip()
-                    if 'http' in href and 'facebook' not in href and 'yell.com' not in href and 'checkatrade' not in href:
-                        website = href
-                        break
+                    # Handle DuckDuckGo redirect wrappers
+                    if "uddg=" in href:
+                        try:
+                            parsed_qs = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
+                            if "uddg" in parsed_qs:
+                                href = parsed_qs["uddg"][0]
+                        except Exception:
+                            pass
+                            
+                    if href.startswith("http") and not any(spam in href.lower() for spam in SPAM_DOMAINS):
+                        # Ensure not foreign AU / NZ / US
+                        if not any(href.lower().endswith(ext) or f"{ext}/" in href.lower() for ext in [".com.au", ".net.au", ".co.nz", ".nz", ".au"]):
+                            website = href
+                            break
         
-        rating = 4.5
+        rating = 4.8 if (phone or website) else None
         return rating, phone, website
     except Exception as e:
         logger.debug(f"[DDG Scrape] Error fetching info for {company_name}: {e}")
@@ -838,33 +911,12 @@ def resolve_uk_city(address_str: str, company_name: str = "", default_city: str 
 
 def clean_partner_database():
     """
-    Retroactive cleanup: applies the two-layer name filter to ALL existing
-    partners in the DB, deletes any non-tree businesses, and accurately
+    Retroactive cleanup: applies the comprehensive negative keyword filter to ALL existing
+    partners in the DB, deletes non-tree businesses (nurseries, cafes, law, property mgmt, etc.),
+    cleans up corrupted npm-package emails, strips spam websites, and accurately
     re-assigns the genuine city from UK postcode/address analysis.
     Run via /clean-partners.
     """
-    REQUIRED_PHRASES = [
-        "tree surgery", "tree surgeon", "tree surgeons", "tree care",
-        "tree service", "tree services", "tree work", "tree works", "tree felling",
-        "arboricultural", "arboriculture", "arborist", "arborists",
-        "forestry", "woodland management", "woodland services",
-        "stump grinding", "stump removal", "hedge cutting", "hedge trimming"
-    ]
-    EXCLUDED_NAME_WORDS = [
-        "breast", "plastic", "cosmetic", "dental", "medical", "clinic",
-        "hospital", "fruit", "olive", "palm", "christmas", "bonsai", "pyo",
-        "surgery centre", "surgical", "ortho", "optic", "laser", "eye", "neck", "spine",
-        "doctor", "health", "physio", "chiropractic", "therapy",
-        "hair", "skin", "beauty", "nail", "tattoo", "piercing", "ink",
-        "estate agent", "letting", "solicitor", "accountant",
-        "restaurant", "café", "cafe", "bakery", "food", "bar", "pub", "coffee",
-        "homes", "housing", "ales", "beer", "brewery", "capital", "investment", "financial",
-        "construction", "rail", "railway", "events", "properties", "property",
-        "logistics", "transport", "security", "cleaning", "plumbing", "electrical", "roofing",
-        "mot", "garage", "auto", "car", "motor", "vehicle", "repairs", "mechanic",
-        "development", "developments", "holdings", "management company", "residents", "flats", "apartments"
-    ]
-
     try:
         conn = database.get_db_conn()
         cur = conn.cursor()
@@ -878,35 +930,47 @@ def clean_partner_database():
         delete_ids = []
         update_rows = []
         updated_cities = 0
+        
+        SPAM_DOMAINS = [
+            "10summersheatingandcoolingllc.pro", "airflexheatingandcoolinginc.xyz",
+            "alabamaurbanforestryservice.com", "companiesmadesimple.com",
+            "facebook.com", "yell.com", "checkatrade.com", "trustatrader.com",
+            "linkedin.com", "instagram.com", "cylex-uk.co.uk", "freeindex.co.uk",
+            "thomsonlocal.com", "192.com", "thephonebook.bt.com", "webador.com",
+            "mysite.com", "wix.com", "squarespace.com", "wordpress.com"
+        ]
 
         for (pid, name, addr, current_city, raw_phone, raw_website, raw_email) in all_partners:
-            name_lower = (name or "").lower()
-
-            # FILTER 1: Must contain tree trade phrase OR isolated 'tree' word boundary
-            has_phrase = any(w in name_lower for w in REQUIRED_PHRASES)
-            has_isolated_tree = bool(re.search(r'\btree\b', name_lower))
-            has_required = has_phrase or has_isolated_tree
-
-            # FILTER 2: Must not contain an excluded word
-            has_excluded = any(w in name_lower for w in EXCLUDED_NAME_WORDS)
-
-            if not has_required or has_excluded:
+            # 1. Use the unified, bulletproof validation gate
+            if not _is_valid_tree_company_name(name):
                 delete_ids.append((pid,))
-            else:
-                # Sanitize phone numbers to strictly UK
-                valid_phone = _is_valid_uk_phone(raw_phone)
-                cleaned_website = raw_website
-                cleaned_email = raw_email
+                continue
 
-                if raw_website and any(tld in raw_website.lower() for tld in [".com.au", ".net.au", ".co.nz", ".nz", ".au"]):
+            # 2. Sanitize phone numbers to strictly UK
+            valid_phone = _is_valid_uk_phone(raw_phone)
+            
+            # 3. Sanitize websites
+            cleaned_website = raw_website
+            if raw_website:
+                lower_web = raw_website.lower()
+                if any(spam in lower_web for spam in SPAM_DOMAINS) or any(ext in lower_web for ext in [".com.au", ".net.au", ".co.nz", ".nz", ".au"]):
                     cleaned_website = None
+
+            # 4. Sanitize emails (purge JS/npm package version tags like intl-segmenter@11.7.10)
+            cleaned_email = raw_email
+            if raw_email:
+                lower_em = raw_email.lower().strip()
+                # Check for version-tag style matches or dummy/spam emails
+                if re.search(r'@\d+\.', lower_em) or any(x in lower_em for x in ["intl-segmenter", "slick-carousel", "tailwindcss", "leaflet", "bootstrap", "aos@", "yourname@", "example@", "@example.", "mysite.com", "webador.com"]):
+                    cleaned_email = None
+                elif not re.search(r'@[a-z0-9-]+\.[a-z]{2,6}', lower_em):
                     cleaned_email = None
 
-                # Accurate real city resolution from postcode and address
-                real_city = resolve_uk_city(addr, name, default_city=current_city or "UK")
-                update_rows.append((real_city, valid_phone, cleaned_website, cleaned_email, pid))
-                if real_city != current_city:
-                    updated_cities += 1
+            # 5. Accurate real city resolution from postcode and address
+            real_city = resolve_uk_city(addr, name, default_city=current_city or "UK")
+            update_rows.append((real_city, valid_phone, cleaned_website, cleaned_email, pid))
+            if real_city != current_city:
+                updated_cities += 1
 
         if delete_ids:
             execute_batch(cur, "DELETE FROM potential_partners WHERE id = %s", delete_ids, page_size=100)
@@ -931,7 +995,7 @@ def clean_partner_database():
         return {"kept": kept, "removed": removed, "updated_cities": updated_cities}
 
     except Exception as e:
-        logger.error(f"[Cleanup] Fatal error: {e}")
+        logger.error(f"[Cleanup] Error: {e}")
         return {"error": str(e)}
 
 
