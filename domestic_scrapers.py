@@ -1,8 +1,10 @@
+﻿import os
 import requests
 import re
 import logging
 import datetime
 import urllib.parse
+import random
 from bs4 import BeautifulSoup
 from typing import List, Dict, Any, Optional
 import database
@@ -10,6 +12,11 @@ import notifications
 import scanners
 
 logger = logging.getLogger("vector-data-labs")
+
+SCRAPER_API_KEY = os.getenv("SCRAPER_API_KEY", "").strip()
+SCRAPINGBEE_API_KEY = os.getenv("SCRAPINGBEE_API_KEY", "").strip()
+ZENROWS_API_KEY = os.getenv("ZENROWS_API_KEY", "").strip()
+PROXY_URL = os.getenv("PROXY_URL", "").strip()
 
 DOMESTIC_KEYWORDS = [
     "tree", "trees", "felling", "fell", "hedge", "hedges", "stump",
@@ -20,6 +27,13 @@ DOMESTIC_KEYWORDS = [
     "pollard", "pollarding", "woodland", "overhanging", "stump grinding",
     "arborist", "timber", "root", "roots", "leylandii", "eucalyptus",
     "communal grounds", "residents association", "parish council", "estate grounds"
+]
+
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1"
 ]
 
 UK_MAJOR_CITIES = [
@@ -68,8 +82,79 @@ UK_PARISH_COMMUNITIES = [
 ]
 
 
+def fetch_unblocked_html(target_url: str, render_js: bool = False) -> Optional[str]:
+    """
+    Universal Unblocking Gateway:
+    Routes requests through residential proxy providers (ScraperAPI / ScrapingBee / ZenRows)
+    to bypass Cloudflare and Akamai bot-protection walls.
+    Falls back to rotating stealth headers.
+    """
+    # 1. ScraperAPI Gateway (Residential UK IP)
+    if SCRAPER_API_KEY:
+        try:
+            params = {
+                "api_key": SCRAPER_API_KEY,
+                "url": target_url,
+                "country_code": "gb",
+                "render": "true" if render_js else "false"
+            }
+            resp = requests.get("https://api.scraperapi.com", params=params, timeout=25)
+            if resp.status_code == 200:
+                return resp.text
+        except Exception as e:
+            logger.debug(f"[ScraperAPI] Error: {e}")
+
+    # 2. ScrapingBee Gateway
+    if SCRAPINGBEE_API_KEY:
+        try:
+            params = {
+                "api_key": SCRAPINGBEE_API_KEY,
+                "url": target_url,
+                "country_code": "gb",
+                "render_js": "true" if render_js else "false"
+            }
+            resp = requests.get("https://app.scrapingbee.com/api/v1/", params=params, timeout=25)
+            if resp.status_code == 200:
+                return resp.text
+        except Exception as e:
+            logger.debug(f"[ScrapingBee] Error: {e}")
+
+    # 3. ZenRows Gateway
+    if ZENROWS_API_KEY:
+        try:
+            params = {
+                "apikey": ZENROWS_API_KEY,
+                "url": target_url,
+                "premium_proxy": "true",
+                "proxy_country": "gb"
+            }
+            resp = requests.get("https://api.zenrows.com/v1/", params=params, timeout=25)
+            if resp.status_code == 200:
+                return resp.text
+        except Exception as e:
+            logger.debug(f"[ZenRows] Error: {e}")
+
+    # 4. Stealth Direct Fallback with Rotating Fingerprint
+    headers = {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
+        "DNT": "1",
+        "Upgrade-Insecure-Requests": "1"
+    }
+    proxies = {"http": PROXY_URL, "https": PROXY_URL} if PROXY_URL else None
+
+    try:
+        resp = requests.get(target_url, headers=headers, proxies=proxies, timeout=12)
+        if resp.status_code == 200:
+            return resp.text
+    except Exception as e:
+        logger.debug(f"[Direct Stealth] Fetch failed for {target_url}: {e}")
+
+    return None
+
+
 def _score_domestic_job(text: str) -> str:
-    """Classifies domestic job size based on keywords."""
     text_lower = text.lower()
     if any(k in text_lower for k in ["large tree", "huge tree", "dismantle", "sectional", "mewp", "crane", "dangerous", "multiple trees", "site clearance", "woodland", "mature oak", "tall pine", "felling of 3", "felling of 4", "communal grounds", "estate trees"]):
         return "large"
@@ -78,31 +163,26 @@ def _score_domestic_job(text: str) -> str:
     return "small"
 
 
-# ── 1. Gumtree UK Domestic Job Board Scraper ──────────────────────────────────
+# ── 1. Gumtree UK Domestic Job Board Scraper (Unblocked) ──────────────────────
 
 def scrape_gumtree_domestic_jobs() -> List[Dict[str, Any]]:
     found_leads = []
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-
     search_queries = [
         "tree surgeon needed",
         "tree removal needed",
         "tree felling wanted",
         "hedge cutting needed",
-        "stump grinding needed",
-        "garden tree cut down"
+        "stump grinding needed"
     ]
 
-    for q in search_queries:
-        try:
-            url = f"https://www.gumtree.com/search?search_category=all&q={urllib.parse.quote(q)}"
-            resp = requests.get(url, headers=headers, timeout=10)
-            if resp.status_code != 200:
-                continue
+    for q in search_queries[:3]:
+        url = f"https://www.gumtree.com/search?search_category=all&q={urllib.parse.quote(q)}"
+        html = fetch_unblocked_html(url, render_js=False)
+        if not html:
+            continue
 
-            soup = BeautifulSoup(resp.text, "html.parser")
+        try:
+            soup = BeautifulSoup(html, "html.parser")
             articles = soup.find_all("article", class_=re.compile(r"listing-maxi|natural"))
 
             for art in articles[:20]:
@@ -148,45 +228,46 @@ def scrape_gumtree_domestic_jobs() -> List[Dict[str, Any]]:
 
 def scrape_freeads_and_preloved() -> List[Dict[str, Any]]:
     found_leads = []
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    
     queries = ["tree surgeon", "tree removal", "hedge cutting", "stump removal", "tree felling"]
-    for q in queries:
+
+    for q in queries[:2]:
+        url = f"https://www.freeads.co.uk/search.aspx?keyword={urllib.parse.quote(q)}&category=services"
+        html = fetch_unblocked_html(url, render_js=False)
+        if not html:
+            continue
+
         try:
-            url = f"https://www.freeads.co.uk/search.aspx?keyword={urllib.parse.quote(q)}&category=services"
-            resp = requests.get(url, headers=headers, timeout=10)
-            if resp.status_code == 200:
-                soup = BeautifulSoup(resp.text, "html.parser")
-                cards = soup.find_all(["div", "article"], class_=re.compile(r"listing|item|result"))
+            soup = BeautifulSoup(html, "html.parser")
+            cards = soup.find_all(["div", "article"], class_=re.compile(r"listing|item|result"))
 
-                for c in cards[:15]:
-                    try:
-                        title_el = c.find(["h2", "h3", "a"])
-                        if not title_el:
-                            continue
-                        title = title_el.get_text(strip=True)
-                        if not any(k in title.lower() for k in DOMESTIC_KEYWORDS):
-                            continue
-
-                        desc_el = c.find(["p", "div"], class_=re.compile(r"desc|snippet|detail"))
-                        desc = desc_el.get_text(strip=True) if desc_el else title
-                        loc_el = c.find(["span", "div"], class_=re.compile(r"location|town"))
-                        loc = loc_el.get_text(strip=True) if loc_el else "United Kingdom"
-
-                        ref = f"FAD-{abs(hash(title + loc)) % 1000000}"
-                        score = _score_domestic_job(title + " " + desc)
-                        found_leads.append({
-                            "reference": ref,
-                            "council_source": f"Freeads Classified ({loc})",
-                            "address": f"{loc}, UK",
-                            "summary": f"🏡 Homeowner Request: {title}. Notes: {desc[:260]}",
-                            "lead_score": score,
-                            "lead_price": 49 if score == "large" else 25,
-                            "lead_source_type": "domestic_classified",
-                            "discovered_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
-                        })
-                    except Exception:
+            for c in cards[:15]:
+                try:
+                    title_el = c.find(["h2", "h3", "a"])
+                    if not title_el:
                         continue
+                    title = title_el.get_text(strip=True)
+                    if not any(k in title.lower() for k in DOMESTIC_KEYWORDS):
+                        continue
+
+                    desc_el = c.find(["p", "div"], class_=re.compile(r"desc|snippet|detail"))
+                    desc = desc_el.get_text(strip=True) if desc_el else title
+                    loc_el = c.find(["span", "div"], class_=re.compile(r"location|town"))
+                    loc = loc_el.get_text(strip=True) if loc_el else "United Kingdom"
+
+                    ref = f"FAD-{abs(hash(title + loc)) % 1000000}"
+                    score = _score_domestic_job(title + " " + desc)
+                    found_leads.append({
+                        "reference": ref,
+                        "council_source": f"Freeads Classified ({loc})",
+                        "address": f"{loc}, UK",
+                        "summary": f"🏡 Homeowner Request: {title}. Notes: {desc[:260]}",
+                        "lead_score": score,
+                        "lead_price": 49 if score == "large" else 25,
+                        "lead_source_type": "domestic_classified",
+                        "discovered_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    })
+                except Exception:
+                    continue
         except Exception:
             continue
 
@@ -196,35 +277,22 @@ def scrape_freeads_and_preloved() -> List[Dict[str, Any]]:
 # ── 3. Facebook & Social Neighborhood Group Public Harvester ──────────────────
 
 def scrape_public_social_community_groups() -> List[Dict[str, Any]]:
-    """
-    Monitors public UK local community boards, Facebook neighborhood feeds, and Nextdoor trade inquiries.
-    Extracts real resident requests: "Can anyone recommend a reliable tree surgeon to remove 2 trees?"
-    """
     found_leads = []
-    headers = {"User-Agent": "TreeKey-Community-Radar/2.0 (UK Public Social Search)"}
+    social_queries = ["recommend a tree surgeon", "looking for tree surgery quotes", "need tree removed from garden"]
 
-    # Public community aggregation queries across UK cities
-    social_queries = [
-        "recommend a tree surgeon",
-        "looking for tree surgery quotes",
-        "need tree removed from garden",
-        "conifer hedge cutting recommendation",
-        "tree surgeon price estimate"
-    ]
+    for city, outcode in UK_MAJOR_CITIES[:10]:
+        for q in social_queries[:1]:
+            search_query = f"{city} {q}"
+            url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(search_query + ' site:facebook.com OR site:nextdoor.co.uk')}"
+            html = fetch_unblocked_html(url, render_js=False)
+            if not html:
+                continue
 
-    for city, outcode in UK_MAJOR_CITIES[:20]:
-        for q in social_queries[:2]:
             try:
-                search_query = f"{city} {q}"
-                url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(search_query + ' site:facebook.com OR site:nextdoor.co.uk')}"
-                resp = requests.get(url, headers=headers, timeout=8)
-                if resp.status_code != 200:
-                    continue
-
-                soup = BeautifulSoup(resp.text, "html.parser")
+                soup = BeautifulSoup(html, "html.parser")
                 results = soup.find_all("div", class_=re.compile(r"result__body|web-result"))
 
-                for r in results[:6]:
+                for r in results[:5]:
                     try:
                         title_el = r.find("a", class_=re.compile(r"result__title|result__url"))
                         snippet_el = r.find(["a", "div"], class_=re.compile(r"result__snippet"))
@@ -262,33 +330,22 @@ def scrape_public_social_community_groups() -> List[Dict[str, Any]]:
 # ── 4. Residents Association & Communal Estate Grounds Tenders ─────────────────
 
 def scrape_residents_associations_and_estates() -> List[Dict[str, Any]]:
-    """
-    Monitors UK Residents Associations, Right to Manage (RTM) boards, and private estate management committees.
-    Captures communal garden tree safety inspections, boundary clearing, and shared woodland tenders.
-    """
     found_leads = []
-    headers = {"User-Agent": "TreeKey-Estate-Monitor/2.0 (UK Communal Grounds Intelligence)"}
+    queries = ["residents association tree surgery tender", "communal grounds tree maintenance quote"]
 
-    queries = [
-        "residents association tree surgery tender",
-        "communal grounds tree maintenance quote",
-        "estate management dangerous tree removal",
-        "block management hedge reduction"
-    ]
+    for city, outcode in UK_MAJOR_CITIES[:8]:
+        for q in queries[:1]:
+            search_query = f"{city} {q}"
+            url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(search_query)}"
+            html = fetch_unblocked_html(url, render_js=False)
+            if not html:
+                continue
 
-    for city, outcode in UK_MAJOR_CITIES[:15]:
-        for q in queries[:2]:
             try:
-                search_query = f"{city} {q}"
-                url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(search_query)}"
-                resp = requests.get(url, headers=headers, timeout=8)
-                if resp.status_code != 200:
-                    continue
-
-                soup = BeautifulSoup(resp.text, "html.parser")
+                soup = BeautifulSoup(html, "html.parser")
                 results = soup.find_all("div", class_=re.compile(r"result__body|web-result"))
 
-                for r in results[:5]:
+                for r in results[:4]:
                     try:
                         title_el = r.find("a", class_=re.compile(r"result__title"))
                         snippet_el = r.find(["a", "div"], class_=re.compile(r"result__snippet"))
@@ -303,14 +360,12 @@ def scrape_residents_associations_and_estates() -> List[Dict[str, Any]]:
                             continue
 
                         ref = f"RMC-{abs(hash(title + city)) % 1000000}"
-                        score = "large"  # Estate tenders are consistently multi-day commercial/domestic assets
-
                         found_leads.append({
                             "reference": ref,
                             "council_source": f"Residents Association / Estate Grounds ({city})",
                             "address": f"{city} ({outcode}), UK",
                             "summary": f"🏢 Residents Association / Estate Tender: {title}. Notes: {snippet[:280]}",
-                            "lead_score": score,
+                            "lead_score": "large",
                             "lead_price": 49,
                             "lead_source_type": "domestic_classified",
                             "discovered_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -327,19 +382,17 @@ def scrape_residents_associations_and_estates() -> List[Dict[str, Any]]:
 
 def scrape_local_newspaper_notices() -> List[Dict[str, Any]]:
     found_leads = []
-    headers = {"User-Agent": "TreeKey-Regional-Paper-Monitor/2.0 (UK Editorial Research)"}
+    for paper_name, domain, region, outcode in UK_LOCAL_PAPERS[:6]:
+        search_url = f"{domain}/search/?q=tree+felling"
+        html = fetch_unblocked_html(search_url, render_js=False)
+        if not html:
+            continue
 
-    for paper_name, domain, region, outcode in UK_LOCAL_PAPERS:
         try:
-            search_url = f"{domain}/search/?q=tree+felling"
-            resp = requests.get(search_url, headers=headers, timeout=8)
-            if resp.status_code != 200:
-                continue
-
-            soup = BeautifulSoup(resp.text, "html.parser")
+            soup = BeautifulSoup(html, "html.parser")
             articles = soup.find_all(["article", "div", "li"], class_=re.compile(r"article|teaser|story|card"))
 
-            for art in articles[:8]:
+            for art in articles[:6]:
                 try:
                     head_el = art.find(["h2", "h3", "a", "strong"])
                     if not head_el:
@@ -377,20 +430,19 @@ def scrape_local_newspaper_notices() -> List[Dict[str, Any]]:
 
 def scrape_reddit_domestic_leads() -> List[Dict[str, Any]]:
     found_leads = []
-    subreddits = ["GardeningUK", "DIYUK", "HousingUK", "UKPersonalFinance"]
-    headers = {"User-Agent": "TreeKey-Arbor-Monitor/2.0 (UK Public Forestry Research)"}
-
-    search_terms = ["tree surgeon cost", "remove tree", "fell tree", "conifer hedge reduction", "stump grinding"]
+    subreddits = ["GardeningUK", "DIYUK", "HousingUK"]
+    search_terms = ["tree surgeon cost", "remove tree", "fell tree"]
 
     for sub in subreddits:
-        for q in search_terms[:2]:
-            try:
-                url = f"https://www.reddit.com/r/{sub}/search.json?q={urllib.parse.quote(q)}&sort=new&restrict_sr=on&limit=15"
-                resp = requests.get(url, headers=headers, timeout=8)
-                if resp.status_code != 200:
-                    continue
+        for q in search_terms[:1]:
+            url = f"https://www.reddit.com/r/{sub}/search.json?q={urllib.parse.quote(q)}&sort=new&restrict_sr=on&limit=10"
+            html = fetch_unblocked_html(url, render_js=False)
+            if not html:
+                continue
 
-                data = resp.json()
+            try:
+                import json
+                data = json.loads(html)
                 children = data.get("data", {}).get("children", [])
 
                 for post in children:
@@ -432,19 +484,17 @@ def scrape_reddit_domestic_leads() -> List[Dict[str, Any]]:
 
 def scrape_fixmystreet_tree_hazards() -> List[Dict[str, Any]]:
     found_leads = []
-    headers = {"User-Agent": "TreeKey-Arbor-Radar/2.0 (UK Green Waste & Hazard Prevention)"}
+    for city_name, outcode in UK_MAJOR_CITIES[:15]:
+        url = f"https://www.fixmystreet.com/reports/{urllib.parse.quote(city_name)}?service=Trees"
+        html = fetch_unblocked_html(url, render_js=False)
+        if not html:
+            continue
 
-    for city_name, outcode in UK_MAJOR_CITIES[:25]:
         try:
-            url = f"https://www.fixmystreet.com/reports/{urllib.parse.quote(city_name)}?service=Trees"
-            resp = requests.get(url, headers=headers, timeout=10)
-            if resp.status_code != 200:
-                continue
-
-            soup = BeautifulSoup(resp.text, "html.parser")
+            soup = BeautifulSoup(html, "html.parser")
             items = soup.find_all(["li", "div"], class_=re.compile(r"item|report|update"))
 
-            for item in items[:15]:
+            for item in items[:10]:
                 try:
                     title_elem = item.find(["h2", "h3", "a", "strong"])
                     if not title_elem:
@@ -453,19 +503,17 @@ def scrape_fixmystreet_tree_hazards() -> List[Dict[str, Any]]:
                     
                     snippet_elem = item.find(["p", "span"], class_=re.compile(r"desc|text|detail"))
                     snippet = snippet_elem.get_text(strip=True) if snippet_elem else title
-
                     full_raw = f"{title} {snippet}"
                     
-                    # 1. Strict Recency Filter: Reject historical archive years
+                    # Reject historical archive years
                     if any(y in full_raw for y in ["2008", "2009", "2010", "2011", "2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025"]):
                         continue
 
-                    # 2. Action Verb Filter: Reject pure street/place nouns like "King's Hedges"
+                    # Require active tree surgery action verbs
                     action_verbs = ["fell", "felling", "cut", "cutting", "prune", "pruning", "overgrown", "dangerous", "fallen", "hazard", "blocking", "dismantle", "stump", "reduce", "reduction", "trim", "trimming"]
                     if not any(v in full_raw.lower() for v in action_verbs):
                         continue
 
-                    # 3. Clean Text Stripper: Remove internal timestamps & '(sent to both)'
                     clean_title = re.sub(r'\d{1,2}:\d{2}.*', '', title).strip()
                     clean_snippet = re.sub(r'\(sent to both\).*', '', snippet).replace('\n', ' ').strip()
                     clean_snippet = re.sub(r'\s+', ' ', clean_snippet)
@@ -495,20 +543,18 @@ def scrape_fixmystreet_tree_hazards() -> List[Dict[str, Any]]:
 
 def scrape_parish_council_grounds_notices() -> List[Dict[str, Any]]:
     found_leads = []
-    headers = {"User-Agent": "TreeKey-Parish-Monitor/2.0 (UK Public Land Management)"}
+    for parish_name, outcode, county in UK_PARISH_COMMUNITIES[:6]:
+        query = f"{parish_name} tree surgery work maintenance tender"
+        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+        html = fetch_unblocked_html(url, render_js=False)
+        if not html:
+            continue
 
-    for parish_name, outcode, county in UK_PARISH_COMMUNITIES:
         try:
-            query = f"{parish_name} tree surgery work maintenance tender"
-            url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
-            resp = requests.get(url, headers=headers, timeout=8)
-            if resp.status_code != 200:
-                continue
-
-            soup = BeautifulSoup(resp.text, "html.parser")
+            soup = BeautifulSoup(html, "html.parser")
             results = soup.find_all("div", class_=re.compile(r"result__body|web-result"))
 
-            for r in results[:4]:
+            for r in results[:3]:
                 try:
                     title_el = r.find("a", class_=re.compile(r"result__title"))
                     snippet_el = r.find(["a", "div"], class_=re.compile(r"result__snippet"))
@@ -545,8 +591,8 @@ def scrape_parish_council_grounds_notices() -> List[Dict[str, Any]]:
 
 def ingest_and_route_domestic_leads() -> int:
     """
-    Master runner: Scrapes all 8 domestic & social channels, deduplicates in Postgres,
-    and dispatches newly intercepted leads exclusively 1-to-1 to senior contractors.
+    Master runner: Scrapes all 8 domestic & social channels via universal unblocking gateway,
+    deduplicates in Postgres, and dispatches newly intercepted leads exclusively 1-to-1 to senior contractors.
     """
     all_leads = []
     all_leads.extend(scrape_gumtree_domestic_jobs())
