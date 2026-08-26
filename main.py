@@ -2926,7 +2926,10 @@ def run_domestic_scan_now():
     Direct scan trigger returning live intercepted leads and Supabase database breakdown.
     """
     import domestic_scrapers
-    count = domestic_scrapers.ingest_and_route_domestic_leads()
+    import threading
+    
+    # Run scraper in fast mode / background
+    threading.Thread(target=domestic_scrapers.ingest_and_route_domestic_leads, daemon=True).start()
     
     # Query database breakdown
     db_stats = {}
@@ -2935,14 +2938,14 @@ def run_domestic_scan_now():
         conn = database.get_db_conn()
         cur = conn.cursor()
         cur.execute("""
-            SELECT lead_source_type, count(*) 
+            SELECT COALESCE(lead_source_type, 'council_planning'), count(*) 
             FROM leads 
             GROUP BY lead_source_type;
         """)
         db_stats = dict(cur.fetchall())
 
         cur.execute("""
-            SELECT reference, council_source, address, summary, lead_score, lead_price, lead_source_type, discovered_at
+            SELECT reference, council_source, address, summary, lead_score, lead_price, COALESCE(lead_source_type, 'council_planning'), discovered_at
             FROM leads
             ORDER BY discovered_at DESC
             LIMIT 15;
@@ -2955,8 +2958,7 @@ def run_domestic_scan_now():
         db_stats = {"error": str(e)}
 
     return {
-        "status": "success",
-        "newly_ingested_this_scan": count,
+        "status": "scan_dispatched_and_active",
         "database_breakdown": db_stats,
         "recent_intercepted_leads": recent_leads
     }
