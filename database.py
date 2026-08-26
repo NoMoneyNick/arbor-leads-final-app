@@ -708,7 +708,9 @@ def record_lead_dispatch_and_burn(lead_id: str, sub_id: str, contractor_email: s
 
 def get_closest_unallocated_leads(outcode: str, limit: int = 5) -> list:
     """
-    Finds nearest unallocated leads in adjacent sectors when a local zone is under-supplied.
+    Finds nearest unallocated leads for overflow compensation.
+    First tries to match the same regional outcode prefix (e.g. 'EX' for Exeter area),
+    then falls back to most recent nationwide unallocated leads if none found nearby.
     """
     if not SURL or not outcode:
         return []
@@ -716,16 +718,35 @@ def get_closest_unallocated_leads(outcode: str, limit: int = 5) -> list:
         conn = get_db_conn()
         cur = conn.cursor()
         try:
-            # Match nearby prefix or council source
+            # Extract alphabetic prefix (e.g. 'EX' from 'EX4', 'NG' from 'NG22')
+            import re
+            prefix_match = re.match(r'^([A-Z]{1,2})', outcode.strip().upper())
+            prefix = prefix_match.group(1) if prefix_match else outcode[:2]
+
+            # Try regional match first
             cur.execute("""
                 SELECT id, reference, address, summary, council_source, lead_score, lead_price
                 FROM leads
                 WHERE (status = 'new' OR status IS NULL)
+                  AND (reference ILIKE %s OR address ILIKE %s OR council_source ILIKE %s)
                 ORDER BY discovered_at DESC
                 LIMIT %s;
-            """, (limit,))
+            """, (f"%{prefix}%", f"%{prefix}%", f"%{prefix}%", limit))
+            rows = cur.fetchall()
+
+            # Fall back to newest nationwide if no regional matches
+            if not rows:
+                cur.execute("""
+                    SELECT id, reference, address, summary, council_source, lead_score, lead_price
+                    FROM leads
+                    WHERE (status = 'new' OR status IS NULL)
+                    ORDER BY discovered_at DESC
+                    LIMIT %s;
+                """, (limit,))
+                rows = cur.fetchall()
+
             cols = ["id", "ref", "addr", "summary", "council", "score", "price"]
-            return [dict(zip(cols, r)) for r in cur.fetchall()]
+            return [dict(zip(cols, r)) for r in rows]
         finally:
             cur.close()
             conn.close()
