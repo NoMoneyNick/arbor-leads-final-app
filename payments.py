@@ -191,20 +191,18 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
             burned = database.burn_lead_inventory(lead_id, customer_email)
             logger.info(f"[Stripe] Lead {lead_id} burned from inventory for {mask(customer_email)}: {burned}")
 
-        # 2. If this was a subscription with outcode
-        if outcode and not lead_id:
-            claimed = database.claim_territory_atomically(outcode, customer_email, stripe_sub_id=data.get("subscription", ""))
-            logger.info(f"[Stripe] Territory {outcode} claimed by {mask(customer_email)}: {claimed}")
-            if not claimed:
-                import notifications
-                notifications.send_system_incident_alert(
-                    category="PAYMENTS & REVENUE",
-                    title="CRITICAL PAYMENT RACE CONDITION",
-                    description=f"Customer {mask(customer_email)} paid for territory {outcode}, but the DB lock failed (likely claimed seconds prior).",
-                    impact="Customer was charged but their territory is NOT active.",
-                    action_required="Log into Stripe immediately. Refund the payment or contact the customer to select a new territory.",
-                    severity="CRITICAL"
-                )
+        # 2. If this was a subscription, register with seniority timestamp
+        if not lead_id:
+            sub_tier = metadata.get("tier", "climber_domestic")
+            sub_outcode = outcode or "GB"
+            reg_ok = database.register_or_update_subscription(
+                customer_email=customer_email,
+                outcode=sub_outcode,
+                tier=sub_tier,
+                stripe_sub_id=data.get("subscription", "")
+            )
+            logger.info(f"[Stripe] Subscription registered for {mask(customer_email)} ({sub_tier} in {sub_outcode}): {reg_ok}")
+
         logger.info(f"[Stripe] Payment complete — {mask(customer_email)} — £{amount / 100:.2f}")
         return {"event": "payment_complete", "email": customer_email,
                 "session_id": session_id, "amount_pence": amount, "outcode": outcode, "lead_id": lead_id}

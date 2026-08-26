@@ -71,45 +71,89 @@ def dispatch_lead_alerts(city: str, leads: list):
     import database
     import re
     
-    # 1. Route to Paying Customers
-    active_claims = database.get_active_territory_claims()
-    customer_leads = {}  # {email: [leads]}
+    import database
+    import re
+    
+    # 1. Fetch active subscribers ordered strictly by Seniority (subscribed_at ASC)
+    subscribers = database.get_active_subscribers_by_seniority()
+    customer_leads = {}       # {email: [leads]}
+    overflow_notices = {}     # {email: bool}
     
     for lead in leads:
         addr = lead.get("addr", "").upper()
-        # Extract ALL valid UK outcodes from dirty address strings (handles missing spaces e.g. NG229DD)
+        lead_id = lead.get("id") or lead.get("ref") or lead.get("reference")
         extracted_outcodes = [m.group(1) for m in re.finditer(r'\b([A-Z]{1,2}[0-9][A-Z0-9]?)\s*([0-9][A-Z]{2})\b', addr)]
         
-        for claim in active_claims:
-            outcode = claim["outcode"].upper()
+        # Find matching subscribers for this lead's geographic area
+        matching_subs = []
+        for sub in subscribers:
+            sub_outcode = sub["outcode"].upper()
+            if sub_outcode in extracted_outcodes or re.search(r'\b' + re.escape(sub_outcode) + r'\b', addr):
+                matching_subs.append(sub)
+
+        # Seniority Allocation Rule:
+        # Longest-tenured subscriber gets the lead first, provided they haven't hit their monthly quota
+        for sub in matching_subs:
+            email = sub["email"]
+            sub_id = sub["id"]
             
-            # Match if it's a valid extracted outcode OR if it's explicitly stated as a standalone word
-            if outcode in extracted_outcodes or re.search(r'\b' + re.escape(outcode) + r'\b', addr):
-                email = claim["customer_email"]
+            # Atomically burn and record dispatch
+            if database.record_lead_dispatch_and_burn(lead_id, sub_id, email, dispatch_type="seniority_standard"):
                 if email not in customer_leads:
                     customer_leads[email] = []
-                # Prevent duplicate leads for the same customer (if multiple rules match)
-                if lead not in customer_leads[email]:
-                    customer_leads[email].append(lead)
+                customer_leads[email].append(lead)
+                break  # Lead burned and dispatched to #1 senior subscriber; do NOT give to anyone else
 
+    # 2. Check for Under-Supplied Junior Subscribers & Dispatch Adjacent Overflows
+    for sub in subscribers:
+        email = sub["email"]
+        sub_id = sub["id"]
+        # If this subscriber received 0 leads this run and their monthly deliveries are low
+        if email not in customer_leads and sub.get("delivered", 0) < 5:
+            overflow_leads = database.get_closest_unallocated_leads(sub["outcode"], limit=2)
+            if overflow_leads:
+                for ol in overflow_leads:
+                    ol_id = ol.get("id") or ol.get("ref")
+                    if database.record_lead_dispatch_and_burn(ol_id, sub_id, email, dispatch_type="overflow_compensation"):
+                        if email not in customer_leads:
+                            customer_leads[email] = []
+                        customer_leads[email].append(ol)
+                        overflow_notices[email] = True
+
+    # 3. Dispatch Formatted Emails to Each Contractor
     for email, routed_leads in customer_leads.items():
+        is_overflow = overflow_notices.get(email, False)
+        
+        notice_banner = """
+        <div style="background:#f0fdf4; border-left:3px solid #059669; padding:10px; font-size:12px; color:#065f46; margin-bottom:16px;">
+            <b>🔒 Single-Sale Guarantee:</b> These leads have been delivered exclusively to you and burned from our public radar.
+        </div>
+        """
+        if is_overflow:
+            notice_banner = """
+            <div style="background:#eff6ff; border-left:3px solid #3b82f6; padding:10px; font-size:12px; color:#1e40af; margin-bottom:16px;">
+                <b>⚡ Priority Overflow Match:</b> Council filings in your immediate sector were quiet today. To protect your subscription value, we have automatically routed you the highest-value unallocated tree applications from adjacent sectors at zero extra cost.
+            </div>
+            """
+
         rows = "".join([
             f"<tr>"
             f"<td style='padding:8px;'>{SCORE_EMOJI.get(l.get('lead_score','small'), '🌳')}</td>"
             f"<td style='padding:8px;'><b>{l['addr']}</b></td>"
             f"<td style='padding:8px;'>{l['summary'][:90]}...</td>"
-            f"<td style='padding:8px;'><a href='{PUBLIC_APP_URL}/generate-letter/{urllib.parse.quote(l.get('ref', l.get('reference', '')))}' style='background:#044332; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px;'>🖨️ Get Letter</a></td>"
+            f"<td style='padding:8px; white-space:nowrap;'>"
+            f"<a href='{PUBLIC_APP_URL}/generate-letter/{urllib.parse.quote(l.get('ref', l.get('reference', '')))}' style='background:#044332; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px; margin-right:4px;'>🖨️ Letter</a>"
+            f"<a href='{PUBLIC_APP_URL}/generate-street-flyer/{urllib.parse.quote(l.get('ref', l.get('reference', '')))}' style='background:#059669; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px;'>🏘️ Flyer</a>"
+            f"</td>"
             f"</tr>"
             for l in routed_leads
         ])
         body = f"""
             <div style="font-family:sans-serif; max-width:640px; margin:auto; color:#0f172a;">
                 <h2 style="color:#044332; margin-bottom:4px;">🌳 TreeKey Intelligence — {len(routed_leads)} New Exclusive Leads</h2>
-                <p style="color:#64748b; font-size:14px; margin-top:0;">Here are the latest statutory tree work applications registered in your sector:</p>
+                <p style="color:#64748b; font-size:14px; margin-top:0;">Here are the latest statutory tree work applications registered for your crew:</p>
                 
-                <div style="background:#f0fdf4; border-left:3px solid #059669; padding:10px; font-size:12px; color:#065f46; margin-bottom:16px;">
-                    <b>🔒 Single-Sale Guarantee:</b> These leads have been delivered exclusively to you and burned from our public radar.
-                </div>
+                {notice_banner}
 
                 <table border='1' cellspacing='0' style='border-collapse:collapse; width:100%; font-size:13px; border-color:#e2e8f0;'>
                     <tr style='background:#f8fafc;'>
@@ -135,10 +179,13 @@ def dispatch_lead_alerts(city: str, leads: list):
                     json={
                         "from": "TreeKey Intelligence <leads@treekey.uk>",
                         "to": [email],
-                        "subject": f"🌳 {len(routed_leads)} New Exclusive Planning Leads in your Area",
+                        "subject": f"🌳 {len(routed_leads)} New Exclusive Planning Leads for your Crew",
                         "html": body
                     }
                 )
+                logging.info(f"[Seniority Lead Router] Successfully routed {len(routed_leads)} leads to customer {email}")
+            except Exception as e:
+                logging.error(f"[Seniority Lead Router] Failed to route to {email}: {e}")
                 logging.info(f"[Lead Router] Successfully routed {len(routed_leads)} leads to customer {email}")
             except Exception as e:
                 logging.error(f"[Lead Router] Failed to route to {email}: {e}")

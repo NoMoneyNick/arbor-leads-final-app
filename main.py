@@ -1441,6 +1441,91 @@ def generate_homeowner_letter(lead_id: str, company: str = "Your Local Tree Spec
 
 
 
+# ── 2. The "Neighbor Multiplier" 1-Tap Street Flyer Generator ─────────────────
+
+@app.get("/generate-street-flyer/{lead_id}", response_class=HTMLResponse)
+def generate_street_flyer(lead_id: str, company: str = "Your Local Tree Surgery Team", phone: str = "07XXX XXXXXX"):
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT reference, address, summary FROM leads WHERE id = %s OR reference = %s;", (lead_id, lead_id))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row:
+        return HTMLResponse("<h3>Lead not found.</h3>", status_code=404)
+
+    ref, addr, summary = row
+    
+    # Extract street name from address
+    parts = [p.strip() for p in addr.split(",") if p.strip()]
+    street_name = parts[0] if parts else "your street"
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <title>Neighbor Street Notice & Discount | {street_name}</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; color: #0f172a; max-width: 650px; margin: auto; line-height: 1.6; background: #fff; }}
+            .card {{ border: 2px solid #044332; border-radius: 12px; padding: 28px; background: #ffffff; }}
+            .badge {{ background: #044332; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; }}
+            .btn-print {{ background: #044332; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; margin-bottom: 20px; }}
+            .discount-box {{ background: #f0fdf4; border: 2px dashed #059669; border-radius: 8px; padding: 16px; margin: 20px 0; text-align: center; }}
+            @media print {{ .btn-print {{ display: none; }} body {{ padding: 0; }} }}
+        </style>
+    </head>
+    <body>
+        <div style="text-align:right;">
+            <button class="btn-print" onclick="window.print()">🖨️ Print 5 Copies for Neighbors</button>
+        </div>
+
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <span class="badge">🌲 Tree Works Notice</span>
+                <span style="font-size:12px; color:#64748b;">NPTC Certified • £5M Insured</span>
+            </div>
+
+            <h2 style="margin:0 0 10px 0; color:#044332; font-size:22px;">Notice to Neighbors on {street_name}</h2>
+            
+            <p style="font-size:14px; color:#334155;">
+                Hello neighbor, our professional arboricultural team will be carrying out approved tree work on your street at <b>{addr}</b> in the coming days.
+            </p>
+
+            <div class="discount-box">
+                <h3 style="margin:0 0 6px 0; color:#065f46; font-size:18px;">🎁 20% Same-Day Street Discount</h3>
+                <p style="margin:0; font-size:13px; color:#047857;">
+                    Because our heavy woodchipper, truck, and climbing crew are already on {street_name}, we have zero extra travel costs. We are passing that saving directly to neighbors!
+                </p>
+            </div>
+
+            <h4 style="margin:16px 0 8px 0; font-size:15px; color:#0f172a;">Services Available on the Day:</h4>
+            <ul style="font-size:13px; color:#334155; padding-left:20px; margin:0 0 20px 0;">
+                <li>Crown reduction, thinning & branch pruning</li>
+                <li>Conifer & overgrown boundary hedge trimming</li>
+                <li>Felling dead, diseased, or hazardous trees</li>
+                <li>Stump grinding & complete green waste removal</li>
+            </ul>
+
+            <div style="background:#f8fafc; border-radius:8px; padding:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div>
+                    <div style="font-size:11px; color:#64748b; text-transform:uppercase; font-weight:bold;">Contractor:</div>
+                    <div style="font-weight:bold; color:#0f172a; font-size:15px;">{company}</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:11px; color:#64748b; text-transform:uppercase; font-weight:bold;">Call or Text for a Free Quote:</div>
+                    <div style="font-weight:800; color:#044332; font-size:17px;">{phone}</div>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+
+
+
 # ── Checkout (Stripe with Single-Sale Inventory Burn) ─────────────────────────
 
 @app.get("/checkout/{plan_key}")

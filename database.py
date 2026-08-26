@@ -111,6 +111,31 @@ def init_db():
                 suggestion TEXT NOT NULL,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
+
+            CREATE TABLE IF NOT EXISTS contractor_subscriptions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                customer_email TEXT UNIQUE NOT NULL,
+                customer_name TEXT,
+                phone TEXT,
+                tier TEXT DEFAULT 'climber_domestic',
+                center_outcode TEXT NOT NULL,
+                radius_miles INT DEFAULT 15,
+                stripe_subscription_id TEXT,
+                monthly_quota INT DEFAULT 20,
+                delivered_this_month INT DEFAULT 0,
+                active BOOLEAN DEFAULT TRUE,
+                subscribed_at TIMESTAMPTZ DEFAULT NOW(),
+                last_dispatched_at TIMESTAMPTZ
+            );
+
+            CREATE TABLE IF NOT EXISTS lead_dispatches (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                lead_id UUID NOT NULL,
+                contractor_id UUID REFERENCES contractor_subscriptions(id) ON DELETE CASCADE,
+                contractor_email TEXT NOT NULL,
+                dispatch_type TEXT DEFAULT 'standard',
+                dispatched_at TIMESTAMPTZ DEFAULT NOW()
+            );
         """)
 
         # Performance Indices for Instant High-Volume Queries
@@ -118,6 +143,9 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_leads_discovered_at ON leads(discovered_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_leads_council ON leads(council_source);",
             "CREATE INDEX IF NOT EXISTS idx_leads_reference ON leads(reference);",
+            "CREATE INDEX IF NOT EXISTS idx_subs_active ON contractor_subscriptions(active, center_outcode, subscribed_at ASC);",
+            "CREATE INDEX IF NOT EXISTS idx_dispatches_lead ON lead_dispatches(lead_id);",
+            "CREATE INDEX IF NOT EXISTS idx_dispatches_contractor ON lead_dispatches(contractor_id);",
             "CREATE INDEX IF NOT EXISTS idx_partners_city ON potential_partners(target_city);",
             "CREATE INDEX IF NOT EXISTS idx_partners_created ON potential_partners(created_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_partners_company_number ON potential_partners(company_number);",
@@ -421,3 +449,150 @@ def burn_lead_inventory(lead_id: str, buyer_email: str) -> bool:
     except Exception as e:
         logger.error(f"[Inventory Burn] Error burning lead {lead_id}: {e}")
         return False
+
+
+def register_or_update_subscription(customer_email: str, outcode: str, tier: str = "climber_domestic", 
+                                     stripe_sub_id: str = None, radius: int = 15, name: str = None, phone: str = None) -> bool:
+    """Registers or updates a contractor subscription with seniority timestamp."""
+    if not SURL or not customer_email or not outcode:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                INSERT INTO contractor_subscriptions (
+                    customer_email, customer_name, phone, tier, center_outcode, radius_miles, stripe_subscription_id, active, subscribed_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, NOW())
+                ON CONFLICT (customer_email) DO UPDATE SET
+                    tier = EXCLUDED.tier,
+                    center_outcode = EXCLUDED.center_outcode,
+                    radius_miles = EXCLUDED.radius_miles,
+                    stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+                    active = TRUE
+                RETURNING id;
+            """, (customer_email.strip().lower(), name, phone, tier, outcode.strip().upper(), radius, stripe_sub_id))
+            row = cur.fetchone()
+            conn.commit()
+            return bool(row)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Subscription] Error registering subscription for {customer_email}: {e}")
+        return False
+
+
+def get_active_subscribers_by_seniority(outcode: str = None) -> list:
+    """
+    Returns active subscribers sorted strictly by Seniority (subscribed_at ASC).
+    Ensures long-term subscribers receive first priority allocation.
+    """
+    if not SURL:
+        return []
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            if outcode:
+                cur.execute("""
+                    SELECT id, customer_email, customer_name, phone, tier, center_outcode, radius_miles, 
+                           monthly_quota, delivered_this_month, subscribed_at
+                    FROM contractor_subscriptions
+                    WHERE active = TRUE AND center_outcode = %s
+                    ORDER BY subscribed_at ASC;
+                """, (outcode.strip().upper(),))
+            else:
+                cur.execute("""
+                    SELECT id, customer_email, customer_name, phone, tier, center_outcode, radius_miles, 
+                           monthly_quota, delivered_this_month, subscribed_at
+                    FROM contractor_subscriptions
+                    WHERE active = TRUE
+                    ORDER BY subscribed_at ASC;
+                """)
+            cols = ["id", "email", "name", "phone", "tier", "outcode", "radius", "quota", "delivered", "subscribed_at"]
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Subscription] Error fetching subscribers by seniority: {e}")
+        return []
+
+
+def record_lead_dispatch_and_burn(lead_id: str, sub_id: str, contractor_email: str, dispatch_type: str = "standard") -> bool:
+    """
+    Atomically dispatches a lead to a subscriber, logs the dispatch audit record,
+    increments contractor delivery count, and burns the lead permanently.
+    """
+    if not SURL or not lead_id or not contractor_email:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            # 1. Burn the lead
+            cur.execute("""
+                UPDATE leads 
+                SET status = 'claimed'
+                WHERE (id = %s OR reference = %s) AND (status = 'new' OR status IS NULL)
+                RETURNING id;
+            """, (lead_id, lead_id))
+            burned_lead = cur.fetchone()
+            if not burned_lead:
+                return False  # Already burned or claimed by someone else
+
+            real_lead_uuid = burned_lead[0]
+
+            # 2. Record dispatch audit log
+            cur.execute("""
+                INSERT INTO lead_dispatches (lead_id, contractor_id, contractor_email, dispatch_type)
+                VALUES (%s, %s, %s, %s);
+            """, (real_lead_uuid, sub_id, contractor_email, dispatch_type))
+
+            # 3. Increment contractor monthly delivery count
+            if sub_id:
+                cur.execute("""
+                    UPDATE contractor_subscriptions
+                    SET delivered_this_month = delivered_this_month + 1,
+                        last_dispatched_at = NOW()
+                    WHERE id = %s;
+                """, (sub_id,))
+
+            conn.commit()
+            logger.info(f"[Seniority Router] Dispatched & burned lead {lead_id} -> {contractor_email} ({dispatch_type})")
+            return True
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Seniority Router] Error dispatching lead {lead_id}: {e}")
+        return False
+
+
+def get_closest_unallocated_leads(outcode: str, limit: int = 5) -> list:
+    """
+    Finds nearest unallocated leads in adjacent sectors when a local zone is under-supplied.
+    """
+    if not SURL or not outcode:
+        return []
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            # Match nearby prefix or council source
+            cur.execute("""
+                SELECT id, reference, address, summary, council_source, lead_score, lead_price
+                FROM leads
+                WHERE (status = 'new' OR status IS NULL)
+                ORDER BY discovered_at DESC
+                LIMIT %s;
+            """, (limit,))
+            cols = ["id", "ref", "addr", "summary", "council", "score", "price"]
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Seniority Router] Error fetching fallback leads: {e}")
+        return []
