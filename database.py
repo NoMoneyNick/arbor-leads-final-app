@@ -238,6 +238,8 @@ def init_db():
             "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMPTZ;",
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_score TEXT DEFAULT 'small';",
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_price NUMERIC DEFAULT 25;",
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_source_type TEXT DEFAULT 'council_planning';",
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS homeowner_contact TEXT;",
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS registered_date DATE;",
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS statutory_deadline DATE;",
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS planning_status TEXT DEFAULT 'pending';",

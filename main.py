@@ -2897,6 +2897,29 @@ def cron_trigger_slash(city_slug: str, secret: Optional[str] = Query(None)):
     return {"status": "success", "city": city, "new_leads": count}
 
 
+@app.get("/scan-domestic-jobs", response_class=HTMLResponse)
+def scan_domestic_jobs_view(request: Request, secret: Optional[str] = Query(None)):
+    """
+    Triggers multi-source domestic tree surgery scraper (Gumtree, FixMyStreet, Community boards).
+    """
+    verify_admin_or_secret(request, secret)
+    import domestic_scrapers
+    count = domestic_scrapers.ingest_and_route_domestic_leads()
+    return f"""<html><body style="font-family:sans-serif; padding:40px; background:#f8fafc;">
+        <h2 style="color:#044332;">🏡 Domestic Job Board Scraper Complete</h2>
+        <p>Successfully intercepted and routed <b>{count} new private homeowner tree leads</b> directly to senior contractors.</p>
+        <a href="/admin" style="background:#044332; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">← Return to Admin Panel</a>
+    </body></html>"""
+
+
+@app.get("/trigger-domestic-scan")
+def cron_trigger_domestic_scan(secret: Optional[str] = Query(None)):
+    verify_cron_secret(secret)
+    import domestic_scrapers
+    count = domestic_scrapers.ingest_and_route_domestic_leads()
+    return {"status": "success", "source": "domestic_multi_source", "new_leads": count}
+
+
 
 
 
