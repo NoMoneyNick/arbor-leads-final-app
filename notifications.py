@@ -77,15 +77,20 @@ def dispatch_lead_alerts(city: str, leads: list):
     
     for lead in leads:
         addr = lead.get("addr", "").upper()
-        # Check if any active outcode is in the address (e.g., "NG22 9DD" -> "NG22")
+        # Extract ALL valid UK outcodes from dirty address strings (handles missing spaces e.g. NG229DD)
+        extracted_outcodes = [m.group(1) for m in re.finditer(r'\b([A-Z]{1,2}[0-9][A-Z0-9]?)\s*([0-9][A-Z]{2})\b', addr)]
+        
         for claim in active_claims:
             outcode = claim["outcode"].upper()
-            # Regex to match outcode as a distinct word in the address
-            if re.search(r'\b' + re.escape(outcode) + r'\b', addr):
+            
+            # Match if it's a valid extracted outcode OR if it's explicitly stated as a standalone word
+            if outcode in extracted_outcodes or re.search(r'\b' + re.escape(outcode) + r'\b', addr):
                 email = claim["customer_email"]
                 if email not in customer_leads:
                     customer_leads[email] = []
-                customer_leads[email].append(lead)
+                # Prevent duplicate leads for the same customer (if multiple rules match)
+                if lead not in customer_leads[email]:
+                    customer_leads[email].append(lead)
 
     for email, routed_leads in customer_leads.items():
         rows = "".join([

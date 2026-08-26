@@ -234,11 +234,13 @@ def is_territory_claimed(outcode: str) -> bool:
     try:
         conn = get_db_conn()
         cur = conn.cursor()
-        cur.execute("SELECT active FROM territory_claims WHERE outcode = %s AND active = TRUE", (outcode.strip().upper(),))
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        return bool(row and row[0])
+        try:
+            cur.execute("SELECT active FROM territory_claims WHERE outcode = %s AND active = TRUE", (outcode.strip().upper(),))
+            row = cur.fetchone()
+            return bool(row and row[0])
+        finally:
+            cur.close()
+            conn.close()
     except Exception as e:
         logger.error(f"[Territory] Check error for {outcode}: {e}")
         return False
@@ -254,22 +256,24 @@ def claim_territory_atomically(outcode: str, customer_email: str, stripe_sub_id:
     try:
         conn = get_db_conn()
         cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO territory_claims (outcode, customer_email, stripe_subscription_id, active, claimed_at)
-            VALUES (%s, %s, %s, TRUE, NOW())
-            ON CONFLICT (outcode) DO UPDATE SET
-                customer_email = EXCLUDED.customer_email,
-                stripe_subscription_id = EXCLUDED.stripe_subscription_id,
-                active = TRUE,
-                claimed_at = NOW()
-            WHERE territory_claims.active = FALSE
-            RETURNING id;
-        """, (outcode.strip().upper(), customer_email.strip().lower(), stripe_sub_id))
-        row = cur.fetchone()
-        conn.commit()
-        cur.close()
-        conn.close()
-        return bool(row)
+        try:
+            cur.execute("""
+                INSERT INTO territory_claims (outcode, customer_email, stripe_subscription_id, active, claimed_at)
+                VALUES (%s, %s, %s, TRUE, NOW())
+                ON CONFLICT (outcode) DO UPDATE SET
+                    customer_email = EXCLUDED.customer_email,
+                    stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+                    active = TRUE,
+                    claimed_at = NOW()
+                WHERE territory_claims.active = FALSE
+                RETURNING id;
+            """, (outcode.strip().upper(), customer_email.strip().lower(), stripe_sub_id))
+            row = cur.fetchone()
+            conn.commit()
+            return bool(row)
+        finally:
+            cur.close()
+            conn.close()
     except Exception as e:
         logger.error(f"[Territory] Atomic claim error for {outcode}: {e}")
         return False
@@ -284,20 +288,22 @@ def unlock_territory_by_subscription(stripe_sub_id: str) -> bool:
     try:
         conn = get_db_conn()
         cur = conn.cursor()
-        cur.execute("""
-            UPDATE territory_claims 
-            SET active = FALSE 
-            WHERE stripe_subscription_id = %s
-            RETURNING outcode;
-        """, (stripe_sub_id,))
-        row = cur.fetchone()
-        conn.commit()
-        cur.close()
-        conn.close()
-        if row:
-            logger.info(f"[Territory] Unlocked territory {row[0]} due to subscription cancellation: {stripe_sub_id}")
-            return True
-        return False
+        try:
+            cur.execute("""
+                UPDATE territory_claims 
+                SET active = FALSE 
+                WHERE stripe_subscription_id = %s
+                RETURNING outcode;
+            """, (stripe_sub_id,))
+            row = cur.fetchone()
+            conn.commit()
+            if row:
+                logger.info(f"[Territory] Unlocked territory {row[0]} due to subscription cancellation: {stripe_sub_id}")
+                return True
+            return False
+        finally:
+            cur.close()
+            conn.close()
     except Exception as e:
         logger.error(f"[Territory] Unlock error for sub {stripe_sub_id}: {e}")
         return False
@@ -313,11 +319,13 @@ def get_active_territory_claims() -> list:
     try:
         conn = get_db_conn()
         cur = conn.cursor()
-        cur.execute("SELECT outcode, customer_email, customer_name FROM territory_claims WHERE active = TRUE;")
-        rows = cur.fetchall()
-        cur.close()
-        conn.close()
-        return [{"outcode": r[0], "customer_email": r[1], "customer_name": r[2]} for r in rows]
+        try:
+            cur.execute("SELECT outcode, customer_email, customer_name FROM territory_claims WHERE active = TRUE;")
+            rows = cur.fetchall()
+            return [{"outcode": r[0], "customer_email": r[1], "customer_name": r[2]} for r in rows]
+        finally:
+            cur.close()
+            conn.close()
     except Exception as e:
         logger.error(f"[Territory] Fetch active claims error: {e}")
         return []

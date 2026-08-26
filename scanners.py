@@ -109,6 +109,52 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str) -
 
 # ── Leeds Scanner (ArcGIS + Yorkshire Regional Councils) ──────────────────────
 
+def run_mesh_network_scan() -> int:
+    """
+    Executes a direct scan of all councils mapped in the Aggregator Mesh (Idox portals, etc.)
+    Bypasses the third-party paid API entirely to save quota.
+    """
+    try:
+        import mesh_scrapers
+    except ImportError:
+        logger.error("[MESH] mesh_scrapers.py not found.")
+        return 0
+
+    new_leads = []
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        for council_name, url in mesh_scrapers.COUNCIL_REGISTRY.items():
+            logger.info(f"[MESH] Scraping {council_name} directly from {url}...")
+            # We add an artificial delay to respect council rate limits
+            import time
+            time.sleep(2)
+            
+            leads = mesh_scrapers.scrape_mesh_council(council_name)
+            for lead in leads:
+                ref = lead.get("reference")
+                addr = lead.get("address")
+                desc = lead.get("description")
+                if not ref or not desc:
+                    continue
+                
+                inserted = _insert_lead(cur, ref, addr, desc, council_name.title())
+                if inserted:
+                    new_leads.append(inserted)
+            conn.commit()
+    except Exception as e:
+        logger.error(f"[MESH] Fatal error during mesh scan: {e}")
+    finally:
+        cur.close()
+        conn.close()
+
+    if new_leads:
+        notifications.dispatch_lead_alerts("MESH-NATIONWIDE", new_leads)
+        
+    logger.info(f"[MESH] Mesh Scan complete. {len(new_leads)} free leads extracted directly from councils.")
+    return len(new_leads)
+
+
 def scan_leeds_leads() -> int:
     """
     Scans both:

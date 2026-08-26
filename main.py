@@ -779,7 +779,7 @@ def public_homepage():
                     Data is aggregated from UK Local Planning Authorities under the Open Government Licence v3.0.
                 </p>
                 <p class="mb-2">
-                    &copy; 2024 Vector Data Labs. All rights reserved. Tree Key is a trading name of Vector Data Labs. 
+                    &copy; 2026 Vector Data Labs. All rights reserved. Tree Key is a trading name of Vector Data Labs. 
                     Platform is 256-bit SSL Encrypted & GDPR Compliant. 
                 </p>
                 <p class="text-slate-400 mt-4 mb-1 flex items-center justify-center md:justify-start gap-2">
@@ -1483,9 +1483,16 @@ def run_master_daily_pipeline():
     3. New Contractor Discovery: Queries Companies House for newly incorporated LTDs.
     4. Two-Layer Name Filter & UK Geotargeting: Purges any non-tree surgery or foreign records.
     """
-    logger.info("[PIPELINE] &#128640; Starting Master Daily Automation Pipeline...")
+    logger.info("[PIPELINE] 🚀 Starting Master Daily Automation Pipeline...")
     
-    # Stage 1: Council Planning Radar Scan
+    # Stage 0: MESH Aggregator (Free Direct Scrapers)
+    try:
+        mesh_leads = scanners.run_mesh_network_scan()
+        logger.info(f"[PIPELINE] Stage 0 Complete: Aggregator Mesh extracted {mesh_leads} free leads.")
+    except Exception as e:
+        logger.error(f"[PIPELINE] Stage 0 error (MESH): {e}")
+
+    # Stage 1: Council Planning Radar Scan (Paid Fallbacks)
     try:
         total_leads_scanned = 0
         for city in ALL_CITIES:

@@ -127,6 +127,9 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
 
     event_type = event["type"]
     data = event["data"]["object"]
+    
+    # GDPR Masking for logs
+    mask = lambda e: f"{e[0]}***@{e.split('@')[1]}" if e and '@' in e else "unknown"
 
     if event_type == "checkout.session.completed":
         session_id = data.get("id")
@@ -136,8 +139,18 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
         if outcode:
             import database
             claimed = database.claim_territory_atomically(outcode, customer_email, stripe_sub_id=data.get("subscription", ""))
-            logger.info(f"[Stripe] Territory {outcode} claimed by {customer_email}: {claimed}")
-        logger.info(f"[Stripe] Payment complete — {customer_email} — £{amount / 100:.2f}")
+            logger.info(f"[Stripe] Territory {outcode} claimed by {mask(customer_email)}: {claimed}")
+            if not claimed:
+                import notifications
+                notifications.send_system_incident_alert(
+                    category="PAYMENTS & REVENUE",
+                    title="CRITICAL PAYMENT RACE CONDITION",
+                    description=f"Customer {mask(customer_email)} paid for territory {outcode}, but the DB lock failed (likely claimed seconds prior).",
+                    impact="Customer was charged but their territory is NOT active.",
+                    action_required="Log into Stripe immediately. Refund the payment or contact the customer to select a new territory.",
+                    severity="CRITICAL"
+                )
+        logger.info(f"[Stripe] Payment complete — {mask(customer_email)} — £{amount / 100:.2f}")
         return {"event": "payment_complete", "email": customer_email,
                 "session_id": session_id, "amount_pence": amount, "outcode": outcode}
 
@@ -160,11 +173,11 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
     elif event_type == "invoice.payment_failed":
         customer_email = data.get("customer_email", "unknown")
         amount_due = data.get("amount_due", 0) / 100
-        logger.warning(f"[Stripe] Payment failed — {customer_email}")
+        logger.warning(f"[Stripe] Payment failed — {mask(customer_email)}")
         notifications.send_system_incident_alert(
             category="REVENUE & BILLING",
-            title=f"CUSTOMER PAYMENT FAILED (£{amount_due:.2f} — {customer_email})",
-            description=f"A recurring subscription renewal charge failed for customer {customer_email}.",
+            title=f"CUSTOMER PAYMENT FAILED (£{amount_due:.2f} — {mask(customer_email)})",
+            description=f"A recurring subscription renewal charge failed for customer {mask(customer_email)}.",
             impact="Customer's card was declined. If uncollected, their territory subscription will lapse.",
             action_required="Log into Stripe Dashboard (Payments > Failed) to check decline reason or contact the contractor directly.",
             metric_details={"Customer": customer_email, "Amount": f"£{amount_due:.2f}"},
