@@ -1576,11 +1576,13 @@ def marketplace_view(tier: Optional[str] = "all"):
 
     tabs_html = f"""
     <div style="margin-bottom:20px; overflow-x:auto; white-space:nowrap; padding-bottom:4px;">
-        {tab_btn("all", "🌐 All Available Leads")}
+        {tab_btn("all", "🌐 All Leads")}
+        {tab_btn("council", "🏛️ Council Statutory (TPO & S211)")}
+        {tab_btn("domestic", "🏡 Private Domestic Jobs")}
         {tab_btn("flash_hot", "🔥 Flash Hot (Day 0–3)")}
         {tab_btn("active", "⚡ Prime Quoting (Day 4–14)")}
         {tab_btn("clearance", "⏳ Clearance (<£10)")}
-        {tab_btn("granted", "✅ Approved / Granted (Ready to Fell)")}
+        {tab_btn("granted", "✅ Approved / Granted")}
     </div>
     """
 

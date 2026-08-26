@@ -1,4 +1,4 @@
-﻿import requests
+import requests
 import re
 import logging
 import datetime
@@ -450,20 +450,34 @@ def scrape_fixmystreet_tree_hazards() -> List[Dict[str, Any]]:
                     if not title_elem:
                         continue
                     title = title_elem.get_text(strip=True)
-                    if len(title) < 10 or not any(k in title.lower() for k in ["tree", "branch", "conifer", "fell", "fallen", "hedge", "root", "decay"]):
-                        continue
-
+                    
                     snippet_elem = item.find(["p", "span"], class_=re.compile(r"desc|text|detail"))
                     snippet = snippet_elem.get_text(strip=True) if snippet_elem else title
 
-                    ref = f"FMS-{abs(hash(title + city_name)) % 1000000}"
-                    score = _score_domestic_job(title + " " + snippet)
+                    full_raw = f"{title} {snippet}"
+                    
+                    # 1. Strict Recency Filter: Reject historical archive years
+                    if any(y in full_raw for y in ["2008", "2009", "2010", "2011", "2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025"]):
+                        continue
+
+                    # 2. Action Verb Filter: Reject pure street/place nouns like "King's Hedges"
+                    action_verbs = ["fell", "felling", "cut", "cutting", "prune", "pruning", "overgrown", "dangerous", "fallen", "hazard", "blocking", "dismantle", "stump", "reduce", "reduction", "trim", "trimming"]
+                    if not any(v in full_raw.lower() for v in action_verbs):
+                        continue
+
+                    # 3. Clean Text Stripper: Remove internal timestamps & '(sent to both)'
+                    clean_title = re.sub(r'\d{1,2}:\d{2}.*', '', title).strip()
+                    clean_snippet = re.sub(r'\(sent to both\).*', '', snippet).replace('\n', ' ').strip()
+                    clean_snippet = re.sub(r'\s+', ' ', clean_snippet)
+
+                    ref = f"FMS-{abs(hash(clean_title + city_name)) % 1000000}"
+                    score = _score_domestic_job(clean_title + " " + clean_snippet)
 
                     found_leads.append({
                         "reference": ref,
                         "council_source": f"Citizen Hazard Report ({city_name})",
                         "address": f"{city_name} ({outcode}), UK",
-                        "summary": f"⚠️ Resident Tree Hazard / Work Needed: {title}. Note: {snippet[:260]}",
+                        "summary": f"⚠️ Resident Tree Hazard / Work Needed: {clean_title}. Note: {clean_snippet[:220]}",
                         "lead_score": score,
                         "lead_price": 49 if score == "large" else 25,
                         "lead_source_type": "domestic_classified",
@@ -547,13 +561,20 @@ def ingest_and_route_domestic_leads() -> int:
     inserted_count = 0
     new_leads_for_routing = []
 
-    if not database.SURL or not all_leads:
+    if not database.SURL:
         return 0
 
     try:
         conn = database.get_db_conn()
         cur = conn.cursor()
         try:
+            # Clean historical archive entries strictly for domestic_classified (leaving council_planning intact)
+            cur.execute("""
+                DELETE FROM leads 
+                WHERE lead_source_type = 'domestic_classified' 
+                  AND (summary LIKE '%2009%' OR summary LIKE '%2008%' OR summary LIKE '%(sent to both)%');
+            """)
+
             for l in all_leads:
                 try:
                     cur.execute("""

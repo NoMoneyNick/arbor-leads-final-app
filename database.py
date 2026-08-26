@@ -762,7 +762,8 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
 def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 40) -> list:
     """
     Returns unallocated leads enriched with their dynamic statutory freshness calculation.
-    Supports filtering by tier ('flash_hot', 'active', 'clearance', 'granted').
+    Supports filtering by tier ('council', 'domestic', 'flash_hot', 'active', 'clearance', 'granted').
+    Enforces strict separation so council planning notices and private domestic leads are never conflated.
     """
     if not SURL:
         return []
@@ -772,22 +773,45 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
         try:
             cur.execute("""
                 SELECT id, reference, address, summary, council_source, lead_score, lead_price, 
-                       discovered_at, planning_status, registered_date
+                       discovered_at, planning_status, registered_date,
+                       COALESCE(lead_source_type, 'council_planning') as source_type
                 FROM leads 
                 WHERE status = 'new' OR status IS NULL 
                 ORDER BY discovered_at DESC 
-                LIMIT 100;
+                LIMIT 150;
             """)
             rows = cur.fetchall()
-            cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date"]
+            cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date", "source_type"]
             raw_leads = [dict(zip(cols, r)) for r in rows]
 
             enriched = []
             for l in raw_leads:
                 freshness = calculate_lead_freshness(l["discovered_at"], l["status"], l["summary"])
                 l.update(freshness)
-                if not filter_tier or filter_tier == "all" or l["tier"] == filter_tier:
+
+                # Custom source badges
+                if l["source_type"] == "domestic_classified":
+                    l["badge_bg"] = "#eff6ff"
+                    l["badge_color"] = "#1d4ed8"
+                    l["badge_text"] = "🏡 Private Domestic"
+                    if "Tender" in l["summary"] or "Estate" in l["summary"]:
+                        l["badge_bg"] = "#fdf4ff"
+                        l["badge_color"] = "#86198f"
+                        l["badge_text"] = "🏢 Estate Tender"
+                elif l["source_type"] == "council_planning":
+                    if not l.get("badge_text") or l["badge_text"] == "Lead":
+                        l["badge_text"] = "🏛️ Council Statutory"
+
+                # Filter routing
+                if not filter_tier or filter_tier == "all":
                     enriched.append(l)
+                elif filter_tier == "council" and l["source_type"] == "council_planning":
+                    enriched.append(l)
+                elif filter_tier == "domestic" and l["source_type"] == "domestic_classified":
+                    enriched.append(l)
+                elif l["tier"] == filter_tier:
+                    enriched.append(l)
+
                 if len(enriched) >= limit:
                     break
 
