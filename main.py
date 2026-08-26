@@ -3853,7 +3853,15 @@ def run_master_daily_pipeline():
     4. Two-Layer Name Filter & UK Geotargeting: Purges any non-tree surgery or foreign records.
     """
     logger.info("[PIPELINE] 🚀 Starting Master Daily Automation Pipeline...")
-    
+
+    # Stage -1: Monthly Quota Reset (safe daily call — only fires on 1st of month)
+    try:
+        reset_count = database.reset_monthly_quotas_if_needed()
+        if reset_count > 0:
+            logger.info(f"[PIPELINE] Monthly Reset: {reset_count} contractor quotas refreshed for new month.")
+    except Exception as e:
+        logger.error(f"[PIPELINE] Monthly reset error: {e}")
+
     # Stage 0: MESH Aggregator (Free Direct Scrapers)
     try:
         mesh_leads = scanners.run_mesh_network_scan()

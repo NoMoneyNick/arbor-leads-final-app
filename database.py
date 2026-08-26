@@ -305,6 +305,45 @@ def init_db():
         logger.error(f"[DB] Initialization error: {e}")
 
 
+
+def reset_monthly_quotas_if_needed() -> int:
+    """
+    Resets delivered_this_month to 0 for all active subscribers at the start of each new month.
+    Safe to call daily — only resets when the last dispatch was in a previous calendar month.
+    Returns number of subscriber rows reset.
+    """
+    import datetime
+    if not SURL:
+        return 0
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE contractor_subscriptions
+                SET delivered_this_month = 0
+                WHERE active = TRUE
+                  AND delivered_this_month > 0
+                  AND (
+                    last_dispatched_at IS NULL
+                    OR DATE_TRUNC('month', last_dispatched_at) < DATE_TRUNC('month', NOW())
+                  )
+                RETURNING id;
+            """)
+            reset_rows = cur.fetchall()
+            conn.commit()
+            count = len(reset_rows)
+            if count > 0:
+                logger.info(f"[Monthly Reset] Reset delivered_this_month for {count} subscribers.")
+            return count
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Monthly Reset] Error resetting quotas: {e}")
+        return 0
+
+
 def increment_api_usage(api_name: str = "UK Planning API", increment: int = 1, cap: int = 500) -> dict:
     """
     Increments monthly API counter and runs predictive velocity forecasting.
