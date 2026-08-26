@@ -2966,6 +2966,36 @@ def run_domestic_scan_now():
     }
 
 
+@app.get("/api/purge-old-domestic-archives")
+def purge_old_domestic_archives():
+    """
+    Purges historical archive noise from domestic leads table without touching council records.
+    """
+    deleted = 0
+    try:
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            DELETE FROM leads 
+            WHERE lead_source_type = 'domestic_classified' 
+              AND (
+                summary LIKE '%2009%' 
+                OR summary LIKE '%2008%' 
+                OR summary LIKE '%(sent to both)%'
+                OR summary LIKE '%King''s Hedges%'
+              )
+            RETURNING id;
+        """)
+        deleted = len(cur.fetchall())
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+    return {"status": "success", "purged_records": deleted}
+
+
 
 
 
