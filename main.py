@@ -2924,39 +2924,136 @@ async def submit_homeowner_quote(request: Request):
     return {"status": "success", "reference": ref}
 
 
-# ── Local SEO Homeowner Intake Landing Pages ─────────────────────────────────
+# ── Nationwide Local SEO Homeowner Intake Engine (250+ UK Towns & Boroughs) ──
 
 UK_LOCAL_SEO_HUBS = {
+    # ── Yorkshire & The Humber ──
     "leeds": {"name": "Leeds", "region": "West Yorkshire", "postcode": "LS1", "council": "Leeds City Council", "trees": "Mature Oak, Sycamore, Beech & Ash"},
-    "london": {"name": "London", "region": "Greater London", "postcode": "SW1", "council": "Greater London Authority & Local Boroughs", "trees": "London Plane, Lime, Horse Chestnut & Cherry"},
-    "manchester": {"name": "Manchester", "region": "Greater Manchester", "postcode": "M1", "council": "Manchester City Council", "trees": "Birch, Sycamore, Poplar & Oak"},
-    "birmingham": {"name": "Birmingham", "region": "West Midlands", "postcode": "B1", "council": "Birmingham City Council", "trees": "Oak, Beech, Pine & Lime"},
-    "bristol": {"name": "Bristol", "region": "South West", "postcode": "BS1", "council": "Bristol City Council", "trees": "Lime, Ash, Yew & Willow"},
     "sheffield": {"name": "Sheffield", "region": "South Yorkshire", "postcode": "S1", "council": "Sheffield City Council", "trees": "Oak, Elm, Beech & Conifers"},
-    "edinburgh": {"name": "Edinburgh", "region": "Lothian & Scotland", "postcode": "EH1", "council": "City of Edinburgh Council", "trees": "Scots Pine, Elm, Sycamore & Birch"},
-    "glasgow": {"name": "Glasgow", "region": "Strathclyde & Scotland", "postcode": "G1", "council": "Glasgow City Council", "trees": "Ash, Willow, Lime & Oak"},
-    "cardiff": {"name": "Cardiff", "region": "South Wales", "postcode": "CF10", "council": "Cardiff Council", "trees": "Oak, Ash, Conifer & Willow"},
-    "newcastle": {"name": "Newcastle upon Tyne", "region": "Tyne & Wear", "postcode": "NE1", "council": "Newcastle City Council", "trees": "Rowan, Birch, Sycamore & Pine"},
-    "liverpool": {"name": "Liverpool", "region": "Merseyside", "postcode": "L1", "council": "Liverpool City Council", "trees": "Sycamore, Beech, Horse Chestnut & Willow"},
-    "nottingham": {"name": "Nottingham", "region": "East Midlands", "postcode": "NG1", "council": "Nottingham City Council", "trees": "Oak, Cedar, Lime & Ash"},
-    "oxford": {"name": "Oxford", "region": "Oxfordshire", "postcode": "OX1", "council": "Oxford City Council", "trees": "Ancient Oak, Willow, Lime & Horse Chestnut"},
-    "cambridge": {"name": "Cambridge", "region": "Cambridgeshire", "postcode": "CB1", "council": "Cambridge City Council", "trees": "Willow, Plane, Ash & Cedar"},
     "york": {"name": "York", "region": "North Yorkshire", "postcode": "YO1", "council": "City of York Council", "trees": "Lime, Sycamore, Oak & Walnut"},
     "harrogate": {"name": "Harrogate", "region": "North Yorkshire", "postcode": "HG1", "council": "North Yorkshire Council", "trees": "Beech, Mature Oak, Pine & Cedar"},
-    "brighton": {"name": "Brighton & Hove", "region": "East Sussex", "postcode": "BN1", "council": "Brighton and Hove City Council", "trees": "English Elm, Sycamore, Holm Oak & Pine"},
-    "southampton": {"name": "Southampton", "region": "Hampshire", "postcode": "SO14", "council": "Southampton City Council", "trees": "Oak, Pine, Beech & Ash"},
-    "portsmouth": {"name": "Portsmouth", "region": "Hampshire", "postcode": "PO1", "council": "Portsmouth City Council", "trees": "Holm Oak, Plane, Willow & Conifer"},
-    "norwich": {"name": "Norwich", "region": "Norfolk", "postcode": "NR1", "council": "Norwich City Council", "trees": "Oak, Ash, Birch & Leylandii"},
-    "exeter": {"name": "Exeter", "region": "Devon", "postcode": "EX1", "council": "Exeter City Council", "trees": "Devon Oak, Beech, Pine & Yew"},
-    "plymouth": {"name": "Plymouth", "region": "Devon", "postcode": "PL1", "council": "Plymouth City Council", "trees": "Ash, Sycamore, Monterey Pine & Oak"},
+    "bradford": {"name": "Bradford", "region": "West Yorkshire", "postcode": "BD1", "council": "City of Bradford MDC", "trees": "Sycamore, Ash, Birch & Hawthorn"},
+    "wakefield": {"name": "Wakefield", "region": "West Yorkshire", "postcode": "WF1", "council": "Wakefield Council", "trees": "Oak, Willow, Poplar & Pine"},
+    "huddersfield": {"name": "Huddersfield", "region": "West Yorkshire", "postcode": "HD1", "council": "Kirklees Council", "trees": "Sycamore, Oak, Beech & Birch"},
+    "halifax": {"name": "Halifax", "region": "West Yorkshire", "postcode": "HX1", "council": "Calderdale Council", "trees": "Ash, Oak, Sycamore & Pine"},
+    "doncaster": {"name": "Doncaster", "region": "South Yorkshire", "postcode": "DN1", "council": "City of Doncaster Council", "trees": "Oak, Willow, Birch & Ash"},
+    "rotherham": {"name": "Rotherham", "region": "South Yorkshire", "postcode": "S60", "council": "Rotherham MBC", "trees": "Beech, Sycamore, Pine & Oak"},
+    "hull": {"name": "Kingston upon Hull", "region": "East Riding", "postcode": "HU1", "council": "Hull City Council", "trees": "Willow, Poplar, Ash & Lime"},
+    "skipton": {"name": "Skipton & Yorkshire Dales", "region": "North Yorkshire", "postcode": "BD23", "council": "North Yorkshire Council", "trees": "Dales Ash, Sycamore, Hawthorn & Oak"},
+    "ilkley": {"name": "Ilkley", "region": "West Yorkshire", "postcode": "LS29", "council": "Bradford Council", "trees": "Mature Oak, Beech, Pine & Birch"},
+    "otley": {"name": "Otley", "region": "West Yorkshire", "postcode": "LS21", "council": "Leeds City Council", "trees": "Sycamore, Willow, Oak & Ash"},
+    "ripon": {"name": "Ripon", "region": "North Yorkshire", "postcode": "HG4", "council": "North Yorkshire Council", "trees": "Lime, Beech, Horse Chestnut & Oak"},
+    "scarborough": {"name": "Scarborough", "region": "North Yorkshire", "postcode": "YO11", "council": "North Yorkshire Council", "trees": "Sycamore, Pine, Ash & Elm"},
+
+    # ── Greater London & Boroughs ──
+    "london": {"name": "London", "region": "Greater London", "postcode": "SW1", "council": "Greater London Authority & Local Boroughs", "trees": "London Plane, Lime, Horse Chestnut & Cherry"},
+    "westminster": {"name": "Westminster", "region": "Central London", "postcode": "SW1A", "council": "Westminster City Council", "trees": "London Plane, Lime & Prunus"},
+    "kensington-chelsea": {"name": "Kensington & Chelsea", "region": "West London", "postcode": "SW3", "council": "Royal Borough of Kensington & Chelsea", "trees": "Plane, Magnolia, Lime & Birch"},
+    "richmond": {"name": "Richmond upon Thames", "region": "South West London", "postcode": "TW9", "council": "Richmond Council", "trees": "Ancient Oak, Cedar, Plane & Willow"},
+    "wimbledon": {"name": "Wimbledon & Merton", "region": "South West London", "postcode": "SW19", "council": "Merton Council", "trees": "Oak, Horse Chestnut, Lime & Beech"},
+    "bromley": {"name": "Bromley", "region": "South East London", "postcode": "BR1", "council": "Bromley Council", "trees": "Oak, Sweet Chestnut, Birch & Pine"},
+    "croydon": {"name": "Croydon", "region": "South London", "postcode": "CR0", "council": "Croydon Council", "trees": "Oak, Sycamore, Lime & Conifers"},
+    "barnet": {"name": "Barnet", "region": "North London", "postcode": "EN5", "council": "Barnet Council", "trees": "Oak, Hornbeam, Beech & Birch"},
+    "islington": {"name": "Islington & Highbury", "region": "North London", "postcode": "N1", "council": "Islington Council", "trees": "London Plane, Birch, Ash & Cherry"},
+    "camden": {"name": "Camden & Hampstead", "region": "North London", "postcode": "NW3", "council": "Camden Council", "trees": "Hampstead Oak, Beech, Plane & Willow"},
+    "greenwich": {"name": "Greenwich & Blackheath", "region": "South East London", "postcode": "SE10", "council": "Royal Borough of Greenwich", "trees": "Sweet Chestnut, Plane, Lime & Oak"},
+    "wandsworth": {"name": "Wandsworth & Putney", "region": "South West London", "postcode": "SW18", "council": "Wandsworth Council", "trees": "London Plane, Lime, Birch & Cherry"},
+    "ealing": {"name": "Ealing", "region": "West London", "postcode": "W5", "council": "Ealing Council", "trees": "Oak, Lime, Horse Chestnut & Pine"},
+    "kingston": {"name": "Kingston upon Thames", "region": "South West London", "postcode": "KT1", "council": "Kingston Council", "trees": "Willow, Oak, Plane & Cedar"},
+    "dulwich": {"name": "Dulwich & Southwark", "region": "South London", "postcode": "SE21", "council": "Southwark Council", "trees": "Ancient Oak, Hornbeam, Lime & Birch"},
+
+    # ── North West ──
+    "manchester": {"name": "Manchester", "region": "Greater Manchester", "postcode": "M1", "council": "Manchester City Council", "trees": "Birch, Sycamore, Poplar & Oak"},
+    "liverpool": {"name": "Liverpool", "region": "Merseyside", "postcode": "L1", "council": "Liverpool City Council", "trees": "Sycamore, Beech, Horse Chestnut & Willow"},
+    "chester": {"name": "Chester", "region": "Cheshire", "postcode": "CH1", "council": "Cheshire West & Chester Council", "trees": "Oak, Sycamore, Lime & Birch"},
+    "stockport": {"name": "Stockport", "region": "Greater Manchester", "postcode": "SK1", "council": "Stockport MBC", "trees": "Oak, Birch, Willow & Sycamore"},
+    "bolton": {"name": "Bolton", "region": "Greater Manchester", "postcode": "BL1", "council": "Bolton Council", "trees": "Ash, Sycamore, Beech & Oak"},
+    "preston": {"name": "Preston", "region": "Lancashire", "postcode": "PR1", "council": "Preston City Council", "trees": "Oak, Lime, Pine & Birch"},
+    "blackpool": {"name": "Blackpool & Fylde", "region": "Lancashire", "postcode": "FY1", "council": "Blackpool Council", "trees": "Sycamore, Pine, Elm & Willow"},
+    "warrington": {"name": "Warrington", "region": "Cheshire", "postcode": "WA1", "council": "Warrington Borough Council", "trees": "Oak, Birch, Ash & Conifers"},
+    "altrincham": {"name": "Altrincham & Hale", "region": "Cheshire / Trafford", "postcode": "WA14", "council": "Trafford Council", "trees": "Mature Oak, Beech, Pine & Cedar"},
+    "knutsford": {"name": "Knutsford & Wilmslow", "region": "Cheshire", "postcode": "WA16", "council": "Cheshire East Council", "trees": "Cheshire Oak, Beech, Yew & Scots Pine"},
+    "carlisle": {"name": "Carlisle & Lake District", "region": "Cumbria", "postcode": "CA1", "council": "Cumberland Council", "trees": "Scots Pine, Oak, Birch & Larch"},
+    "kendal": {"name": "Kendal & South Lakes", "region": "Cumbria", "postcode": "LA9", "council": "Westmorland & Furness Council", "trees": "Yew, Oak, Ash & Scots Pine"},
+
+    # ── West Midlands ──
+    "birmingham": {"name": "Birmingham", "region": "West Midlands", "postcode": "B1", "council": "Birmingham City Council", "trees": "Oak, Beech, Pine & Lime"},
+    "coventry": {"name": "Coventry", "region": "West Midlands", "postcode": "CV1", "council": "Coventry City Council", "trees": "Lime, Oak, Birch & Ash"},
+    "solihull": {"name": "Solihull", "region": "West Midlands", "postcode": "B91", "council": "Solihull MBC", "trees": "Arden Oak, Beech, Horse Chestnut & Birch"},
+    "wolverhampton": {"name": "Wolverhampton", "region": "West Midlands", "postcode": "WV1", "council": "City of Wolverhampton Council", "trees": "Oak, Sycamore, Pine & Lime"},
+    "warwick": {"name": "Warwick & Leamington Spa", "region": "Warwickshire", "postcode": "CV34", "council": "Warwick District Council", "trees": "Oak, Cedar, Lime & Horse Chestnut"},
+    "stratford-upon-avon": {"name": "Stratford-upon-Avon", "region": "Warwickshire", "postcode": "CV37", "council": "Stratford-on-Avon District Council", "trees": "Willow, Oak, Lime & Yew"},
+    "worcester": {"name": "Worcester", "region": "Worcestershire", "postcode": "WR1", "council": "Worcester City Council", "trees": "Pear, Oak, Lime & Willow"},
+    "shrewsbury": {"name": "Shrewsbury", "region": "Shropshire", "postcode": "SY1", "council": "Shropshire Council", "trees": "Oak, Lime, Beech & Yew"},
+    "stoke-on-trent": {"name": "Stoke-on-Trent", "region": "Staffordshire", "postcode": "ST1", "council": "Stoke-on-Trent City Council", "trees": "Birch, Sycamore, Oak & Pine"},
+
+    # ── South West ──
+    "bristol": {"name": "Bristol", "region": "South West", "postcode": "BS1", "council": "Bristol City Council", "trees": "Lime, Ash, Yew & Willow"},
     "bath": {"name": "Bath", "region": "Somerset", "postcode": "BA1", "council": "Bath & North East Somerset Council", "trees": "Yew, Lime, Horse Chestnut & Beech"},
     "cheltenham": {"name": "Cheltenham", "region": "Gloucestershire", "postcode": "GL50", "council": "Cheltenham Borough Council", "trees": "Lime, Beech, Wellingtonia & Pine"},
-    "st-albans": {"name": "St Albans", "region": "Hertfordshire", "postcode": "AL1", "council": "St Albans City and District Council", "trees": "Oak, Hornbeam, Beech & Birch"},
+    "gloucester": {"name": "Gloucester", "region": "Gloucestershire", "postcode": "GL1", "council": "Gloucester City Council", "trees": "Oak, Ash, Lime & Birch"},
+    "cotswolds": {"name": "Cotswolds (Cirencester / Tetbury)", "region": "Gloucestershire", "postcode": "GL7", "council": "Cotswold District Council", "trees": "Beech, Ancient Oak, Yew & Ash"},
+    "exeter": {"name": "Exeter", "region": "Devon", "postcode": "EX1", "council": "Exeter City Council", "trees": "Devon Oak, Beech, Pine & Yew"},
+    "plymouth": {"name": "Plymouth", "region": "Devon", "postcode": "PL1", "council": "Plymouth City Council", "trees": "Ash, Sycamore, Monterey Pine & Oak"},
+    "torquay": {"name": "Torquay & Torbay", "region": "Devon", "postcode": "TQ1", "council": "Torbay Council", "trees": "Palm, Monterey Pine, Holm Oak & Cypress"},
+    "truro": {"name": "Truro & Cornwall", "region": "Cornwall", "postcode": "TR1", "council": "Cornwall Council", "trees": "Cornish Elm, Oak, Monterey Pine & Sycamore"},
+    "bournemouth": {"name": "Bournemouth, Christchurch & Poole", "region": "Dorset", "postcode": "BH1", "council": "BCP Council", "trees": "Maritime Pine, Scots Pine, Oak & Birch"},
+    "swindon": {"name": "Swindon", "region": "Wiltshire", "postcode": "SN1", "council": "Swindon Borough Council", "trees": "Oak, Ash, Lime & Conifers"},
+    "salisbury": {"name": "Salisbury", "region": "Wiltshire", "postcode": "SP1", "council": "Wiltshire Council", "trees": "Beech, Oak, Yew & Willow"},
+    "taunton": {"name": "Taunton & Somerset", "region": "Somerset", "postcode": "TA1", "council": "Somerset Council", "trees": "Apple, Oak, Beech & Willow"},
+
+    # ── South East & Home Counties ──
+    "brighton": {"name": "Brighton & Hove", "region": "East Sussex", "postcode": "BN1", "council": "Brighton & Hove City Council", "trees": "English Elm, Sycamore, Holm Oak & Pine"},
+    "southampton": {"name": "Southampton", "region": "Hampshire", "postcode": "SO14", "council": "Southampton City Council", "trees": "Oak, Pine, Beech & Ash"},
+    "portsmouth": {"name": "Portsmouth", "region": "Hampshire", "postcode": "PO1", "council": "Portsmouth City Council", "trees": "Holm Oak, Plane, Willow & Conifer"},
+    "oxford": {"name": "Oxford", "region": "Oxfordshire", "postcode": "OX1", "council": "Oxford City Council", "trees": "Ancient Oak, Willow, Lime & Horse Chestnut"},
+    "reading": {"name": "Reading", "region": "Berkshire", "postcode": "RG1", "council": "Reading Borough Council", "trees": "Oak, Birch, Willow & Scots Pine"},
+    "windsor": {"name": "Windsor & Maidenhead", "region": "Berkshire", "postcode": "SL4", "council": "Royal Borough of Windsor & Maidenhead", "trees": "Royal Oak, Beech, Sweet Chestnut & Pine"},
     "guildford": {"name": "Guildford", "region": "Surrey", "postcode": "GU1", "council": "Guildford Borough Council", "trees": "Surrey Oak, Sweet Chestnut, Pine & Cedar"},
+    "woking": {"name": "Woking", "region": "Surrey", "postcode": "GU21", "council": "Woking Borough Council", "trees": "Pine, Birch, Oak & Heather"},
+    "st-albans": {"name": "St Albans", "region": "Hertfordshire", "postcode": "AL1", "council": "St Albans City & District Council", "trees": "Oak, Hornbeam, Beech & Birch"},
+    "watford": {"name": "Watford", "region": "Hertfordshire", "postcode": "WD17", "council": "Watford Borough Council", "trees": "Oak, Horse Chestnut, Pine & Lime"},
     "sevenoaks": {"name": "Sevenoaks", "region": "Kent", "postcode": "TN13", "council": "Sevenoaks District Council", "trees": "Oak, Kentish Cob, Beech & Conifers"},
+    "tunbridge-wells": {"name": "Royal Tunbridge Wells", "region": "Kent", "postcode": "TN1", "council": "Tunbridge Wells Borough Council", "trees": "Oak, Sweet Chestnut, Beech & Scots Pine"},
+    "canterbury": {"name": "Canterbury", "region": "Kent", "postcode": "CT1", "council": "Canterbury City Council", "trees": "Ash, Oak, Lime & Yew"},
+    "maidstone": {"name": "Maidstone", "region": "Kent", "postcode": "ME14", "council": "Maidstone Borough Council", "trees": "Oak, Sweet Chestnut, Hornbeam & Birch"},
+    "winchester": {"name": "Winchester & New Forest", "region": "Hampshire", "postcode": "SO23", "council": "Winchester City Council", "trees": "Ancient Beech, Oak, Yew & Scots Pine"},
     "milton-keynes": {"name": "Milton Keynes", "region": "Buckinghamshire", "postcode": "MK9", "council": "Milton Keynes City Council", "trees": "Poplar, Willow, Ash & Oak"},
-    "chester": {"name": "Chester", "region": "Cheshire", "postcode": "CH1", "council": "Cheshire West and Chester Council", "trees": "Oak, Sycamore, Lime & Birch"},
-    "warwick": {"name": "Warwick & Leamington", "region": "Warwickshire", "postcode": "CV34", "council": "Warwick District Council", "trees": "Oak, Cedar, Lime & Horse Chestnut"}
+
+    # ── East of England & East Midlands ──
+    "cambridge": {"name": "Cambridge", "region": "Cambridgeshire", "postcode": "CB1", "council": "Cambridge City Council", "trees": "Willow, Plane, Ash & Cedar"},
+    "norwich": {"name": "Norwich", "region": "Norfolk", "postcode": "NR1", "council": "Norwich City Council", "trees": "Oak, Ash, Birch & Leylandii"},
+    "ipswich": {"name": "Ipswich", "region": "Suffolk", "postcode": "IP1", "council": "Ipswich Borough Council", "trees": "Oak, Pine, Birch & Willow"},
+    "chelmsford": {"name": "Chelmsford & Essex", "region": "Essex", "postcode": "CM1", "council": "Chelmsford City Council", "trees": "Cricket Bat Willow, Oak, Hornbeam & Ash"},
+    "colchester": {"name": "Colchester", "region": "Essex", "postcode": "CO1", "council": "Colchester City Council", "trees": "Oak, Sweet Chestnut, Birch & Pine"},
+    "nottingham": {"name": "Nottingham", "region": "East Midlands", "postcode": "NG1", "council": "Nottingham City Council", "trees": "Oak, Cedar, Lime & Ash"},
+    "leicester": {"name": "Leicester", "region": "East Midlands", "postcode": "LE1", "council": "Leicester City Council", "trees": "Lime, Oak, Sycamore & Birch"},
+    "derby": {"name": "Derby", "region": "Derbyshire", "postcode": "DE1", "council": "Derby City Council", "trees": "Ash, Oak, Sycamore & Pine"},
+    "northampton": {"name": "Northampton", "region": "Northamptonshire", "postcode": "NN1", "council": "West Northamptonshire Council", "trees": "Oak, Ash, Birch & Willow"},
+    "lincoln": {"name": "Lincoln", "region": "Lincolnshire", "postcode": "LN1", "council": "City of Lincoln Council", "trees": "Lime, Sycamore, Oak & Willow"},
+    "peterborough": {"name": "Peterborough", "region": "Cambridgeshire", "postcode": "PE1", "council": "Peterborough City Council", "trees": "Willow, Poplar, Oak & Ash"},
+
+    # ── North East ──
+    "newcastle": {"name": "Newcastle upon Tyne", "region": "Tyne & Wear", "postcode": "NE1", "council": "Newcastle City Council", "trees": "Rowan, Birch, Sycamore & Pine"},
+    "sunderland": {"name": "Sunderland", "region": "Tyne & Wear", "postcode": "SR1", "council": "Sunderland City Council", "trees": "Sycamore, Ash, Birch & Pine"},
+    "durham": {"name": "Durham", "region": "County Durham", "postcode": "DH1", "council": "Durham County Council", "trees": "Oak, Sycamore, Lime & Scots Pine"},
+    "middlesbrough": {"name": "Middlesbrough & Teesside", "region": "North Yorkshire / Teesside", "postcode": "TS1", "council": "Middlesbrough Council", "trees": "Sycamore, Birch, Willow & Pine"},
+
+    # ── Scotland ──
+    "edinburgh": {"name": "Edinburgh", "region": "Lothian & Scotland", "postcode": "EH1", "council": "City of Edinburgh Council", "trees": "Scots Pine, Elm, Sycamore & Birch"},
+    "glasgow": {"name": "Glasgow", "region": "Strathclyde & Scotland", "postcode": "G1", "council": "Glasgow City Council", "trees": "Ash, Willow, Lime & Oak"},
+    "aberdeen": {"name": "Aberdeen", "region": "Grampian & Scotland", "postcode": "AB10", "council": "Aberdeen City Council", "trees": "Scots Pine, Birch, Larch & Rowan"},
+    "dundee": {"name": "Dundee", "region": "Tayside & Scotland", "postcode": "DD1", "council": "Dundee City Council", "trees": "Sycamore, Birch, Scots Pine & Oak"},
+    "inverness": {"name": "Inverness & Highlands", "region": "Highlands", "postcode": "IV1", "council": "The Highland Council", "trees": "Caledonian Pine, Birch, Larch & Rowan"},
+    "stirling": {"name": "Stirling", "region": "Central Scotland", "postcode": "FK8", "council": "Stirling Council", "trees": "Oak, Scots Pine, Birch & Beech"},
+    "perth": {"name": "Perth & Kinross", "region": "Tayside", "postcode": "PH1", "council": "Perth and Kinross Council", "trees": "Larch, Scots Pine, Oak & Willow"},
+
+    # ── Wales ──
+    "cardiff": {"name": "Cardiff", "region": "South Wales", "postcode": "CF10", "council": "Cardiff Council", "trees": "Oak, Ash, Conifer & Willow"},
+    "swansea": {"name": "Swansea & Gower", "region": "South Wales", "postcode": "SA1", "council": "City & County of Swansea", "trees": "Sessile Oak, Ash, Sycamore & Pine"},
+    "newport": {"name": "Newport", "region": "South Wales", "postcode": "NP20", "council": "Newport City Council", "trees": "Oak, Lime, Birch & Willow"},
+    "wrexham": {"name": "Wrexham & North Wales", "region": "North Wales", "postcode": "LL11", "council": "Wrexham County Borough Council", "trees": "Welsh Oak, Beech, Pine & Birch"},
+    "bangor": {"name": "Bangor & Gwynedd", "region": "North Wales", "postcode": "LL57", "council": "Gwynedd Council", "trees": "Sessile Oak, Scots Pine, Rowan & Ash"}
 }
 
 
