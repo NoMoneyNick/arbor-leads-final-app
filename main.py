@@ -3056,19 +3056,160 @@ UK_LOCAL_SEO_HUBS = {
     "bangor": {"name": "Bangor & Gwynedd", "region": "North Wales", "postcode": "LL57", "council": "Gwynedd Council", "trees": "Sessile Oak, Scots Pine, Rowan & Ash"}
 }
 
+# Master UK Postcode Prefix to Local Authority / County Resolution Matrix (All 124 Areas)
+UK_ALL_POSTCODE_AREAS = {
+    "AB": ("Aberdeen & Aberdeenshire", "Grampian", "Aberdeen City Council"),
+    "AL": ("St Albans & Harpenden", "Hertfordshire", "St Albans City and District Council"),
+    "B":  ("Birmingham & Solihull", "West Midlands", "Birmingham City Council"),
+    "BA": ("Bath & North East Somerset", "Somerset", "Bath & North East Somerset Council"),
+    "BB": ("Blackburn & Burnley", "Lancashire", "Blackburn with Darwen Borough Council"),
+    "BD": ("Bradford, Keighley & Skipton", "West / North Yorkshire", "Bradford & North Yorkshire Councils"),
+    "BH": ("Bournemouth, Poole & Christchurch", "Dorset", "BCP Council"),
+    "BL": ("Bolton & Bury", "Greater Manchester", "Bolton & Bury Councils"),
+    "BN": ("Brighton, Hove & Eastbourne", "East Sussex", "Brighton & Hove City Council"),
+    "BR": ("Bromley, Orpington & Beckenham", "Greater London", "London Borough of Bromley"),
+    "BS": ("Bristol & North Somerset", "South West", "Bristol City Council"),
+    "CA": ("Carlisle, Penrith & Lake District", "Cumbria", "Cumberland & Westmorland Councils"),
+    "CB": ("Cambridge & Ely", "Cambridgeshire", "Greater Cambridge Planning"),
+    "CF": ("Cardiff & Vale of Glamorgan", "South Wales", "Cardiff Council"),
+    "CH": ("Chester, Wirral & Ellesmere Port", "Cheshire", "Cheshire West & Wirral Councils"),
+    "CM": ("Chelmsford, Brentwood & Harlow", "Essex", "Chelmsford City Council"),
+    "CO": ("Colchester & Clacton", "Essex", "Colchester City Council"),
+    "CR": ("Croydon, Purley & Caterham", "Greater London / Surrey", "London Borough of Croydon"),
+    "CT": ("Canterbury, Thanet & Dover", "Kent", "Canterbury City Council"),
+    "CV": ("Coventry, Warwick & Stratford", "West Midlands", "Coventry & Warwick Councils"),
+    "CW": ("Crewe, Northwich & Nantwich", "Cheshire", "Cheshire East Council"),
+    "DA": ("Dartford & Bexley", "Kent / London", "Dartford & Bexley Councils"),
+    "DD": ("Dundee & Angus", "Tayside", "Dundee City Council"),
+    "DE": ("Derby & Peak District", "Derbyshire", "Derby City Council"),
+    "DG": ("Dumfries & Galloway", "South West Scotland", "Dumfries and Galloway Council"),
+    "DH": ("Durham & Chester-le-Street", "County Durham", "Durham County Council"),
+    "DL": ("Darlington, Richmond & Dales", "County Durham / North Yorks", "Darlington Borough Council"),
+    "DN": ("Doncaster, Scunthorpe & Grimsby", "South Yorks / Lincs", "City of Doncaster Council"),
+    "DT": ("Dorchester & Weymouth", "Dorset", "Dorset Council"),
+    "DY": ("Dudley & Stourbridge", "West Midlands", "Dudley MBC"),
+    "E":  ("East London", "Greater London", "Tower Hamlets, Hackney, Waltham Forest & Newham Councils"),
+    "EC": ("City of London & Central East", "Greater London", "City of London Corporation"),
+    "EH": ("Edinburgh & Lothians", "Scotland", "City of Edinburgh Council"),
+    "EN": ("Enfield & Barnet", "Greater London / Herts", "Enfield & Barnet Councils"),
+    "EX": ("Exeter, Barnstaple & Devon", "Devon", "Exeter City Council"),
+    "FK": ("Falkirk & Stirling", "Central Scotland", "Falkirk & Stirling Councils"),
+    "FY": ("Blackpool & The Fylde", "Lancashire", "Blackpool Council"),
+    "G":  ("Glasgow & Clyde", "Strathclyde", "Glasgow City Council"),
+    "GL": ("Gloucester, Cheltenham & Cotswolds", "Gloucestershire", "Gloucester & Cheltenham Councils"),
+    "GU": ("Guildford, Woking & Surrey Hills", "Surrey / Hampshire", "Guildford & Waverley Councils"),
+    "HA": ("Harrow, Wembley & Stanmore", "Greater London", "London Borough of Harrow"),
+    "HD": ("Huddersfield & Holmfirth", "West Yorkshire", "Kirklees Council"),
+    "HG": ("Harrogate, Ripon & Knaresborough", "North Yorkshire", "North Yorkshire Council"),
+    "HP": ("Hemel Hempstead, Aylesbury & Chilterns", "Herts / Bucks", "Dacorum & Buckinghamshire Councils"),
+    "HR": ("Hereford & Wye Valley", "Herefordshire", "Herefordshire Council"),
+    "HS": ("Outer Hebrides / Western Isles", "Highlands & Islands", "Comhairle nan Eilean Siar"),
+    "HU": ("Hull & East Riding", "East Yorkshire", "Hull City Council"),
+    "HX": ("Halifax & Calder Valley", "West Yorkshire", "Calderdale Council"),
+    "IG": ("Ilford, Barking & Redbridge", "Greater London", "Redbridge & Barking Councils"),
+    "IP": ("Ipswich & Suffolk Coast", "Suffolk", "Ipswich Borough Council"),
+    "IV": ("Inverness & Scottish Highlands", "Highlands", "The Highland Council"),
+    "KA": ("Kilmarnock, Ayr & Ayrshire", "South West Scotland", "East & South Ayrshire Councils"),
+    "KT": ("Kingston, Epsom & Surrey", "Greater London / Surrey", "Kingston & Elmbridge Councils"),
+    "KW": ("Kirkwall, Caithness & Orkney", "Highlands & Islands", "Highland & Orkney Councils"),
+    "KY": ("Kirkcaldy, Dunfermline & Fife", "Scotland", "Fife Council"),
+    "L":  ("Liverpool & Merseyside", "Merseyside", "Liverpool City Council"),
+    "LA": ("Lancaster, Morecambe & South Lakes", "Lancashire / Cumbria", "Lancaster & Westmorland Councils"),
+    "LD": ("Llandrindod Wells & Powys", "Mid Wales", "Powys County Council"),
+    "LE": ("Leicester & Charnwood", "Leicestershire", "Leicester City Council"),
+    "LL": ("Llandudno, Bangor & Wrexham", "North Wales", "Conwy & Gwynedd Councils"),
+    "LN": ("Lincoln & Lincolnshire Wolds", "Lincolnshire", "City of Lincoln Council"),
+    "LS": ("Leeds, Wetherby & Wharfedale", "West Yorkshire", "Leeds City Council"),
+    "LU": ("Luton & Dunstable", "Bedfordshire", "Luton Borough Council"),
+    "M":  ("Manchester & Salford", "Greater Manchester", "Manchester & Salford City Councils"),
+    "ME": ("Medway, Maidstone & Rochester", "Kent", "Medway & Maidstone Councils"),
+    "MK": ("Milton Keynes & North Bucks", "Buckinghamshire", "Milton Keynes City Council"),
+    "ML": ("Motherwell, Lanark & Clyde Valley", "Central Scotland", "North & South Lanarkshire Councils"),
+    "N":  ("North London & Islington", "Greater London", "Islington, Camden, Haringey & Barnet Councils"),
+    "NE": ("Newcastle, Gateshead & Northumberland", "Tyne & Wear / North East", "Newcastle & Gateshead Councils"),
+    "NG": ("Nottingham & Sherwood", "Nottinghamshire", "Nottingham City Council"),
+    "NN": ("Northampton, Kettering & Corby", "Northamptonshire", "West & North Northamptonshire Councils"),
+    "NP": ("Newport & Gwent", "South Wales", "Newport City Council"),
+    "NR": ("Norwich & Norfolk Broads", "Norfolk", "Norwich City Council"),
+    "NW": ("North West London & Camden", "Greater London", "Camden, Brent & Barnet Councils"),
+    "OL": ("Oldham & Rochdale", "Greater Manchester", "Oldham & Rochdale Councils"),
+    "OX": ("Oxford & Oxfordshire", "Oxfordshire", "Oxford City Council"),
+    "PA": ("Paisley, Loch Lomond & Argyll", "West Scotland", "Renfrewshire & Argyll Councils"),
+    "PE": ("Peterborough, King's Lynn & Fenland", "Cambridgeshire / Norfolk", "Peterborough City Council"),
+    "PH": ("Perth, Kinross & Highlands", "Central Scotland", "Perth & Kinross Council"),
+    "PL": ("Plymouth & South Devon", "Devon / Cornwall", "Plymouth City Council"),
+    "PO": ("Portsmouth & Isle of Wight", "Hampshire / IOW", "Portsmouth City Council"),
+    "PR": ("Preston, Chorley & Southport", "Lancashire", "Preston City Council"),
+    "RG": ("Reading, Newbury & Berkshire", "Berkshire / Oxon", "Reading Borough Council"),
+    "RH": ("Redhill, Crawley & Gatwick", "Surrey / Sussex", "Reigate & Crawley Councils"),
+    "RM": ("Romford, Havering & Dagenham", "Greater London / Essex", "London Borough of Havering"),
+    "S":  ("Sheffield, Barnsley & Peak District", "South Yorkshire", "Sheffield City Council"),
+    "SA": ("Swansea, Gower & Pembrokeshire", "South West Wales", "Swansea & Pembrokeshire Councils"),
+    "SE": ("South East London & Greenwich", "Greater London", "Southwark, Lewisham, Lambeth & Greenwich"),
+    "SG": ("Stevenage, Hitchin & North Herts", "Hertfordshire / Beds", "Stevenage & North Herts Councils"),
+    "SK": ("Stockport, Macclesfield & High Peak", "Cheshire / Greater Manchester", "Stockport & Cheshire East"),
+    "SL": ("Slough, Windsor & Maidenhead", "Berkshire / Bucks", "Royal Borough of Windsor & Maidenhead"),
+    "SM": ("Sutton & Carshalton", "Greater London", "London Borough of Sutton"),
+    "SN": ("Swindon & Wiltshire Downs", "Wiltshire", "Swindon Borough Council"),
+    "SO": ("Southampton, Winchester & New Forest", "Hampshire", "Southampton & Winchester Councils"),
+    "SP": ("Salisbury & Stonehenge", "Wiltshire / Hants", "Wiltshire Council"),
+    "SR": ("Sunderland & Seaham", "Tyne & Wear", "Sunderland City Council"),
+    "SS": ("Southend-on-Sea & Basildon", "Essex", "Southend-on-Sea City Council"),
+    "ST": ("Stoke-on-Trent & Staffordshire Moors", "Staffordshire", "Stoke-on-Trent City Council"),
+    "SW": ("South West London & Battersea", "Greater London", "Wandsworth, Lambeth, Merton & Westminster"),
+    "SY": ("Shrewsbury & Shropshire Hills", "Shropshire / Powys", "Shropshire Council"),
+    "TA": ("Taunton & Exmoor", "Somerset", "Somerset Council"),
+    "TD": ("Galashiels, Scottish Borders & Berwick", "Borders", "Scottish Borders Council"),
+    "TF": ("Telford & Wrekin", "Shropshire", "Telford & Wrekin Council"),
+    "TN": ("Tunbridge Wells, Sevenoaks & Hastings", "Kent / East Sussex", "Tunbridge Wells & Hastings Councils"),
+    "TQ": ("Torquay, Paignton & South Hams", "Devon", "Torbay & South Hams Councils"),
+    "TR": ("Truro, Penzance & Cornwall", "Cornwall", "Cornwall Council"),
+    "TS": ("Teesside, Middlesbrough & Stockton", "North Yorkshire / Durham", "Middlesbrough & Stockton Councils"),
+    "TW": ("Twickenham, Richmond & Hounslow", "Greater London", "Richmond & Hounslow Councils"),
+    "UB": ("Uxbridge, Southall & Hillingdon", "Greater London", "London Borough of Hillingdon"),
+    "W":  ("West London & Mayfair", "Greater London", "Westminster, Kensington & Chelsea, Hammersmith"),
+    "WA": ("Warrington, St Helens & Widnes", "Cheshire / Merseyside", "Warrington Borough Council"),
+    "WC": ("Central London & Bloomsbury", "Greater London", "Camden & Westminster Councils"),
+    "WD": ("Watford, Rickmansworth & Three Rivers", "Hertfordshire", "Watford & Three Rivers Councils"),
+    "WF": ("Wakefield, Castleford & Pontefract", "West Yorkshire", "Wakefield Council"),
+    "WN": ("Wigan & Leigh", "Greater Manchester", "Wigan Council"),
+    "WR": ("Worcester & Malvern Hills", "Worcestershire", "Worcester City Council"),
+    "WS": ("Walsall & Cannock", "West Midlands / Staffs", "Walsall Council"),
+    "WV": ("Wolverhampton & South Staffs", "West Midlands", "City of Wolverhampton Council"),
+    "YO": ("York, Harrogate & North York Moors", "North Yorkshire", "City of York & North Yorkshire Councils"),
+    "ZE": ("Shetland Islands", "Highlands & Islands", "Shetland Islands Council")
+}
+
 
 @app.get("/tree-surgeon/{location_slug}", response_class=HTMLResponse)
 def local_seo_intake_page(location_slug: str):
     slug_clean = location_slug.lower().strip()
+    
+    # 1. Exact UK Hub Match
     hub = UK_LOCAL_SEO_HUBS.get(slug_clean)
+    
+    # 2. Outward Postcode Area Match (e.g. LS6, LS, SW1, M20, BS8, BD23)
+    if not hub:
+        postcode_prefix = re.sub(r'\d+', '', slug_clean).upper()
+        if postcode_prefix in UK_ALL_POSTCODE_AREAS:
+            area_name, county_name, council_authority = UK_ALL_POSTCODE_AREAS[postcode_prefix]
+            hub = {
+                "name": f"{location_slug.upper()} ({area_name})",
+                "region": county_name,
+                "postcode": location_slug.upper(),
+                "council": council_authority,
+                "trees": "Oak, Ash, Conifer, Birch, Sycamore, Lime & Beech"
+            }
+
+    # 3. Dynamic Universal Town / Village Fallback
     if not hub:
         display_city = location_slug.replace("-", " ").title()
         hub = {
             "name": display_city,
             "region": "United Kingdom",
             "postcode": "",
-            "council": f"{display_city} Council",
-            "trees": "Oak, Ash, Conifer, Sycamore & Beech"
+            "council": f"{display_city} Local Planning Authority",
+            "trees": "Oak, Ash, Conifer, Sycamore, Pine & Beech"
         }
 
     city_name = hub["name"]
@@ -3316,6 +3457,9 @@ def sitemap_xml():
     ]
     for slug in UK_LOCAL_SEO_HUBS.keys():
         urls.append(f"https://arbor-leads-final-app.onrender.com/tree-surgeon/{slug}")
+
+    for pc_prefix in UK_ALL_POSTCODE_AREAS.keys():
+        urls.append(f"https://arbor-leads-final-app.onrender.com/tree-surgeon/{pc_prefix.lower()}")
 
     xml_lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
     today = datetime.date.today().isoformat()
