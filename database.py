@@ -131,11 +131,22 @@ def init_db():
         ]
         for stmt in resilience_cols:
             cur.execute(stmt)
+            
+        # SECURITY MANDATE: Enable Row-Level Security to block public REST API access
+        rls_statements = [
+            "ALTER TABLE potential_partners ENABLE ROW LEVEL SECURITY;",
+            "ALTER TABLE leads ENABLE ROW LEVEL SECURITY;",
+            "ALTER TABLE payments ENABLE ROW LEVEL SECURITY;",
+            "ALTER TABLE api_usage ENABLE ROW LEVEL SECURITY;",
+            "ALTER TABLE territory_claims ENABLE ROW LEVEL SECURITY;"
+        ]
+        for stmt in rls_statements:
+            cur.execute(stmt)
 
         conn.commit()
         cur.close()
         conn.close()
-        logger.info("[DB] Database initialized successfully with high-performance indices and territory lockout.")
+        logger.info("[DB] Database initialized successfully with high-performance indices and strict RLS lockout.")
     except Exception as e:
 
         logger.error(f"[DB] Initialization error: {e}")
