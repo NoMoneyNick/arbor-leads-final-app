@@ -83,3 +83,4 @@
 4. **ICO Registration:** Register Vector Data Labs with the ICO and pay the Â£40 fee.
 5. **Database Expansion Strategy (Phase 2):** Brainstorm and build new scraping pipelines to find maximum potential tree surgeon customers and emails (beyond the current 2,172).
 6. **Lead Scope Expansion (Phase 2):** Research data sources for domestic/residential and industrial tree surgery leads to diversify away from just council planning portals.
+7. **Contractor Portal Upgrades (Phase 2):** Build a custom account settings dashboard where paying tree surgeons can toggle their preferred notification methods (WhatsApp vs. Email) and interactively draw/pick their custom lead alert areas on a map.

@@ -183,9 +183,6 @@ def dispatch_lead_alerts(city: str, leads: list):
                 logging.info(f"[Seniority Lead Router] Successfully routed {len(routed_leads)} leads to customer {email}")
             except Exception as e:
                 logging.error(f"[Seniority Lead Router] Failed to route to {email}: {e}")
-                logging.info(f"[Lead Router] Successfully routed {len(routed_leads)} leads to customer {email}")
-            except Exception as e:
-                logging.error(f"[Lead Router] Failed to route to {email}: {e}")
 
     # 2. Master Digest for Admin
     if len(leads) > ALERT_BATCH_THRESHOLD:
