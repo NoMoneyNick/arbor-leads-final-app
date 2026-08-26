@@ -3207,7 +3207,7 @@ def local_seo_intake_page(location_slug: str):
 """
 
 
-@app.get("/sitemap.xml", response_class=Response)
+@app.get("/sitemap.xml")
 def sitemap_xml():
     """Generates dynamic XML sitemap for Google Search Console indexing all UK city hubs."""
     urls = [
