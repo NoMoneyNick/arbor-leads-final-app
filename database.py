@@ -790,7 +790,11 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 l.update(freshness)
 
                 # Custom source badges
-                if l["source_type"] == "domestic_classified":
+                if l["source_type"] == "direct_homeowner":
+                    l["badge_bg"] = "#ecfdf5"
+                    l["badge_color"] = "#065f46"
+                    l["badge_text"] = "🏡 Direct Homeowner (Verified Phone)"
+                elif l["source_type"] == "domestic_classified":
                     l["badge_bg"] = "#eff6ff"
                     l["badge_color"] = "#1d4ed8"
                     l["badge_text"] = "🏡 Private Domestic"
@@ -807,7 +811,7 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                     enriched.append(l)
                 elif filter_tier == "council" and l["source_type"] == "council_planning":
                     enriched.append(l)
-                elif filter_tier == "domestic" and l["source_type"] == "domestic_classified":
+                elif filter_tier == "domestic" and l["source_type"] in ("domestic_classified", "direct_homeowner"):
                     enriched.append(l)
                 elif l["tier"] == filter_tier:
                     enriched.append(l)
