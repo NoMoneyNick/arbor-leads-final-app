@@ -82,17 +82,44 @@ UK_CITY_COORDS = {
     "CARLISLE": (54.8925, -2.9329, "Cumberland Council", "CA1")
 }
 
+_IP_RATE_LIMITS = {}
+def _check_rate_limit(ip: str):
+    import time
+    now = time.time()
+    if ip not in _IP_RATE_LIMITS:
+        _IP_RATE_LIMITS[ip] = []
+    _IP_RATE_LIMITS[ip] = [t for t in _IP_RATE_LIMITS[ip] if now - t < 60]
+    if len(_IP_RATE_LIMITS[ip]) > 20:
+        return False
+    _IP_RATE_LIMITS[ip].append(now)
+    return True
+
 
 
 @app.get("/api/check-postcode")
 @app.get("/check-postcode")
 @app.get("/check-postcode/{postcode}")
-def api_check_postcode(postcode: Optional[str] = None, lat: Optional[float] = None, lng: Optional[float] = None, radius: int = 15):
+def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Optional[float] = None, lng: Optional[float] = None, radius: int = 15):
     """
     Public postcode radar inspection endpoint.
     Restricted strictly to the 309 English Local Planning Authorities.
     Supports search by Postcode/Outcode, UK City name, or direct Map Click (lat/lng coordinates).
     """
+    # Security: IP Rate Limiting to prevent Map Scrape DDoS
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        import notifications
+        notifications.send_system_incident_alert(
+            category="SECURITY & ABUSE",
+            title=f"DDOS ATTACK BLOCKED FROM IP: {client_ip}",
+            description=f"IP {client_ip} exceeded the public map scan rate limit (20 req/min). They have been blocked to protect the Planning API quota.",
+            impact="None. The attacker was successfully throttled.",
+            action_required="No action required. If this continues, block the IP in Cloudflare.",
+            severity="WARNING",
+            throttle_hours=1.0
+        )
+        raise HTTPException(status_code=429, detail="Too many requests. Please slow down your map scans.")
+        
     import urllib.request
     import urllib.parse
     import json
@@ -537,7 +564,7 @@ def public_homepage():
                 <!-- Radar UI -->
                 <div class="bg-[#020617] border border-slate-700 rounded-xl p-6 shadow-[0_0_40px_rgba(0,0,0,0.5)]">
                     <form onsubmit="event.preventDefault(); scanTerritory();" class="flex flex-col sm:flex-row gap-4 mb-6">
-                        <input type="text" id="postcodeInput" placeholder="Enter outward postcode (e.g. LS1, B1, SW1)" value="B1" required class="flex-1 bg-slate-800 border-2 border-slate-600 text-white font-mono rounded px-4 py-3 focus:outline-none focus:border-brand-green focus:bg-slate-900 transition-colors uppercase text-lg shadow-inner">
+                        <input type="text" id="postcodeInput" placeholder="Enter your Region or Postcode (e.g., Nottingham or NG22)..." onkeydown="if(event.key === 'Enter') scanTerritory()" value="B1" required class="flex-1 bg-slate-800 border-2 border-slate-600 text-white font-mono rounded px-4 py-3 focus:outline-none focus:border-brand-green focus:bg-slate-900 transition-colors uppercase text-lg shadow-inner">
                         <select id="radiusSelect" class="bg-slate-800 border-2 border-slate-600 text-white font-mono rounded px-4 py-3 focus:outline-none focus:border-brand-green">
                             <option value="16093">10 Miles</option>
                             <option value="24140" selected>15 Miles</option>
@@ -1192,9 +1219,17 @@ def checkout(plan_key: str, request: Request):
     if database.is_territory_claimed(outcode):
         return HTMLResponse("<h1>Territory Unavailable</h1><p>Sorry, this territory is already locked by another partner.</p>", status_code=403)
         
+        
     url = payments.create_checkout_session(plan_key, outcode)
     if not url:
-        raise HTTPException(status_code=503, detail="Payment system unavailable. Contact support.")
+        return HTMLResponse(
+            "<html><body style='font-family:sans-serif; text-align:center; padding:60px;'>"
+            "<h1>Payment System Unavailable</h1>"
+            "<p>We are currently experiencing issues connecting to Stripe. Please try again in a few minutes or contact support at contact@treekey.uk.</p>"
+            "<a href='/'>Return to Map</a>"
+            "</body></html>", 
+            status_code=503
+        )
     return RedirectResponse(url=url)
 
 
