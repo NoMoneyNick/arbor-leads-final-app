@@ -703,13 +703,8 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "badge_color": "#059669",
             "badge_bg": "#ecfdf5",
             "badge_text": "✅ Officially Approved (Ready to Fell)",
-            "price": 25,
-            "days_left": "Approved by Council",
-            "plan_key": "single_lead_medium"
-        }
-
-    # Calculate days since registration/discovery
     days_old = 0
+
     if discovered_at:
         if isinstance(discovered_at, str):
             try:
@@ -722,7 +717,52 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
                 discovered_at = discovered_at.replace(tzinfo=datetime.timezone.utc)
             days_old = (now - discovered_at).days
 
-    # Consultation window is typically 42 days (6 weeks for S211) or 56 days (TPO)
+    # 1. Domestic Jobs: Strict 7-Day Expiration Guardrail
+    if source_type in ("direct_homeowner", "domestic_classified"):
+        days_left = max(0, 7 - days_old)
+        if days_old > 7:
+            return {
+                "tier": "expired",
+                "badge_color": "#64748b",
+                "badge_bg": "#f1f5f9",
+                "badge_text": "🛑 Expired Domestic Job",
+                "price": 0,
+                "days_left": "Expired (>7 days old)",
+                "plan_key": "expired"
+            }
+        elif days_old <= 2:
+            return {
+                "tier": "flash_hot",
+                "badge_color": "#059669",
+                "badge_bg": "#ecfdf5",
+                "badge_text": "🔥 Fresh Homeowner Quote (Urgent: Day 0–2)",
+                "price": 35,
+                "days_left": f"{days_left} days left before quote closes",
+                "plan_key": "single_lead_medium"
+            }
+        else:
+            return {
+                "tier": "active",
+                "badge_color": "#d97706",
+                "badge_bg": "#fffbeb",
+                "badge_text": "⚡ Active Homeowner Quote (Day 3–7)",
+                "price": 25,
+                "days_left": f"{days_left} days left before quote closes",
+                "plan_key": "single_lead_small"
+            }
+
+    # 2. Council Statutory Planning Notices (30-day max window)
+    if planning_status and planning_status.lower() in ["granted", "approved"]:
+        return {
+            "tier": "granted",
+            "badge_color": "#059669",
+            "badge_bg": "#ecfdf5",
+            "badge_text": "✅ Officially Approved (Ready to Fell)",
+            "price": 25,
+            "days_left": "Approved by Council",
+            "plan_key": "single_lead_medium"
+        }
+
     is_tpo = "tpo" in (summary or "").lower() or "preservation" in (summary or "").lower()
     total_window = 56 if is_tpo else 42
     days_left = max(0, total_window - days_old)
@@ -786,7 +826,9 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
 
             enriched = []
             for l in raw_leads:
-                freshness = calculate_lead_freshness(l["discovered_at"], l["status"], l["summary"])
+                freshness = calculate_lead_freshness(l["discovered_at"], l["status"], l["summary"], source_type=l.get("source_type", "council_planning"))
+                if freshness.get("tier") == "expired":
+                    continue
                 l.update(freshness)
 
                 # Custom source badges
