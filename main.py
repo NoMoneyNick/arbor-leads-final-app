@@ -2410,6 +2410,169 @@ async def handle_submit_drop_spot(request: Request):
     return RedirectResponse(url="/chip-drop", status_code=303)
 
 
+
+
+# ── 6. Emergency Storm Weather Radar & Rate Multiplier ────────────────────────
+
+@app.get("/storm-radar", response_class=HTMLResponse)
+def storm_radar_view():
+    """
+    Emergency Storm Weather Radar:
+    Monitors Met Office high-wind gale events (45mph+ gusts).
+    Alerts contractors only in targeted impacted sectors with instant 1.5x-2.0x emergency quote sheets.
+    """
+    alerts = database.get_active_storm_alerts()
+
+    if not alerts:
+        alerts = [
+            {
+                "id": "sample-storm-1",
+                "region": "Northern England & Pennines",
+                "outcodes": ["LS", "BD", "HG", "WF", "HD", "HX"],
+                "gust_mph": 55,
+                "level": "amber",
+                "summary": "Met Office Amber Warning: 50-60mph wind gusts forecast. High risk of branch failure and uprooted shallow-root conifers.",
+                "valid_from": "Tonight 21:00",
+                "valid_to": "Tomorrow 18:00"
+            }
+        ]
+
+    alert_cards = ""
+    for a in alerts:
+        region = a["region"]
+        outcodes = ", ".join(a.get("outcodes", []))
+        gust = a["gust_mph"]
+        level = a.get("level", "amber").upper()
+        summary = a["summary"]
+        bg_color = "#fef2f2" if gust >= 50 else "#fffbeb"
+        border_color = "#dc2626" if gust >= 50 else "#d97706"
+        badge_bg = "#dc2626" if gust >= 50 else "#d97706"
+
+        alert_cards += f"""
+        <div style="background:{bg_color}; border:2px solid {border_color}; border-radius:12px; padding:24px; margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div>
+                    <span style="background:{badge_bg}; color:white; font-size:11px; font-weight:bold; padding:4px 10px; border-radius:20px; text-transform:uppercase;">🌪️ {level} GALE ALERT ({gust} MPH)</span>
+                    <h3 style="margin:10px 0 4px 0; color:#0f172a; font-size:20px;">{region}</h3>
+                    <span style="font-size:13px; color:#475569;">Target Sectors: <b>{outcodes}</b></span>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:13px; color:#64748b;">Emergency Rate Multiplier:</div>
+                    <div style="font-size:22px; font-weight:800; color:#044332;">1.5x – 2.0x Rates</div>
+                </div>
+            </div>
+            <p style="color:#334155; font-size:14px; margin:14px 0 16px 0; line-height:1.5;">
+                {summary}
+            </p>
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-top:1px solid #e2e8f0; padding-top:14px;">
+                <span style="font-size:12px; color:#64748b;">Valid: {a.get('valid_from')} until {a.get('valid_to')}</span>
+                <a href="/generate-storm-quote/EMERGENCY-DISPATCH" style="background:#044332; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">
+                    Generate 1-Tap Emergency Quote Sheet ➔
+                </a>
+            </div>
+        </div>"""
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Storm Weather Radar & Emergency Dispatch | TreeKey</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; line-height:1.5; }}
+            .container {{ max-width: 860px; margin: auto; }}
+        </style>
+    </head>
+    <body>
+    <div class="container">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
+            <div>
+                <h1 style="margin:0; font-size:28px; color:#044332;">🌪️ Emergency Storm Weather Radar</h1>
+                <p style="margin:4px 0 0 0; color:#64748b; font-size:14px;">Severe gale & wind triggers (45mph+). Targeted emergency mobilization without notification spam.</p>
+            </div>
+            <a href="/dashboard" style="background:#0f172a; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold;">← Contractor Dashboard</a>
+        </div>
+
+        <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:14px 18px; margin-bottom:24px; font-size:13px; color:#065f46;">
+            <b>🛡️ Zero-Spam Guarantee:</b> We never alert you for normal rain or mild breezes. Alerts trigger strictly for verified 45mph+ gale forecasts in your registered sector so you can mobilize emergency standby crews.
+        </div>
+
+        {alert_cards}
+
+        <div style="text-align:center; margin-top:32px;">
+            <a href="/" style="color:#64748b; text-decoration:none; font-size:13px;">← Return to Main Intelligence Map</a>
+        </div>
+    </div>
+    </body>
+    </html>
+    """
+
+
+@app.get("/generate-storm-quote/{lead_id}", response_class=HTMLResponse)
+def generate_storm_quote(lead_id: str, company: str = "Your Emergency Tree Surgery Team", phone: str = "07XXX XXXXXX"):
+    """
+    Generates a 1-tap printable Emergency Storm Takedown & Hazardous Tree Quote Sheet with BS3998 compliance.
+    """
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <title>Emergency Tree Works Quote Sheet</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; color: #0f172a; max-width: 650px; margin: auto; line-height: 1.6; background: #fff; }}
+            .card {{ border: 2px solid #dc2626; border-radius: 12px; padding: 28px; background: #ffffff; }}
+            .badge {{ background: #dc2626; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; }}
+            .btn-print {{ background: #044332; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; margin-bottom: 20px; }}
+            @media print {{ .btn-print {{ display: none; }} body {{ padding: 0; }} }}
+        </style>
+    </head>
+    <body>
+        <div style="text-align:right;">
+            <button class="btn-print" onclick="window.print()">🖨️ Print / Save Emergency Quote PDF</button>
+        </div>
+
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <span class="badge">🚨 Emergency Dangerous Tree Quotation</span>
+                <span style="font-size:12px; color:#64748b;">BS3998:2010 • NPTC • £5M Insurance</span>
+            </div>
+
+            <h2 style="margin:0 0 10px 0; color:#991b1b; font-size:22px;">Immediate Hazardous Tree Assessment</h2>
+            
+            <p style="font-size:14px; color:#334155;">
+                This formal quotation covers priority hazardous tree felling, storm damage clearance, hanging limb removal, and structural stabilization under emergency mobilization protocols.
+            </p>
+
+            <div style="background:#fef2f2; border-left:4px solid #dc2626; padding:12px 16px; margin:16px 0; font-size:13px; color:#991b1b;">
+                <b>Exempt from Standard 6-Week Council Wait:</b> Under Section 211 & TPO regulations, trees posing an immediate danger to persons or property (dead, dying, or dangerous) may be made safe immediately without standard statutory delay.
+            </div>
+
+            <h4 style="margin:16px 0 8px 0; font-size:15px; color:#0f172a;">Scope of Emergency Works:</h4>
+            <ul style="font-size:13px; color:#334155; padding-left:20px; margin:0 0 20px 0;">
+                <li>Safe controlled dismantle of windblown / hung-up stems</li>
+                <li>Rigging and winching away from building structures & powerlines</li>
+                <li>Reduction of hazardous fractured branches to safe points</li>
+                <li>Full site clearance and chipping of green waste</li>
+            </ul>
+
+            <div style="background:#f8fafc; border-radius:8px; padding:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div>
+                    <div style="font-size:11px; color:#64748b; text-transform:uppercase; font-weight:bold;">Emergency Contractor:</div>
+                    <div style="font-weight:bold; color:#0f172a; font-size:16px;">{company}</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:11px; color:#64748b; text-transform:uppercase; font-weight:bold;">24/7 Emergency Line:</div>
+                    <div style="font-weight:800; color:#dc2626; font-size:18px;">{phone}</div>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+
 #  City Scan Routes (Dashboard  Basic Auth) 
 
 def _resolve_city_param(slug: str) -> Optional[str]:

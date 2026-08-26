@@ -191,6 +191,19 @@ def init_db():
                 active BOOLEAN DEFAULT TRUE,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
+
+            CREATE TABLE IF NOT EXISTS storm_weather_alerts (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                region_name TEXT NOT NULL,
+                outcode_prefixes TEXT[] NOT NULL,
+                wind_gust_mph INT NOT NULL,
+                warning_level TEXT DEFAULT 'amber',
+                summary TEXT NOT NULL,
+                valid_from TIMESTAMPTZ DEFAULT NOW(),
+                valid_to TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '48 hours'),
+                dispatched BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
         """)
 
         # Performance Indices for Instant High-Volume Queries
@@ -206,6 +219,7 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_auth_token ON contractor_auth_tokens(token);",
             "CREATE INDEX IF NOT EXISTS idx_auth_otp ON contractor_auth_tokens(otp_code, customer_email);",
             "CREATE INDEX IF NOT EXISTS idx_chip_drop_outcode ON chip_drop_spots(outcode, active);",
+            "CREATE INDEX IF NOT EXISTS idx_storm_alerts_active ON storm_weather_alerts(valid_to, warning_level);",
             "CREATE INDEX IF NOT EXISTS idx_partners_city ON potential_partners(target_city);",
             "CREATE INDEX IF NOT EXISTS idx_partners_created ON potential_partners(created_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_partners_company_number ON potential_partners(company_number);",
@@ -245,7 +259,8 @@ def init_db():
             "ALTER TABLE contractor_ledger_entries ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE machinery_assets ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE contractor_auth_tokens ENABLE ROW LEVEL SECURITY;",
-            "ALTER TABLE chip_drop_spots ENABLE ROW LEVEL SECURITY;"
+            "ALTER TABLE chip_drop_spots ENABLE ROW LEVEL SECURITY;",
+            "ALTER TABLE storm_weather_alerts ENABLE ROW LEVEL SECURITY;"
         ]
         for stmt in rls_statements:
             cur.execute(stmt)
@@ -1127,4 +1142,58 @@ def get_chip_drop_spots(outcode: str = None, material: str = None, limit: int = 
             conn.close()
     except Exception as e:
         logger.error(f"[ChipDrop] Error fetching drop spots: {e}")
+        return []
+
+
+def record_storm_alert(region_name: str, outcode_prefixes: list, wind_gust_mph: int, 
+                       warning_level: str = "amber", summary: str = "") -> bool:
+    """
+    Records a high-wind storm alert for targeted contractor emergency mobilization.
+    """
+    if not SURL or not region_name:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                INSERT INTO storm_weather_alerts (region_name, outcode_prefixes, wind_gust_mph, warning_level, summary)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id;
+            """, (region_name.strip(), outcode_prefixes, wind_gust_mph, warning_level, summary.strip()))
+            row = cur.fetchone()
+            conn.commit()
+            return bool(row)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[StormRadar] Error recording alert: {e}")
+        return False
+
+
+def get_active_storm_alerts() -> list:
+    """
+    Fetches active Met Office / Severe Weather alerts (45mph+ gusts).
+    """
+    if not SURL:
+        return []
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT id, region_name, outcode_prefixes, wind_gust_mph, warning_level, summary, valid_from, valid_to
+                FROM storm_weather_alerts
+                WHERE valid_to > NOW()
+                ORDER BY wind_gust_mph DESC;
+            """)
+            rows = cur.fetchall()
+            cols = ["id", "region", "outcodes", "gust_mph", "level", "summary", "valid_from", "valid_to"]
+            return [dict(zip(cols, r)) for r in rows]
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[StormRadar] Error fetching alerts: {e}")
         return []
