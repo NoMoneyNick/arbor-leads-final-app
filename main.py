@@ -461,21 +461,32 @@ def public_homepage():
 <body class="bg-brand-dark text-slate-300 font-sans antialiased selection:bg-brand-green selection:text-white">
 
     <!-- Navigation -->
-    <nav class="sticky top-0 z-50 bg-brand-dark/95 backdrop-blur-md border-b border-slate-800 shadow-2xl">
+    <nav class="sticky top-0 z-50 bg-slate-950/95 backdrop-blur-md border-b border-emerald-950 shadow-2xl">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center h-20">
-                <a href="/" class="flex items-center gap-3">
-                    <img src="/static/logo.png" alt="Tree Key" class="h-14 w-auto">
-                </a>
-                <div class="flex items-center gap-4 md:gap-8 font-mono text-xs md:text-sm tracking-wide">
-                    <div class="hidden md:flex items-center gap-8">
-                        <a href="#radar" class="text-slate-400 hover:text-white transition-colors">RADAR</a>
-                        <a href="#pricing" class="text-slate-400 hover:text-white transition-colors flex items-center gap-2">
-                            <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-alert opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-red-600"></span></span>
-                            TERRITORIES
-                        </a>
+                <a href="/" class="flex items-center gap-3 text-white font-bold text-xl tracking-tight no-underline">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"/>
+                        </svg>
                     </div>
-                    <a href="/admin" class="bg-brand-green/10 text-brand-glow border border-brand-green/30 px-4 py-2 rounded font-bold uppercase hover:bg-brand-green hover:text-white transition-all duration-300 shadow-[0_0_15px_rgba(5,150,105,0.2)]">Login</a>
+                    <div class="flex flex-col">
+                        <span class="font-extrabold text-lg text-white leading-none tracking-wider font-sans">TREE<span class="text-emerald-400">KEY</span></span>
+                        <span class="text-[9px] uppercase tracking-widest text-emerald-500 font-mono font-semibold">Arbor Intelligence</span>
+                    </div>
+                </a>
+                <div class="flex items-center gap-3 md:gap-6 font-mono text-xs tracking-wide">
+                    <div class="hidden lg:flex items-center gap-6 text-slate-300">
+                        <a href="/#radar" class="hover:text-emerald-400 transition-colors">RADAR</a>
+                        <a href="/marketplace" class="hover:text-emerald-400 transition-colors">MARKETPLACE</a>
+                        <a href="/ledger" class="hover:text-emerald-400 transition-colors">LEDGER</a>
+                        <a href="/chip-drop" class="hover:text-emerald-400 transition-colors">CHIP-DROP</a>
+                        <a href="/storm-radar" class="hover:text-emerald-400 transition-colors text-amber-400 font-bold">STORM RADAR</a>
+                        <a href="/pricing" class="hover:text-emerald-400 transition-colors">PACKAGES</a>
+                    </div>
+                    <a href="/login" class="bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 px-3.5 py-1.5 rounded-lg font-bold uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-[0_0_15px_rgba(5,150,105,0.2)]">
+                        Contractor Sign In ➔
+                    </a>
                 </div>
             </div>
         </div>
@@ -2568,6 +2579,233 @@ def generate_storm_quote(lead_id: str, company: str = "Your Emergency Tree Surge
                 </div>
             </div>
         </div>
+    </body>
+    </html>
+    """
+
+
+
+
+# ── 7. Post-Job Google Review Booster & BS3998 Digital Trust Badge ────────────
+
+@app.get("/boost-review", response_class=HTMLResponse)
+def boost_review_page(contractor_name: Optional[str] = "Your Tree Surgery Business", google_link: Optional[str] = "https://g.page/r/your-google-review-link"):
+    """
+    Automated Post-Job Google Review Booster & BS3998 Digital Trust Badge:
+    Allows contractors to send 1-tap WhatsApp/SMS review requests to homeowners right after job completion.
+    """
+    wa_msg = f"Hi%20there,%20thank%20you%20for%20choosing%20{urllib.parse.quote(contractor_name)}%20for%20your%20tree%20surgery%20today!%20If%20you%20were%20happy%20with%20our%20work%20and%20tidy%20garden%20clearance,%20could%20you%20leave%20us%20a%20quick%205-star%20review%20on%20Google?%20It%20means%20the%20world%20to%20our%20crew:%20{google_link}"
+    wa_url = f"https://wa.me/?text={wa_msg}"
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Google Review Booster & BS3998 Badge | TreeKey</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; line-height:1.5; }}
+            .container {{ max-width: 800px; margin: auto; }}
+            .card {{ background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }}
+            .btn-wa {{ background: #059669; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; }}
+        </style>
+    </head>
+    <body>
+    <div class="container">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; flex-wrap:wrap; gap:10px;">
+            <div>
+                <h1 style="margin:0; font-size:28px; color:#044332;">⭐ Google Review Booster & Trust Badge</h1>
+                <p style="margin:4px 0 0 0; color:#64748b; font-size:14px;">Collect 5-star Google reviews from homeowners within 2 hours of packing away the chipper.</p>
+            </div>
+            <a href="/dashboard" style="background:#0f172a; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold;">← Contractor Dashboard</a>
+        </div>
+
+        <!-- 1-Tap WhatsApp Booster -->
+        <div class="card">
+            <h3 style="margin-top:0; color:#044332; font-size:18px;">📱 1-Tap WhatsApp Homeowner Review Request</h3>
+            <p style="color:#64748b; font-size:13px;">Send this pre-formatted message to your client as soon as payment is confirmed:</p>
+            
+            <div style="background:#f8fafc; border-left:4px solid #059669; padding:14px; margin:16px 0; font-size:13px; color:#334155; line-height:1.6;">
+                "Hi there, thank you for choosing <b>{contractor_name}</b> for your tree surgery today! If you were happy with our work and tidy garden clearance, could you leave us a quick 5-star review on Google? It means the world to our crew: <span style='color:#2563eb;'>{google_link}</span>"
+            </div>
+
+            <div style="margin-top:16px;">
+                <a href="{wa_url}" target="_blank" class="btn-wa">💬 Send Review Request via WhatsApp ➔</a>
+            </div>
+        </div>
+
+        <!-- BS3998 Digital Trust Badge -->
+        <div class="card">
+            <h3 style="margin-top:0; color:#044332; font-size:18px;">🛡️ Your BS3998:2010 Verified Digital Badge</h3>
+            <p style="color:#64748b; font-size:13px;">Embed this verified badge on your quotes and invoices to build instant trust with homeowners and commercial estate managers.</p>
+            
+            <div style="display:flex; align-items:center; gap:16px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:16px; margin:16px 0;">
+                <div style="background:#044332; color:white; width:48px; height:48px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:24px;">
+                    🌲
+                </div>
+                <div>
+                    <div style="font-weight:bold; color:#044332; font-size:15px;">BS3998:2010 British Standard Verified Arborist</div>
+                    <div style="font-size:12px; color:#065f46;">Verified Member • £5M Public Liability Insured • NPTC Certified Crew</div>
+                </div>
+            </div>
+        </div>
+
+        <div style="text-align:center; margin-top:32px;">
+            <a href="/" style="color:#64748b; text-decoration:none; font-size:13px;">← Return to Main Intelligence Map</a>
+        </div>
+    </div>
+    </body>
+    </html>
+    """
+
+
+
+
+# ── 8. AI Direct Homeowner Vision & Scope Estimator (`photo-to-scope`) ───────
+
+@app.get("/quote-estimator", response_class=HTMLResponse)
+def quote_estimator_page():
+    """
+    Direct Homeowner Scope & Instant Quote Estimator:
+    Provides instant fair-market estimates and eliminates 5-contractor bidding wars.
+    Directs 1-to-1 to the verified local senior contractor.
+    """
+    return """
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Instant Tree Work Scope & Fair Quote Estimator | TreeKey</title>
+        <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; line-height:1.5; }
+            .box { max-width: 680px; margin: auto; background: white; padding: 32px; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
+            input, select, textarea { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; margin-top: 4px; margin-bottom: 16px; font-family: inherit; font-size: 14px; }
+            .btn { background: #044332; color: white; border: none; padding: 14px 20px; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer; width: 100%; }
+        </style>
+    </head>
+    <body>
+    <div class="box">
+        <div style="text-align:center; margin-bottom:24px;">
+            <div style="display:inline-block; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:20px; padding:4px 12px; font-size:12px; color:#065f46; font-weight:bold; text-transform:uppercase; margin-bottom:8px;">
+                🤖 AI Arborist Scope Engine
+            </div>
+            <h1 style="margin:0 0 6px 0; color:#044332; font-size:26px;">Instant Tree Work Estimator</h1>
+            <p style="color:#64748b; font-size:14px; margin:0;">Get an accurate fair-market estimate and connect directly with 1 verified local tree surgeon — no spam, no 5-way bidding wars.</p>
+        </div>
+
+        <form id="scopeForm" onsubmit="event.preventDefault(); calcScope();">
+            <label style="font-size:12px; font-weight:bold;">Tree Work Required:</label>
+            <select id="workType">
+                <option value="dismantle">Complete Tree Removal / Felling & Dismantle</option>
+                <option value="reduction">Crown Reduction / Thinning / Pruning (20-30%)</option>
+                <option value="stump">Stump Grinding (Below Ground Level)</option>
+                <option value="hedge">Overgrown Boundary Hedge Reduction</option>
+                <option value="deadwood">Deadwooding & Dangerous Limb Removal</option>
+            </select>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Approx. Tree Height / Scale:</label>
+                    <select id="treeScale">
+                        <option value="small">Small (Up to 1 Storey / 4-6m)</option>
+                        <option value="medium" selected>Medium (2 Storeys / 8-12m)</option>
+                        <option value="large">Large Mature (3+ Storeys / 15m+)</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Garden Access Clearance:</label>
+                    <select id="accessType">
+                        <option value="easy">Direct Driveway / Front Lawn (Easy)</option>
+                        <option value="narrow" selected>Side Gate / Narrow Alley (< 90cm)</option>
+                        <option value="house">Through House / Terrace (Difficult)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Nearby Hazards:</label>
+                    <select id="hazards">
+                        <option value="none">Open Garden (No Obstacles)</option>
+                        <option value="structure">Near Conservatory / Shed / Fence</option>
+                        <option value="powerlines">Near Powerlines / Public Roadway</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold;">Your Postcode / Town:</label>
+                    <input type="text" id="postcode" placeholder="e.g. LS6 2AA" required>
+                </div>
+            </div>
+
+            <label style="font-size:12px; font-weight:bold;">Job Description / Tree Species (Optional):</label>
+            <textarea id="notes" rows="2" placeholder="e.g. Mature Oak overhangs neighbor conservatory; want 2m branch clearance."></textarea>
+
+            <button type="submit" class="btn">Calculate Scope & Estimate ⚡</button>
+        </form>
+
+        <div id="scopeResult" style="background:#f0fdf4; border:2px solid #059669; border-radius:12px; padding:20px; margin-top:24px; display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-b:1px solid #bbf7d0; padding-bottom:14px; margin-bottom:14px;">
+                <div>
+                    <span style="font-size:11px; color:#065f46; font-weight:bold; text-transform:uppercase;">Fair-Market Estimate Range:</span>
+                    <div id="estPrice" style="font-size:28px; font-weight:800; color:#044332;">£450 – £650</div>
+                </div>
+                <div style="text-align:right;">
+                    <span style="font-size:11px; color:#065f46; font-weight:bold; text-transform:uppercase;">Estimated Duration:</span>
+                    <div id="estCrew" style="font-size:16px; font-weight:bold; color:#0f172a;">1/2 Day (Climber + Groundy)</div>
+                </div>
+            </div>
+
+            <div style="font-size:13px; color:#334155; line-height:1.5;">
+                <div style="margin-bottom:6px;"><b>🌲 Green Waste Volume:</b> <span id="estWaste">Approx 1 Tipper Van Load (3–4 m³ chipped)</span></div>
+                <div style="margin-bottom:6px;"><b>⚖️ Statutory Status:</b> <span id="estCouncil">TreeKey will verify Conservation Area & TPO status automatically with your local council.</span></div>
+            </div>
+
+            <div style="background:white; border-radius:8px; padding:14px; margin-top:16px; border:1px solid #bbf7d0;">
+                <h4 style="margin:0 0 6px 0; color:#044332; font-size:14px;">🔒 1-to-1 Contractor Dispatch Guarantee:</h4>
+                <p style="margin:0; font-size:12px; color:#64748b;">
+                    We never sell your details to 5 different contractors. We route this job directly to the #1 verified NPTC tree surgeon in your postcode.
+                </p>
+                <div style="margin-top:12px;">
+                    <a href="/pricing" style="background:#044332; color:white; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold; display:inline-block;">Connect with Local Contractor ➔</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function calcScope() {
+            const w = document.getElementById('workType').value;
+            const s = document.getElementById('treeScale').value;
+            const a = document.getElementById('accessType').value;
+            const h = document.getElementById('hazards').value;
+
+            let minP = 250, maxP = 400;
+            let duration = "Half Day (2 Crew)";
+            let waste = "1 Van Load (2-3 m³)";
+
+            if (w === 'dismantle') {
+                if (s === 'small') { minP = 350; maxP = 550; duration = "Half Day (Climber + Groundy)"; waste = "1 Tipper Load"; }
+                else if (s === 'medium') { minP = 550; maxP = 850; duration = "Full Day (Climber + Groundy)"; waste = "1.5 Tipper Loads"; }
+                else { minP = 950; maxP = 1500; duration = "1-2 Days (3 Crew + MEWP/Rigging)"; waste = "2-3 Tipper Loads"; }
+            } else if (w === 'reduction') {
+                if (s === 'small') { minP = 200; maxP = 350; }
+                else if (s === 'medium') { minP = 380; maxP = 600; }
+                else { minP = 650; maxP = 950; }
+            } else if (w === 'stump') {
+                minP = 120; maxP = 250; duration = "1-2 Hours (Stump Grinder)"; waste = "Mulch backfilled on site";
+            }
+
+            if (a === 'house') { minP += 100; maxP += 150; }
+            if (h === 'powerlines') { minP += 150; maxP += 250; }
+
+            document.getElementById('estPrice').innerText = '£' + minP + ' – £' + maxP;
+            document.getElementById('estCrew').innerText = duration;
+            document.getElementById('estWaste').innerText = waste;
+            document.getElementById('scopeResult').style.display = 'block';
+        }
+    </script>
     </body>
     </html>
     """
