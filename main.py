@@ -951,8 +951,9 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
     except Exception as e:
         logger.error(f"[ADMIN] DB error: {e}")
 
+    import html
     partner_rows = "".join([
-        f"<li><b>{p[0]}</b>  {p[1] or 'Director on file'} | <b>{p[2]}</b> |  {p[4] or ''} |  {p[5] or ''} |  {p[3] or 'N/A'}</li>"
+        f"<li><b>{html.escape(str(p[0] or ''))}</b>  {html.escape(str(p[1] or 'Director on file'))} | <b>{html.escape(str(p[2] or ''))}</b> |  {html.escape(str(p[4] or ''))} |  {html.escape(str(p[5] or ''))} |  {p[3] or 'N/A'}</li>"
         for p in stats["partners"]
     ])
 
@@ -977,7 +978,7 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
 
     SCORE_EMOJI = {"small": "", "medium": "", "large": ""}
     lead_rows = "".join([
-        f"<li>{SCORE_EMOJI.get(l[2],'')} <b>{l[0]}</b> {get_freshness_badge(l[5])}<br><span style='color:#555; font-size:13px;'>{l[1][:90]}... | {l[3]} | {l[4]}</span></li>"
+        f"<li>{SCORE_EMOJI.get(l[2],'')} <b>{html.escape(str(l[0] or ''))}</b> {get_freshness_badge(l[5])}<br><span style='color:#555; font-size:13px;'>{html.escape(str(l[1] or '')[:90])}... | {html.escape(str(l[3] or ''))} | {html.escape(str(l[4] or ''))}</span></li>"
         for l in stats["leads"]
     ])
 

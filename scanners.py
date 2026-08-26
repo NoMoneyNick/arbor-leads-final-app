@@ -421,21 +421,22 @@ def scan_city_planning_api(city_name: str) -> int:
 
         conn = database.get_db_conn()
         cur = conn.cursor()
+        try:
+            for prefix, records in prefix_results:
+                for item in records:
+                    summary = item.get("description", "") or ""
+                    if not _is_tree_related(summary):
+                        continue
+                    ref  = item.get("reference") or f"{prefix}-{int(time.time())}"
+                    addr = item.get("address", city_name)
+                    lead = _insert_lead(cur, ref, addr, summary, city_name)
+                    if lead:
+                        new_leads.append(lead)
 
-        for prefix, records in prefix_results:
-            for item in records:
-                summary = item.get("description", "") or ""
-                if not _is_tree_related(summary):
-                    continue
-                ref  = item.get("reference") or f"{prefix}-{int(time.time())}"
-                addr = item.get("address", city_name)
-                lead = _insert_lead(cur, ref, addr, summary, city_name)
-                if lead:
-                    new_leads.append(lead)
-
-        conn.commit()
-        cur.close()
-        conn.close()
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
 
         if new_leads:
             notifications.dispatch_lead_alerts(city_name, new_leads)
