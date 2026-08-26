@@ -52,10 +52,11 @@ def health():
 
 
 @app.get("/scan-nationwide")
-def scan_nationwide_fast():
+def scan_nationwide_fast(secret: Optional[str] = Query(None)):
     """
     Crawls all UK regions in parallel to capture thousands of planning and domestic leads.
     """
+    verify_cron_secret(secret)
     import threading
     threading.Thread(target=scanners.scan_nationwide_bulk_crawler, daemon=True).start()
     return {"status": "nationwide_crawl_dispatched_in_background", "coverage": "124 UK Outward Postcodes & 300+ Councils"}
@@ -1404,15 +1405,20 @@ async def submit_suggestion(request: Request):
 def generate_homeowner_letter(lead_id: str, company: str = "Your Local Tree Specialists", phone: str = "07XXX XXXXXX"):
     conn = database.get_db_conn()
     cur = conn.cursor()
-    cur.execute("SELECT reference, address, summary, council_source FROM leads WHERE id = %s OR reference = %s;", (lead_id, lead_id))
+    cur.execute("SELECT reference, address, summary, council_source, status FROM leads WHERE id::text = %s OR reference = %s;", (lead_id, lead_id))
     row = cur.fetchone()
     cur.close()
     conn.close()
 
     if not row:
         return HTMLResponse("<h3>Lead not found.</h3>", status_code=404)
-
-    ref, addr, summary, council = row
+        
+    ref, addr, summary, council, status = row
+    if status != 'claimed':
+        return HTMLResponse(
+            "<h3>Lead Not Unlocked</h3><p>This lead has not been purchased yet. Please unlock it in the marketplace to view the full details and generate letters.</p>",
+            status_code=403
+        )
 
     return f"""
     <!DOCTYPE html>
@@ -3573,10 +3579,11 @@ def cron_trigger_slash(city_slug: str, secret: Optional[str] = Query(None)):
 
 
 @app.get("/api/scan-nationwide-all-uk")
-def scan_nationwide_all_uk_endpoint():
+def scan_nationwide_all_uk_endpoint(secret: Optional[str] = Query(None)):
     """
     Crawls all UK regions in parallel to capture thousands of planning and domestic leads.
     """
+    verify_cron_secret(secret)
     import threading
     threading.Thread(target=scanners.scan_nationwide_bulk_crawler, daemon=True).start()
     return {"status": "nationwide_crawl_dispatched_in_background", "coverage": "124 UK Outward Postcodes & 300+ Councils"}
@@ -3606,10 +3613,11 @@ def cron_trigger_domestic_scan(secret: Optional[str] = Query(None)):
 
 
 @app.get("/api/run-domestic-scan-now")
-def run_domestic_scan_now():
+def run_domestic_scan_now(secret: Optional[str] = Query(None)):
     """
     Direct scan trigger returning live intercepted leads and Supabase database breakdown.
     """
+    verify_cron_secret(secret)
     import domestic_scrapers
     import threading
     
@@ -3671,10 +3679,11 @@ def run_domestic_scan_now():
 
 
 @app.get("/api/purge-old-domestic-archives")
-def purge_old_domestic_archives():
+def purge_old_domestic_archives(secret: Optional[str] = Query(None)):
     """
     Purges historical archive noise from domestic leads table without touching council records.
     """
+    verify_cron_secret(secret)
     deleted = 0
     try:
         conn = database.get_db_conn()
