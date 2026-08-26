@@ -2930,10 +2930,30 @@ def run_domestic_scan_now():
     import domestic_scrapers
     import threading
     
-    # Run scraper in fast mode / background
+    # 1. Clean historical archive entries strictly for domestic_classified
+    try:
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            DELETE FROM leads 
+            WHERE lead_source_type = 'domestic_classified' 
+              AND (
+                summary LIKE '%2009%' 
+                OR summary LIKE '%2008%' 
+                OR summary LIKE '%(sent to both)%'
+                OR summary LIKE '%King''s Hedges%'
+              );
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception:
+        pass
+
+    # 2. Trigger fresh background scraper
     threading.Thread(target=domestic_scrapers.ingest_and_route_domestic_leads, daemon=True).start()
     
-    # Query database breakdown
+    # 3. Query database breakdown
     db_stats = {}
     recent_leads = []
     try:
