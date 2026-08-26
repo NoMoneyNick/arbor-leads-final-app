@@ -686,7 +686,7 @@ def get_closest_unallocated_leads(outcode: str, limit: int = 5) -> list:
         return []
 
 
-def calculate_lead_freshness(discovered_at, planning_status: str = "pending", summary: str = "") -> dict:
+def calculate_lead_freshness(discovered_at, planning_status: str = "pending", summary: str = "", source_type: str = "council_planning") -> dict:
     """
     Calculates statutory lead freshness, countdown timer, color badge, and dynamic decay price:
     - Flash Hot (Day 0-3): £29 unlock (0 competitors aware)
@@ -702,7 +702,8 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "tier": "granted",
             "badge_color": "#059669",
             "badge_bg": "#ecfdf5",
-            "badge_text": "✅ Officially Approved (Ready to Fell)",
+            "badge_text": "✅ Officially Approved (Ready to Fell)"
+        }
     days_old = 0
 
     if discovered_at:
@@ -767,6 +768,17 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
     total_window = 56 if is_tpo else 42
     days_left = max(0, total_window - days_old)
 
+    if days_old > 56:
+        return {
+            "tier": "expired",
+            "badge_color": "#64748b",
+            "badge_bg": "#f1f5f9",
+            "badge_text": "🛑 Expired Statutory Notice (>56 Days)",
+            "price": 0,
+            "days_left": "Expired (>56 days)",
+            "plan_key": "expired"
+        }
+
     if days_old <= 3:
         return {
             "tier": "flash_hot",
@@ -787,7 +799,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "days_left": f"{days_left} days left in consultation",
             "plan_key": "single_lead_small"
         }
-    else:
+    elif days_old <= 42:
         return {
             "tier": "clearance",
             "badge_color": "#ca8a04",
@@ -795,6 +807,16 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "badge_text": f"⏳ Late Window Clearance (Closing Soon)",
             "price": 9,
             "days_left": f"{days_left} days until determination",
+            "plan_key": "single_lead_small"
+        }
+    else:
+        return {
+            "tier": "clearance",
+            "badge_color": "#64748b",
+            "badge_bg": "#f8fafc",
+            "badge_text": f"📋 Final Determination (Day 43–56)",
+            "price": 9,
+            "days_left": f"{days_left} days left",
             "plan_key": "single_lead_small"
         }
 
