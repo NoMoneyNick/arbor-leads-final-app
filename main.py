@@ -250,11 +250,11 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
     conn = database.get_db_conn()
     cur = conn.cursor()
     if len(prefix_alpha) > 1:
-        # Match postcode prefix exactly with a space or at the end
-        cur.execute("SELECT count(*) FROM leads WHERE address ~* %s OR council_source ILIKE %s", 
+        # Match postcode prefix exactly with a space or at the end for unallocated leads
+        cur.execute("SELECT count(*) FROM leads WHERE (status = 'new' OR status IS NULL) AND (address ~* %s OR council_source ILIKE %s)", 
         (f"\\y{prefix_alpha}[0-9]", f"%{district[:6]}%"))
     else:
-        cur.execute("SELECT count(*) FROM leads WHERE council_source ILIKE %s", (f"%{district[:6]}%",))
+        cur.execute("SELECT count(*) FROM leads WHERE (status = 'new' OR status IS NULL) AND council_source ILIKE %s", (f"%{district[:6]}%",))
     direct_leads = cur.fetchone()[0]
     cur.close()
     conn.close()
@@ -1119,30 +1119,47 @@ def status(user: str = Depends(verify_dashboard_auth)):
 def pricing():
     plans = payments.PLANS
 
-    cards = ""
+    # Separate subscriptions and single purchase plans
+    sub_cards = ""
+    single_cards = ""
+
     for key, plan in plans.items():
         if plan["mode"] == "subscription":
-            price_display = f"{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal;'>/month</span>"
+            price_display = f"£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal; color:#64748b;'>/month</span>"
+            roi_box = f"<div style='background:#f0fdf4; border-left:3px solid #059669; padding:10px; font-size:12px; color:#065f46; text-align:left; margin:14px 0; border-radius:4px;'><b>💡 Real-World Math:</b> {plan.get('real_world_roi', '')}</div>"
+            highlight = "border:2px solid #059669; box-shadow:0 8px 24px rgba(5,150,105,0.12);" if key == "climber_domestic" else "border:1px solid #e2e8f0;"
+            
+            sub_cards += f"""
+            <div style="{highlight} border-radius:16px; padding:24px; background:white; display:flex; flex-direction:column; justify-content:space-between; margin-bottom:16px;">
+                <div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                        <span style="font-size:11px; background:#ecfdf5; color:#065f46; font-weight:bold; padding:4px 10px; border-radius:20px; text-transform:uppercase;">{plan['badge']}</span>
+                    </div>
+                    <h3 style="margin:0 0 6px 0; font-size:19px; color:#0f172a;">{plan['name']}</h3>
+                    <p style="color:#64748b; font-size:13px; line-height:1.5; margin:0 0 12px 0;">{plan['description']}</p>
+                    <div style="font-size:28px; font-weight:800; color:#044332; margin:10px 0;">{price_display}</div>
+                    {roi_box}
+                </div>
+                <a href="/checkout/{key}" style="background:#044332; color:white; padding:12px; border-radius:8px; text-decoration:none; text-align:center; font-weight:bold; font-size:14px; margin-top:10px; display:block;">
+                   Claim Tailored Tier →
+                </a>
+            </div>"""
         else:
-            price_display = f"{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal;'> one-off</span>"
-
-        highlight = "border:3px solid #1b5e20;" if key == "city_monthly" else "border:2px solid #ccc;"
-
-        cards += f"""
-        <div style="{highlight} border-radius:16px; padding:24px; margin:10px 0;
-                    background:white; text-align:center;">
-            <div style="font-size:13px; color:#1b5e20; font-weight:bold;
-                        margin-bottom:8px;">{plan['badge']}</div>
-            <h3 style="margin:0 0 8px 0;">{plan['name']}</h3>
-            <p style="color:#666; font-size:14px; margin:0 0 16px 0;">{plan['description']}</p>
-            <h2 style="color:#1b5e20; margin:0 0 20px 0;">{price_display}</h2>
-            <a href="/checkout/{key}"
-               style="background:#1b5e20; color:white; padding:12px 28px;
-                      border-radius:8px; text-decoration:none;
-                      display:inline-block; font-weight:bold;">
-               Get Started 
-            </a>
-        </div>"""
+            price_display = f"£{plan['amount'] / 100:.0f}<span style='font-size:14px; font-weight:normal; color:#64748b;'> one-off</span>"
+            single_cards += f"""
+            <div style="border:1px solid #e2e8f0; border-radius:12px; padding:18px; background:white; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+                <div style="max-width:480px;">
+                    <span style="font-size:10px; background:#f1f5f9; color:#475569; font-weight:bold; padding:3px 8px; border-radius:12px; text-transform:uppercase;">{plan['badge']}</span>
+                    <h4 style="margin:6px 0 4px 0; font-size:16px; color:#0f172a;">{plan['name']}</h4>
+                    <p style="color:#64748b; font-size:12px; margin:0;">{plan['description']}</p>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:22px; font-weight:bold; color:#044332; margin-bottom:6px;">{price_display}</div>
+                    <a href="/checkout/{key}" style="background:#0f172a; color:white; padding:8px 18px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold; display:inline-block;">
+                        Unlock Single Lead
+                    </a>
+                </div>
+            </div>"""
 
     return f"""
     <!DOCTYPE html>
@@ -1150,8 +1167,7 @@ def pricing():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Commercial Allocation Tiers | Tree Key</title>
-
+        <title>Tailored Packages & Anti-Directory Guarantee | TreeKey</title>
         <style>
             :root {{
                 --brand-primary: #044332;
@@ -1164,40 +1180,113 @@ def pricing():
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                 background-color: var(--bg-light);
                 color: var(--brand-dark);
-                margin: 0; padding: 48px 20px;
+                margin: 0; padding: 40px 16px;
                 line-height: 1.6;
             }}
-            .container {{ max-width: 720px; margin: auto; }}
+            .container {{ max-width: 860px; margin: auto; }}
             .header {{ text-align: center; margin-bottom: 32px; }}
-            .header h1 {{ font-size: 32px; font-weight: 800; color: var(--brand-dark); margin: 0 0 10px 0; }}
-            .header p {{ color: var(--brand-muted); font-size: 15px; margin: 0; }}
-            .notice-box {{
-                background: #ffffff;
-                border: 1px solid var(--border-color);
-                border-left: 4px solid var(--brand-primary);
-                border-radius: 6px;
-                padding: 16px 20px;
-                font-size: 13px;
-                color: var(--brand-muted);
-                margin-bottom: 24px;
+            .header h1 {{ font-size: 34px; font-weight: 800; color: var(--brand-dark); margin: 0 0 10px 0; }}
+            .header p {{ color: var(--brand-muted); font-size: 16px; margin: 0; }}
+            
+            .creed-banner {{
+                background: linear-gradient(135deg, #044332 0%, #064e3b 100%);
+                color: white;
+                border-radius: 12px;
+                padding: 24px;
+                margin-bottom: 32px;
+                box-shadow: 0 8px 24px rgba(4,67,50,0.15);
             }}
+            .creed-banner h3 {{ margin-top: 0; font-size: 20px; color: #a7f3d0; }}
+            
+            .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-bottom: 32px; }}
+            
+            .comparison-table {{
+                width: 100%;
+                border-collapse: collapse;
+                background: white;
+                border-radius: 12px;
+                overflow: hidden;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+                margin-top: 24px;
+                font-size: 13px;
+            }}
+            .comparison-table th, .comparison-table td {{
+                padding: 14px 16px;
+                text-align: left;
+                border-bottom: 1px solid var(--border-color);
+            }}
+            .comparison-table th {{ background: #0f172a; color: white; font-weight: 600; }}
+            .comparison-table tr:last-child td {{ border-bottom: none; }}
         </style>
     </head>
     <body>
     <div class="container">
         <div class="header">
-            <h1>Commercial Allocation Tiers</h1>
-            <p>Direct statutory notice streams and verified planning intelligence allocations.</p>
+            <h1>Fair Trade Packages & Zero-Reselling Guarantee</h1>
+            <p>Direct statutory council intelligence & photo-verified homeowner leads. 100% exclusive. No shared bidding wars.</p>
         </div>
 
-        <div class="notice-box">
-            <b>Statutory Allocation Protocol:</b> Notice allocations are distributed immediately following local planning authority registration. Exclusive radial lockouts guarantee zero competing contractor distribution within your operating territory.
+        <div class="creed-banner">
+            <h3>🌲 The TreeKey Creed: "Your Prosperity is Our Business"</h3>
+            <p style="font-size:14px; line-height:1.6; margin:0;">
+                We are not a faceless directory. We do NOT sell your leads to 5 competitors, we do not take a percentage of your hard-earned invoices, and we don't trap you in long contracts. Every lead on TreeKey is a <b>single-sale asset</b>—the second you receive it, it is burned from our system forever.
+            </p>
         </div>
 
-        {cards}
+        <h2 style="font-size:22px; margin-bottom:16px; color:#0f172a;">1. Select Your Dedicated Subscription Tier</h2>
+        <div class="grid">
+            {sub_cards}
+        </div>
 
-        <div style="text-align:center; margin-top:32px;">
-            <a href="/" style="color:var(--brand-muted); text-decoration:none; font-size:13px; font-weight:600;"> Return to Main Intelligence Hub</a>
+        <h2 style="font-size:22px; margin:32px 0 16px 0; color:#0f172a;">2. Or Buy As You Go (Single-Lead Marketplace)</h2>
+        <p style="color:#64748b; font-size:13px; margin-top:-10px; margin-bottom:16px;">
+            Subscribers get priority allocation. Any unallocated leads flow into our single-purchase marketplace. Once bought, a lead is burned and never resold.
+        </p>
+        {single_cards}
+
+        <h2 style="font-size:22px; margin:40px 0 16px 0; color:#0f172a;">⚖️ Why TreeKey is the Opposite of Directories</h2>
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Feature / Metric</th>
+                    <th>Traditional Directories (Bark / Checkatrade / TrustATrader)</th>
+                    <th style="background:#044332;">TreeKey Operating System</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><b>Lead Exclusivity</b></td>
+                    <td>❌ Sold to 3–5 competing contractors simultaneously.</td>
+                    <td style="color:#065f46; font-weight:bold;">✅ 100% Single-Sale. Lead is burned once dispatched.</td>
+                </tr>
+                <tr>
+                    <td><b>Price Competition</b></td>
+                    <td>❌ Race to the bottom; customer compares 5 cheap quotes.</td>
+                    <td style="color:#065f46; font-weight:bold;">✅ First-Mover Advantage. Quote before competitors know.</td>
+                </tr>
+                <tr>
+                    <td><b>Lead Source</b></td>
+                    <td>❌ Unverified ballpark quote seekers & price checkers.</td>
+                    <td style="color:#065f46; font-weight:bold;">✅ Statutory Council Planning Notices (100% committed).</td>
+                </tr>
+                <tr>
+                    <td><b>Trade Cost Framing</b></td>
+                    <td>❌ Heavy fixed monthly directory listing fees (£120+/mo).</td>
+                    <td style="color:#065f46; font-weight:bold;">✅ Low £49/mo (less than half a tank of diesel). 1 job = 5x ROI.</td>
+                </tr>
+                <tr>
+                    <td><b>Customer Ownership</b></td>
+                    <td>❌ Trapped inside their app collecting reviews for them.</td>
+                    <td style="color:#065f46; font-weight:bold;">✅ You Own the Client. Quote directly under your own brand.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div style="text-align:center; margin-top:40px; padding:20px; background:white; border-radius:12px; border:1px solid #e2e8f0;">
+            <p style="margin:0 0 10px 0; font-size:14px; color:#64748b;">Have an idea or want a tool built specifically for your crew?</p>
+            <a href="/suggestions" style="color:#044332; font-weight:bold; text-decoration:none; font-size:14px;">💡 Submit a Suggestion to Our Product Board →</a>
+            &nbsp;|&nbsp;
+            <a href="/" style="color:#64748b; text-decoration:none; font-size:14px;">Return to Live Map</a>
         </div>
     </div>
     </body>
@@ -1207,40 +1296,283 @@ def pricing():
 
 
 
-#  Checkout (Stripe) 
+# ── Customer Suggestions & Feedback Hub ───────────────────────────────────────
+
+@app.get("/suggestions", response_class=HTMLResponse)
+def suggestions_page():
+    return """
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Arborist Suggestions Hub | TreeKey</title>
+        <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; }
+            .box { max-width:580px; margin:auto; background:white; padding:32px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04); }
+            input, textarea { width:100%; box-sizing:border-box; padding:12px; border:1px solid #cbd5e1; border-radius:8px; margin-bottom:16px; font-family:inherit; font-size:14px; }
+            button { background:#044332; color:white; border:none; padding:12px 24px; border-radius:8px; font-weight:bold; font-size:15px; cursor:pointer; width:100%; }
+        </style>
+    </head>
+    <body>
+    <div class="box">
+        <h2 style="margin-top:0; color:#044332;">💡 Arborist Suggestions & Feature Requests</h2>
+        <p style="color:#64748b; font-size:14px; line-height:1.5;">We built TreeKey to serve UK tree surgeons. Tell us what tools, calculators, or data features you need to make your business more profitable.</p>
+        <form action="/api/submit-suggestion" method="POST">
+            <label style="font-size:13px; font-weight:600;">Your Name / Company Name:</label>
+            <input type="text" name="name" placeholder="e.g. Dave, Apex Tree Care Ltd" required>
+            
+            <label style="font-size:13px; font-weight:600;">Phone Number or Email (Optional):</label>
+            <input type="text" name="contact" placeholder="So we can let you know when it's built">
+            
+            <label style="font-size:13px; font-weight:600;">Your Suggestion or Problem You Want Solved:</label>
+            <textarea name="suggestion" rows="5" placeholder="e.g. I need a tool to calculate tipping weight for mature Ash trees, or an easier way to download council sketch maps..." required></textarea>
+            
+            <button type="submit">Submit Suggestion to Founders 🚀</button>
+        </form>
+        <p style="text-align:center; margin-top:20px;"><a href="/" style="color:#64748b; text-decoration:none; font-size:13px;">← Return to Main Page</a></p>
+    </div>
+    </body>
+    </html>
+    """
+
+
+@app.post("/api/submit-suggestion")
+async def submit_suggestion(request: Request):
+    form = await request.form()
+    name = form.get("name", "")
+    contact = form.get("contact", "")
+    suggestion = form.get("suggestion", "")
+    
+    database.save_contractor_suggestion(name, contact, suggestion)
+    
+    return HTMLResponse("""
+    <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#f8fafc;">
+        <div style="max-width:500px; margin:auto; background:white; padding:40px; border-radius:16px; border:1px solid #e2e8f0;">
+            <h2 style="color:#059669; margin-top:0;">✅ Suggestion Received!</h2>
+            <p style="color:#64748b; font-size:15px; line-height:1.5;">Thank you for helping us make TreeKey better for UK tree surgeons. Our team reviews every suggestion directly.</p>
+            <a href="/" style="display:inline-block; background:#044332; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; margin-top:15px;">Return to Map</a>
+        </div>
+    </body></html>
+    """)
+
+
+
+
+# ── 1-Tap Homeowner Introduction Letter Generator ─────────────────────────────
+
+@app.get("/generate-letter/{lead_id}", response_class=HTMLResponse)
+def generate_homeowner_letter(lead_id: str, company: str = "Your Local Tree Specialists", phone: str = "07XXX XXXXXX"):
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT reference, address, summary, council_source FROM leads WHERE id = %s OR reference = %s;", (lead_id, lead_id))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row:
+        return HTMLResponse("<h3>Lead not found.</h3>", status_code=404)
+
+    ref, addr, summary, council = row
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <title>Homeowner Notice Letter | {ref}</title>
+        <style>
+            body {{ font-family: "Georgia", serif; padding: 40px; color: #111; max-width: 650px; margin: auto; line-height: 1.6; background: #fff; }}
+            .header {{ border-bottom: 2px solid #044332; padding-bottom: 15px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: flex-end; }}
+            .title {{ font-size: 20px; font-weight: bold; color: #044332; }}
+            .btn-print {{ background: #044332; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; font-family: sans-serif; }}
+            @media print {{ .btn-print {{ display: none; }} body {{ padding: 0; }} }}
+        </style>
+    </head>
+    <body>
+        <div style="text-align:right; margin-bottom:15px;">
+            <button class="btn-print" onclick="window.print()">🖨️ Print / Save as PDF</button>
+        </div>
+
+        <div class="header">
+            <div>
+                <div class="title">{company}</div>
+                <div style="font-size:12px; color:#666; font-family:sans-serif;">Professional Arboricultural & Tree Surgery Services</div>
+            </div>
+            <div style="font-size:12px; font-family:sans-serif; text-align:right;">
+                <b>Tel:</b> {phone}<br>
+                <b>Standard:</b> BS 3998:2010 Compliant
+            </div>
+        </div>
+
+        <p style="font-size:14px; margin-bottom:20px;">
+            <b>To the Property Owner / Occupier:</b><br>
+            {addr}
+        </p>
+
+        <p style="font-size:14px;">Dear Homeowner,</p>
+
+        <p style="font-size:14px; text-align:justify;">
+            We are writing to introduce our local arboricultural team in relation to your recent statutory planning notification registered with <b>{council}</b> (Application Reference: <b>{ref}</b>).
+        </p>
+
+        <div style="background:#f8fafc; border-left:3px solid #044332; padding:12px 16px; margin:15px 0; font-size:13px; font-family:sans-serif;">
+            <b>Proposed Arboricultural Specification:</b><br>
+            <i>"{summary}"</i>
+        </div>
+
+        <p style="font-size:14px; text-align:justify;">
+            As an established, fully insured local tree care contractor, our team carries full NPTC city & guilds climbing certifications and £5,000,000 Public Liability Insurance. All operations are strictly executed in accordance with <b>British Standard BS 3998:2010 (Tree Work Recommendations)</b>.
+        </p>
+
+        <p style="font-size:14px; text-align:justify;">
+            We would be pleased to provide a <b>complimentary, no-obligation on-site quotation</b> and assist with any liaison required with the local planning authority tree officer.
+        </p>
+
+        <div style="margin-top:30px; font-size:14px;">
+            Yours sincerely,<br><br>
+            <b>{company}</b><br>
+            Direct Line: <b>{phone}</b>
+        </div>
+    </body>
+    </html>
+    """
+
+
+
+
+# ── Checkout (Stripe with Single-Sale Inventory Burn) ─────────────────────────
 
 @app.get("/checkout/{plan_key}")
 def checkout(plan_key: str, request: Request):
-    outcode = request.query_params.get("outcode")
-    if not outcode:
-        return HTMLResponse("<h1>Error</h1><p>No territory selected. Please go back and scan a territory on the map before checking out.</p>", status_code=400)
+    outcode = request.query_params.get("outcode", "GB")
+    lead_id = request.query_params.get("lead_id")
     
-    # Check if claimed
-    import database
-    if database.is_territory_claimed(outcode):
-        return HTMLResponse("<h1>Territory Unavailable</h1><p>Sorry, this territory is already locked by another partner.</p>", status_code=403)
-        
-        
     url = payments.create_checkout_session(plan_key, outcode)
     if not url:
         return HTMLResponse(
             "<html><body style='font-family:sans-serif; text-align:center; padding:60px;'>"
             "<h1>Payment System Unavailable</h1>"
-            "<p>We are currently experiencing issues connecting to Stripe. Please try again in a few minutes or contact support at contact@treekey.uk.</p>"
-            "<a href='/'>Return to Map</a>"
+            "<p>We are currently experiencing issues connecting to Stripe. Please contact support at contact@treekey.uk.</p>"
+            "<a href='/pricing'>Return to Pricing</a>"
             "</body></html>", 
             status_code=503
         )
     return RedirectResponse(url=url)
 
 
+@app.get("/marketplace", response_class=HTMLResponse)
+def marketplace_view():
+    """
+    Single-Purchase Lead Marketplace with Pre-Purchase Teaser Cards:
+    Allows contractors to preview unallocated leads before unlocking.
+    Once unlocked, the lead is permanently burned from the system.
+    """
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, reference, address, summary, council_source, lead_score, lead_price, discovered_at 
+        FROM leads 
+        WHERE status = 'new' OR status IS NULL 
+        ORDER BY discovered_at DESC 
+        LIMIT 30;
+    """)
+    leads = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    lead_cards = ""
+    for (lid, ref, addr, summary, council, score, price, discovered) in leads:
+        # Mask exact street number/name to prevent bypassing, but show neighborhood/town & postcode
+        addr_parts = [p.strip() for p in addr.split(",") if p.strip()]
+        masked_area = addr_parts[-1] if len(addr_parts) > 1 else addr
+        if len(addr_parts) >= 2:
+            masked_area = f"{addr_parts[-2]}, {addr_parts[-1]}"
+            
+        plan_key = f"single_lead_{score}" if score in ["small", "medium", "large"] else "single_lead_medium"
+        unlock_fee = int(price or 25)
+        
+        lead_cards += f"""
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; padding:20px; margin-bottom:14px; box-shadow:0 2px 8px rgba(0,0,0,0.03);">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+                <div>
+                    <span style="font-size:11px; background:#ecfdf5; color:#065f46; font-weight:bold; padding:3px 8px; border-radius:12px; text-transform:uppercase;">Verified Council Notice</span>
+                    <span style="font-size:11px; background:#f1f5f9; color:#475569; padding:3px 8px; border-radius:12px; margin-left:6px;">LPA: {council}</span>
+                    <h3 style="margin:8px 0 4px 0; font-size:17px; color:#0f172a;">📍 {masked_area}</h3>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:20px; font-weight:800; color:#044332;">£{unlock_fee}</div>
+                    <span style="font-size:11px; color:#64748b;">Single-Sale Asset</span>
+                </div>
+            </div>
+            
+            <div style="background:#f8fafc; border-left:3px solid #044332; padding:10px 14px; margin:12px 0; font-size:13px; color:#334155; line-height:1.5;">
+                <b>Job Preview:</b> {summary[:220]}...
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:14px;">
+                <div style="font-size:12px; color:#64748b;">
+                    🔒 Once unlocked, this lead is burned and never resold.
+                </div>
+                <a href="/checkout/{plan_key}?lead_id={lid}" style="background:#044332; color:white; padding:9px 20px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">
+                    Unlock Full Property Address & Contacts (£{unlock_fee}) →
+                </a>
+            </div>
+        </div>"""
+
+    if not lead_cards:
+        lead_cards = "<div style='text-align:center; padding:40px; background:white; border-radius:12px;'><p style='color:#64748b;'>All live planning leads are currently allocated to subscribers. Check back shortly for new council registrations.</p></div>"
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Single-Purchase Planning Lead Marketplace | TreeKey</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; line-height:1.6; }}
+            .container {{ max-width: 800px; margin: auto; }}
+        </style>
+    </head>
+    <body>
+    <div class="container">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; flex-wrap:wrap; gap:10px;">
+            <div>
+                <h1 style="margin:0; font-size:28px; color:#044332;">🛒 Unallocated Planning Leads</h1>
+                <p style="margin:4px 0 0 0; color:#64748b; font-size:14px;">Preview available council applications before unlocking. Subscribers receive priority allocation.</p>
+            </div>
+            <a href="/pricing" style="background:#059669; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">View Monthly Subscriptions</a>
+        </div>
+
+        <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:14px 18px; margin-bottom:24px; font-size:13px; color:#1e40af;">
+            <b>💡 Single-Sale Guarantee:</b> Every lead purchased below is immediately removed from the live marketplace and burned permanently. You are the ONLY contractor who will receive the property data.
+        </div>
+
+        {lead_cards}
+
+        <div style="text-align:center; margin-top:30px;">
+            <a href="/" style="color:#64748b; text-decoration:none; font-size:13px;">← Return to Main Intelligence Map</a>
+        </div>
+    </div>
+    </body>
+    </html>
+    """
+
+
+
+
 @app.get("/payment/success", response_class=HTMLResponse)
 def payment_success():
     return """
-    <html><body style="font-family:sans-serif; text-align:center; padding:60px;">
-        <h1> Payment Successful!</h1>
-        <p>Thank you. Your leads will start arriving shortly.</p>
-        <p><a href="/">Back to Dashboard</a></p>
+    <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#f8fafc;">
+        <div style="max-width:550px; margin:auto; background:white; padding:40px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04);">
+            <h1 style="color:#059669; margin-top:0;">🎉 Payment Successful!</h1>
+            <p style="color:#64748b; font-size:15px; line-height:1.5;">Thank you. Your exclusive planning intelligence stream has been activated. Your lead dispatches and tools are now live.</p>
+            <div style="margin-top:25px;">
+                <a href="/" style="background:#044332; color:white; padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">View Live Intelligence Map</a>
+            </div>
+        </div>
     </body></html>
     """
 

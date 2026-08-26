@@ -103,6 +103,14 @@ def init_db():
                 claimed_at TIMESTAMPTZ DEFAULT NOW(),
                 expires_at TIMESTAMPTZ
             );
+
+            CREATE TABLE IF NOT EXISTS contractor_suggestions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                contractor_name TEXT,
+                phone_or_email TEXT,
+                suggestion TEXT NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
         """)
 
         # Performance Indices for Instant High-Volume Queries
@@ -355,5 +363,61 @@ def get_active_territory_claims() -> list:
             cur.close()
             conn.close()
     except Exception as e:
-        logger.error(f"[Territory] Fetch active claims error: {e}")
+        logger.error(f"[Territory] Error fetching active claims: {e}")
         return []
+
+
+def save_contractor_suggestion(name: str, contact: str, suggestion_text: str) -> bool:
+    """Saves contractor suggestions and feedback to the database."""
+    if not SURL or not suggestion_text:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                INSERT INTO contractor_suggestions (contractor_name, phone_or_email, suggestion)
+                VALUES (%s, %s, %s)
+                RETURNING id;
+            """, (name.strip() if name else "Anonymous Arborist", contact.strip() if contact else None, suggestion_text.strip()))
+            row = cur.fetchone()
+            conn.commit()
+            return bool(row)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Feedback] Error saving contractor suggestion: {e}")
+        return False
+
+
+def burn_lead_inventory(lead_id: str, buyer_email: str) -> bool:
+    """
+    Single-Sale Inventory Burn Protocol:
+    The millisecond a lead is purchased or claimed, it is permanently marked as 'claimed'
+    and assigned to buyer_email so it is impossible to be displayed or sold to anyone else.
+    """
+    if not SURL or not lead_id:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE leads 
+                SET status = 'claimed'
+                WHERE id = %s AND (status = 'new' OR status IS NULL)
+                RETURNING id;
+            """, (lead_id,))
+            row = cur.fetchone()
+            conn.commit()
+            if row:
+                logger.info(f"[Inventory Burn] Lead {lead_id} permanently claimed & burned by {buyer_email}.")
+                return True
+            return False
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Inventory Burn] Error burning lead {lead_id}: {e}")
+        return False

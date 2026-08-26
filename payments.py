@@ -10,37 +10,80 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
 PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
 logger = logging.getLogger("vector-data-labs")
 
-# ── Pricing Plans ─────────────────────────────────────────────────────────────
+# ── Pricing Plans (5 Tailored Packages + Single Purchase Marketplace) ─────────
 # All amounts in pence (GBP)
 PLANS = {
-    "sole_trader": {
-        "name": "Sole Trader (10-Mile Radius)",
-        "description": "10-Mile Radial Boundary. 100% Exclusive Lead Routing. Daily Email Notifications.",
+    "stump_pro": {
+        "name": "TreeKey Stump Pro",
+        "description": "Dedicated to stump grinding contractors. Filtered exclusively for felling & stump removal applications with gate clearance checks.",
+        "amount": 2900,   # £29/month
+        "mode": "subscription",
+        "badge": "Stump Specialists",
+        "real_world_roi": "One £150 stump job per month gives a 5x ROI."
+    },
+    "climber_domestic": {
+        "name": "TreeKey Climber (Domestic)",
+        "description": "For 1-2 van tree surgeons. Daily domestic crown reductions, pollards, garden felling, 1-tap homeowner letters, and Street View briefs.",
         "amount": 4900,   # £49/month
         "mode": "subscription",
-        "badge": "Starter",
-    },
-    "commercial_pro": {
-        "name": "Commercial Pro (25-Mile Radius)",
-        "description": "25-Mile Radial Boundary. 100% Exclusive. Instant SMS Alerts. Connected-Council Access.",
-        "amount": 14900,  # £149/month
-        "mode": "subscription",
         "badge": "Most Popular",
+        "real_world_roi": "Less than half a tank of diesel (£49/mo). One £400 job every 6 months pays for the entire year with a 4x net return."
     },
-    "regional_elite": {
-        "name": "Regional Elite (50-Mile Radius)",
-        "description": "50-Mile Radial Boundary. First-Priority API Routing. Dedicated Account Manager.",
-        "amount": 29900,  # £299/month
+    "arb_consultant": {
+        "name": "TreeKey Consultant (Planning & Survey)",
+        "description": "For qualified arborists (TechArb/MICFor). Developer condition 7 discharges, BS5837 impact assessments, and direct developer company contacts.",
+        "amount": 8900,   # £89/month
         "mode": "subscription",
-        "badge": "Premium",
+        "badge": "Planning & Surveyors",
+        "real_world_roi": "One £800 developer method statement report every 3 months gives a 3x ROI on pure desktop work."
     },
+    "commercial_forestry": {
+        "name": "TreeKey Commercial & Forestry",
+        "description": "For heavy machinery operators & commercial outfits. Multi-tree site clearances (3+), Ash Dieback blocks, and B2B institutional tenders.",
+        "amount": 13900,  # £139/month
+        "mode": "subscription",
+        "badge": "Heavy Commercial",
+        "real_world_roi": "One commercial job won per year (£3,000–£15,000) covers your subscription for 2–5 years."
+    },
+    "treekey_elite": {
+        "name": "TreeKey Elite (All-Access Partner)",
+        "description": "100% Unrestricted Access to ALL categories across 30 miles + Zero-Minute Instant WhatsApp Alerts + RAMS Legal Pack + Automated Direct Mailouts.",
+        "amount": 17900,  # £179/month
+        "mode": "subscription",
+        "badge": "VIP All-Access",
+        "real_world_roi": "Complete business operating system. First-mover WhatsApp dispatch before competitors even know the job exists."
+    },
+    # Single Lead Pay-As-You-Go Purchases (Single-Sale Inventory Burn)
+    "single_lead_small": {
+        "name": "Single Lead Unlock (Domestic Maintenance)",
+        "description": "100% Exclusive unshared planning lead. Once purchased, this lead is permanently deleted from all systems and never sold again.",
+        "amount": 1900,   # £19 one-off
+        "mode": "payment",
+        "badge": "Single Purchase",
+        "real_world_roi": "Instant unlocked property address, homeowner name, and Street View brief."
+    },
+    "single_lead_medium": {
+        "name": "Single Lead Unlock (Standard Felling / Tree Removal)",
+        "description": "100% Exclusive unshared felling lead. Permanently burned from inventory upon purchase.",
+        "amount": 2900,   # £29 one-off
+        "mode": "payment",
+        "badge": "Single Purchase",
+        "real_world_roi": "Instant unlocked property address, homeowner name, and Street View brief."
+    },
+    "single_lead_large": {
+        "name": "Single Lead Unlock (Commercial / Site Clearance / TPO)",
+        "description": "100% Exclusive high-value commercial or developer planning lead. Burned from inventory immediately upon purchase.",
+        "amount": 4900,   # £49 one-off
+        "mode": "payment",
+        "badge": "Single Purchase",
+        "real_world_roi": "Instant unlocked property address, developer contact, and planning specs."
+    }
 }
 
 
-def create_checkout_session(plan_key: str, outcode: str = None) -> Optional[str]:
-
+def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = None) -> Optional[str]:
     """
-    Creates a Stripe Checkout session for the given plan.
+    Creates a Stripe Checkout session for the given plan or single lead purchase.
     Returns the checkout URL to redirect the customer to.
     """
     if not stripe.api_key:
@@ -67,16 +110,19 @@ def create_checkout_session(plan_key: str, outcode: str = None) -> Optional[str]
             "success_url": f"{PUBLIC_APP_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}",
             "cancel_url": f"{PUBLIC_APP_URL}/pricing",
             "allow_promotion_codes": True,
+            "metadata": {}
         }
         
         if outcode:
             session_params["client_reference_id"] = outcode
-            session_params["metadata"] = {"outcode": outcode}
+            session_params["metadata"]["outcode"] = outcode
+            
+        if lead_id:
+            session_params["metadata"]["lead_id"] = lead_id
 
         session = stripe.checkout.Session.create(**session_params)
-        logger.info(f"[Stripe] Checkout session created for plan '{plan_key}': {session.id}")
+        logger.info(f"[Stripe] Checkout session created for plan '{plan_key}' (lead_id={lead_id}): {session.id}")
         return session.url
-
 
     except stripe.error.AuthenticationError:
         logger.error("[Stripe] Invalid API key.")
@@ -135,9 +181,18 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
         session_id = data.get("id")
         customer_email = data.get("customer_details", {}).get("email", "unknown")
         amount = data.get("amount_total", 0)
-        outcode = data.get("client_reference_id") or data.get("metadata", {}).get("outcode")
-        if outcode:
-            import database
+        metadata = data.get("metadata", {})
+        outcode = data.get("client_reference_id") or metadata.get("outcode")
+        lead_id = metadata.get("lead_id")
+        
+        import database
+        # 1. If this was a single lead purchase, execute the Single-Sale Inventory Burn
+        if lead_id:
+            burned = database.burn_lead_inventory(lead_id, customer_email)
+            logger.info(f"[Stripe] Lead {lead_id} burned from inventory for {mask(customer_email)}: {burned}")
+
+        # 2. If this was a subscription with outcode
+        if outcode and not lead_id:
             claimed = database.claim_territory_atomically(outcode, customer_email, stripe_sub_id=data.get("subscription", ""))
             logger.info(f"[Stripe] Territory {outcode} claimed by {mask(customer_email)}: {claimed}")
             if not claimed:
@@ -152,7 +207,7 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
                 )
         logger.info(f"[Stripe] Payment complete — {mask(customer_email)} — £{amount / 100:.2f}")
         return {"event": "payment_complete", "email": customer_email,
-                "session_id": session_id, "amount_pence": amount, "outcode": outcode}
+                "session_id": session_id, "amount_pence": amount, "outcode": outcode, "lead_id": lead_id}
 
 
     elif event_type == "customer.subscription.created":

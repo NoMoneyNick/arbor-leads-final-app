@@ -95,26 +95,37 @@ def dispatch_lead_alerts(city: str, leads: list):
     for email, routed_leads in customer_leads.items():
         rows = "".join([
             f"<tr>"
-            f"<td style='padding:6px;'>{SCORE_EMOJI.get(l.get('lead_score','small'), '🌳')}</td>"
-            f"<td style='padding:6px;'><b>{l['addr']}</b></td>"
-            f"<td style='padding:6px;'>{l['summary'][:80]}...</td>"
-            f"<td style='padding:6px; font-weight:bold;'>£{l.get('lead_price', 25)}</td>"
+            f"<td style='padding:8px;'>{SCORE_EMOJI.get(l.get('lead_score','small'), '🌳')}</td>"
+            f"<td style='padding:8px;'><b>{l['addr']}</b></td>"
+            f"<td style='padding:8px;'>{l['summary'][:90]}...</td>"
+            f"<td style='padding:8px;'><a href='{PUBLIC_APP_URL}/generate-letter/{urllib.parse.quote(l.get('ref', l.get('reference', '')))}' style='background:#044332; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px;'>🖨️ Get Letter</a></td>"
             f"</tr>"
             for l in routed_leads
         ])
         body = f"""
-            <h2>🌳 Tree Key Exclusive Leads - {len(routed_leads)} New Matches</h2>
-            <p>Here are the latest statutory tree work applications approved in your locked territory:</p>
-            <table border='1' cellspacing='0' style='border-collapse:collapse; width:100%;'>
-                <tr style='background:#f4f4f9;'>
-                    <th style='padding:6px;'>Grade</th>
-                    <th style='padding:6px;'>Location</th>
-                    <th style='padding:6px;'>Description</th>
-                    <th style='padding:6px;'>Est. Value</th>
-                </tr>
-                {rows}
-            </table>
-            <p><a href='{PUBLIC_APP_URL or "#"}'>Log in to Dashboard ➔</a></p>
+            <div style="font-family:sans-serif; max-width:640px; margin:auto; color:#0f172a;">
+                <h2 style="color:#044332; margin-bottom:4px;">🌳 TreeKey Intelligence — {len(routed_leads)} New Exclusive Leads</h2>
+                <p style="color:#64748b; font-size:14px; margin-top:0;">Here are the latest statutory tree work applications registered in your sector:</p>
+                
+                <div style="background:#f0fdf4; border-left:3px solid #059669; padding:10px; font-size:12px; color:#065f46; margin-bottom:16px;">
+                    <b>🔒 Single-Sale Guarantee:</b> These leads have been delivered exclusively to you and burned from our public radar.
+                </div>
+
+                <table border='1' cellspacing='0' style='border-collapse:collapse; width:100%; font-size:13px; border-color:#e2e8f0;'>
+                    <tr style='background:#f8fafc;'>
+                        <th style='padding:8px; text-align:left;'>Type</th>
+                        <th style='padding:8px; text-align:left;'>Location</th>
+                        <th style='padding:8px; text-align:left;'>Description</th>
+                        <th style='padding:8px; text-align:left;'>Tool</th>
+                    </tr>
+                    {rows}
+                </table>
+
+                <div style="margin-top:24px; padding:16px; background:#f8fafc; border-radius:8px; text-align:center; font-size:13px; color:#64748b;">
+                    Have an idea or want a new tool built for your business? 
+                    <a href="{PUBLIC_APP_URL}/suggestions" style="color:#044332; font-weight:bold;">Submit a Suggestion →</a>
+                </div>
+            </div>
         """
         if RESEND_API_KEY:
             try:
@@ -122,9 +133,9 @@ def dispatch_lead_alerts(city: str, leads: list):
                     "https://api.resend.com/emails",
                     headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
                     json={
-                        "from": "Tree Key <leads@treekey.uk>",
+                        "from": "TreeKey Intelligence <leads@treekey.uk>",
                         "to": [email],
-                        "subject": f"🌳 {len(routed_leads)} New Exclusive Leads in your Territory",
+                        "subject": f"🌳 {len(routed_leads)} New Exclusive Planning Leads in your Area",
                         "html": body
                     }
                 )
