@@ -3221,7 +3221,7 @@ def sitemap_xml():
         urls.append(f"https://arbor-leads-final-app.onrender.com/tree-surgeon/{slug}")
 
     xml_lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
-    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    today = datetime.date.today().isoformat()
     for u in urls:
         xml_lines.append(f"  <url><loc>{u}</loc><lastmod>{today}</lastmod><changefreq>daily</changefreq><priority>0.8</priority></url>")
     xml_lines.append('</urlset>')
