@@ -157,7 +157,7 @@ def dispatch_lead_alerts(city: str, leads: list):
         email = sub["email"]
         sub_id = sub["id"]
         # If this subscriber received 0 leads this run and their monthly deliveries are low
-        if email not in customer_leads and sub.get("delivered", 0) < 5:
+        if email not in customer_leads and sub.get("delivered", 0) < max(3, int(sub.get("quota", 20) * 0.2)):
             overflow_leads = database.get_closest_unallocated_leads(sub["outcode"], limit=2)
             if overflow_leads:
                 for ol in overflow_leads:
