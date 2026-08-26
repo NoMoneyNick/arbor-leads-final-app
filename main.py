@@ -1721,9 +1721,10 @@ def payment_success():
     <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#f8fafc;">
         <div style="max-width:550px; margin:auto; background:white; padding:40px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04);">
             <h1 style="color:#059669; margin-top:0;">🎉 Payment Successful!</h1>
-            <p style="color:#64748b; font-size:15px; line-height:1.5;">Thank you. Your exclusive planning intelligence stream has been activated. Your lead dispatches and tools are now live.</p>
-            <div style="margin-top:25px;">
-                <a href="/" style="background:#044332; color:white; padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">View Live Intelligence Map</a>
+            <p style="color:#64748b; font-size:15px; line-height:1.5;">Thank you. Your exclusive planning intelligence stream has been activated.<br><br>Your lead dispatches will arrive by email automatically — but you can also browse and unlock leads directly below.</p>
+            <div style="margin-top:25px; display:flex; flex-direction:column; gap:12px; align-items:center;">
+                <a href="/marketplace" style="background:#044332; color:white; padding:12px 28px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; width:260px; display:block;">🏛️ Browse Available Leads Now</a>
+                <a href="/login" style="background:#1d4ed8; color:white; padding:12px 28px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; width:260px; display:block;">🔑 Log In to Your Dashboard</a>
             </div>
         </div>
     </body></html>
