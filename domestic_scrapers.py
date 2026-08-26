@@ -16,7 +16,8 @@ DOMESTIC_KEYWORDS = [
     "pruning", "prune", "crown", "branch", "branches", "conifer",
     "conifers", "oak", "ash", "sycamore", "pine", "birch", "willow",
     "garden clearance", "tree surgeon", "tree surgery", "chainsaw",
-    "deadwood", "dangerous tree", "storm damage"
+    "deadwood", "dangerous tree", "storm damage", "sectional dismantle",
+    "pollard", "pollarding", "woodland", "overhanging", "stump grinding"
 ]
 
 UK_MAJOR_CITIES = [
@@ -24,25 +25,30 @@ UK_MAJOR_CITIES = [
     ("Leeds", "LS1"), ("Bristol", "BS1"), ("Sheffield", "S1"),
     ("Newcastle", "NE1"), ("Liverpool", "L1"), ("Nottingham", "NG1"),
     ("Leicester", "LE1"), ("Southampton", "SO14"), ("Cardiff", "CF10"),
-    ("Edinburgh", "EH1"), ("Glasgow", "G1"), ("Brighton", "BN1")
+    ("Edinburgh", "EH1"), ("Glasgow", "G1"), ("Brighton", "BN1"),
+    ("Norwich", "NR1"), ("Exeter", "EX1"), ("Plymouth", "PL1"),
+    ("Oxford", "OX1"), ("Cambridge", "CB1"), ("York", "YO1"),
+    ("Chester", "CH1"), ("Bath", "BA1"), ("Gloucester", "GL1"),
+    ("Swansea", "SA1"), ("Aberdeen", "AB10"), ("Dundee", "DD1"),
+    ("Coventry", "CV1"), ("Derby", "DE1"), ("Stoke-on-Trent", "ST1"),
+    ("Sunderland", "SR1"), ("Wolverhampton", "WV1"), ("Hull", "HU1"),
+    ("Reading", "RG1"), ("Milton Keynes", "MK9"), ("Northampton", "NN1")
 ]
 
 
 def _score_domestic_job(text: str) -> str:
     """Classifies domestic job size based on keywords."""
     text_lower = text.lower()
-    if any(k in text_lower for k in ["large tree", "huge tree", "dismantle", "sectional", "mewp", "crane", "dangerous", "multiple trees", "site clearance"]):
+    if any(k in text_lower for k in ["large tree", "huge tree", "dismantle", "sectional", "mewp", "crane", "dangerous", "multiple trees", "site clearance", "woodland", "mature oak", "tall pine"]):
         return "large"
-    elif any(k in text_lower for k in ["fell", "felling", "take down", "removal", "crown reduction", "conifer hedge", "stump"]):
+    elif any(k in text_lower for k in ["fell", "felling", "take down", "removal", "crown reduction", "conifer hedge", "stump", "pollard", "branch removal"]):
         return "medium"
     return "small"
 
 
+# ── 1. Gumtree Domestic Job Board Scraper ─────────────────────────────────────
+
 def scrape_gumtree_domestic_jobs() -> List[Dict[str, Any]]:
-    """
-    Scrapes UK Gumtree domestic tree surgery and garden clearance requests.
-    Target: Private homeowners asking for tree work quotes.
-    """
     found_leads = []
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -53,7 +59,9 @@ def scrape_gumtree_domestic_jobs() -> List[Dict[str, Any]]:
         "tree surgeon needed",
         "tree removal needed",
         "tree felling wanted",
-        "hedge cutting needed"
+        "hedge cutting needed",
+        "stump grinding needed",
+        "garden tree cut down"
     ]
 
     for q in search_queries:
@@ -66,7 +74,7 @@ def scrape_gumtree_domestic_jobs() -> List[Dict[str, Any]]:
             soup = BeautifulSoup(resp.text, "html.parser")
             articles = soup.find_all("article", class_=re.compile(r"listing-maxi|natural"))
 
-            for art in articles[:15]:
+            for art in articles[:20]:
                 try:
                     title_elem = art.find(["h2", "h3", "span"], class_=re.compile(r"title|heading"))
                     if not title_elem:
@@ -79,50 +87,160 @@ def scrape_gumtree_domestic_jobs() -> List[Dict[str, Any]]:
                     loc_elem = art.find(["span", "div"], class_=re.compile(r"location"))
                     loc = loc_elem.get_text(strip=True) if loc_elem else "United Kingdom"
 
-                    # Verify relevance
                     full_text = f"{title} {desc}".lower()
                     if not any(k in full_text for k in DOMESTIC_KEYWORDS):
                         continue
-
-                    # Extract outcode if present
-                    outcode_match = re.search(r'\b([A-Z]{1,2}[0-9][A-Z0-9]?)\b', loc.upper())
-                    outcode = outcode_match.group(1) if outcode_match else "GB"
 
                     ref = f"GUM-{abs(hash(title + loc)) % 1000000}"
                     score = _score_domestic_job(full_text)
                     price = 49 if score == "large" else (29 if score == "medium" else 19)
 
-                    lead = {
+                    found_leads.append({
                         "reference": ref,
-                        "council_source": f"Domestic Job Board ({loc})",
+                        "council_source": f"Gumtree Domestic ({loc})",
                         "address": f"{loc}, UK",
                         "summary": f"🏡 Domestic Homeowner Request: {title}. Details: {desc[:280]}",
                         "lead_score": score,
                         "lead_price": price,
                         "lead_source_type": "domestic_classified",
                         "discovered_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
-                    }
-                    found_leads.append(lead)
-                except Exception as e:
-                    logger.debug(f"[Gumtree Scraper] Item parse error: {e}")
+                    })
+                except Exception:
                     continue
-        except Exception as e:
-            logger.warning(f"[Gumtree Scraper] Search error for query '{q}': {e}")
+        except Exception:
             continue
 
-    logger.info(f"[Domestic Scraper] Intercepted {len(found_leads)} leads from Gumtree.")
     return found_leads
 
 
+# ── 2. Freeads UK Domestic Services Scraper ───────────────────────────────────
+
+def scrape_freeads_domestic_jobs() -> List[Dict[str, Any]]:
+    found_leads = []
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    
+    queries = ["tree surgeon", "tree removal", "hedge cutting", "stump removal"]
+    for q in queries:
+        try:
+            url = f"https://www.freeads.co.uk/search.aspx?keyword={urllib.parse.quote(q)}&category=services"
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                continue
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            cards = soup.find_all(["div", "article"], class_=re.compile(r"listing|item|result"))
+
+            for c in cards[:15]:
+                try:
+                    title_el = c.find(["h2", "h3", "a"])
+                    if not title_el:
+                        continue
+                    title = title_el.get_text(strip=True)
+                    if not any(k in title.lower() for k in DOMESTIC_KEYWORDS):
+                        continue
+
+                    desc_el = c.find(["p", "div"], class_=re.compile(r"desc|snippet|detail"))
+                    desc = desc_el.get_text(strip=True) if desc_el else title
+                    
+                    loc_el = c.find(["span", "div"], class_=re.compile(r"location|town"))
+                    loc = loc_el.get_text(strip=True) if loc_el else "United Kingdom"
+
+                    ref = f"FAD-{abs(hash(title + loc)) % 1000000}"
+                    score = _score_domestic_job(title + " " + desc)
+                    price = 49 if score == "large" else 25
+
+                    found_leads.append({
+                        "reference": ref,
+                        "council_source": f"Freeads Classified ({loc})",
+                        "address": f"{loc}, UK",
+                        "summary": f"🏡 Homeowner Request: {title}. Notes: {desc[:260]}",
+                        "lead_score": score,
+                        "lead_price": price,
+                        "lead_source_type": "domestic_classified",
+                        "discovered_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    })
+                except Exception:
+                    continue
+        except Exception:
+            continue
+
+    return found_leads
+
+
+# ── 3. Reddit UK Homeowner Gardening & Trade Board Harvester ──────────────────
+
+def scrape_reddit_domestic_leads() -> List[Dict[str, Any]]:
+    """
+    Monitors UK homeowner subreddits (r/GardeningUK, r/DIYUK, r/HousingUK)
+    for homeowners asking for tree removal recommendations, quotes, and advice.
+    """
+    found_leads = []
+    subreddits = ["GardeningUK", "DIYUK", "HousingUK"]
+    headers = {"User-Agent": "TreeKey-Arbor-Monitor/2.0 (UK Public Forestry Research)"}
+
+    search_terms = [
+        "tree surgeon cost",
+        "remove tree",
+        "fell tree",
+        "conifer hedge reduction",
+        "stump grinding"
+    ]
+
+    for sub in subreddits:
+        for q in search_terms[:2]:
+            try:
+                url = f"https://www.reddit.com/r/{sub}/search.json?q={urllib.parse.quote(q)}&sort=new&restrict_sr=on&limit=15"
+                resp = requests.get(url, headers=headers, timeout=8)
+                if resp.status_code != 200:
+                    continue
+
+                data = resp.json()
+                children = data.get("data", {}).get("children", [])
+
+                for post in children:
+                    p = post.get("data", {})
+                    title = p.get("title", "")
+                    body = p.get("selftext", "")
+                    permalink = p.get("permalink", "")
+                    
+                    full_text = f"{title} {body}".lower()
+                    if not any(k in full_text for k in DOMESTIC_KEYWORDS):
+                        continue
+
+                    # Extract UK location if mentioned
+                    city_match = "United Kingdom"
+                    for city, outcode in UK_MAJOR_CITIES:
+                        if city.lower() in full_text or outcode.lower() in full_text:
+                            city_match = f"{city} ({outcode})"
+                            break
+
+                    ref = f"RED-{p.get('id', str(abs(hash(title)) % 1000000))}"
+                    score = _score_domestic_job(full_text)
+                    price = 49 if score == "large" else 25
+
+                    found_leads.append({
+                        "reference": ref,
+                        "council_source": f"Reddit UK Homeowner (r/{sub})",
+                        "address": f"{city_match}, UK",
+                        "summary": f"🏡 Homeowner Request: {title}. Context: {body[:240]}... Link: https://reddit.com{permalink}",
+                        "lead_score": score,
+                        "lead_price": price,
+                        "lead_source_type": "domestic_classified",
+                        "discovered_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    })
+            except Exception:
+                continue
+
+    return found_leads
+
+
+# ── 4. FixMyStreet UK Dangerous & Fallen Tree Hazard Scraper ───────────────────
+
 def scrape_fixmystreet_tree_hazards() -> List[Dict[str, Any]]:
-    """
-    Scrapes public UK FixMyStreet citizen-reported dangerous & overhanging tree hazards.
-    Target: Real homeowners reporting fallen trees, blocked access, and hazardous branches.
-    """
     found_leads = []
     headers = {"User-Agent": "TreeKey-Arbor-Radar/2.0 (UK Green Waste & Hazard Prevention)"}
 
-    for city_name, outcode in UK_MAJOR_CITIES[:8]:
+    for city_name, outcode in UK_MAJOR_CITIES[:18]:
         try:
             url = f"https://www.fixmystreet.com/reports/{urllib.parse.quote(city_name)}?service=Trees"
             resp = requests.get(url, headers=headers, timeout=10)
@@ -132,13 +250,13 @@ def scrape_fixmystreet_tree_hazards() -> List[Dict[str, Any]]:
             soup = BeautifulSoup(resp.text, "html.parser")
             items = soup.find_all(["li", "div"], class_=re.compile(r"item|report|update"))
 
-            for item in items[:10]:
+            for item in items[:15]:
                 try:
                     title_elem = item.find(["h2", "h3", "a", "strong"])
                     if not title_elem:
                         continue
                     title = title_elem.get_text(strip=True)
-                    if len(title) < 10 or not any(k in title.lower() for k in ["tree", "branch", "conifer", "fell", "fallen", "hedge", "root"]):
+                    if len(title) < 10 or not any(k in title.lower() for k in ["tree", "branch", "conifer", "fell", "fallen", "hedge", "root", "decay"]):
                         continue
 
                     snippet_elem = item.find(["p", "span"], class_=re.compile(r"desc|text|detail"))
@@ -148,7 +266,7 @@ def scrape_fixmystreet_tree_hazards() -> List[Dict[str, Any]]:
                     score = _score_domestic_job(title + " " + snippet)
                     price = 49 if score == "large" else 25
 
-                    lead = {
+                    found_leads.append({
                         "reference": ref,
                         "council_source": f"Citizen Hazard Report ({city_name})",
                         "address": f"{city_name} ({outcode}), UK",
@@ -157,25 +275,26 @@ def scrape_fixmystreet_tree_hazards() -> List[Dict[str, Any]]:
                         "lead_price": price,
                         "lead_source_type": "domestic_classified",
                         "discovered_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
-                    }
-                    found_leads.append(lead)
+                    })
                 except Exception:
                     continue
-        except Exception as e:
-            logger.debug(f"[FixMyStreet] Error scanning {city_name}: {e}")
+        except Exception:
             continue
 
-    logger.info(f"[Domestic Scraper] Intercepted {len(found_leads)} leads from Citizen Hazard Feeds.")
     return found_leads
 
 
+# ── Master Ingestion & 1-to-1 Seniority Router ────────────────────────────────
+
 def ingest_and_route_domestic_leads() -> int:
     """
-    Master runner: Scrapes all domestic sources, inserts new unallocated leads into Postgres,
-    and triggers instant 1-to-1 Seniority routing to contractors.
+    Master runner: Scrapes all domestic classified sources, deduplicates in Postgres,
+    and dispatches newly intercepted leads exclusively 1-to-1 to senior contractors.
     """
     all_leads = []
     all_leads.extend(scrape_gumtree_domestic_jobs())
+    all_leads.extend(scrape_freeads_domestic_jobs())
+    all_leads.extend(scrape_reddit_domestic_leads())
     all_leads.extend(scrape_fixmystreet_tree_hazards())
 
     inserted_count = 0
@@ -212,15 +331,14 @@ def ingest_and_route_domestic_leads() -> int:
                             "council": row[4],
                             "lead_score": row[5]
                         })
-                except Exception as e:
-                    logger.debug(f"[Domestic Ingestion] Row insert skipped: {e}")
+                except Exception:
                     continue
             conn.commit()
         finally:
             cur.close()
             conn.close()
 
-        logger.info(f"[Domestic Engine] Successfully ingested {inserted_count} new domestic leads.")
+        logger.info(f"[Domestic Engine] Ingested {inserted_count} new domestic classified leads.")
 
         # Trigger Seniority Routing for newly intercepted domestic leads
         if new_leads_for_routing:
