@@ -71,9 +71,6 @@ def dispatch_lead_alerts(city: str, leads: list):
     import database
     import re
     
-    import database
-    import re
-    
     # 1. Fetch active subscribers ordered strictly by Seniority (subscribed_at ASC)
     subscribers = database.get_active_subscribers_by_seniority()
     customer_leads = {}       # {email: [leads]}

@@ -174,7 +174,10 @@ def init_db():
             "ALTER TABLE leads ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE payments ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE api_usage ENABLE ROW LEVEL SECURITY;",
-            "ALTER TABLE territory_claims ENABLE ROW LEVEL SECURITY;"
+            "ALTER TABLE territory_claims ENABLE ROW LEVEL SECURITY;",
+            "ALTER TABLE contractor_subscriptions ENABLE ROW LEVEL SECURITY;",
+            "ALTER TABLE lead_dispatches ENABLE ROW LEVEL SECURITY;",
+            "ALTER TABLE contractor_suggestions ENABLE ROW LEVEL SECURITY;"
         ]
         for stmt in rls_statements:
             cur.execute(stmt)
