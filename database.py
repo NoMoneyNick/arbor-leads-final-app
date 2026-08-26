@@ -164,6 +164,10 @@ def init_db():
             "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMPTZ;",
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_score TEXT DEFAULT 'small';",
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_price NUMERIC DEFAULT 25;",
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS registered_date DATE;",
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS statutory_deadline DATE;",
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS planning_status TEXT DEFAULT 'pending';",
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lifecycle_stage TEXT DEFAULT 'stage_1_application';",
         ]
         for stmt in resilience_cols:
             cur.execute(stmt)
@@ -598,4 +602,118 @@ def get_closest_unallocated_leads(outcode: str, limit: int = 5) -> list:
             conn.close()
     except Exception as e:
         logger.error(f"[Seniority Router] Error fetching fallback leads: {e}")
+        return []
+
+
+def calculate_lead_freshness(discovered_at, planning_status: str = "pending", summary: str = "") -> dict:
+    """
+    Calculates statutory lead freshness, countdown timer, color badge, and dynamic decay price:
+    - Flash Hot (Day 0-3): £29 unlock (0 competitors aware)
+    - Active Quoting (Day 4-14): £19 unlock (Prime window)
+    - Clearance / Late Window (Day 15-30): £9 unlock (Consultation closing)
+    - Granted / Approved: £25 unlock (Permitted felling ready to start)
+    """
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc)
+    
+    if planning_status and planning_status.lower() in ["granted", "approved"]:
+        return {
+            "tier": "granted",
+            "badge_color": "#059669",
+            "badge_bg": "#ecfdf5",
+            "badge_text": "✅ Officially Approved (Ready to Fell)",
+            "price": 25,
+            "days_left": "Approved by Council",
+            "plan_key": "single_lead_medium"
+        }
+
+    # Calculate days since registration/discovery
+    days_old = 0
+    if discovered_at:
+        if isinstance(discovered_at, str):
+            try:
+                dt = datetime.datetime.fromisoformat(discovered_at.replace("Z", "+00:00"))
+                days_old = (now - dt).days
+            except Exception:
+                days_old = 0
+        elif hasattr(discovered_at, "timestamp"):
+            if discovered_at.tzinfo is None:
+                discovered_at = discovered_at.replace(tzinfo=datetime.timezone.utc)
+            days_old = (now - discovered_at).days
+
+    # Consultation window is typically 42 days (6 weeks for S211) or 56 days (TPO)
+    is_tpo = "tpo" in (summary or "").lower() or "preservation" in (summary or "").lower()
+    total_window = 56 if is_tpo else 42
+    days_left = max(0, total_window - days_old)
+
+    if days_old <= 3:
+        return {
+            "tier": "flash_hot",
+            "badge_color": "#dc2626",
+            "badge_bg": "#fef2f2",
+            "badge_text": "🔥 Flash Hot (Day 0–3 • 0 Competitors Aware)",
+            "price": 29,
+            "days_left": f"{days_left} days left in consultation",
+            "plan_key": "single_lead_medium"
+        }
+    elif days_old <= 14:
+        return {
+            "tier": "active",
+            "badge_color": "#d97706",
+            "badge_bg": "#fffbeb",
+            "badge_text": "⚡ Prime Quoting Window (Day 4–14)",
+            "price": 19,
+            "days_left": f"{days_left} days left in consultation",
+            "plan_key": "single_lead_small"
+        }
+    else:
+        return {
+            "tier": "clearance",
+            "badge_color": "#ca8a04",
+            "badge_bg": "#fefce8",
+            "badge_text": f"⏳ Late Window Clearance (Closing Soon)",
+            "price": 9,
+            "days_left": f"{days_left} days until determination",
+            "plan_key": "single_lead_small"
+        }
+
+
+def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 40) -> list:
+    """
+    Returns unallocated leads enriched with their dynamic statutory freshness calculation.
+    Supports filtering by tier ('flash_hot', 'active', 'clearance', 'granted').
+    """
+    if not SURL:
+        return []
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT id, reference, address, summary, council_source, lead_score, lead_price, 
+                       discovered_at, planning_status, registered_date
+                FROM leads 
+                WHERE status = 'new' OR status IS NULL 
+                ORDER BY discovered_at DESC 
+                LIMIT 100;
+            """)
+            rows = cur.fetchall()
+            cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date"]
+            raw_leads = [dict(zip(cols, r)) for r in rows]
+
+            enriched = []
+            for l in raw_leads:
+                freshness = calculate_lead_freshness(l["discovered_at"], l["status"], l["summary"])
+                l.update(freshness)
+                if not filter_tier or filter_tier == "all" or l["tier"] == filter_tier:
+                    enriched.append(l)
+                if len(enriched) >= limit:
+                    break
+
+            return enriched
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Marketplace] Error fetching enriched leads: {e}")
         return []

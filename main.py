@@ -1547,57 +1547,73 @@ def checkout(plan_key: str, request: Request):
 
 
 @app.get("/marketplace", response_class=HTMLResponse)
-def marketplace_view():
+def marketplace_view(tier: Optional[str] = "all"):
     """
-    Single-Purchase Lead Marketplace with Pre-Purchase Teaser Cards:
+    Single-Purchase Lead Marketplace with Statutory Freshness Badges & Filter Tabs:
     Allows contractors to preview unallocated leads before unlocking.
-    Once unlocked, the lead is permanently burned from the system.
+    Supports filtering by Flash Hot (Day 0-3), Active, Clearance, and Granted.
     """
-    conn = database.get_db_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT id, reference, address, summary, council_source, lead_score, lead_price, discovered_at 
-        FROM leads 
-        WHERE status = 'new' OR status IS NULL 
-        ORDER BY discovered_at DESC 
-        LIMIT 30;
-    """)
-    leads = cur.fetchall()
-    cur.close()
-    conn.close()
+    leads = database.get_marketplace_leads_with_freshness(filter_tier=tier, limit=40)
+
+    # Active filter tab styles
+    def tab_btn(target_tier: str, label: str):
+        is_active = (tier == target_tier) or (not tier and target_tier == "all")
+        bg = "#044332" if is_active else "#ffffff"
+        color = "#ffffff" if is_active else "#475569"
+        border = "1px solid #044332" if is_active else "1px solid #cbd5e1"
+        return f'<a href="/marketplace?tier={target_tier}" style="background:{bg}; color:{color}; border:{border}; padding:7px 14px; border-radius:20px; text-decoration:none; font-size:12px; font-weight:bold; margin-right:6px; display:inline-block;">{label}</a>'
+
+    tabs_html = f"""
+    <div style="margin-bottom:20px; overflow-x:auto; white-space:nowrap; padding-bottom:4px;">
+        {tab_btn("all", "🌐 All Available Leads")}
+        {tab_btn("flash_hot", "🔥 Flash Hot (Day 0–3)")}
+        {tab_btn("active", "⚡ Prime Quoting (Day 4–14)")}
+        {tab_btn("clearance", "⏳ Clearance (<£10)")}
+        {tab_btn("granted", "✅ Approved / Granted (Ready to Fell)")}
+    </div>
+    """
 
     lead_cards = ""
-    for (lid, ref, addr, summary, council, score, price, discovered) in leads:
+    for l in leads:
+        lid = l["id"]
+        ref = l["ref"]
+        addr = l["addr"]
+        summary = l["summary"]
+        council = l["council"]
+        unlock_fee = l["price"]
+        plan_key = l["plan_key"]
+        badge_bg = l["badge_bg"]
+        badge_color = l["badge_color"]
+        badge_text = l["badge_text"]
+        days_left = l["days_left"]
+
         # Mask exact street number/name to prevent bypassing, but show neighborhood/town & postcode
         addr_parts = [p.strip() for p in addr.split(",") if p.strip()]
         masked_area = addr_parts[-1] if len(addr_parts) > 1 else addr
         if len(addr_parts) >= 2:
             masked_area = f"{addr_parts[-2]}, {addr_parts[-1]}"
-            
-        plan_key = f"single_lead_{score}" if score in ["small", "medium", "large"] else "single_lead_medium"
-        unlock_fee = int(price or 25)
-        
+
         lead_cards += f"""
         <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; padding:20px; margin-bottom:14px; box-shadow:0 2px 8px rgba(0,0,0,0.03);">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
                 <div>
-                    <span style="font-size:11px; background:#ecfdf5; color:#065f46; font-weight:bold; padding:3px 8px; border-radius:12px; text-transform:uppercase;">Verified Council Notice</span>
+                    <span style="font-size:11px; background:{badge_bg}; color:{badge_color}; font-weight:bold; padding:4px 10px; border-radius:12px; text-transform:uppercase;">{badge_text}</span>
                     <span style="font-size:11px; background:#f1f5f9; color:#475569; padding:3px 8px; border-radius:12px; margin-left:6px;">LPA: {council}</span>
-                    <h3 style="margin:8px 0 4px 0; font-size:17px; color:#0f172a;">📍 {masked_area}</h3>
+                    <h3 style="margin:10px 0 4px 0; font-size:17px; color:#0f172a;">📍 {masked_area}</h3>
                 </div>
                 <div style="text-align:right;">
-                    <div style="font-size:20px; font-weight:800; color:#044332;">£{unlock_fee}</div>
-                    <span style="font-size:11px; color:#64748b;">Single-Sale Asset</span>
+                    <div style="font-size:22px; font-weight:800; color:#044332;">£{unlock_fee}</div>
+                    <span style="font-size:11px; color:#64748b;">{days_left}</span>
                 </div>
             </div>
             
-            <div style="background:#f8fafc; border-left:3px solid #044332; padding:10px 14px; margin:12px 0; font-size:13px; color:#334155; line-height:1.5;">
-                <b>Job Preview:</b> {summary[:220]}...
+            <div style="background:#f8fafc; border-left:3px solid #044332; padding:12px 14px; margin:12px 0; font-size:13px; color:#334155; line-height:1.5;">
+                <b>Job Specification:</b> {summary[:220]}...
             </div>
 
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:14px;">
                 <div style="font-size:12px; color:#64748b;">
-                    🔒 Once unlocked, this lead is burned and never resold.
+                    🔒 Single-Sale Asset • Burned permanently upon unlock.
                 </div>
                 <a href="/checkout/{plan_key}?lead_id={lid}" style="background:#044332; color:white; padding:9px 20px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">
                     Unlock Full Property Address & Contacts (£{unlock_fee}) →
@@ -1606,7 +1622,10 @@ def marketplace_view():
         </div>"""
 
     if not lead_cards:
-        lead_cards = "<div style='text-align:center; padding:40px; background:white; border-radius:12px;'><p style='color:#64748b;'>All live planning leads are currently allocated to subscribers. Check back shortly for new council registrations.</p></div>"
+        lead_cards = f"""
+        <div style='text-align:center; padding:40px; background:white; border-radius:12px; border:1px solid #e2e8f0;'>
+            <p style='color:#64748b; margin:0;'>No leads currently matching the selected filter ({tier}). Check back shortly for new council registrations or switch tabs.</p>
+        </div>"""
 
     return f"""
     <!DOCTYPE html>
@@ -1617,22 +1636,24 @@ def marketplace_view():
         <title>Single-Purchase Planning Lead Marketplace | TreeKey</title>
         <style>
             body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; line-height:1.6; }}
-            .container {{ max-width: 800px; margin: auto; }}
+            .container {{ max-width: 840px; margin: auto; }}
         </style>
     </head>
     <body>
     <div class="container">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; flex-wrap:wrap; gap:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
             <div>
-                <h1 style="margin:0; font-size:28px; color:#044332;">🛒 Unallocated Planning Leads</h1>
-                <p style="margin:4px 0 0 0; color:#64748b; font-size:14px;">Preview available council applications before unlocking. Subscribers receive priority allocation.</p>
+                <h1 style="margin:0; font-size:28px; color:#044332;">🛒 Statutory Planning Marketplace</h1>
+                <p style="margin:4px 0 0 0; color:#64748b; font-size:14px;">Real-time council planning notices with statutory freshness countdowns.</p>
             </div>
             <a href="/pricing" style="background:#059669; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">View Monthly Subscriptions</a>
         </div>
 
-        <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:14px 18px; margin-bottom:24px; font-size:13px; color:#1e40af;">
+        <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:12px 16px; margin-bottom:20px; font-size:13px; color:#1e40af;">
             <b>💡 Single-Sale Guarantee:</b> Every lead purchased below is immediately removed from the live marketplace and burned permanently. You are the ONLY contractor who will receive the property data.
         </div>
+
+        {tabs_html}
 
         {lead_cards}
 
