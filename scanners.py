@@ -88,8 +88,24 @@ def _is_tree_related(text: str) -> bool:
 
 def _insert_lead(cur, reference: str, address: str, summary: str, source: str) -> Optional[dict]:
     """
-    Inserts a lead into the DB. Returns the lead dict if new, None if duplicate.
+    Inserts a lead into the DB. Returns the lead dict if new, None if duplicate or low-quality junk.
+    Enforces a strict quality gate: blocks empty, generic placeholders like 'tree-preservation-order'.
     """
+    if not summary or not reference:
+        return None
+        
+    s_clean = summary.strip().lower()
+    # Reject generic placeholders that lack actionable details for contractors
+    if s_clean in ["tree-preservation-order", "tpo", "work to trees", "works to trees", "tree work", "tree works", "trees"]:
+        return None
+    if len(s_clean) < 12:
+        return None
+        
+    addr_clean = address.strip() if address else ""
+    if not addr_clean or addr_clean.lower() in ["greater london", "london", "uk", "england"]:
+        # If address is completely generic, require higher description detail to avoid useless leads
+        if len(s_clean) < 20:
+            return None
 
     lead_score, lead_price = score_lead(summary)
     cur.execute(
@@ -238,20 +254,20 @@ def scan_leeds_leads() -> int:
 
 
 
-# ── London Scanner (GLA Datahub + Green Belt Councils) ────────────────────────
-
+# ── London Scanner (GLA Datahub + Complete London & Green Belt Postcodes) ──────
+ 
 def scan_london_leads() -> int:
     """
-    Scans both:
-    1. London GLA Planning Datahub (all 32 London Boroughs)
-    2. Surrounding Green Belt councils (Surrey/Tandridge/Oxted, Kent, Essex, Herts)
-       via UK Planning API postcodes (RH, TN, GU, CR, BR, KT, SM, TW, UB, HA, EN, IG, RM, DA, CM, AL, WD, SL, ME).
+    Scans London & Green Belt planning applications:
+    1. London GLA Planning Datahub (deep multi-field extraction across all 32 London Boroughs)
+    2. Comprehensive UK Planning API & PlanIt radar covering all Inner & Outer London + Home Counties postcodes:
+       (SW, SE, NW, N, E, EC, WC, CR, BR, EN, HA, UB, KT, TW, DA, RM, IG, SM, RH, TN, GU, CM, SS, SL, HP, AL, SG, WD, ME).
     """
     new_leads = []
     conn = database.get_db_conn()
     cur = conn.cursor()
 
-    # 1. GLA Datahub Scan
+    # 1. GLA Datahub Scan with robust schema mapping
     if GLA_API_KEY:
         try:
             headers = {"Authorization": GLA_API_KEY, "Accept": "application/json"}
@@ -259,7 +275,7 @@ def scan_london_leads() -> int:
             time.sleep(1.0) # London throttle
             res = requests.get(
                 "https://planningdata.london.gov.uk/api/applications",
-                params={"limit": 50},
+                params={"limit": 100},
                 headers=headers,
                 timeout=15
             )
@@ -276,11 +292,37 @@ def scan_london_leads() -> int:
             elif res.status_code == 200:
                 records = res.json().get("data", [])
                 for item in records:
-                    summary = item.get("proposal", "")
-                    if not _is_tree_related(summary):
+                    # Search across all possible GLA description fields to avoid placeholder names
+                    summary = (
+                        item.get("description")
+                        or item.get("proposal")
+                        or item.get("development_description")
+                        or item.get("details")
+                        or item.get("proposal_summary")
+                        or item.get("title")
+                        or ""
+                    ).strip()
+                    
+                    if not summary or not _is_tree_related(summary):
                         continue
-                    ref = item.get("reference", f"LON-{int(time.time())}")
-                    addr = item.get("address", "Greater London")
+                        
+                    # Extract nested or flat address
+                    addr = ""
+                    if isinstance(item.get("location"), dict):
+                        addr = item["location"].get("address", "")
+                    elif isinstance(item.get("site"), dict):
+                        addr = item["site"].get("address", "")
+                    if not addr:
+                        addr = item.get("site_address") or item.get("address") or item.get("address_text") or "London"
+                        
+                    ref = (
+                        item.get("reference")
+                        or item.get("application_reference")
+                        or item.get("lpa_app_no")
+                        or item.get("planning_reference")
+                        or f"LON-{int(time.time())}"
+                    )
+                    
                     lead = _insert_lead(cur, ref, addr, summary, "London")
                     if lead:
                         new_leads.append(lead)
@@ -288,11 +330,16 @@ def scan_london_leads() -> int:
             logger.error(f"[London GLA] Error: {e}")
 
 
-    # 2. Green Belt & Border Councils Scan (Tandridge/Oxted RH, Sevenoaks TN, Surrey GU, etc.)
+    # 2. Comprehensive London & Home Counties Radar Scan via UK Planning API & PlanIt
     if UK_PLANNING_API_KEY:
-        green_belt_prefixes = ["RH", "TN", "GU", "CR", "BR", "KT", "SM", "TW", "UB", "HA", "EN", "IG", "RM", "DA", "CM", "AL", "WD", "SL", "ME"]
+        london_all_prefixes = [
+            # Inner & Outer London
+            "SW", "SE", "NW", "N", "E", "EC", "WC", "CR", "BR", "EN", "HA", "UB", "KT", "TW", "DA", "RM", "IG", "SM",
+            # Green Belt & Home Counties
+            "RH", "TN", "GU", "CM", "SS", "SL", "HP", "AL", "SG", "WD", "ME"
+        ]
         headers = {"X-API-Key": UK_PLANNING_API_KEY}
-        for prefix in green_belt_prefixes:
+        for prefix in london_all_prefixes:
             try:
                 import time
                 time.sleep(1.5) # Cron job throttle to prevent 6am ban
@@ -307,8 +354,8 @@ def scan_london_leads() -> int:
                 if res.status_code == 200:
                     records = res.json().get("data", [])
                     for item in records:
-                        summary = item.get("description", "") or ""
-                        if not _is_tree_related(summary):
+                        summary = (item.get("description", "") or "").strip()
+                        if not summary or not _is_tree_related(summary):
                             continue
                         ref  = item.get("reference") or f"{prefix}-{int(time.time())}"
                         addr = item.get("address", f"London / {prefix}")
@@ -316,7 +363,7 @@ def scan_london_leads() -> int:
                         if lead:
                             new_leads.append(lead)
             except Exception as pe:
-                logger.debug(f"[London Green Belt] Error scanning prefix '{prefix}': {pe}")
+                logger.debug(f"[London Radar] Error scanning prefix '{prefix}': {pe}")
 
     conn.commit()
     cur.close()
@@ -324,7 +371,7 @@ def scan_london_leads() -> int:
 
     if new_leads:
         notifications.dispatch_lead_alerts("London", new_leads)
-    logger.info(f"[London] Scan complete. {len(new_leads)} new leads found across London & Green Belt councils.")
+    logger.info(f"[London] Scan complete. {len(new_leads)} high-quality leads found across London & Green Belt councils.")
     return len(new_leads)
 
 

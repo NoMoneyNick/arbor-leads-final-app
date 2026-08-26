@@ -17,25 +17,40 @@ logger = logging.getLogger("vector-data-labs")
 # The Council Registry maps city/region names to their direct Idox Public Access URLs.
 # This cuts out the 3rd party API middleman for these regions.
 COUNCIL_REGISTRY = {
+    # England & Regional Metros
     "CORNWALL": "https://planning.cornwall.gov.uk/online-applications",
     "NOTTINGHAM": "https://publicaccess.nottinghamcity.gov.uk/online-applications",
     "MANCHESTER": "https://pa.manchester.gov.uk/online-applications",
     "EDINBURGH": "https://citydev-portal.edinburgh.gov.uk/idoxpa-web",
     "GLASGOW": "https://publicaccess.glasgow.gov.uk/online-applications",
+    "FIFE": "https://planning.fife.gov.uk/online",
+    "BRISTOL": "https://planningonline.bristol.gov.uk/online-applications",
+    "LEEDS": "https://publicaccess.leeds.gov.uk/online-applications",
+    # London Boroughs (Direct Public Access Mesh)
     "WESTMINSTER": "https://idoxpa.westminster.gov.uk/online-applications",
     "BROMLEY": "https://searchapplications.bromley.gov.uk/online-applications",
     "CROYDON": "https://publicaccess3.croydon.gov.uk/online-applications",
-    "FIFE": "https://planning.fife.gov.uk/online",
-    "SURREY HEATH": "https://publicaccess.surreyheath.gov.uk/online-applications",
-    "GUILDFORD": "https://publicaccess.guildford.gov.uk/online-applications",
-    "SEVENOAKS": "https://pa.sevenoaks.gov.uk/online-applications",
     "SOUTHWARK": "https://planning.southwark.gov.uk/online-applications",
     "ISLINGTON": "https://planning.islington.gov.uk/online-applications",
     "LAMBETH": "https://planning.lambeth.gov.uk/online-applications",
+    "BARNET": "https://publicaccess.barnet.gov.uk/online-applications",
+    "BRENT": "https://pa.brent.gov.uk/online-applications",
+    "EALING": "https://pam.ealing.gov.uk/online-applications",
+    "HOUNSLOW": "https://planning.hounslow.gov.uk/online-applications",
+    "KINGSTON": "https://publicaccess.kingston.gov.uk/online-applications",
+    "MERTON": "https://planning.merton.gov.uk/online-applications",
+    "GREENWICH": "https://planning.royalgreenwich.gov.uk/online-applications",
+    "HARINGEY": "https://planning.haringey.gov.uk/online-applications",
+    "REDBRIDGE": "https://planning.redbridge.gov.uk/online-applications",
+    "BEXLEY": "https://pa.bexley.gov.uk/online-applications",
+    "HAVERING": "https://development.havering.gov.uk/online-applications",
+    "SUTTON": "https://planning.sutton.gov.uk/online-applications",
+    # Home Counties / Green Belt
+    "SURREY HEATH": "https://publicaccess.surreyheath.gov.uk/online-applications",
+    "GUILDFORD": "https://publicaccess.guildford.gov.uk/online-applications",
+    "SEVENOAKS": "https://pa.sevenoaks.gov.uk/online-applications",
     "DARTFORD": "https://publicaccess.dartford.gov.uk/online-applications",
-    "MAIDSTONE": "https://pa.midkent.gov.uk/online-applications",
-    "BRISTOL": "https://planningonline.bristol.gov.uk/online-applications",
-    "LEEDS": "https://publicaccess.leeds.gov.uk/online-applications"
+    "MAIDSTONE": "https://pa.midkent.gov.uk/online-applications"
 }
 
 def is_tree_related(description: str) -> bool:

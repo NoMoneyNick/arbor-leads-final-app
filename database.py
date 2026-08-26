@@ -143,10 +143,18 @@ def init_db():
         for stmt in rls_statements:
             cur.execute(stmt)
 
+        # DATA QUALITY HYGIENE: Purge any old blank or uninformative placeholder leads
+        cur.execute("""
+            DELETE FROM leads 
+            WHERE summary IS NULL 
+               OR LOWER(TRIM(summary)) IN ('tree-preservation-order', 'tpo', 'work to trees', 'works to trees', 'trees', '')
+               OR (LENGTH(TRIM(summary)) < 15 AND (address = 'Greater London' OR address = 'London' OR address IS NULL));
+        """)
+
         conn.commit()
         cur.close()
         conn.close()
-        logger.info("[DB] Database initialized successfully with high-performance indices and strict RLS lockout.")
+        logger.info("[DB] Database initialized successfully with high-performance indices, strict RLS lockout, and lead hygiene filters.")
     except Exception as e:
 
         logger.error(f"[DB] Initialization error: {e}")
