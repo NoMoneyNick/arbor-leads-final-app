@@ -2860,7 +2860,7 @@ def quote_estimator_page():
     """
 
 
-@app.post("/api/submit-homeowner-quote")
+@app.api_route("/api/submit-homeowner-quote", methods=["GET", "POST"])
 async def submit_homeowner_quote(request: Request):
     """
     Direct Homeowner Lead Intake Webhook:
