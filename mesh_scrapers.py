@@ -116,7 +116,7 @@ class IdoxScraper:
             return csrf_input['value']
         return ""
 
-    def search_tree_applications(self, days_back: int = 7) -> List[Dict]:
+    def search_tree_applications(self, days_back: int = 30) -> List[Dict]:
         if not BeautifulSoup:
             logger.error("[MESH] BeautifulSoup not installed. Cannot run Idox Scraper.")
             return []
