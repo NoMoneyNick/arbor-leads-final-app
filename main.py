@@ -1746,7 +1746,7 @@ async def stripe_webhook(request: Request):
 # ── 3. "TreeKey Ledger" (Verticalized Arborist Accounting Engine) ───────────────
 
 @app.get("/ledger", response_class=HTMLResponse)
-def ledger_dashboard(email: Optional[str] = "partner@treecare.co.uk"):
+def ledger_dashboard(email: Optional[str] = None):
     """
     TreeKey Ledger: Verticalized financial command center for UK tree surgeons.
     Includes Van-Day true costing, CIS developer tax deductions, and £90k VAT gauge.
@@ -3471,18 +3471,19 @@ def local_seo_intake_page(location_slug: str):
 @app.get("/sitemap.xml")
 def sitemap_xml():
     """Generates dynamic XML sitemap for Google Search Console indexing all UK city hubs."""
+    base = os.getenv("PUBLIC_APP_URL", "https://treekey.uk").rstrip("/")
     urls = [
-        "https://arbor-leads-final-app.onrender.com/",
-        "https://arbor-leads-final-app.onrender.com/marketplace",
-        "https://arbor-leads-final-app.onrender.com/quote-estimator",
-        "https://arbor-leads-final-app.onrender.com/pricing",
-        "https://arbor-leads-final-app.onrender.com/boost-review"
+        f"{base}/",
+        f"{base}/marketplace",
+        f"{base}/quote-estimator",
+        f"{base}/pricing",
+        f"{base}/boost-review"
     ]
     for slug in UK_LOCAL_SEO_HUBS.keys():
-        urls.append(f"https://arbor-leads-final-app.onrender.com/tree-surgeon/{slug}")
+        urls.append(f"{base}/tree-surgeon/{slug}")
 
     for pc_prefix in UK_ALL_POSTCODE_AREAS.keys():
-        urls.append(f"https://arbor-leads-final-app.onrender.com/tree-surgeon/{pc_prefix.lower()}")
+        urls.append(f"{base}/tree-surgeon/{pc_prefix.lower()}")
 
     xml_lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
     today = datetime.date.today().isoformat()
