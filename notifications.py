@@ -29,7 +29,7 @@ def send_resend_email(subject: str, html_body: str):
                 "Content-Type": "application/json"
             },
             json={
-                "from": "Vector Data Labs <onboarding@resend.dev>",
+                "from": "TreeKey Intelligence <leads@treekey.uk>",
                 "to": [TEST_EMAIL],
                 "subject": subject,
                 "html": html_body
@@ -81,7 +81,7 @@ def send_purchased_lead_email(customer_email: str, lead_data: dict):
                 "Content-Type": "application/json"
             },
             json={
-                "from": "TreeKey Support <onboarding@resend.dev>",
+                "from": "TreeKey Support <leads@treekey.uk>",
                 "to": [customer_email],
                 "subject": subject,
                 "html": html
