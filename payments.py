@@ -81,7 +81,7 @@ PLANS = {
 }
 
 
-def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = None) -> Optional[str]:
+def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = None, radius: int = 15) -> Optional[str]:
     """
     Creates a Stripe Checkout session for the given plan or single lead purchase.
     Returns the checkout URL to redirect the customer to.
@@ -110,18 +110,19 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
             "success_url": f"{PUBLIC_APP_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}",
             "cancel_url": f"{PUBLIC_APP_URL}/pricing",
             "allow_promotion_codes": True,
-            "metadata": {}
+            "metadata": {"plan_key": plan_key}
         }
-        
+
         if outcode:
             session_params["client_reference_id"] = outcode
             session_params["metadata"]["outcode"] = outcode
-            
+            session_params["metadata"]["radius_miles"] = str(radius)
+
         if lead_id:
             session_params["metadata"]["lead_id"] = lead_id
 
         session = stripe.checkout.Session.create(**session_params)
-        logger.info(f"[Stripe] Checkout session created for plan '{plan_key}' (lead_id={lead_id}): {session.id}")
+        logger.info(f"[Stripe] Checkout session created for plan '{plan_key}' outcode={outcode} radius={radius}mi (lead_id={lead_id}): {session.id}")
         return session.url
 
     except stripe.error.AuthenticationError:
@@ -188,20 +189,35 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
         import database
         # 1. If this was a single lead purchase, execute the Single-Sale Inventory Burn
         if lead_id:
-            burned = database.burn_lead_inventory(lead_id, customer_email)
-            logger.info(f"[Stripe] Lead {lead_id} burned from inventory for {mask(customer_email)}: {burned}")
+            lead_data = database.burn_lead_inventory(lead_id, customer_email)
+            if lead_data:
+                logger.info(f"[Stripe] Lead {lead_id} burned from inventory for {mask(customer_email)}")
+                notifications.send_purchased_lead_email(customer_email, lead_data)
+            else:
+                logger.warning(f"[Stripe] Lead {lead_id} was already claimed or not found, but {mask(customer_email)} paid for it!")
+                notifications.send_system_incident_alert(
+                    category="REVENUE & BILLING",
+                    title=f"DOUBLE SALE RACE CONDITION: {mask(customer_email)} paid for already-claimed lead!",
+                    description=f"Customer {customer_email} paid £{amount / 100:.2f} for lead {lead_id}, but the lead was already claimed by someone else or does not exist.",
+                    impact="Customer paid for a lead but did not receive it. They will be angry.",
+                    action_required="Manually refund the payment in Stripe or email the customer offering a credit.",
+                    severity="CRITICAL",
+                    throttle_hours=0.0
+                )
 
         # 2. If this was a subscription, register with seniority timestamp
         if not lead_id:
             sub_tier = metadata.get("tier", "climber_domestic")
             sub_outcode = outcode or "GB"
+            sub_radius = int(metadata.get("radius_miles", 15))
             reg_ok = database.register_or_update_subscription(
                 customer_email=customer_email,
                 outcode=sub_outcode,
                 tier=sub_tier,
-                stripe_sub_id=data.get("subscription", "")
+                stripe_sub_id=data.get("subscription", ""),
+                radius=sub_radius
             )
-            logger.info(f"[Stripe] Subscription registered for {mask(customer_email)} ({sub_tier} in {sub_outcode}): {reg_ok}")
+            logger.info(f"[Stripe] Subscription registered for {mask(customer_email)} ({sub_tier} in {sub_outcode} ±{sub_radius}mi): {reg_ok}")
 
         logger.info(f"[Stripe] Payment complete — {mask(customer_email)} — £{amount / 100:.2f}")
         return {"event": "payment_complete", "email": customer_email,

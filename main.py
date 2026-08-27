@@ -15,7 +15,7 @@ import research
 import payments
 import csv
 import io
-from fastapi import FastAPI, Query, BackgroundTasks, HTTPException, Depends, Request
+from fastapi import FastAPI, Query, BackgroundTasks, HTTPException, Depends, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -1594,20 +1594,113 @@ def generate_street_flyer(lead_id: str, company: str = "Your Local Tree Surgery 
 
 @app.get("/checkout/{plan_key}")
 def checkout(plan_key: str, request: Request):
-    outcode = request.query_params.get("outcode", "GB")
+    outcode = request.query_params.get("outcode", "")
     lead_id = request.query_params.get("lead_id")
-    
-    url = payments.create_checkout_session(plan_key, outcode)
+
+    plan = payments.PLANS.get(plan_key)
+    if not plan:
+        return HTMLResponse("<h3>Invalid plan.</h3>", status_code=404)
+
+    # Single lead purchase — go straight to Stripe (no area needed)
+    if lead_id or plan.get("mode") == "payment":
+        url = payments.create_checkout_session(plan_key, outcode or "GB", lead_id)
+        if not url:
+            return HTMLResponse(
+                "<html><body style='font-family:sans-serif; text-align:center; padding:60px;'>"
+                "<h1>Payment System Unavailable</h1>"
+                "<p>Please contact support at contact@treekey.uk.</p>"
+                "<a href='/pricing'>Return to Pricing</a>"
+                "</body></html>",
+                status_code=503
+            )
+        return RedirectResponse(url=url)
+
+    # Subscription plan — show area selector first if no outcode provided
+    plan_name = plan["name"]
+    plan_price = f"£{plan['amount'] // 100}/month"
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Set Your Area — TreeKey</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; }}
+        .card {{ max-width:520px; margin:auto; background:white; border:1px solid #e2e8f0; border-radius:16px; padding:36px; box-shadow:0 4px 20px rgba(0,0,0,0.06); }}
+        h1 {{ color:#044332; font-size:24px; margin:0 0 6px 0; }}
+        p.sub {{ color:#64748b; font-size:14px; margin:0 0 28px 0; }}
+        label {{ display:block; font-size:13px; font-weight:600; color:#374151; margin-bottom:6px; }}
+        input, select {{ width:100%; box-sizing:border-box; padding:11px 14px; border:1px solid #d1d5db; border-radius:8px; font-size:15px; margin-bottom:20px; background:white; }}
+        input:focus, select:focus {{ outline:none; border-color:#044332; box-shadow:0 0 0 3px rgba(4,67,50,0.08); }}
+        .hint {{ font-size:12px; color:#94a3b8; margin-top:-14px; margin-bottom:18px; }}
+        button {{ width:100%; background:#044332; color:white; padding:14px; border:none; border-radius:8px; font-size:16px; font-weight:700; cursor:pointer; }}
+        button:hover {{ background:#065f46; }}
+        .plan-box {{ background:#f0fdf4; border:1px solid #a7f3d0; border-radius:10px; padding:14px 16px; margin-bottom:24px; display:flex; justify-content:space-between; align-items:center; }}
+        .plan-box .name {{ font-weight:700; color:#065f46; font-size:15px; }}
+        .plan-box .price {{ font-weight:800; color:#044332; font-size:18px; }}
+        .lock-note {{ background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:12px 14px; font-size:12px; color:#1e40af; margin-bottom:24px; }}
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>🌳 One last step</h1>
+    <p class="sub">Tell us where you work so we can route the right leads to you.</p>
+
+    <div class="plan-box">
+        <span class="name">{plan_name}</span>
+        <span class="price">{plan_price}</span>
+    </div>
+
+    <div class="lock-note">
+        🔒 Your leads are matched exclusively to your area. Once locked, no other contractor on the same tier will receive leads in your zone.
+    </div>
+
+    <form method="POST" action="/checkout/{plan_key}">
+        <label for="outcode">Your Base Postcode or Outcode</label>
+        <input type="text" id="outcode" name="outcode" placeholder="e.g. NG22, B1, SW1, EX4"
+               maxlength="6" required autocomplete="postal-code"
+               style="text-transform:uppercase;"
+               oninput="this.value=this.value.toUpperCase()">
+        <div class="hint">The postcode area you operate from — e.g. NG for Nottingham, B for Birmingham</div>
+
+        <label for="radius">Working Radius</label>
+        <select id="radius" name="radius">
+            <option value="10">10 miles — Tight local zone</option>
+            <option value="15" selected>15 miles — Standard (recommended)</option>
+            <option value="20">20 miles — Extended coverage</option>
+            <option value="30">30 miles — Wide regional reach</option>
+            <option value="50">50 miles — Full county coverage</option>
+        </select>
+
+        <button type="submit">Continue to Secure Payment →</button>
+    </form>
+    <p style="text-align:center; margin-top:16px; font-size:12px; color:#94a3b8;">
+        Secured by Stripe · Cancel anytime · No setup fees
+    </p>
+</div>
+</body>
+</html>""")
+
+
+@app.post("/checkout/{plan_key}")
+async def checkout_post(plan_key: str, outcode: str = Form(...), radius: int = Form(15)):
+    """Handles the area form submission, then redirects to Stripe with outcode in metadata."""
+    plan = payments.PLANS.get(plan_key)
+    if not plan:
+        return HTMLResponse("<h3>Invalid plan.</h3>", status_code=404)
+
+    clean_outcode = outcode.strip().upper()[:6] or "GB"
+    url = payments.create_checkout_session(plan_key, clean_outcode, radius=radius)
     if not url:
         return HTMLResponse(
             "<html><body style='font-family:sans-serif; text-align:center; padding:60px;'>"
             "<h1>Payment System Unavailable</h1>"
-            "<p>We are currently experiencing issues connecting to Stripe. Please contact support at contact@treekey.uk.</p>"
+            "<p>Please contact support at contact@treekey.uk.</p>"
             "<a href='/pricing'>Return to Pricing</a>"
-            "</body></html>", 
+            "</body></html>",
             status_code=503
         )
-    return RedirectResponse(url=url)
+    return RedirectResponse(url=url, status_code=303)
 
 
 @app.get("/marketplace", response_class=HTMLResponse)
