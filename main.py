@@ -1408,12 +1408,19 @@ async def submit_suggestion(request: Request):
 
 @app.get("/generate-letter/{lead_id}", response_class=HTMLResponse)
 def generate_homeowner_letter(lead_id: str, company: str = "Your Local Tree Specialists", phone: str = "07XXX XXXXXX"):
-    conn = database.get_db_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT reference, address, summary, council_source, status FROM leads WHERE id::text = %s OR reference = %s;", (lead_id, lead_id))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
+    row = None
+    try:
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT reference, address, summary, council_source, status FROM leads WHERE id::text = %s OR reference = %s;", (lead_id, lead_id))
+            row = cur.fetchone()
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Letter] DB error for lead {lead_id}: {e}")
+        return HTMLResponse("<h3>Error loading lead data.</h3>", status_code=500)
 
     if not row:
         return HTMLResponse("<h3>Lead not found.</h3>", status_code=404)
@@ -1495,12 +1502,19 @@ def generate_homeowner_letter(lead_id: str, company: str = "Your Local Tree Spec
 
 @app.get("/generate-street-flyer/{lead_id}", response_class=HTMLResponse)
 def generate_street_flyer(lead_id: str, company: str = "Your Local Tree Surgery Team", phone: str = "07XXX XXXXXX"):
-    conn = database.get_db_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT reference, address, summary FROM leads WHERE id = %s OR reference = %s;", (lead_id, lead_id))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
+    row = None
+    try:
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT reference, address, summary FROM leads WHERE id::text = %s OR reference = %s;", (lead_id, lead_id))
+            row = cur.fetchone()
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Flyer] DB error for lead {lead_id}: {e}")
+        return HTMLResponse("<h3>Error loading lead data.</h3>", status_code=500)
 
     if not row:
         return HTMLResponse("<h3>Lead not found.</h3>", status_code=404)
