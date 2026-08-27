@@ -2223,7 +2223,7 @@ def contractor_dashboard(request: Request):
 @app.get("/logout")
 def logout():
     response = RedirectResponse(url="/login", status_code=303)
-    response.delete_cookie("treekey_contractor_session")
+    response.delete_cookie("treekey_contractor_session", httponly=True, secure=True, samesite="lax")
     return response
 
 
