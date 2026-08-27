@@ -2094,9 +2094,9 @@ def verify_login(request: Request, token: Optional[str] = None, otp: Optional[st
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
-def contractor_dashboard(request: Request, email: Optional[str] = None):
-    # Cookie or param session
-    session_email = request.cookies.get("treekey_contractor_session") or email
+def contractor_dashboard(request: Request):
+    # Cookie session only — never accept email as a query param (privacy risk)
+    session_email = request.cookies.get("treekey_contractor_session")
     if not session_email:
         return RedirectResponse(url="/login", status_code=303)
 
