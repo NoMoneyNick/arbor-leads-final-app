@@ -1,17 +1,3 @@
-# PROJECT STATE: VECTOR DATA LABS & TREE KEY (V4.2-SECURE)
-
-**Status:** 100% Deployed, Fully Enriched, Great Britain Coverage, Pre-Revenue  
-**Customer Brand:** **Tree Key** (powered by Vector Data Labs parent umbrella)  
-**Live Production URL:** https://treekey.uk  
-**Admin Portal:** https://treekey.uk/admin  
-**Backup URL:** https://arbor-leads-final-app.onrender.com  
-**Last Updated:** 24 Aug 2026  
-
----
-
-## 🎯 CURRENT PLATFORM MILESTONES (100% OPERATIONAL)
-
-1. **Partner Database:** **1,883+ Verified UK Limited Company Tree Surgeons** (100% audited & enriched with direct Managing Director names and verified UK telephone numbers).
 2. **Planning Radar (Great Britain):** **800+ Live Statutory Planning Notices** actively monitored across all 309 English councils, all 32 Scottish local authorities, and all 22 Welsh unitary councils.
 3. **Interactive Homepage Radar (`/`):** Click-to-move pin, smooth panning (zero auto-zoom), universal postcode/city lookup, continuous harmonic micro-density lead/value recalculations, and 5–25 mile radius selector.
 4. **Master Autonomous Guardian & Alert Sentry:** Predictive burn-rate calculation for API quotas, ultra-bold ALL-CAPS incident email alerts across all failure tripwires (UK Planning API, Companies House, Google Places, London GLA, Supabase, Stripe).
@@ -71,7 +57,7 @@
 | `UK_PLANNING_API_KEY` | ✅ Set | UK Planning API for nationwide councils |
 | `RESEND_API_KEY` | ✅ Set | Transactional email alerts & quota warnings |
 | `TEST_EMAIL` | ✅ Set | Destination email for leads and guardian alerts |
-| `PUBLIC_APP_URL` | 🔄 Update to | `https://treekey.uk` |
+| `PUBLIC_APP_URL` | ✅ Set | `https://treekey.uk` — used in sitemap, robots.txt, and email links |
 | `STRIPE_SECRET_KEY` | ✅ Set | Stripe payments live & verified |
 | `STRIPE_WEBHOOK_SECRET` | ✅ Set | Stripe webhook listener |
 
