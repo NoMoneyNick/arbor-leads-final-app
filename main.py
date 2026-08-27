@@ -2081,13 +2081,14 @@ def verify_login(request: Request, token: Optional[str] = None, otp: Optional[st
     if not verified_email:
         return RedirectResponse(url="/login?error=Login+link+expired+or+already+used.+Please+request+a+new+one.", status_code=303)
 
-    # Set secure session cookie
-    response = RedirectResponse(url=f"/dashboard?email={verified_email}", status_code=303)
+    # Set secure session cookie and redirect to dashboard
+    response = RedirectResponse(url="/dashboard", status_code=303)
     response.set_cookie(
         key="treekey_contractor_session",
         value=verified_email,
         max_age=86400 * 30,  # 30 days
         httponly=True,
+        secure=True,
         samesite="lax"
     )
     return response
