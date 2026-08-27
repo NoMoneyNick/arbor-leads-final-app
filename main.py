@@ -441,7 +441,12 @@ def public_homepage():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tree Key | Statutory Planning Intelligence</title>
+    <title>TreeKey | UK Tree Surgery Planning Intelligence</title>
+    <meta name="description" content="TreeKey intercepts live UK council planning applications for tree surgery work. Get exclusive leads delivered to tree surgeons before competitors know they exist.">
+    <meta property="og:title" content="TreeKey | UK Tree Surgery Planning Intelligence">
+    <meta property="og:description" content="Exclusive tree surgery leads from live UK planning applications. Council TPO notices, S211 felling approvals, and domestic homeowner jobs — delivered first.">
+    <meta property="og:url" content="https://treekey.uk">
+    <meta property="og:type" content="website">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {{
