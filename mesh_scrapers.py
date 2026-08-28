@@ -11,6 +11,32 @@ try:
 except ImportError:
     BeautifulSoup = None
 
+# Reuse the same false-positive-safe compound-phrase list scanners.py already
+# built for the UK Planning API / GLA feeds (Aug 28 2026). The old local
+# keyword list here was single bare words ("crown", "branch", "oak", "ash",
+# "fell") which false-positive on street names, bank branches, and "fell
+# down" style phrasing -- TREE_GOLD's compound phrases ("crown reduction",
+# "oak tree", "fell 1") were specifically built to avoid that.
+try:
+    from scanners import TREE_GOLD
+except ImportError:
+    # Defensive fallback if this module is ever imported standalone
+    # without scanners.py present (e.g. isolated unit tests).
+    TREE_GOLD = ["tree surgery", "tree work", "tpo", "tree preservation order",
+                 "felling", "pollard", "crown reduction", "hedge trimming"]
+
+# Idox's basic advanced-search "description" field only takes one plain-text
+# term (no boolean OR), so a single search for "tree" misses genuine tree-work
+# applications worded around a species/operation without the literal word
+# "tree" (e.g. "TPO: pollard protected oak", "Crown reduction of specimen").
+# Mirrors the multi-pass SIC-code insight from bulk_contractor_extractor.py's
+# item-5 expansion: run several narrow, high-signal server-side searches per
+# council instead of one, then dedupe and apply the same TREE_GOLD filter.
+# NOT yet load-tested against live council portals at this term count --
+# run once and watch for 429s/bans before trusting it at full national scale,
+# same caveat as the SIC-code pass.
+IDOX_SEARCH_TERMS = ["tree", "tpo", "hedge"]
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger("vector-data-labs")
 
@@ -92,10 +118,12 @@ COUNCIL_REGISTRY = {
 }
 
 def is_tree_related(description: str) -> bool:
-    """Checks if a planning description is relevant to tree surgeons."""
+    """Checks if a planning description is relevant to tree surgeons.
+    Uses the same compound-phrase TREE_GOLD list as scanners.py to avoid
+    false positives from bare single words (street names, bank "branches",
+    "fell down", etc.)."""
     desc = description.lower()
-    keywords = ["tree", "tpo", "crown", "fell", "prune", "branch", "oak", "ash", "sycamore", "coppice", "pollard"]
-    return any(kw in desc for kw in keywords)
+    return any(phrase in desc for phrase in TREE_GOLD)
 
 class IdoxScraper:
     def __init__(self, base_url: str):
@@ -116,7 +144,7 @@ class IdoxScraper:
             return csrf_input['value']
         return ""
 
-    def search_tree_applications(self, days_back: int = 30) -> List[Dict]:
+    def search_tree_applications(self, days_back: int = 30, search_term: str = "tree") -> List[Dict]:
         if not BeautifulSoup:
             logger.error("[MESH] BeautifulSoup not installed. Cannot run Idox Scraper.")
             return []
@@ -137,7 +165,7 @@ class IdoxScraper:
             start_date = end_date - datetime.timedelta(days=days_back)
             
             payload = {
-                "searchCriteria.description": "tree",
+                "searchCriteria.description": search_term,
                 "date(applicationReceivedStart)": start_date.strftime("%d/%m/%Y"),
                 "date(applicationReceivedEnd)": end_date.strftime("%d/%m/%Y"),
                 "searchType": "Application"
@@ -194,7 +222,7 @@ class IdoxScraper:
                         "description": desc
                     })
 
-            logger.info(f"[MESH] Successfully scraped {len(leads)} tree leads from {self.base_url}")
+            logger.info(f"[MESH] Successfully scraped {len(leads)} tree leads from {self.base_url} (term='{search_term}')")
             return leads
 
         except requests.exceptions.Timeout:
@@ -210,12 +238,34 @@ def scrape_mesh_council(city_name: str) -> List[Dict]:
     Returns a list of leads, or [] if no leads/failure.
     """
     city_upper = city_name.strip().upper()
-    
+
     # Handle known IDOX implementations
     base_url = COUNCIL_REGISTRY.get(city_upper)
     if base_url and "online-applications" in base_url.lower():
         logger.info(f"[MESH] Routing {city_upper} to free Idox Engine...")
         scraper = IdoxScraper(base_url)
-        return scraper.search_tree_applications(days_back=7)
-        
+
+        # Multi-pass search: Idox's basic description field only accepts one
+        # plain-text term, so run it once per high-signal term and dedupe by
+        # reference (mirrors the SIC-code multi-pass pattern used for item 5's
+        # Companies House expansion).
+        seen_refs = set()
+        merged_leads = []
+        for term in IDOX_SEARCH_TERMS:
+            try:
+                term_leads = scraper.search_tree_applications(days_back=7, search_term=term)
+            except Exception as e:
+                logger.debug(f"[MESH] {city_upper} search term '{term}' failed: {e}")
+                continue
+            for lead in term_leads:
+                ref = lead.get("reference")
+                if ref and ref in seen_refs:
+                    continue
+                if ref:
+                    seen_refs.add(ref)
+                merged_leads.append(lead)
+            time.sleep(1)  # be polite to the council portal between passes
+
+        return merged_leads
+
     return []

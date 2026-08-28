@@ -84,14 +84,46 @@ REQUIRED_WORDS = [
     "tree", "arbor", "forest", "woodland", "hedg", "stump", "felling", "timber", "countryside"
 ]
 
+# ── SIC-code pass (Database Expansion Phase 2) ────────────────────────────────
+# The name-substring search above (SEARCH_QUERIES + is_valid_tree_company) can only
+# ever find a company whose NAME literally contains a tree-related word — it misses
+# any genuinely relevant company with a generic/branded name (e.g. "Greenwood
+# Grounds Ltd", "Ridgeline Contracting Ltd") that does real tree surgery work.
+# Companies House's advanced-search API supports filtering by SIC (business
+# activity) code directly, which catches those. Split into two confidence tiers:
+#   - TREE_SPECIFIC: codes that are essentially always genuine tree/forestry work —
+#     accepted on the SIC code alone, no name check needed.
+#   - BROAD_LANDSCAPING: general landscaping/gardening — plausible but broad enough
+#     (covers lawn care, planting, etc. too) that it's still gated through the
+#     existing is_valid_tree_company() name check to avoid flooding results with
+#     unrelated gardening companies.
+SIC_CODES_TREE_SPECIFIC = ["02100", "02200", "02400"]   # Silviculture / Logging / Support services to forestry
+SIC_CODES_BROAD_LANDSCAPING = ["81300"]                  # Landscape service activities (broad — name-gated)
+
 
 # ── COMPANIES HOUSE API HELPERS ───────────────────────────────────────────────
 
+import threading as _threading
+_CH_RATE_LOCK = _threading.Lock()
+_CH_LAST_CALL = [0.0]
+_CH_MIN_INTERVAL = 1.5  # seconds between Companies House calls
+
 def ch_headers():
+    """
+    The throttle is a shared lock/timestamp, not a per-call sleep — this file's call
+    sites run under ThreadPoolExecutor(max_workers=8), and a sleep inside each thread
+    only throttles that one thread, letting up to 8 requests through per interval
+    instead of 1 (blowing past the 600-req/5-min cap this was meant to protect).
+    """
     if not CH_KEY:
         return {}
     import time
-    time.sleep(1.5) # Strict rate-limit throttle to prevent 600/5min 429 errors at 6am cron
+    with _CH_RATE_LOCK:
+        now = time.time()
+        wait = _CH_MIN_INTERVAL - (now - _CH_LAST_CALL[0])
+        if wait > 0:
+            time.sleep(wait)
+        _CH_LAST_CALL[0] = time.time()
     auth = base64.b64encode(f"{CH_KEY}:".encode()).decode()
     return {"Authorization": f"Basic {auth}"}
 
@@ -113,6 +145,33 @@ def search_companies_house(query: str, items_per_page: int = 50) -> list:
             return res.json().get("items", [])
     except Exception as e:
         logger.debug(f"[CH Search] Query '{query}' error: {e}")
+    return []
+
+
+def search_companies_house_by_sic(sic_codes: list, location: str = None, items_per_page: int = 100) -> list:
+    """
+    Searches Companies House by SIC (registered business activity) code rather than
+    company name — catches genuinely relevant companies a name-substring search
+    would never find. `sic_codes` param confirmed against the live Companies House
+    advanced-search API spec (comma-delimited list).
+    """
+    if not CH_KEY:
+        return []
+    url = "https://api.company-information.service.gov.uk/advanced-search/companies"
+    params = {
+        "sic_codes": ",".join(sic_codes),
+        "company_status": "active",
+        "company_type": "ltd",
+        "size": items_per_page
+    }
+    if location:
+        params["location"] = location
+    try:
+        res = requests.get(url, headers=ch_headers(), params=params, timeout=12)
+        if res.status_code == 200:
+            return res.json().get("items", [])
+    except Exception as e:
+        logger.debug(f"[CH SIC Search] {sic_codes} @ {location}: {e}")
     return []
 
 
@@ -276,7 +335,65 @@ def run_bulk_extraction(output_csv: str = "uk_tree_contractors_2000_master.csv",
             except Exception as e:
                 logger.debug(f"Search future error: {e}")
 
-    logger.info(f"Harvested {len(master_records)} unique, active UK Limited Companies!")
+    logger.info(f"Harvested {len(master_records)} unique, active UK Limited Companies after name-search!")
+
+    # 1b. Harvest by SIC (business-activity) code — catches genuinely relevant
+    # companies the name search above can never find (see comment on
+    # SIC_CODES_TREE_SPECIFIC above). One query per region per SIC tier, not per
+    # town/search-term, to keep API call volume sane.
+    logger.info("[Stage 1b] Querying Companies House by SIC code (non-obviously-named tree companies)...")
+
+    def execute_sic_search_job(region_info, sic_codes, name_gated):
+        region = region_info["region"]
+        country = region_info["country"]
+        primary_town = region_info["terms"][0]
+        results = search_companies_house_by_sic(sic_codes, location=primary_town, items_per_page=100)
+        valid = []
+        for item in results:
+            name = item.get("company_name", "")
+            number = item.get("company_number", "")
+            if not number or number in seen_companies:
+                continue
+            if name_gated and not is_valid_tree_company(name):
+                continue
+            addr_data = item.get("registered_office_address", {})
+            address = ", ".join(filter(None, [
+                addr_data.get("address_line_1"),
+                addr_data.get("address_line_2"),
+                addr_data.get("locality"),
+                addr_data.get("postal_code")
+            ]))
+            valid.append({
+                "company_name": name.title(),
+                "company_number": number,
+                "address": address,
+                "town": primary_town,
+                "region": region,
+                "country": country,
+                "postcode": addr_data.get("postal_code", ""),
+                "sic_codes": ", ".join(item.get("sic_codes", []))
+            })
+        return valid
+
+    sic_jobs = []
+    for region_info in UK_TARGET_REGIONS:
+        sic_jobs.append((region_info, SIC_CODES_TREE_SPECIFIC, False))     # accepted on SIC code alone
+        sic_jobs.append((region_info, SIC_CODES_BROAD_LANDSCAPING, True))  # still name-gated (broad code)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [executor.submit(execute_sic_search_job, *job) for job in sic_jobs]
+        for f in as_completed(futures):
+            try:
+                batch = f.result()
+                for rec in batch:
+                    c_num = rec["company_number"]
+                    if c_num not in seen_companies:
+                        seen_companies.add(c_num)
+                        master_records.append(rec)
+            except Exception as e:
+                logger.debug(f"SIC search future error: {e}")
+
+    logger.info(f"Harvested {len(master_records)} unique, active UK Limited Companies after SIC-code pass!")
 
     # 2. Enrich with Managing Director & Contact Details
     logger.info("[Stage 2] Enriching records with Managing Director names & Google Places contact details...")

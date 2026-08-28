@@ -268,6 +268,17 @@ def init_db():
         for stmt in rls_statements:
             cur.execute(stmt)
 
+        # Add lat/lon columns for geographic radius matching (safe, idempotent)
+        cur.execute("ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS lat FLOAT;")
+        cur.execute("ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS lon FLOAT;")
+        # Contractor Portal Upgrades (Phase 2, part 1 — PROJECT_STATE.md item 8):
+        # preferred lead-notification format. 'email' = plain email (current default
+        # behaviour), 'whatsapp'/'both' = the batch lead email also includes a
+        # click-to-forward WhatsApp button per lead. Note: this is a forward-to-self
+        # convenience link (create_whatsapp_link), not push delivery via WhatsApp's
+        # Business API — no such integration exists in this codebase.
+        cur.execute("ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS notification_preference TEXT DEFAULT 'email';")
+
         # DATA QUALITY HYGIENE: Purge any old blank or uninformative placeholder leads
         cur.execute("""
             DELETE FROM leads 
@@ -342,6 +353,83 @@ def reset_monthly_quotas_if_needed() -> int:
     except Exception as e:
         logger.error(f"[Monthly Reset] Error resetting quotas: {e}")
         return 0
+
+
+# ── Tier quotas: realistic monthly lead limits per plan ───────────────────────
+TIER_QUOTAS = {
+    "stump_pro": 3,
+    "climber_domestic": 5,
+    "arb_consultant": 8,
+    "commercial_forestry": 12,
+    "treekey_elite": 18,
+    "sole_trader": 5,
+    "commercial_pro": 14,
+    "regional_elite": 25,
+}
+
+# ── Tier radius caps: server-side enforcement so a cheaper tier can't select a
+# larger radius than it's entitled to (the checkout form previously offered the
+# same 10-50mi choice to every plan with nothing enforcing it). Elite (30mi) and
+# Regional Elite (50mi) match the radius figures already advertised in their copy.
+TIER_MAX_RADIUS = {
+    "stump_pro": 15,
+    "climber_domestic": 15,
+    "arb_consultant": 20,
+    "commercial_forestry": 25,
+    "treekey_elite": 30,
+    "sole_trader": 15,
+    "commercial_pro": 25,
+    "regional_elite": 50,
+}
+
+# ── Tier dispatch priority: higher tiers are sold "priority routing" (e.g. Elite's
+# "first-priority API routing"), but dispatch previously ordered strictly by
+# subscribed_at with no tier weighting at all. Used as a stable sort key ahead of
+# seniority — ties within the same priority band still resolve by subscribed_at.
+TIER_PRIORITY = {
+    "treekey_elite": 5,
+    "regional_elite": 5,
+    "commercial_forestry": 4,
+    "commercial_pro": 4,
+    "arb_consultant": 3,
+    "climber_domestic": 2,
+    "sole_trader": 2,
+    "stump_pro": 1,
+}
+
+
+def lookup_outcode_centroid(outcode: str) -> tuple:
+    """
+    Returns (lat, lon) centroid for a UK outcode via the free postcodes.io API.
+    Returns (None, None) if not found or API unavailable.
+    """
+    import math as _math  # noqa — math imported at module level but repeated for clarity
+    try:
+        clean = outcode.strip().upper().replace(" ", "")
+        resp = requests.get(
+            f"https://api.postcodes.io/outcodes/{clean}",
+            timeout=5
+        )
+        if resp.status_code == 200:
+            result = resp.json().get("result", {})
+            lat = result.get("latitude")
+            lon = result.get("longitude")
+            if lat and lon:
+                return (float(lat), float(lon))
+    except Exception as e:
+        logger.debug(f"[postcodes.io] Centroid lookup failed for {outcode}: {e}")
+    return (None, None)
+
+
+def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Returns great-circle distance in miles between two lat/lon points."""
+    import math
+    R = 3958.8  # Earth radius in miles
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
 
 
 def increment_api_usage(api_name: str = "UK Planning API", increment: int = 1, cap: int = 500) -> dict:
@@ -482,12 +570,20 @@ def unlock_territory_by_subscription(stripe_sub_id: str) -> bool:
         cur = conn.cursor()
         try:
             cur.execute("""
-                UPDATE territory_claims 
-                SET active = FALSE 
+                UPDATE territory_claims
+                SET active = FALSE
                 WHERE stripe_subscription_id = %s
                 RETURNING outcode;
             """, (stripe_sub_id,))
             row = cur.fetchone()
+            # Also deactivate the subscription record itself — this is what login/dashboard
+            # gating (get_contractor_subscription) actually reads, and previously stayed
+            # active=TRUE forever after cancellation (ghost session persisted).
+            cur.execute("""
+                UPDATE contractor_subscriptions
+                SET active = FALSE
+                WHERE stripe_subscription_id = %s;
+            """, (stripe_sub_id,))
             conn.commit()
             if row:
                 logger.info(f"[Territory] Unlocked territory {row[0]} due to subscription cancellation: {stripe_sub_id}")
@@ -587,29 +683,42 @@ def burn_lead_inventory(lead_id: str, buyer_email: str) -> dict:
         return None
 
 
-def register_or_update_subscription(customer_email: str, outcode: str, tier: str = "climber_domestic", 
+def register_or_update_subscription(customer_email: str, outcode: str, tier: str = "climber_domestic",
                                      stripe_sub_id: str = None, radius: int = 15, name: str = None, phone: str = None) -> bool:
-    """Registers or updates a contractor subscription with seniority timestamp."""
+    """Registers or updates a contractor subscription with seniority timestamp, lat/lon centroid, and tier quota."""
     if not SURL or not customer_email or not outcode:
         return False
+
+    # Look up geographic centroid for radius matching at dispatch time
+    lat, lon = lookup_outcode_centroid(outcode)
+
+    # Set realistic monthly quota based on tier
+    quota = TIER_QUOTAS.get(tier, 5)
+
     try:
         conn = get_db_conn()
         cur = conn.cursor()
         try:
             cur.execute("""
                 INSERT INTO contractor_subscriptions (
-                    customer_email, customer_name, phone, tier, center_outcode, radius_miles, stripe_subscription_id, active, subscribed_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, NOW())
+                    customer_email, customer_name, phone, tier, center_outcode, radius_miles,
+                    stripe_subscription_id, active, subscribed_at, monthly_quota, lat, lon
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, NOW(), %s, %s, %s)
                 ON CONFLICT (customer_email) DO UPDATE SET
                     tier = EXCLUDED.tier,
                     center_outcode = EXCLUDED.center_outcode,
                     radius_miles = EXCLUDED.radius_miles,
                     stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+                    monthly_quota = EXCLUDED.monthly_quota,
+                    lat = EXCLUDED.lat,
+                    lon = EXCLUDED.lon,
                     active = TRUE
                 RETURNING id;
-            """, (customer_email.strip().lower(), name, phone, tier, outcode.strip().upper(), radius, stripe_sub_id))
+            """, (customer_email.strip().lower(), name, phone, tier,
+                  outcode.strip().upper(), radius, stripe_sub_id, quota, lat, lon))
             row = cur.fetchone()
             conn.commit()
+            logger.info(f"[Subscription] Registered {customer_email} — {tier} | {outcode} ±{radius}mi | quota={quota} | coords=({lat},{lon})")
             return bool(row)
         finally:
             cur.close()
@@ -619,10 +728,97 @@ def register_or_update_subscription(customer_email: str, outcode: str, tier: str
         return False
 
 
+def update_notification_preference(email: str, preference: str) -> bool:
+    """
+    Sets the contractor's preferred lead-notification format. Valid values:
+    'email' (default), 'whatsapp', 'both'. Anything else is rejected rather than
+    silently stored, since this drives what gets rendered into the dispatch email.
+    """
+    if not SURL or not email:
+        return False
+    preference = (preference or "").strip().lower()
+    if preference not in ("email", "whatsapp", "both"):
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE contractor_subscriptions
+                SET notification_preference = %s
+                WHERE customer_email = %s
+                RETURNING id;
+            """, (preference, email.strip().lower()))
+            row = cur.fetchone()
+            conn.commit()
+            return bool(row)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Settings] Error updating notification preference for {email}: {e}")
+        return False
+
+
+def get_contractor_settings(email: str) -> dict:
+    """Returns the contractor's current settings (currently just notification_preference)."""
+    if not SURL or not email:
+        return {"notification_preference": "email"}
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT notification_preference FROM contractor_subscriptions WHERE customer_email = %s
+            """, (email.strip().lower(),))
+            row = cur.fetchone()
+            return {"notification_preference": (row[0] if row and row[0] else "email")}
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Settings] Error fetching settings for {email}: {e}")
+        return {"notification_preference": "email"}
+
+
+def update_subscription_tier_by_stripe_id(stripe_sub_id: str, new_tier: str) -> bool:
+    """
+    Updates tier + monthly_quota for an existing subscription (a Stripe Billing Portal
+    plan upgrade/downgrade), keyed by Stripe subscription ID. Does not touch
+    outcode/radius/lat/lon since those don't change on a plan switch.
+    """
+    if not SURL or not stripe_sub_id or not new_tier:
+        return False
+    quota = TIER_QUOTAS.get(new_tier, 5)
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE contractor_subscriptions
+                SET tier = %s, monthly_quota = %s
+                WHERE stripe_subscription_id = %s
+                RETURNING customer_email;
+            """, (new_tier, quota, stripe_sub_id))
+            row = cur.fetchone()
+            conn.commit()
+            if row:
+                logger.info(f"[Subscription] Tier updated to {new_tier} (quota={quota}) for stripe_sub_id={stripe_sub_id}")
+                return True
+            return False
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Subscription] Error updating tier for stripe_sub_id {stripe_sub_id}: {e}")
+        return False
+
+
 def get_active_subscribers_by_seniority(outcode: str = None) -> list:
     """
     Returns active subscribers sorted strictly by Seniority (subscribed_at ASC).
     Ensures long-term subscribers receive first priority allocation.
+    Includes lat/lon for geographic radius matching.
     """
     if not SURL:
         return []
@@ -630,30 +826,54 @@ def get_active_subscribers_by_seniority(outcode: str = None) -> list:
         conn = get_db_conn()
         cur = conn.cursor()
         try:
+            base_sql = """
+                SELECT id, customer_email, customer_name, phone, tier, center_outcode, radius_miles,
+                       monthly_quota, delivered_this_month, subscribed_at, lat, lon, notification_preference
+                FROM contractor_subscriptions
+                WHERE active = TRUE
+            """
             if outcode:
-                cur.execute("""
-                    SELECT id, customer_email, customer_name, phone, tier, center_outcode, radius_miles, 
-                           monthly_quota, delivered_this_month, subscribed_at
-                    FROM contractor_subscriptions
-                    WHERE active = TRUE AND center_outcode = %s
-                    ORDER BY subscribed_at ASC;
-                """, (outcode.strip().upper(),))
+                cur.execute(base_sql + " AND center_outcode = %s ORDER BY subscribed_at ASC;",
+                            (outcode.strip().upper(),))
             else:
-                cur.execute("""
-                    SELECT id, customer_email, customer_name, phone, tier, center_outcode, radius_miles, 
-                           monthly_quota, delivered_this_month, subscribed_at
-                    FROM contractor_subscriptions
-                    WHERE active = TRUE
-                    ORDER BY subscribed_at ASC;
-                """)
-            cols = ["id", "email", "name", "phone", "tier", "outcode", "radius", "quota", "delivered", "subscribed_at"]
-            return [dict(zip(cols, r)) for r in cur.fetchall()]
+                cur.execute(base_sql + " ORDER BY subscribed_at ASC;")
+            cols = ["id", "email", "name", "phone", "tier", "outcode", "radius", "quota", "delivered", "subscribed_at", "lat", "lon", "notification_preference"]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            # Higher-tier subscribers get first look (sold as "priority routing"); within
+            # the same tier band, longest-tenured subscriber still wins (stable sort).
+            rows.sort(key=lambda r: (-TIER_PRIORITY.get(r["tier"], 1), r["subscribed_at"]))
+            return rows
         finally:
             cur.close()
             conn.close()
     except Exception as e:
         logger.error(f"[Subscription] Error fetching subscribers by seniority: {e}")
         return []
+
+
+def get_contractor_subscription(email: str) -> dict:
+    """Returns the contractor subscription record for this email, or empty dict. Used for login validation."""
+    if not SURL or not email:
+        return {}
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT id, tier, center_outcode, radius_miles, active, monthly_quota, delivered_this_month
+                FROM contractor_subscriptions WHERE customer_email = %s
+            """, (email.strip().lower(),))
+            row = cur.fetchone()
+            if row:
+                cols = ["id", "tier", "outcode", "radius", "active", "quota", "delivered"]
+                return dict(zip(cols, row))
+            return {}
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Subscription] Error fetching sub for {email}: {e}")
+        return {}
 
 
 def record_lead_dispatch_and_burn(lead_id: str, sub_id: str, contractor_email: str, dispatch_type: str = "standard") -> bool:
@@ -669,13 +889,14 @@ def record_lead_dispatch_and_burn(lead_id: str, sub_id: str, contractor_email: s
         try:
             # 1. Burn the lead
             cur.execute("""
-                UPDATE leads 
+                UPDATE leads
                 SET status = 'claimed'
-                WHERE (id = %s OR reference = %s) AND (status = 'new' OR status IS NULL)
+                WHERE (id::text = %s OR reference = %s) AND (status = 'new' OR status IS NULL)
                 RETURNING id;
             """, (lead_id, lead_id))
             burned_lead = cur.fetchone()
             if not burned_lead:
+                conn.rollback()
                 return False  # Already burned or claimed by someone else
 
             real_lead_uuid = burned_lead[0]
@@ -686,14 +907,26 @@ def record_lead_dispatch_and_burn(lead_id: str, sub_id: str, contractor_email: s
                 VALUES (%s, %s, %s, %s);
             """, (real_lead_uuid, sub_id, contractor_email, dispatch_type))
 
-            # 3. Increment contractor monthly delivery count
+            # 3. Atomically increment monthly delivery count. The WHERE guard is what
+            # actually enforces the quota (the caller's in-memory check can go stale
+            # within a single batch, or race against a second concurrent dispatch run) —
+            # this UPDATE is the only place quota is really enforced.
             if sub_id:
                 cur.execute("""
                     UPDATE contractor_subscriptions
                     SET delivered_this_month = delivered_this_month + 1,
                         last_dispatched_at = NOW()
-                    WHERE id = %s;
+                    WHERE id = %s AND delivered_this_month < monthly_quota
+                    RETURNING delivered_this_month;
                 """, (sub_id,))
+                if not cur.fetchone():
+                    # Quota was already hit (possibly by a concurrent dispatch run) —
+                    # release the lead instead of burning it against a subscriber who
+                    # can't legally receive it, so the caller falls through to the next
+                    # matching subscriber.
+                    conn.rollback()
+                    logger.warning(f"[Seniority Router] Quota hit for sub {sub_id} — releasing lead {lead_id} back to pool.")
+                    return False
 
             conn.commit()
             logger.info(f"[Seniority Router] Dispatched & burned lead {lead_id} -> {contractor_email} ({dispatch_type})")

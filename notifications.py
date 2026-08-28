@@ -121,11 +121,17 @@ def dispatch_lead_alerts(city: str, leads: list):
 
     import database
     import re
-    
+
+    # 0. Make sure this month's counters are reset before we check anyone's quota —
+    # otherwise a dispatch run that fires before the daily reset job would wrongly
+    # skip fully-eligible contractors using last month's exhausted count.
+    database.reset_monthly_quotas_if_needed()
+
     # 1. Fetch active subscribers ordered strictly by Seniority (subscribed_at ASC)
     subscribers = database.get_active_subscribers_by_seniority()
     customer_leads = {}       # {email: [leads]}
     overflow_notices = {}     # {email: bool}
+    customer_prefs = {}       # {email: notification_preference} — Contractor Portal Upgrades (Phase 2)
     
     for lead in leads:
         addr = lead.get("addr", "").upper()
@@ -136,21 +142,56 @@ def dispatch_lead_alerts(city: str, leads: list):
         matching_subs = []
         for sub in subscribers:
             sub_outcode = sub["outcode"].upper()
+            sub_lat = sub.get("lat")
+            sub_lon = sub.get("lon")
+            sub_radius = sub.get("radius") or 15
+            matched = False
+
+            # Priority 1: Exact outcode string match (fastest, highest confidence)
             if sub_outcode in extracted_outcodes or re.search(r'\b' + re.escape(sub_outcode) + r'\b', addr):
+                matched = True
+
+            # Priority 2: Haversine distance — check each outcode in the address
+            if not matched and sub_lat and sub_lon:
+                for oc in extracted_outcodes:
+                    lead_lat, lead_lon = database.lookup_outcode_centroid(oc)
+                    if lead_lat and lead_lon:
+                        dist = database.haversine_miles(sub_lat, sub_lon, lead_lat, lead_lon)
+                        if dist <= sub_radius:
+                            matched = True
+                            break
+
+            # Priority 3: Regional prefix fallback (same letter prefix e.g. NG)
+            if not matched:
+                prefix_m = re.match(r'^([A-Z]{1,2})', sub_outcode)
+                if prefix_m:
+                    prefix = prefix_m.group(1)
+                    if any(oc.startswith(prefix) for oc in extracted_outcodes):
+                        matched = True
+
+            if matched:
                 matching_subs.append(sub)
+
 
         # Seniority Allocation Rule:
         # Longest-tenured subscriber gets the lead first, provided they haven't hit their monthly quota
         for sub in matching_subs:
             email = sub["email"]
             sub_id = sub["id"]
-            
+
+            # Quota enforcement — skip if at monthly limit
+            if sub.get("delivered", 0) >= sub.get("quota", 5):
+                logging.debug(f"[Quota] Skipping {email} — at monthly quota ({sub.get('delivered')}/{sub.get('quota')})")
+                continue
+
             # Atomically burn and record dispatch
             if database.record_lead_dispatch_and_burn(lead_id, sub_id, email, dispatch_type="seniority_standard"):
                 if email not in customer_leads:
                     customer_leads[email] = []
+                    customer_prefs[email] = sub.get("notification_preference") or "email"
                 customer_leads[email].append(lead)
                 break  # Lead burned and dispatched to #1 senior subscriber; do NOT give to anyone else
+
 
     # 2. Check for Under-Supplied Junior Subscribers & Dispatch Adjacent Overflows
     for sub in subscribers:
@@ -165,6 +206,7 @@ def dispatch_lead_alerts(city: str, leads: list):
                     if database.record_lead_dispatch_and_burn(ol_id, sub_id, email, dispatch_type="overflow_compensation"):
                         if email not in customer_leads:
                             customer_leads[email] = []
+                            customer_prefs[email] = sub.get("notification_preference") or "email"
                         customer_leads[email].append(ol)
                         overflow_notices[email] = True
 
@@ -184,6 +226,21 @@ def dispatch_lead_alerts(city: str, leads: list):
             </div>
             """
 
+        # Contractor Portal Upgrades (Phase 2, part 1): add a forward-to-WhatsApp
+        # button per lead when the contractor has opted into it in /settings. This
+        # is a click-to-forward convenience link (create_whatsapp_link), not push
+        # delivery via WhatsApp's Business API — no such integration exists here.
+        wants_whatsapp = customer_prefs.get(email, "email") in ("whatsapp", "both")
+
+        def _wa_button(l):
+            if not wants_whatsapp:
+                return ""
+            wa = create_whatsapp_link(
+                l.get("ref", l.get("reference", "")), city, l.get("addr", ""),
+                l.get("summary", ""), l.get("lead_score", "small"), l.get("lead_price", 25)
+            )
+            return f"<a href='{wa}' style='background:#25D366; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px; margin-left:4px;'>📲 WhatsApp</a>"
+
         rows = "".join([
             f"<tr>"
             f"<td style='padding:8px;'>{SCORE_EMOJI.get(l.get('lead_score','small'), '🌳')}</td>"
@@ -192,6 +249,7 @@ def dispatch_lead_alerts(city: str, leads: list):
             f"<td style='padding:8px; white-space:nowrap;'>"
             f"<a href='{PUBLIC_APP_URL}/generate-letter/{urllib.parse.quote(l.get('ref', l.get('reference', '')))}' style='background:#044332; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px; margin-right:4px;'>🖨️ Letter</a>"
             f"<a href='{PUBLIC_APP_URL}/generate-street-flyer/{urllib.parse.quote(l.get('ref', l.get('reference', '')))}' style='background:#059669; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px;'>🏘️ Flyer</a>"
+            f"{_wa_button(l)}"
             f"</td>"
             f"</tr>"
             for l in routed_leads

@@ -23,6 +23,10 @@
 
 ### 3. 🎨 Website, Branding, Logo & Copy Polish
 - [x] **Brand Identity & Logo:** Custom transparent vector logo and square app icons crafted, anti-aliased, and mounted to navigation bar.
+- [x] **Homepage Radar Graphic Fix (Aug 28 2026):** The rotating sweep on the homepage
+  radar icon was orbiting the center of its own quarter-wedge div instead of the
+  circle's true center (`transform-origin` was `50% 50%`, needed `0% 100%` since the
+  wedge is positioned top-right of the circle). Fixed in main.py's `.radar-sweep` CSS.
 - [ ] **Hero Section & Value Proposition:** Review headline, subheadline, and trade authority copy for punchiness.
 - [ ] **Trade Credibility & Badges:** Add badges for BS5837 compliance, Open Government Licence (OGL v3.0), and ArbAC alignment.
 - [ ] **Pricing Table & Lockout Text:** Fine-tune exclusive 15-mile radial territory lockout copy (£149/mo) and credit pack terms (£80).
@@ -38,8 +42,26 @@
   - **Email 2 (The Competitive Moat):** Exclusive 15-mile radial territory lockout (£149/mo).
   - **Email 3 (The Soft Close):** £49/mo Regional Plan or £80 10-Lead Credit Pack.
   - **Personalization Tokens:** `{{director_name}}`, `{{company_name}}`, `{{city}}`, `{{recent_tpo_street}}`.
-- [ ] **Outreach Tool Warmup:** Load secondary domain mailboxes into **Instantly.ai** or **Smartlead.ai** for 14-day automated warmup.
+- [x] **Outreach Tool Warmup:** LIVE via Instantly.ai — started Aug 25 2026, nick@treekey.uk.
+  Throttle raised Aug 28 2026: 2 emails/day (up from 1), max 40/day (up from 30),
+  reply rate 35% (up from 30%).
 - [ ] **Direct WhatsApp / SMS Campaign:** Draft conversational message templates targeting the **980 Managing Director mobile numbers** on file.
+
+---
+
+### 5. 🏡 Domestic Listing Section (Future — replaces the removed scraper)
+- [ ] The old `domestic_scrapers.py` (Gumtree/Reddit/social/local-press scraping) was
+  removed Aug 28 2026 — it carried real UK GDPR/PECR risk with no clean fix at scale
+  (see project memory: `project_treekey_business_model.md`).
+- [ ] Replace with a consensual **homeowner-submitted job listing page**
+  (`/list-your-job` or similar): the homeowner posts their own job directly to
+  TreeKey, same as Checkatrade/MyBuilder/Rated People — sidesteps the legal problem
+  entirely since it's their own request, not a scraped third-party post.
+- [ ] Needs: public form + route, a `domestic_listings` table, spam/abuse protection
+  (reuse `_check_rate_limit`), and routing submissions into the existing
+  `leads` table / `dispatch_lead_alerts` pipeline so no downstream code changes.
+- [ ] `domestic_scrapers.py` currently a no-op stub (`ingest_and_route_domestic_leads()`
+  returns 0) so the 3 existing call sites in main.py don't break in the meantime.
 
 ---
 
@@ -66,7 +88,66 @@
 1. **[BLOCKED] Overturn PayPal Ban:** Call PayPal UK Business Support (020 8080 6500) to demand a human review of the automated ID ban glitch. (Priority: Low - Stripe is functioning).
 2. **DNS Email Deliverability:** Configure SPF, DKIM, and DMARC on Cloudflare/Namecheap so the 2,172 cold emails do not go to spam.
 3. **Cold Email Copywriting:** Write the high-converting 3-step email sequence.
-4. **ICO Registration:** Register Vector Data Labs with the ICO and pay the Â£40 fee.
-5. **Database Expansion Strategy (Phase 2):** Brainstorm and build new scraping pipelines to find maximum potential tree surgeon customers and emails (beyond the current 2,172).
-6. **Lead Scope Expansion (Phase 2):** Research data sources for domestic/residential and industrial tree surgery leads to diversify away from just council planning portals.
-7. **Contractor Portal Upgrades (Phase 2):** Build a custom account settings dashboard where paying tree surgeons can toggle their preferred notification methods (WhatsApp vs. Email) and interactively draw/pick their custom lead alert areas on a map.
+4. **ICO Registration:** Register Vector Data Labs with the ICO and pay the £40 fee.
+   **Nick's call (Aug 28 2026): deferring until just before the cold-email sequence
+   actually goes out**, not before.
+5. **Database Expansion Strategy (Phase 2) — IN PROGRESS (Aug 28 2026):** Added a
+   Companies House SIC-code search pass to `bulk_contractor_extractor.py` (Stage 1b),
+   alongside the existing name-substring search — catches genuinely relevant
+   companies whose name gives no clue what they do (e.g. "Greenwood Grounds Ltd"),
+   which the old approach could never find. Uses SIC codes 02100/02200/02400
+   (silviculture/logging/forestry support — accepted on SIC alone) and 81300
+   (landscaping — broader, so still name-gated). **Not yet run/verified live** —
+   the `sic_codes` and `location` params are confirmed real in the CH API spec, but
+   exact `location` matching behaviour (postcode vs. free-text town name) hasn't
+   been tested against the live API. Run it once and sanity-check the result count
+   before trusting it at full scale. Other ideas surfaced but not built (would need
+   live browser inspection to scrape reliably, or are separate paid-API integrations):
+   trade-body directories (e.g. Arboricultural Association's Approved Contractor
+   Directory — real, but is an interactive postcode/name search, not a static list,
+   so needs per-postcode query automation), Google Places business listings.
+6. **Lead Scope Expansion (Phase 2):** Domestic/residential source — see item 5 in
+   the Master Sprint Queue above (old scraper removed for GDPR/PECR risk, replacement
+   listing-page concept documented there). Industrial tree surgery leads —
+   not yet explored.
+7. **[PERSONAL — NOT a TreeKey/Vector Data Labs task]** Explore adapting the general scraping/dedup/enrichment pattern (not the UK-specific data sources) into a small personal, non-commercial tool for finding industrial metalwork/welding project leads in the Philippines, to occasionally help a friend. Likely data sources: PhilGEPS (notices.philgeps.gov.ph — public government procurement/tender notices, the closest Philippine parallel to UK council planning notices) for project listings, and SEC/DTI Philippines business registries for the Companies-House-style enrichment side. Not started.
+8. **Contractor Portal Upgrades (Phase 2) — PART 1 DONE (Aug 28 2026):** Notification-preference
+   toggle built: a `/settings` page (session-gated) where a contractor picks
+   Email-only vs. Email+WhatsApp-forward-buttons, stored in
+   `contractor_subscriptions.notification_preference` and read by
+   `dispatch_lead_alerts` when building the lead-delivery email. Note: this adds a
+   click-to-forward WhatsApp link per lead, it is NOT push delivery via WhatsApp's
+   Business API (no such integration exists/is configured). **PART 2 NOT DONE:**
+   interactively drawing/picking a custom lead-alert area on a map — deliberately
+   deferred, it needs a JS mapping library (e.g. Leaflet), polygon storage, and
+   reworking the core dispatch-matching geometry from radius-based to
+   polygon-based. Worth its own dedicated pass rather than bolting on quickly.
+9. **Council Lead-Detection Quality (Aug 28 2026) — DONE for mesh_scrapers.py, NOT
+   applied to UK Planning API / GLA:** Nick asked whether item 5's Companies-House
+   SIC-code insight (a structured field beats free-text keyword matching) applies
+   to the council/lead-discovery side too. Findings:
+   - `mesh_scrapers.py`'s direct Idox council scraper had its own separate, weaker
+     keyword list (`"crown"`, `"branch"`, `"oak"`, `"fell"` as bare words) — riskier
+     for false positives than `scanners.py`'s `TREE_GOLD` compound-phrase list
+     (built specifically to avoid "Crown Street", "bank branch", "fell down", etc).
+     **Fixed:** `mesh_scrapers.py` now imports and reuses `scanners.TREE_GOLD`.
+   - Idox's advanced-search "description" field only accepts one plain-text term
+     (no boolean OR), so a single search for "tree" was silently missing genuine
+     tree-work applications worded without that literal word (e.g. "TPO: pollard
+     protected oak"). **Fixed:** added a 3-term multi-pass search (`tree`, `tpo`,
+     `hedge`) per council, deduped by reference — same multi-pass pattern as item
+     5's SIC-code expansion. **Caveat, same as item 5:** not load-tested live —
+     3x the requests per council portal, watch for 429s/soft-bans before trusting
+     it at full national scale; can drop back to 1 term for any council that
+     complains.
+   - The UK Planning API (`ukplanningapi.co.uk`) and London GLA Datahub feeds in
+     `scanners.py` are a different case: they're queried broadly with no filter at
+     all (`status: "received"`, no keyword param) and rely entirely on the
+     `TREE_GOLD` client-side filter. I did **not** guess at an undocumented
+     "application type" query parameter for either — unlike Companies House
+     (whose `sic_codes` param I verified live against their own API spec this
+     session), I haven't checked these two APIs' actual docs, and a wrong guessed
+     param name could silently narrow results with no error, quietly losing real
+     leads. If Nick wants this pushed further, the next step is a live doc check
+     of both APIs (same as was done for Companies House and CARTO) before
+     changing anything — not a guess.

@@ -21,10 +21,26 @@ GOOGLE_MAPS_KEY = os.getenv("GOOGLE_MAPS_KEY", "").strip()
 logger = logging.getLogger("vector-data-labs")
 
 
+import threading as _threading
+_CH_RATE_LOCK = _threading.Lock()
+_CH_LAST_CALL = [0.0]
+_CH_MIN_INTERVAL = 0.6  # seconds between Companies House calls
+
 def _ch_headers():
-    """Builds the auth header for Companies House API."""
+    """
+    Builds the auth header for Companies House API. The throttle is a shared lock/
+    timestamp, not a per-call sleep — this file's call sites run under a
+    ThreadPoolExecutor(max_workers=10), and a sleep inside each thread only throttles
+    that one thread, letting up to 10 requests through per interval instead of 1
+    (blowing past the 600-req/5-min cap this was meant to protect).
+    """
     import time
-    time.sleep(0.6) # Strict rate-limit throttle to prevent 600/5min 429 errors
+    with _CH_RATE_LOCK:
+        now = time.time()
+        wait = _CH_MIN_INTERVAL - (now - _CH_LAST_CALL[0])
+        if wait > 0:
+            time.sleep(wait)
+        _CH_LAST_CALL[0] = time.time()
     auth = base64.b64encode(f"{CH_KEY}:".encode()).decode()
     return {"Authorization": f"Basic {auth}"}
 

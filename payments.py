@@ -10,6 +10,24 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
 PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
 logger = logging.getLogger("vector-data-labs")
 
+# Best-effort in-process dedup for retried Stripe webhooks (Stripe redelivers the same
+# event id on timeout/non-2xx — that's a normal retry, not a fraud/race signal). Doesn't
+# survive a restart or a multi-instance deploy, but removes the common false-positive case.
+_PROCESSED_STRIPE_EVENT_IDS: Dict[str, float] = {}
+
+
+def _is_duplicate_stripe_event(event_id: str) -> bool:
+    import time
+    now = time.time()
+    for k in [k for k, t in _PROCESSED_STRIPE_EVENT_IDS.items() if now - t > 86400]:
+        del _PROCESSED_STRIPE_EVENT_IDS[k]
+    if not event_id:
+        return False
+    if event_id in _PROCESSED_STRIPE_EVENT_IDS:
+        return True
+    _PROCESSED_STRIPE_EVENT_IDS[event_id] = now
+    return False
+
 # ── Pricing Plans (5 Tailored Packages + Single Purchase Marketplace) ─────────
 # All amounts in pence (GBP)
 PLANS = {
@@ -52,6 +70,31 @@ PLANS = {
         "mode": "subscription",
         "badge": "VIP All-Access",
         "real_world_roi": "Complete business operating system. First-mover WhatsApp dispatch before competitors even know the job exists."
+    },
+    # Homepage general-ledger tiers (radius-based, distinct from the tailored tiers above)
+    "sole_trader": {
+        "name": "TreeKey Sole Trader",
+        "description": "Perfect for one-man bands and local startups aiming to grow steadily.",
+        "amount": 4900,   # £49/month
+        "mode": "subscription",
+        "badge": "Sole Trader",
+        "real_world_roi": "One job pays for the month."
+    },
+    "commercial_pro": {
+        "name": "TreeKey Commercial Pro",
+        "description": "The sweet spot for established 3-man crews hunting lucrative clearances.",
+        "amount": 14900,  # £149/month
+        "mode": "subscription",
+        "badge": "Best for Crews",  # was "Most Popular" — duplicated climber_domestic's badge on the same pricing page
+        "real_world_roi": "The average commercial site clearance pays £2,500+. One job pays for the year."
+    },
+    "regional_elite": {
+        "name": "TreeKey Regional Elite",
+        "description": "For massive operations running multiple crews across a wide geographic spread.",
+        "amount": 29900,  # £299/month
+        "mode": "subscription",
+        "badge": "Regional Elite",
+        "real_world_roi": "50-mile radial boundary with first-priority API routing and a dedicated account manager."
     },
     # Single Lead Pay-As-You-Go Purchases (Single-Sale Inventory Burn)
     "single_lead_small": {
@@ -110,8 +153,13 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
             "success_url": f"{PUBLIC_APP_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}",
             "cancel_url": f"{PUBLIC_APP_URL}/pricing",
             "allow_promotion_codes": True,
-            "metadata": {"plan_key": plan_key}
+            "metadata": {"plan_key": plan_key, "tier": plan_key}
         }
+
+        if plan["mode"] == "subscription":
+            # Carry plan_key on the Subscription object itself (not just the Checkout
+            # Session), so later subscription-level webhook events still have it.
+            session_params["subscription_data"] = {"metadata": {"plan_key": plan_key, "tier": plan_key}}
 
         if outcode:
             session_params["client_reference_id"] = outcode
@@ -174,7 +222,8 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
 
     event_type = event["type"]
     data = event["data"]["object"]
-    
+    is_retry = _is_duplicate_stripe_event(event.get("id"))
+
     # GDPR Masking for logs
     mask = lambda e: f"{e[0]}***@{e.split('@')[1]}" if e and '@' in e else "unknown"
 
@@ -193,6 +242,10 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
             if lead_data:
                 logger.info(f"[Stripe] Lead {lead_id} burned from inventory for {mask(customer_email)}")
                 notifications.send_purchased_lead_email(customer_email, lead_data)
+            elif is_retry:
+                # Stripe redelivers the same event on timeout/non-2xx — this is an
+                # expected retry of an already-fulfilled purchase, not a real double-sale.
+                logger.info(f"[Stripe] Duplicate webhook delivery for already-processed lead {lead_id} ({mask(customer_email)}) — ignoring retry.")
             else:
                 logger.warning(f"[Stripe] Lead {lead_id} was already claimed or not found, but {mask(customer_email)} paid for it!")
                 notifications.send_system_incident_alert(
@@ -229,6 +282,38 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
         plan_id = data.get("items", {}).get("data", [{}])[0].get("plan", {}).get("id", "unknown")
         logger.info(f"[Stripe] New subscription — customer {customer_id} — plan {plan_id}")
         return {"event": "subscription_created", "customer_id": customer_id}
+
+    elif event_type == "customer.subscription.updated":
+        # Plan upgrade/downgrade via the Stripe Billing Portal fires this event, not
+        # checkout.session.completed — previously nothing handled it at all, so a
+        # contractor's tier/quota never changed on a self-service plan switch.
+        subscription_id = data.get("id")
+        items = data.get("items", {}).get("data", [])
+        new_price = (items[0].get("price") or {}) if items else {}
+        new_amount = new_price.get("unit_amount")
+        import database
+        # Best-effort reverse-match of the new Stripe price back to a PLANS tier by
+        # amount. A couple of tiers share a price point (e.g. sole_trader/climber_domestic
+        # are both £49/mo), so an ambiguous match is flagged for manual review rather
+        # than guessed at.
+        matches = [k for k, v in PLANS.items() if v["mode"] == "subscription" and v["amount"] == new_amount]
+        if len(matches) == 1:
+            new_tier = matches[0]
+            ok = database.update_subscription_tier_by_stripe_id(subscription_id, new_tier)
+            logger.info(f"[Stripe] Subscription {subscription_id} plan change -> {new_tier} (£{(new_amount or 0) / 100:.2f}/mo): updated={ok}")
+            return {"event": "subscription_updated", "subscription_id": subscription_id, "new_tier": new_tier}
+        else:
+            logger.warning(f"[Stripe] Subscription {subscription_id} updated to £{(new_amount or 0) / 100:.2f}/mo — {len(matches)} PLANS tiers match ({matches}), cannot auto-resolve.")
+            notifications.send_system_incident_alert(
+                category="REVENUE & BILLING",
+                title=f"SUBSCRIPTION PLAN CHANGE NEEDS MANUAL REVIEW: {subscription_id}",
+                description=f"Subscription {subscription_id} changed to a new price (£{(new_amount or 0) / 100:.2f}/mo) that could not be uniquely matched to a PLANS tier (candidates: {matches}).",
+                impact="This contractor's tier/quota was NOT updated automatically and may now not match what they're paying for.",
+                action_required="Check the Stripe subscription and update contractor_subscriptions.tier for this customer manually.",
+                severity="WARNING",
+                throttle_hours=1.0
+            )
+            return {"event": "subscription_updated", "subscription_id": subscription_id, "new_tier": None}
 
     elif event_type == "customer.subscription.deleted":
         customer_id = data.get("customer")

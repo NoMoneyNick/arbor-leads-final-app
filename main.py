@@ -114,6 +114,38 @@ def _check_rate_limit(ip: str):
     return True
 
 
+# ── Signed contractor session cookie ──────────────────────────────────────────
+# Previously the session cookie was the contractor's email in plain text with no
+# signature, so anyone could set treekey_contractor_session=victim@example.com in
+# their browser and load that contractor's dashboard/ledger. This signs the value
+# with HMAC so a tampered/forged cookie is rejected on read.
+import hmac as _hmac
+import hashlib as _hashlib
+import base64 as _base64
+_SESSION_SECRET = (os.getenv("SESSION_SECRET", "").strip() or T_SEC or "treekey-fallback-dev-secret").encode()
+if not os.getenv("SESSION_SECRET", "").strip():
+    logger.warning("[Auth] SESSION_SECRET not set — falling back to TRIGGER_SECRET (or a dev default) to sign session cookies. Set a dedicated SESSION_SECRET in Render for defense-in-depth.")
+
+def _sign_session_cookie(email: str) -> str:
+    email_b64 = _base64.urlsafe_b64encode(email.strip().lower().encode()).decode().rstrip("=")
+    sig = _hmac.new(_SESSION_SECRET, email_b64.encode(), _hashlib.sha256).hexdigest()
+    return f"{email_b64}.{sig}"
+
+def _verify_session_cookie(cookie_value: Optional[str]) -> Optional[str]:
+    """Returns the verified email from a signed session cookie, or None if missing/invalid/tampered."""
+    if not cookie_value or "." not in cookie_value:
+        return None
+    email_b64, _, sig = cookie_value.rpartition(".")
+    expected_sig = _hmac.new(_SESSION_SECRET, email_b64.encode(), _hashlib.sha256).hexdigest()
+    if not _hmac.compare_digest(sig, expected_sig):
+        return None
+    try:
+        padding = "=" * (-len(email_b64) % 4)
+        return _base64.urlsafe_b64decode(email_b64 + padding).decode()
+    except Exception:
+        return None
+
+
 
 @app.get("/api/check-postcode")
 @app.get("/check-postcode")
@@ -478,7 +510,12 @@ def public_homepage():
         ::-webkit-scrollbar-thumb {{ background: #334155; border-radius: 4px; }}
         ::-webkit-scrollbar-thumb:hover {{ background: #059669; }}
         .bg-grid-slate-900 {{ background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='32' height='32' fill='none' stroke='%231e293b' stroke-dasharray='5 3' transform='scale(1, -1)'%3E%3Cpath d='M0 .5H31.5V32'/%3E%3C/svg%3E"); }}
-        .radar-sweep {{ animation: sweep 4s linear infinite; transform-origin: 50% 50%; }}
+        /* The sweep div is the top-right QUARTER of the circular radar (w-1/2 h-1/2,
+           positioned top-right of the parent), so its own bottom-left corner is what
+           actually sits at the center of the circle — not the div's own center. Rotating
+           around 50% 50% (this div's center) made the whole quarter-wedge orbit around a
+           point offset from the visual center instead of sweeping around the true center. */
+        .radar-sweep {{ animation: sweep 4s linear infinite; transform-origin: 0% 100%; }}
         @keyframes sweep {{ to {{ transform: rotate(360deg); }} }}
     </style>
 </head>
@@ -1161,8 +1198,12 @@ def status(user: str = Depends(verify_dashboard_auth)):
 #  Pricing Page (Public) 
 
 @app.get("/pricing", response_class=HTMLResponse)
-def pricing():
+def pricing(request: Request):
     plans = payments.PLANS
+    msg = request.query_params.get("msg", "")
+    msg_banner = ""
+    if msg == "no_subscription":
+        msg_banner = "<div style='background:#fef2f2; border:1px solid #fca5a5; border-radius:8px; padding:14px; margin-bottom:20px; color:#991b1b;'><b>No active subscription found</b> for that email. Please subscribe below to access your dashboard.</div>"
 
     # Separate subscriptions and single purchase plans
     sub_cards = ""
@@ -1270,6 +1311,8 @@ def pricing():
             <h1>Fair Trade Packages & Zero-Reselling Guarantee</h1>
             <p>Direct statutory council intelligence & photo-verified homeowner leads. 100% exclusive. No shared bidding wars.</p>
         </div>
+
+        {msg_banner}
 
         <div class="creed-banner">
             <h3>🌲 The TreeKey Creed: "Your Prosperity is Our Business"</h3>
@@ -1689,6 +1732,12 @@ async def checkout_post(plan_key: str, outcode: str = Form(...), radius: int = F
     if not plan:
         return HTMLResponse("<h3>Invalid plan.</h3>", status_code=404)
 
+    # Server-side radius cap — the form previously offered the same 10-50mi choice to
+    # every plan with nothing enforcing it, so a cheap tier could select (and receive
+    # dispatch for) the same radius sold as a premium-tier differentiator.
+    max_radius = database.TIER_MAX_RADIUS.get(plan_key, 15)
+    radius = min(radius, max_radius)
+
     clean_outcode = outcode.strip().upper()[:6] or "GB"
     url = payments.create_checkout_session(plan_key, clean_outcode, radius=radius)
     if not url:
@@ -1858,11 +1907,18 @@ async def stripe_webhook(request: Request):
 # ── 3. "TreeKey Ledger" (Verticalized Arborist Accounting Engine) ───────────────
 
 @app.get("/ledger", response_class=HTMLResponse)
-def ledger_dashboard(email: Optional[str] = None):
+def ledger_dashboard(request: Request):
     """
     TreeKey Ledger: Verticalized financial command center for UK tree surgeons.
     Includes Van-Day true costing, CIS developer tax deductions, and £90k VAT gauge.
     """
+    # Previously took `email` straight from the query string with no auth check at
+    # all — anyone could view/write any contractor's financial data via /ledger?email=.
+    # Now derived only from the verified session cookie, same as /dashboard.
+    email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not email:
+        return RedirectResponse(url="/login", status_code=303)
+
     summary = database.get_contractor_financial_summary(email)
     turnover = summary["rolling_turnover"]
     headroom = summary["vat_headroom"]
@@ -1989,7 +2045,6 @@ def ledger_dashboard(email: Optional[str] = None):
             <h3 style="margin-top:0; color:#044332; font-size:18px;">📝 Log Completed Job & CIS Deduction</h3>
             <p style="color:#64748b; font-size:13px;">Save an invoice to track your 12-month VAT position and commercial CIS tax balances.</p>
             <form action="/api/save-ledger-entry" method="POST" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">
-                <input type="hidden" name="email" value="{email}">
                 <div>
                     <label style="font-size:12px; font-weight:bold;">Job / Property Name:</label>
                     <input type="text" name="job_name" placeholder="e.g. 14 Elm Grove Dismantle" required>
@@ -2055,8 +2110,14 @@ def ledger_dashboard(email: Optional[str] = None):
 
 @app.post("/api/save-ledger-entry")
 async def handle_save_ledger(request: Request):
+    # Previously trusted `email` from the POST body — any client could write ledger
+    # entries into another contractor's financial records by changing a hidden form
+    # field. Now derived only from the verified session cookie.
+    email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not email:
+        return RedirectResponse(url="/login", status_code=303)
+
     form = await request.form()
-    email = form.get("email", "partner@treecare.co.uk")
     job_name = form.get("job_name", "Untitled Job")
     client_type = form.get("client_type", "domestic")
     gross = float(form.get("gross_amount", 0) or 0)
@@ -2076,19 +2137,82 @@ async def handle_save_ledger(request: Request):
         tipping_cost=tipping,
         fuel_cost=fuel
     )
-    database.save_ledger_entry(
-        contractor_email=email,
-        job_name=job_name,
-        client_type=client_type,
-        gross_amount=gross,
-        labor_amount=labor,
-        cis_rate=cis_rate,
-        tipping_cost=tipping,
-        fuel_cost=fuel
-    )
-    return RedirectResponse(url=f"/ledger?email={email}", status_code=303)
+    return RedirectResponse(url="/ledger", status_code=303)
 
 
+
+
+# ── 3b. Contractor Portal Upgrades (Phase 2, part 1 — PROJECT_STATE.md item 8) ─
+# Notification-preference toggle. NOTE: the interactive map-drawn custom lead-alert
+# area (the other half of item 8) is a substantially bigger piece — it needs a JS
+# mapping library, polygon storage, and reworking the core dispatch-matching
+# geometry from radius-based to polygon-based — deliberately NOT built in this pass.
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request):
+    email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not email:
+        return RedirectResponse(url="/login", status_code=303)
+
+    current = database.get_contractor_settings(email).get("notification_preference", "email")
+    saved_banner = "<div style='background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:10px; margin-bottom:16px; color:#065f46; font-size:13px;'>Saved.</div>" if request.query_params.get("saved") else ""
+
+    def opt(value, label, desc):
+        checked = "checked" if current == value else ""
+        return f"""
+        <label style="display:block; border:1px solid #e2e8f0; border-radius:8px; padding:14px; margin-bottom:10px; cursor:pointer;">
+            <input type="radio" name="notification_preference" value="{value}" {checked} style="width:auto; margin-right:8px;">
+            <b>{label}</b>
+            <div style="font-size:12px; color:#64748b; margin-left:22px;">{desc}</div>
+        </label>
+        """
+
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <title>Settings | TreeKey</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; }}
+            .container {{ max-width: 600px; margin: auto; }}
+            .card {{ background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; }}
+            .btn {{ background: #044332; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; }}
+        </style>
+    </head>
+    <body>
+    <div class="container">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h1 style="margin:0; font-size:24px; color:#044332;">⚙️ Settings</h1>
+            <a href="/dashboard" style="color:#044332; font-size:13px; text-decoration:none; font-weight:bold;">← Dashboard</a>
+        </div>
+        <div class="card">
+            {saved_banner}
+            <h3 style="margin-top:0; font-size:16px;">Lead Notification Format</h3>
+            <p style="color:#64748b; font-size:13px;">How new leads are delivered when you're allocated one.</p>
+            <form method="POST" action="/api/save-settings">
+                {opt("email", "Email only", "Standard lead-delivery email with Letter/Flyer tools.")}
+                {opt("whatsapp", "Email + WhatsApp forward buttons", "Adds a one-tap “Forward on WhatsApp” button next to each lead so you can send it straight to your crew.")}
+                {opt("both", "Both (same as above)", "Included for clarity — WhatsApp buttons are additive to the email, not a replacement for it.")}
+                <button type="submit" class="btn" style="width:100%; margin-top:8px;">Save Settings</button>
+            </form>
+        </div>
+    </div>
+    </body>
+    </html>
+    """)
+
+
+@app.post("/api/save-settings")
+async def save_settings(request: Request):
+    email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not email:
+        return RedirectResponse(url="/login", status_code=303)
+
+    form = await request.form()
+    preference = form.get("notification_preference", "email")
+    database.update_notification_preference(email, preference)
+    return RedirectResponse(url="/settings?saved=1", status_code=303)
 
 
 # ── 4. Passwordless Contractor Auth & Mobile Command Center ───────────────────
@@ -2137,9 +2261,13 @@ def login_page(error: Optional[str] = None):
 
 @app.post("/api/request-magic-link")
 async def request_magic_link(request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        return RedirectResponse(url="/login?error=Too+many+attempts.+Please+wait+a+minute+and+try+again.", status_code=303)
+
     form = await request.form()
     contact = form.get("contact", "").strip().lower()
-    
+
     if not contact:
         return RedirectResponse(url="/login?error=Please+enter+your+email+address", status_code=303)
     
@@ -2183,16 +2311,27 @@ async def request_magic_link(request: Request):
 
 @app.get("/verify-login")
 def verify_login(request: Request, token: Optional[str] = None, otp: Optional[str] = None, email: Optional[str] = None):
+    # OTP is a 6-digit code (1,000,000 possibilities) with no prior throttling — this
+    # caps guessing attempts per IP the same way /check-postcode is protected.
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        return RedirectResponse(url="/login?error=Too+many+attempts.+Please+wait+a+minute+and+try+again.", status_code=303)
+
     verified_email = database.verify_magic_auth_token(token=token, otp=otp, email=email)
-    
+
     if not verified_email:
         return RedirectResponse(url="/login?error=Login+link+expired+or+already+used.+Please+request+a+new+one.", status_code=303)
 
-    # Set secure session cookie and redirect to dashboard
+    # Ghost-session guard: only contractors with an active subscription get a dashboard session
+    active_sub = database.get_contractor_subscription(verified_email)
+    if not active_sub or not active_sub.get("active"):
+        return RedirectResponse(url="/pricing?msg=no_subscription", status_code=303)
+
+    # Set secure, signed session cookie and redirect to dashboard
     response = RedirectResponse(url="/dashboard", status_code=303)
     response.set_cookie(
         key="treekey_contractor_session",
-        value=verified_email,
+        value=_sign_session_cookie(verified_email),
         max_age=86400 * 30,  # 30 days
         httponly=True,
         secure=True,
@@ -2204,7 +2343,7 @@ def verify_login(request: Request, token: Optional[str] = None, otp: Optional[st
 @app.get("/dashboard", response_class=HTMLResponse)
 def contractor_dashboard(request: Request):
     # Cookie session only — never accept email as a query param (privacy risk)
-    session_email = request.cookies.get("treekey_contractor_session")
+    session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
     if not session_email:
         return RedirectResponse(url="/login", status_code=303)
 
@@ -2280,6 +2419,7 @@ def contractor_dashboard(request: Request):
                 <div style="text-align:right;">
                     {active_badge}
                     <div style="margin-top:8px;">
+                        <a href="/settings" style="color:#a7f3d0; font-size:12px; text-decoration:none; margin-right:12px;">Settings ⚙️</a>
                         <a href="/logout" style="color:#a7f3d0; font-size:12px; text-decoration:none;">Log Out ➔</a>
                     </div>
                 </div>
@@ -2288,7 +2428,7 @@ def contractor_dashboard(request: Request):
 
         <!-- Quick Access Operational Tools -->
         <div class="quick-grid">
-            <a href="/ledger?email={session_email}" class="quick-card">
+            <a href="/ledger" class="quick-card">
                 <div style="font-size:20px;">📊</div>
                 <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">TreeKey Ledger</div>
                 <div style="font-size:11px; color:#64748b;">Van-Day Costing & £90k VAT Gauge</div>
@@ -4156,13 +4296,26 @@ def export_directors(user: str = Depends(verify_dashboard_auth)):
         logger.error(f"[EXPORT] DB error: {e}")
         rows = []
 
+    # Note: the nested f-strings below previously escaped double quotes inside an
+    # f-string expression part (e.g. f'...{f'<a href=\"...\">' if r[4] else ''}...'),
+    # which is a hard SyntaxError on Python <3.12 (only 3.12+ relaxed this) — meaning
+    # this whole file would fail to import at all on an older interpreter. Pulled the
+    # per-row HTML into helper functions so no quote character needs escaping.
+    _no_director_html = "<span style='color:#888;'>Director on file</span>"
+
+    def _mailto_cell(email):
+        return f"<a href='mailto:{email}'>{email}</a>" if email else ""
+
+    def _website_cell(url):
+        return f"<a href='{url}' target='_blank'>Website</a>" if url else ""
+
     table_rows = "".join([
         f"<tr>"
         f"<td style='padding:8px; border:1px solid #ddd;'><b>{r[0]}</b><br><span style='color:#777; font-size:11px;'>#{r[1]}</span></td>"
-        f"<td style='padding:8px; border:1px solid #ddd;'>{r[2] or '<span style=\"color:#888;\">Director on file</span>'}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd;'>{r[2] or _no_director_html}</td>"
         f"<td style='padding:8px; border:1px solid #ddd;'>{r[3] or ''}</td>"
-        f"<td style='padding:8px; border:1px solid #ddd;'>{f'<a href=\"mailto:{r[4]}\">{r[4]}</a>' if r[4] else ''}</td>"
-        f"<td style='padding:8px; border:1px solid #ddd;'>{f'<a href=\"{r[5]}\" target=\"_blank\">Website</a>' if r[5] else ''}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd;'>{_mailto_cell(r[4])}</td>"
+        f"<td style='padding:8px; border:1px solid #ddd;'>{_website_cell(r[5])}</td>"
         f"<td style='padding:8px; border:1px solid #ddd; text-align:center;'> {r[6] or 'N/A'}</td>"
         f"<td style='padding:8px; border:1px solid #ddd;'><b>{r[7]}</b></td>"
         f"</tr>"
