@@ -493,28 +493,6 @@ def public_homepage():
     <meta property="og:url" content="https://treekey.uk">
     <meta property="og:type" content="website">
     <link href="/static/tailwind.css" rel="stylesheet">
-    <script>
-        tailwind.config = {{
-            theme: {{
-                extend: {{
-                    colors: {{
-                        brand: {{
-                            dark: '#020617',
-                            slate: '#0f172a',
-                            green: '#059669',
-                            cedar: '#92400e',
-                            glow: '#10b981',
-                            alert: '#ef4444'
-                        }}
-                    }},
-                    fontFamily: {{
-                        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-                        mono: ['JetBrains Mono', 'ui-monospace', 'monospace']
-                    }}
-                }}
-            }}
-        }}
-    </script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -4490,3 +4468,4 @@ async def terms_of_service():
 </body>
 </html>
 """
+

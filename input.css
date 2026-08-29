@@ -1,0 +1,11 @@
+@import "tailwindcss";
+@theme {
+  --color-brand-dark: #020617;
+  --color-brand-slate: #0f172a;
+  --color-brand-green: #059669;
+  --color-brand-cedar: #92400e;
+  --color-brand-glow: #10b981;
+  --color-brand-alert: #ef4444;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
