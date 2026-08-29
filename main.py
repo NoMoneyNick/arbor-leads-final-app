@@ -468,6 +468,19 @@ def public_homepage():
         for l in stats["sample_leads"]
     ]) or "<tr><td colspan='3' class='p-8 text-center text-slate-500 font-mono'>Intercepting live planning data...</td></tr>"
 
+    ticker_rows = "".join([
+        f"""<div class='grid grid-cols-[56px_92px_1fr_86px_60px] gap-3 items-center px-4 py-2.5 border-b border-emerald-900/40 text-xs font-mono'>
+            <span class='text-emerald-600'>{(l[6].strftime('%H:%M') if l[6] else '--:--')}</span>
+            <span class='text-emerald-600 truncate'>{((l[5] or l[4] or 'TPO'))[:10]}</span>
+            <span class='text-slate-300 truncate'>{((l[1] or l[0] or ''))[:64]}</span>
+            <span class='text-right'>
+                <span class='text-amber-400 font-bold text-[10px] uppercase tracking-wide'>{(l[2] or 'medium')} job</span>
+            </span>
+            <span class='text-right'><span class='bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border border-emerald-500/20'>Live</span></span>
+        </div>"""
+        for l in stats["sample_leads"][:5]
+    ]) or "<div class='px-4 py-8 text-center text-slate-500 font-mono text-xs'>Intercepting live planning data...</div>"
+
     return f"""<!DOCTYPE html>
 <html lang="en-GB" class="scroll-smooth">
 <head>
@@ -553,68 +566,65 @@ def public_homepage():
         </div>
     </nav>
 
-    <!-- Hero Section -->
-    <main class="relative overflow-hidden pt-16 pb-24 lg:pt-32 lg:pb-40 bg-brand-dark bg-cover bg-center" style="background-image: url('/static/hero_bg.jpg');">
-        <div class="absolute inset-0 bg-brand-dark/80 backdrop-blur-[2px]"></div>
-        <div class="absolute inset-0 bg-gradient-to-t from-brand-dark via-transparent to-brand-dark/50"></div>
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center">
-            
-            <!-- Animated Radar Graphic -->
-            <div class="relative w-24 h-24 mx-auto mb-8 rounded-full border border-emerald-500/30 bg-emerald-500/5 shadow-[0_0_30px_rgba(16,185,129,0.2)] flex items-center justify-center overflow-hidden">
-                <div class="absolute inset-0 rounded-full border border-emerald-500/20 m-2"></div>
-                <div class="absolute inset-0 rounded-full border border-emerald-500/10 m-5"></div>
-                <div class="w-1/2 h-1/2 absolute top-0 right-0 bg-gradient-to-bl from-emerald-400/40 to-transparent rounded-tr-full radar-sweep"></div>
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-400 relative z-10"><path d="M12 2v20M2 12h20M12 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0 -12 0"></path></svg>
+    <!-- Hero Section: Live Signal Console -->
+    <main class="relative overflow-hidden pt-16 pb-24 lg:pt-24 lg:pb-32 bg-brand-dark bg-[radial-gradient(ellipse_at_top,rgba(5,150,105,0.10),transparent_60%)]">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+
+            <!-- Live Console Feed: real intercepted notices, not a decorative graphic -->
+            <div class="bg-[#0A1A12]/80 border border-emerald-900/50 rounded-xl overflow-hidden shadow-2xl mb-10">
+                <div class="flex items-center gap-2 px-4 py-3 border-b border-emerald-900/50">
+                    <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
+                    <span class="font-mono text-[11px] uppercase tracking-widest text-emerald-400">Live Feed — 360+ UK Council Portals</span>
+                </div>
+                <p class="px-4 pt-3 pb-1 text-[11px] font-mono text-slate-500 leading-relaxed">Real notices from our scan, sized by job scope — not anything you pay TreeKey.</p>
+                <div class="mt-1">
+                    {ticker_rows}
+                </div>
             </div>
 
-            <!-- Authority Trigger: Government Data -->
-            <div class="flex flex-col items-center gap-3 mb-8">
-                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/80 border border-slate-600 text-slate-300 font-mono text-xs uppercase tracking-widest shadow-xl">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-brand-green"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-                    Authorized UK Statutory Planning Data
-                </div>
-                <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-sm shadow-[0_0_15px_rgba(16,185,129,0.15)]">
+            <div class="text-center">
+                <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-sm shadow-[0_0_15px_rgba(16,185,129,0.15)] mb-6">
                     <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
                     <strong>{display_leads:,}</strong> Active Commercial Notices Intercepted
                 </div>
-            </div>
 
-            <!-- The Big Claim -->
-            <h1 class="text-5xl md:text-7xl font-extrabold text-white tracking-tight mb-6 leading-tight">
-                The Ultimate Lead Radar For<br>
-                <span class="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-emerald-600">UK Tree Surgeons.</span>
-            </h1>
+                <!-- The Big Claim -->
+                <h1 class="text-4xl md:text-6xl font-extrabold text-white tracking-tight mb-6 leading-tight">
+                    Every job, the moment the council files it.<br>
+                    <span class="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-amber-500">Not the moment your rivals hear about it.</span>
+                </h1>
 
-            <!-- The Pain/Solution Frame -->
-            <p class="mt-6 max-w-3xl mx-auto text-xl text-slate-400 leading-relaxed font-medium">
-                We intercept high-value TPO and Conservation Area tree work from 360+ UK council planning portals 24/7. 
-                <br><strong class="text-slate-200">You receive high-value commercial tree surgery notices instantly to your phone.</strong>
-            </p>
+                <!-- The Pain/Solution Frame -->
+                <p class="mt-4 max-w-2xl mx-auto text-lg text-slate-400 leading-relaxed font-medium">
+                    We watch 360+ UK council planning portals so you don't have to check them between jobs.
+                    <br><strong class="text-slate-200">When a real felling licence or TPO notice lands in your patch, it's yours first — chainsaw still in the van.</strong>
+                </p>
 
-            <!-- Cognitive Ease & Action Cues -->
-            <div class="mt-12 flex flex-col items-center gap-4">
-                <div class="flex flex-wrap justify-center gap-4">
-                    <a href="#radar" class="flex items-center gap-2 bg-brand-green text-white px-8 py-4 rounded font-bold text-lg hover:bg-emerald-500 transition-all duration-300 shadow-[0_0_30px_rgba(5,150,105,0.4)] hover:shadow-[0_0_40px_rgba(5,150,105,0.6)] hover:-translate-y-1 transform">
-                        Scan My Postcode Now
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
-                    </a>
+                <!-- Cognitive Ease & Action Cues -->
+                <div class="mt-10 flex flex-col items-center gap-4">
+                    <div class="flex flex-wrap justify-center gap-4">
+                        <a href="#radar" class="flex items-center gap-2 bg-brand-green text-white px-8 py-4 rounded font-bold text-lg hover:bg-emerald-500 transition-all duration-300 shadow-[0_0_30px_rgba(5,150,105,0.4)] hover:shadow-[0_0_40px_rgba(5,150,105,0.6)] hover:-translate-y-1 transform">
+                            Scan My Postcode Now
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                        </a>
+                    </div>
+                    <p class="text-xs text-slate-500 font-mono uppercase tracking-widest mt-2">100% Exclusive Leads. Never Sold Twice.</p>
                 </div>
-                <p class="text-xs text-slate-500 font-mono uppercase tracking-widest mt-2">100% Exclusive Leads. Never Sold Twice.</p>
-            </div>
 
-            <!-- Institutional Trust Badges (Anchoring Authority) -->
-            <div class="mt-16 pt-8 border-t border-slate-800/50 flex flex-wrap justify-center gap-8 opacity-70 grayscale hover:grayscale-0 transition-all duration-500">
-                <div class="flex items-center gap-2 text-sm font-mono text-slate-300">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-                    BS5837 Survey Alignment
-                </div>
-                <div class="flex items-center gap-2 text-sm font-mono text-slate-300">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-                    OGL v3.0 Public Sector Data
-                </div>
-                <div class="flex items-center gap-2 text-sm font-mono text-slate-300">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-                    ArbAC Industry Standard
+                <!-- Institutional Trust Badges (Anchoring Authority) -->
+                <div class="mt-14 pt-8 border-t border-slate-800/50 flex flex-wrap justify-center gap-8 opacity-70 grayscale hover:grayscale-0 transition-all duration-500">
+                    <div class="flex items-center gap-2 text-sm font-mono text-slate-300">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+                        BS5837 Survey Alignment
+                    </div>
+                    <div class="flex items-center gap-2 text-sm font-mono text-slate-300">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+                        Published Under The Open Government Licence
+                    </div>
+                    <div class="flex items-center gap-2 text-sm font-mono text-slate-300">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+                        ArbAC Industry Standard
+                    </div>
                 </div>
             </div>
         </div>

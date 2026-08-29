@@ -27,10 +27,62 @@
   radar icon was orbiting the center of its own quarter-wedge div instead of the
   circle's true center (`transform-origin` was `50% 50%`, needed `0% 100%` since the
   wedge is positioned top-right of the circle). Fixed in main.py's `.radar-sweep` CSS.
-- [ ] **Hero Section & Value Proposition:** Review headline, subheadline, and trade authority copy for punchiness.
-- [ ] **Trade Credibility & Badges:** Add badges for BS5837 compliance, Open Government Licence (OGL v3.0), and ArbAC alignment.
-- [ ] **Pricing Table & Lockout Text:** Fine-tune exclusive 15-mile radial territory lockout copy (£149/mo) and credit pack terms (£80).
-- [ ] **FAQ Section Review:** Ensure contractor questions regarding lead exclusivity, notice speed, and cancellation are answered clearly.
+- [ ] **NEXT ACTION (Aug 28 2026):** Tailwind is loaded from `cdn.tailwindcss.com` —
+  the browser itself warns this "should not be used in production." Fine at near-zero
+  traffic, but should be swapped for a proper built/compiled Tailwind before the cold
+  email sequence sends real traffic to the homepage (affects load speed / first
+  impression). Nick confirmed — do this one first, next session.
+- [ ] **PRIORITY 1 FOR NEXT SESSION (Nick confirmed Aug 28 2026):** the four items
+  below — hero copy, trust badges, pricing/lockout copy, FAQ. Nick agreed these
+  matter more than anything else content-wise since they directly affect whether a
+  contractor converts on their first visit, which matters a lot once cold email
+  traffic actually starts arriving.
+  - [x] **Hero Section & Value Proposition — DONE (Aug 29 2026):** replaced with the
+    "Live Signal" redesign (see below).
+  - [x] **Trade Credibility & Badges — wording fixed (Aug 29 2026):** see "Wording
+    precision" note below, folded into the same edit.
+  - [ ] **Pricing Table & Lockout Text:** Fine-tune exclusive radial territory lockout copy and credit pack terms. NOT done yet.
+  - [ ] **FAQ Section Review:** Ensure contractor questions regarding lead exclusivity, notice speed, and cancellation are answered clearly. NOT done yet.
+  - [x] **Wording precision — DONE (Aug 29 2026):** the homepage badge "Authorized UK
+    Statutory Planning Data" reworded to "Published Under The Open Government
+    Licence" — same true claim, no longer readable as government sanctioning
+    TreeKey specifically.
+- [x] **Homepage hero redesign — "Live Signal" (Concept A) implemented live (Aug 29
+  2026):** Nick picked Concept A from the rebrand comparison artifact (a live
+  console-feed hero instead of the old radar-icon-and-headline layout) after two
+  rounds of design iteration. Replaced the hero in `main.py`'s `public_homepage()`:
+  dropped the spinning radar icon and `/static/hero_bg.jpg` background, added a
+  dark-green console panel showing the 5 most recent real leads from the DB
+  (`stats["sample_leads"]`) as monospace rows (time / council ref / description /
+  size tag / LIVE badge), then the headline+CTA+trust-badges below it, unchanged
+  functionally (still links to `#radar`, `/checkout/...`, etc). **Important catch
+  during implementation:** the design mockup's rows showed a specific £ "job value"
+  per lead (e.g. "£1,900"). Checked whether that's backed by real data before
+  shipping it — it is not. `leads.lead_price` (`scanners.py` `score_lead()`,
+  £25/£50/£75) is the price of the *lead itself*, not an estimate of the
+  underlying tree job's value — using it as "job worth" would have been actively
+  misleading (exactly the "looks like a price they'd pay" confusion Nick flagged
+  earlier, just with a real number attached). No field in the schema estimates
+  actual job/contract value. **Fix:** dropped the £ figure from the live version
+  entirely; each row instead shows the real `lead_score` tier as "SMALL/MEDIUM/LARGE
+  JOB" — honest, since that field genuinely is a size classification, not invented.
+  Verified: `python3 -m py_compile` passes, and the homepage function was extracted
+  and executed standalone with mock DB rows (including `None` values) confirming it
+  renders complete, balanced HTML with no unresolved template placeholders and none
+  of the old "Authorized..." wording left behind. Not yet re-verified against a live
+  deploy (that happens once Nick runs `UPDATE_WEBSITE.bat` / deploys on Render).
+  Concept A was explicitly "subject to change" — Nick may still want further passes.
+- [ ] **Marketplace / Ledger / Chip-Drop / Storm Radar nav items — CLARIFIED (Aug 28
+  2026):** These are NOT meant to be generic subpages — they're meant to be given
+  free to tree surgeons (whether linked from the homepage, or bundled in with a
+  purchased lead), specifically so TreeKey feels like it understands and sympathises
+  with tree surgeons' real problems, not like a site built just to grab quick cash
+  fast. This intent isn't actually written down anywhere Claude could find — it's
+  NOT in MANIFEST.md as it currently stands (checked Aug 28 2026) despite Nick
+  believing it should be. **Action:** document this intent explicitly in MANIFEST.md
+  (or here) so it isn't lost, and check these pages' actual current behaviour against
+  it — right now they're plain top-nav links with no visible framing as "a free
+  goodwill tool," which undersells the actual intent behind them.
 
 
 ---
@@ -151,3 +203,19 @@
      leads. If Nick wants this pushed further, the next step is a live doc check
      of both APIs (same as was done for Companies House and CARTO) before
      changing anything — not a guess.
+10. **PWA / "installable website" with real push notifications (Aug 28 2026 — idea,
+    NOT started, post-launch priority):** Nick asked about building a native app,
+    partly on the premise that "B2B apps make the most money" — that stat is about
+    selling to businesses vs. consumers (which TreeKey already is), not about
+    native app vs. website, so it doesn't itself argue for a native app. Compared
+    a native iOS/Android app (Apple Developer $99/yr + Google $25 one-time, app
+    store review process outside our control, likely weeks of work, ongoing OS
+    maintenance) against a PWA: add a web manifest + service worker to the
+    existing site so it can be "installed" to a phone home screen with real push
+    notifications, no app store involved. Verdict: the PWA route is a genuinely
+    good idea — cheap, reuses the existing backend entirely, and would make the
+    "you'll know before your competitors do" pitch literally true instead of just
+    marketing copy (push notification vs. checking email). NOT urgent though —
+    DNS/email deliverability (item 2 below) and the cold email copy (item 3) are
+    what's actually gating the first paying contractor and matter more right now.
+    Good candidate for right after launch, or folded into a later polish pass.
