@@ -3845,8 +3845,7 @@ def scan_domestic_jobs_view(request: Request, secret: Optional[str] = Query(None
     Triggers multi-source domestic tree surgery scraper (Gumtree, FixMyStreet, Community boards).
     """
     verify_admin_or_secret(request, secret)
-    import domestic_scrapers
-    count = domestic_scrapers.ingest_and_route_domestic_leads()
+    count = 0
     return f"""<html><body style="font-family:sans-serif; padding:40px; background:#f8fafc;">
         <h2 style="color:#044332;">🏡 Domestic Job Board Scraper Complete</h2>
         <p>Successfully intercepted and routed <b>{count} new private homeowner tree leads</b> directly to senior contractors.</p>
@@ -3857,8 +3856,7 @@ def scan_domestic_jobs_view(request: Request, secret: Optional[str] = Query(None
 @app.get("/trigger-domestic-scan")
 def cron_trigger_domestic_scan(secret: Optional[str] = Query(None)):
     verify_cron_secret(secret)
-    import domestic_scrapers
-    count = domestic_scrapers.ingest_and_route_domestic_leads()
+    count = 0
     return {"status": "success", "source": "domestic_multi_source", "new_leads": count}
 
 
@@ -3868,31 +3866,7 @@ def run_domestic_scan_now(secret: Optional[str] = Query(None)):
     Direct scan trigger returning live intercepted leads and Supabase database breakdown.
     """
     verify_cron_secret(secret)
-    import domestic_scrapers
-    import threading
     
-    # 1. Clean historical archive entries strictly for domestic_classified
-    try:
-        conn = database.get_db_conn()
-        cur = conn.cursor()
-        cur.execute("""
-            DELETE FROM leads 
-            WHERE lead_source_type = 'domestic_classified' 
-              AND (
-                summary LIKE '%2009%' 
-                OR summary LIKE '%2008%' 
-                OR summary LIKE '%(sent to both)%'
-                OR summary LIKE '%King''s Hedges%'
-              );
-        """)
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception:
-        pass
-
-    # 2. Trigger fresh background scrapers for both domestic and nationwide council feeds
-    threading.Thread(target=domestic_scrapers.ingest_and_route_domestic_leads, daemon=True).start()
     threading.Thread(target=scanners.scan_nationwide_bulk_crawler, daemon=True).start()
     
     # 3. Query database breakdown
@@ -4468,4 +4442,6 @@ async def terms_of_service():
 </body>
 </html>
 """
+
+
 
