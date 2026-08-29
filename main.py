@@ -530,13 +530,7 @@ def public_homepage():
     <meta name="theme-color" content="#020617">
     <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link href="/static/tailwind.css" rel="stylesheet">
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js');
-        });
-      }
-    </script>
+    <script>if ('serviceWorker' in navigator) {{ window.addEventListener('load', () => {{ navigator.serviceWorker.register('/sw.js'); }}); }}</script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -4433,13 +4427,7 @@ async def privacy_policy():
     <meta name="theme-color" content="#020617">
     <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link href="/static/tailwind.css" rel="stylesheet">
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js');
-        });
-      }
-    </script>
+    <script>if ('serviceWorker' in navigator) {{ window.addEventListener('load', () => {{ navigator.serviceWorker.register('/sw.js'); }}); }}</script>
 </head>
 <body class="bg-slate-900 text-slate-300 font-sans p-8 md:p-16">
     <div class="max-w-3xl mx-auto bg-slate-800 p-8 rounded-lg shadow-xl border border-slate-700">
@@ -4476,13 +4464,7 @@ async def terms_of_service():
     <meta name="theme-color" content="#020617">
     <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link href="/static/tailwind.css" rel="stylesheet">
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js');
-        });
-      }
-    </script>
+    <script>if ('serviceWorker' in navigator) {{ window.addEventListener('load', () => {{ navigator.serviceWorker.register('/sw.js'); }}); }}</script>
 </head>
 <body class="bg-slate-900 text-slate-300 font-sans p-8 md:p-16">
     <div class="max-w-3xl mx-auto bg-slate-800 p-8 rounded-lg shadow-xl border border-slate-700">
@@ -4506,6 +4488,7 @@ async def terms_of_service():
 </body>
 </html>
 """
+
 
 
 
