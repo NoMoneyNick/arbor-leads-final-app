@@ -432,6 +432,40 @@ def verify_admin_or_secret(request: Request, secret: Optional[str] = None):
 
 #  Public Landing Page (Enterprise Institutional Architecture) 
 
+
+# ---------------------------------------------------------
+# Progressive Web App (PWA) Service Worker
+# ---------------------------------------------------------
+@app.get("/sw.js")
+def service_worker():
+    sw_code = """
+const CACHE_NAME = 'treekey-v1';
+const urlsToCache = [
+  '/',
+  '/static/tailwind.css',
+  '/static/icon-192.png',
+  '/static/icon-512.png'
+];
+
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(cache => cache.addAll(urlsToCache))
+  );
+});
+
+self.addEventListener('fetch', event => {
+  event.respondWith(
+    caches.match(event.request)
+      .then(response => {
+        if (response) return response;
+        return fetch(event.request);
+      })
+  );
+});
+"""
+    return Response(content=sw_code, media_type="application/javascript")
+
 @app.get("/", response_class=HTMLResponse)
 def public_homepage():
     stats = {"p": 0, "l": 0, "sample_leads": []}
@@ -492,7 +526,17 @@ def public_homepage():
     <meta property="og:description" content="Exclusive tree surgery leads from live UK planning applications. Council TPO notices, S211 felling approvals, and domestic homeowner jobs — delivered first.">
     <meta property="og:url" content="https://treekey.uk">
     <meta property="og:type" content="website">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#020617">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link href="/static/tailwind.css" rel="stylesheet">
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js');
+        });
+      }
+    </script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -4385,7 +4429,17 @@ async def privacy_policy():
 <head>
     <meta charset="UTF-8">
     <title>Privacy Policy - Tree Key</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#020617">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link href="/static/tailwind.css" rel="stylesheet">
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js');
+        });
+      }
+    </script>
 </head>
 <body class="bg-slate-900 text-slate-300 font-sans p-8 md:p-16">
     <div class="max-w-3xl mx-auto bg-slate-800 p-8 rounded-lg shadow-xl border border-slate-700">
@@ -4418,7 +4472,17 @@ async def terms_of_service():
 <head>
     <meta charset="UTF-8">
     <title>Terms of Service - Tree Key</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#020617">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link href="/static/tailwind.css" rel="stylesheet">
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js');
+        });
+      }
+    </script>
 </head>
 <body class="bg-slate-900 text-slate-300 font-sans p-8 md:p-16">
     <div class="max-w-3xl mx-auto bg-slate-800 p-8 rounded-lg shadow-xl border border-slate-700">
@@ -4442,6 +4506,8 @@ async def terms_of_service():
 </body>
 </html>
 """
+
+
 
 
 
