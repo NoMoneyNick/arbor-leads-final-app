@@ -203,11 +203,9 @@
      leads. If Nick wants this pushed further, the next step is a live doc check
      of both APIs (same as was done for Companies House and CARTO) before
      changing anything — not a guess.
-10. **PWA / "installable website" with real push notifications (Aug 28 2026 — idea,
-    NOT started, post-launch priority):** Nick asked about building a native app,
-    partly on the premise that "B2B apps make the most money" — that stat is about
-    selling to businesses vs. consumers (which TreeKey already is), not about
-    native app vs. website, so it doesn't itself argue for a native app. Compared
+10. **PWA / "installable website" (Aug 29 2026):**
+    - **PART 1 (DONE):** Added `manifest.json`, Service Worker caching, and iOS/Android meta tags. The app is now installable to the home screen.
+    - **PART 2 (NOT STARTED):** Actual Web Push API push notifications. Good candidate for post-launch polish.
     a native iOS/Android app (Apple Developer $99/yr + Google $25 one-time, app
     store review process outside our control, likely weeks of work, ongoing OS
     maintenance) against a PWA: add a web manifest + service worker to the
