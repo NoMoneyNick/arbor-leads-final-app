@@ -138,7 +138,7 @@
  
 ## REMAINING PRE-LAUNCH TO-DO LIST
 1. **[BLOCKED] Overturn PayPal Ban:** Call PayPal UK Business Support (020 8080 6500) to demand a human review of the automated ID ban glitch. (Priority: Low - Stripe is functioning).
-2. **DNS Email Deliverability:** Configure SPF, DKIM, and DMARC on Cloudflare/Namecheap so the 2,172 cold emails do not go to spam.
+2. **DNS Email Deliverability — DONE (Aug 29 2026):** SPF, DKIM, and DMARC are fully configured in Cloudflare for Google Workspace. Verified live.
 3. **Cold Email Copywriting:** Write the high-converting 3-step email sequence.
 4. **ICO Registration:** Register Vector Data Labs with the ICO and pay the £40 fee.
    **Nick's call (Aug 28 2026): deferring until just before the cold-email sequence
