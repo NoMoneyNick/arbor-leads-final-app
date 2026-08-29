@@ -492,7 +492,7 @@ def public_homepage():
     <meta property="og:description" content="Exclusive tree surgery leads from live UK planning applications. Council TPO notices, S211 felling approvals, and domestic homeowner jobs — delivered first.">
     <meta property="og:url" content="https://treekey.uk">
     <meta property="og:type" content="website">
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="/static/tailwind.css" rel="stylesheet">
     <script>
         tailwind.config = {{
             theme: {{
@@ -822,8 +822,6 @@ def public_homepage():
     </section>
 
     <!-- FAQ Section (Objection Handling) -->
-
-
     <section class="section py-20 bg-[#020617] border-t border-slate-800">
         <div class="container mx-auto px-4 max-w-3xl">
             <div class="text-center mb-12">
@@ -833,17 +831,17 @@ def public_homepage():
             <div class="space-y-6">
                 <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
                     <h3 class="text-lg font-bold text-white mb-2">Are these leads exclusive?</h3>
-                    <p class="text-slate-400 leading-relaxed">Yes. We operate on a strict <strong>Lead-Level Exclusivity</strong> model. Unlike platforms that sell the same job to 5 different guys, if you receive a commercial notice from Tree Key, it is 100% yours. We never sell the same lead twice.</p>
+                    <p class="text-slate-400 leading-relaxed">Yes. We operate on a strict <strong>Radial Territory Exclusivity</strong> model. You set your base postcode and an operating radius (up to 50 miles). As long as you have remaining monthly quota, you are the <em>only</em> contractor we notify about jobs in your area.</p>
                 </div>
                 
                 <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
-                    <h3 class="text-lg font-bold text-white mb-2">Are the jobs real?</h3>
-                    <p class="text-slate-400 leading-relaxed">Yes. We do not generate fake "marketing" leads. We pull statutory data directly from UK council planning portals under the Open Government Licence (OGL v3.0). Every lead includes the official council reference number so you can verify it instantly.</p>
+                    <h3 class="text-lg font-bold text-white mb-2">How fast do I get notified?</h3>
+                    <p class="text-slate-400 leading-relaxed">Instantly. Our system scrapes UK planning portals continuously. The moment a new tree-related planning application or TPO/S211 notice is published in your radius, an alert is dispatched directly to your inbox so you can quote the homeowner before your competitors even know the job exists.</p>
                 </div>
                 
                 <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
                     <h3 class="text-lg font-bold text-white mb-2">Am I tied into a long contract?</h3>
-                    <p class="text-slate-400 leading-relaxed">No. We work with tradesmen, not corporations. The lockout is a rolling monthly agreement. You can cancel instantly at any time with zero penalty. Alternatively, buy a 80 credit pack for zero monthly commitment.</p>
+                    <p class="text-slate-400 leading-relaxed">No. The territory lockout is a rolling monthly agreement. You can cancel instantly at any time with zero penalty. If you don't want a subscription, you can unlock leads one-by-one via the Marketplace, though you won't get territory exclusivity.</p>
                 </div>
             </div>
         </div>
@@ -4434,7 +4432,7 @@ async def privacy_policy():
 <head>
     <meta charset="UTF-8">
     <title>Privacy Policy - Tree Key</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="/static/tailwind.css" rel="stylesheet">
 </head>
 <body class="bg-slate-900 text-slate-300 font-sans p-8 md:p-16">
     <div class="max-w-3xl mx-auto bg-slate-800 p-8 rounded-lg shadow-xl border border-slate-700">
@@ -4467,7 +4465,7 @@ async def terms_of_service():
 <head>
     <meta charset="UTF-8">
     <title>Terms of Service - Tree Key</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="/static/tailwind.css" rel="stylesheet">
 </head>
 <body class="bg-slate-900 text-slate-300 font-sans p-8 md:p-16">
     <div class="max-w-3xl mx-auto bg-slate-800 p-8 rounded-lg shadow-xl border border-slate-700">
