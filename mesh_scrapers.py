@@ -6,6 +6,8 @@ import re
 import time
 from typing import List, Dict
 
+import net_utils
+
 try:
     from bs4 import BeautifulSoup
 except ImportError:
@@ -135,6 +137,40 @@ class IdoxScraper:
             "Accept-Language": "en-GB,en;q=0.5"
         })
 
+    # Throttle so one council's unusual page doesn't send an alert per search
+    # term, per city, every single scan cycle -- class-level (shared across
+    # instances) since a new IdoxScraper is constructed per scan.
+    _structure_alert_throttle: dict = {}
+    _structure_alert_throttle_hours = 24.0
+
+    def _alert_possible_structure_change(self, search_term: str):
+        now = time.time()
+        last = IdoxScraper._structure_alert_throttle.get(self.base_url, 0)
+        if now - last < IdoxScraper._structure_alert_throttle_hours * 3600:
+            return
+        IdoxScraper._structure_alert_throttle[self.base_url] = now
+        try:
+            import notifications
+            notifications.send_system_incident_alert(
+                category="SCRAPER PAGE STRUCTURE",
+                title=f"{self.base_url} may have changed its Idox page layout",
+                description=(
+                    f"A search for '{search_term}' on {self.base_url} returned a page "
+                    f"with no recognisable results list and no 'no results' message "
+                    f"either. This usually means either a genuinely unusual empty "
+                    f"result, or the council has changed their Idox theme/markup and "
+                    f"our parser (which looks for <ul id='searchresults'>) no longer "
+                    f"matches anything on this portal -- which would mean leads from "
+                    f"this specific council are being silently missed."
+                ),
+                impact="Possible silent lead loss from this one council if it's a structure change, not a genuine empty result.",
+                action_required=f"Manually open {self.base_url}/search.do?action=advanced, run a broad search, and compare the page structure against what mesh_scrapers.py expects.",
+                severity="WARNING",
+                throttle_hours=IdoxScraper._structure_alert_throttle_hours
+            )
+        except Exception as e:
+            logger.debug(f"[MESH] Could not send structure-change alert for {self.base_url}: {e}")
+
     def get_csrf_token(self, html_text: str) -> str:
         if not BeautifulSoup:
             return ""
@@ -153,7 +189,7 @@ class IdoxScraper:
         try:
             # Step 1: Establish session and get CSRF token
             adv_search_url = f"{self.base_url}/search.do?action=advanced"
-            res = self.session.get(adv_search_url, verify=False, timeout=15)
+            res = net_utils.smart_get(adv_search_url, session=self.session, timeout=15)
             if res.status_code != 200:
                 logger.warning(f"[MESH] Failed to connect to {self.base_url}. Status: {res.status_code}")
                 return leads
@@ -163,7 +199,7 @@ class IdoxScraper:
             # Step 2: Prepare POST payload for Advanced Search
             end_date = datetime.datetime.now()
             start_date = end_date - datetime.timedelta(days=days_back)
-            
+
             payload = {
                 "searchCriteria.description": search_term,
                 "date(applicationReceivedStart)": start_date.strftime("%d/%m/%Y"),
@@ -175,11 +211,11 @@ class IdoxScraper:
 
             # Step 3: Execute Search
             search_url = f"{self.base_url}/advancedSearchResults.do?action=searchCriteria"
-            res_post = self.session.post(search_url, data=payload, verify=False, timeout=20)
-            
+            res_post = net_utils.smart_post(search_url, session=self.session, data=payload, timeout=20)
+
             # Step 4: Parse Results
             soup = BeautifulSoup(res_post.text, 'html.parser')
-            
+
             # Idox results are typically in a <ul id="searchresults">
             results_list = soup.find('ul', id='searchresults')
             if not results_list:
@@ -188,13 +224,39 @@ class IdoxScraper:
                     ref_tag = soup.find('th', string=re.compile("Reference", re.I))
                     addr_tag = soup.find('th', string=re.compile("Address", re.I))
                     desc_tag = soup.find('th', string=re.compile("Proposal", re.I))
-                    
+
                     if ref_tag and desc_tag:
                         ref = ref_tag.find_next_sibling('td').text.strip()
                         addr = addr_tag.find_next_sibling('td').text.strip() if addr_tag else "Unknown Address"
                         desc = desc_tag.find_next_sibling('td').text.strip()
                         if is_tree_related(desc):
                             leads.append({"reference": ref, "address": addr, "description": desc})
+                    return leads
+
+                # Not the single-result redirect either. Before this fix, this
+                # silently returned [] whether the council genuinely had zero
+                # matches OR their Idox theme/markup had changed and our
+                # selectors no longer match anything -- those two cases look
+                # identical from here (both "found nothing") but mean very
+                # different things: one is normal, the other means we've been
+                # silently missing leads from that council. Best-effort
+                # heuristic to tell them apart: Idox's own "no results" pages
+                # almost always say so somewhere in the page text. If that
+                # phrase is absent, this is more likely a real structural
+                # break, so flag it (throttled per-council) instead of
+                # staying silent. This is a heuristic, not a verified check
+                # against every council's theme -- it can still be wrong in
+                # either direction, but it's strictly better than no signal
+                # at all.
+                page_text = soup.get_text(" ", strip=True).lower()
+                looks_like_genuine_no_results = any(
+                    phrase in page_text for phrase in (
+                        "no results", "0 results", "no application", "your search did not match",
+                        "did not return any results", "no records"
+                    )
+                )
+                if not looks_like_genuine_no_results:
+                    self._alert_possible_structure_change(search_term)
                 return leads
 
             # Parse multiple results

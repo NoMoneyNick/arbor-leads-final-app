@@ -22,6 +22,7 @@ import logging
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
+import net_utils
 
 load_dotenv()
 
@@ -140,7 +141,7 @@ def search_companies_house(query: str, items_per_page: int = 50) -> list:
         "size": items_per_page
     }
     try:
-        res = requests.get(url, headers=ch_headers(), params=params, timeout=12)
+        res = net_utils.smart_get(url, headers=ch_headers(), params=params, timeout=12)
         if res.status_code == 200:
             return res.json().get("items", [])
     except Exception as e:
@@ -167,7 +168,7 @@ def search_companies_house_by_sic(sic_codes: list, location: str = None, items_p
     if location:
         params["location"] = location
     try:
-        res = requests.get(url, headers=ch_headers(), params=params, timeout=12)
+        res = net_utils.smart_get(url, headers=ch_headers(), params=params, timeout=12)
         if res.status_code == 200:
             return res.json().get("items", [])
     except Exception as e:
@@ -181,7 +182,7 @@ def get_director_from_ch(company_number: str) -> str | None:
         return None
     url = f"https://api.company-information.service.gov.uk/company/{company_number}/officers"
     try:
-        res = requests.get(url, headers=ch_headers(), timeout=10)
+        res = net_utils.smart_get(url, headers=ch_headers(), timeout=10)
         if res.status_code == 200:
             officers = res.json().get("items", [])
             # Look for active director / CEO / Managing Director
@@ -225,7 +226,7 @@ def enrich_with_google_places(company_name: str, city_or_postcode: str) -> dict:
         time.sleep(1.2) # Throttle DDG
         url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        res = requests.get(url, headers=headers, timeout=10)
+        res = net_utils.smart_get(url, headers=headers, timeout=10)
         
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')

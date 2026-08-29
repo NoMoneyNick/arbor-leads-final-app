@@ -33,3 +33,11 @@ desktop.ini
 # OneDrive sync artifacts
 *.tmp
 ~$*
+
+# Large local tool binaries -- never commit these. GitHub hard-rejects any
+# single file over 100MB on push; tailwindcss.exe (the Tailwind CLI binary,
+# ~107MB) broke every push once it landed in this folder unignored
+# (Aug 29 2026). These are one-time downloads each dev machine needs
+# locally, not something the website's code repo should carry.
+*.exe
+tailwindcss.exe

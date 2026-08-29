@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 import database
 from typing import Optional, List, Dict, Tuple, Set, Any
 from dotenv import load_dotenv
+import net_utils
 
 
 
@@ -55,7 +56,7 @@ def get_director_from_ch(company_number: str):
         return None
     try:
         url = f"https://api.company-information.service.gov.uk/company/{company_number}/officers"
-        res = requests.get(url, headers=_ch_headers(), timeout=10)
+        res = net_utils.smart_get(url, headers=_ch_headers(), timeout=10)
         if res.status_code == 401:
             import notifications
             notifications.send_system_incident_alert(
@@ -116,7 +117,7 @@ def search_companies_house(query: str, items_per_page: int = 50, start_index: in
         params = {"q": query, "items_per_page": items_per_page}
         if start_index > 0:
             params["start_index"] = start_index
-        res = requests.get(url, params=params, headers=_ch_headers(), timeout=5)
+        res = net_utils.smart_get(url, params=params, headers=_ch_headers(), timeout=5)
         if res.status_code == 200:
             return res.json().get("items", [])
     except Exception as e:
@@ -288,7 +289,7 @@ def scrape_email_from_website(website_url: str) -> Optional[str]:
         
         # 1. Fetch Homepage (fast 2s timeout)
         try:
-            res = requests.get(website_url, headers=headers, timeout=2.0, verify=False)
+            res = net_utils.smart_get(website_url, headers=headers, timeout=2.0)
             if res.status_code == 200:
                 emails = _extract_emails_from_html(res.text)
                 if emails:
@@ -299,7 +300,7 @@ def scrape_email_from_website(website_url: str) -> Optional[str]:
         # 2. Check /contact sub-page (fast 1.5s timeout)
         base_url = website_url.rstrip("/")
         try:
-            sub_res = requests.get(base_url + "/contact", headers=headers, timeout=1.5, verify=False)
+            sub_res = net_utils.smart_get(base_url + "/contact", headers=headers, timeout=1.5)
             if sub_res.status_code == 200:
                 sub_emails = _extract_emails_from_html(sub_res.text)
                 if sub_emails:
@@ -328,7 +329,7 @@ def get_google_places_info(company_name: str, city_or_addr: str = ""):
         query = f"{company_name} {city_or_addr} tree surgery UK".strip()
         url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        res = requests.get(url, headers=headers, timeout=10)
+        res = net_utils.smart_get(url, headers=headers, timeout=10)
         
         phone = None
         website = None
@@ -633,7 +634,7 @@ def perform_research(city_name: str):
         from concurrent.futures import ThreadPoolExecutor
         def fetch_ch_search(q):
             try:
-                res = requests.get(
+                res = net_utils.smart_get(
                     "https://api.company-information.service.gov.uk/search/companies",
                     params={"q": q, "items_per_page": 100},
                     headers=_ch_headers(),

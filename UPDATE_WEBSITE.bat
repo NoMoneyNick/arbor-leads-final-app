@@ -9,10 +9,18 @@ REM  3. GitHub tells Render to rebuild the live website automatically
 REM
 REM  You do not need to understand git, commits, or any of the words
 REM  that scroll past below. Just wait for the final message.
+REM
+REM  Aug 29 2026: if something goes wrong, this now PRINTS the real
+REM  error from git right there in the window (it used to hide it,
+REM  which meant Claude was guessing blind at what broke). Just
+REM  screenshot the whole window like before -- the real reason will
+REM  actually be in the screenshot now.
 REM ============================================================
 
 cd /d "%~dp0"
 setlocal enabledelayedexpansion
+
+set LOGFILE=%TEMP%\treekey_update_log.txt
 
 echo.
 echo   Checking for changes to send...
@@ -23,24 +31,34 @@ git commit -m "Website update %date% %time%" >nul 2>&1
 
 echo   Getting the latest version from GitHub first...
 echo.
-git pull >nul 2>&1
+git pull > "%LOGFILE%" 2>&1
 if errorlevel 1 (
     echo   ============================================================
     echo   SOMETHING NEEDS ATTENTION - please do NOT close this window.
     echo   Take a screenshot of this whole window and send it to Claude.
     echo   ============================================================
+    echo.
+    echo   --- What git actually said: ---
+    type "%LOGFILE%"
+    echo   --------------------------------
+    echo.
     pause
     exit /b 1
 )
 
 echo   Sending your changes to the website...
 echo.
-git push >nul 2>&1
+git push > "%LOGFILE%" 2>&1
 if errorlevel 1 (
     echo   ============================================================
     echo   SOMETHING NEEDS ATTENTION - please do NOT close this window.
     echo   Take a screenshot of this whole window and send it to Claude.
     echo   ============================================================
+    echo.
+    echo   --- What git actually said: ---
+    type "%LOGFILE%"
+    echo   --------------------------------
+    echo.
     pause
     exit /b 1
 )

@@ -203,6 +203,71 @@
      leads. If Nick wants this pushed further, the next step is a live doc check
      of both APIs (same as was done for Companies House and CARTO) before
      changing anything — not a guess.
+   - **Scraper foundation hardening pass (Aug 29 2026) — DONE:** Nick asked for an
+     honest 0-100 rating of the scraper as an engineering foundation (separate
+     from whether tree surgery is the right business). Initial rating: 62/100.
+     Real strengths found: correct cross-thread rate limiting for Companies
+     House (a shared lock/timestamp, not a naive per-thread sleep — catches a
+     concurrency bug most multi-threaded scrapers get wrong), proactive
+     `notifications.send_system_incident_alert()` calls on 401/429s, and
+     correct CSRF/session handling for the Idox POST search flow. Real gaps:
+     TLS verification disabled everywhere (`verify=False`), no retry/backoff
+     on transient failures, HTML-scrape structural breakage (a council
+     changing their Idox theme) was silently indistinguishable from a
+     genuine zero-result search, and zero automated tests. Nick asked to fix
+     as much as possible without changing current behaviour, then again to go
+     as far as possible. **Built:**
+     - `net_utils.py` (new, shared by scanners.py/mesh_scrapers.py/research.py/
+       bulk_contractor_extractor.py): `smart_get`/`smart_post` — verify-TLS-
+       first with a one-time unverified fallback (throttled per-domain alert
+       on fallback, so a bad cert is finally visible instead of blanket-
+       disabled forever), exponential-backoff-with-jitter retry on timeouts/
+       connection errors/5xx (default 2 extra attempts), and a 429 is
+       deliberately passed straight through untouched so each call site's
+       existing bespoke rate-limit handling stays in charge. Drop-in: same
+       `requests.Response` return type, same exceptions on final failure, so
+       every call site only needed `requests.get(` → `net_utils.smart_get(`
+       (and drop `verify=False`) with no other logic changes.
+     - `mesh_scrapers.py`: added `IdoxScraper._alert_possible_structure_change()`
+       — when a search returns HTTP 200 but the page is neither a results
+       list, the single-result redirect, nor recognisable as a genuine
+       "no results" page, it now fires a throttled WARNING alert instead of
+       silently returning `[]` indistinguishably from a real empty search.
+       Heuristic-based (checks for common Idox "no results" phrasing), not
+       verified against every council's theme — documented as such in the
+       code, same honesty standard as the rest of this project's caveats.
+     - `test_scrapers.py` (new, stdlib `unittest` + `unittest.mock` only, no
+       new dependency, runs via `python -m unittest test_scrapers.py -v`,
+       currently 16 tests, all passing, ~0.02s, zero real network calls):
+       covers TREE_GOLD true/false-positive filtering, lead scoring tiers,
+       Idox CSRF/results/redirect/structure-change parsing against fixture
+       HTML, the multi-pass dedup in `scrape_mesh_council`, and every branch
+       of `net_utils`'s retry/TLS-fallback/429-passthrough/session-reuse
+       logic. **Writing the false-positive test caught a real bug before it
+       shipped further:** `TREE_GOLD` had a bare `"fell "` entry that matched
+       almost any ordinary sentence using "fell" as a verb ("a branch fell in
+       the storm", "the applicant fell ill", "the company fell behind") —
+       directly contradicting the false-positive protection this list's own
+       comment says it exists for. Removed; `"fell 1"/"fell 2"/"fell 3"`,
+       `"fell to ground"`, and `"felling"` already cover genuine tree-work
+       phrasing, confirmed via the new test suite.
+     - **Deliberately NOT done, and why:** the near-duplicate per-region
+       scanner functions in `scanners.py` (Leeds/London/etc — the same
+       drift risk that caused the original `mesh_scrapers.py` vs
+       `scanners.py` keyword-list gap) should be consolidated into one
+       parameterized scanner, and the Companies House rate limiter is
+       in-process memory only (fine on a single Render instance, would need
+       Redis/DB-backed shared state to stay correct across more than one).
+       Both are real architectural changes, not safe additions — a DRY
+       refactor risks quietly changing one region's behaviour, and adding
+       Redis is a new dependency for a scaling problem that doesn't exist
+       yet at single-instance scale. Held back deliberately for their own
+       dedicated pass with region-by-region verification, not bundled in.
+     - Verification: `python3 -m py_compile` on all 5 touched/new files,
+       plus the full `test_scrapers.py` suite, both run and passing in this
+       session before shipping (not just "should work"). Not yet exercised
+       against a live council portal in production — verified logic-correct,
+       not yet load-tested live (same caveat as the rest of this item).
 10. **PWA / "installable website" (Aug 29 2026):**
     - **PART 1 (DONE):** Added `manifest.json`, Service Worker caching, and iOS/Android meta tags. The app is now installable to the home screen.
     - **PART 2 (NOT STARTED):** Actual Web Push API push notifications. Good candidate for post-launch polish.

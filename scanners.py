@@ -5,6 +5,7 @@ import logging
 from typing import Optional, List, Tuple, Dict, Any
 import database
 import notifications
+import net_utils
 
 logger = logging.getLogger("vector-data-labs")
 
@@ -51,7 +52,15 @@ TREE_GOLD = [
     "tpo", "tree preservation order", "protected tree", "mature tree", "specimen tree",
     "section 211", "s211", "notice of intent",
     # Specific arboricultural operations
-    "felling", "fell ", "fell to ground", "fell 1", "fell 2", "fell 3", "sectional dismantle", "dismantle",
+    # NOTE (Aug 29 2026): a bare "fell " entry used to live here. It matched
+    # any ordinary use of "fell" as a verb -- "a branch fell in the storm",
+    # "the applicant fell ill", "the company fell behind" -- which is exactly
+    # the "fell down' style phrasing" false positive this list's own comment
+    # says it exists to avoid. Caught by the new test suite (test_scrapers.py)
+    # before it shipped further. Removed; "felling", "fell to ground", and
+    # "fell 1/2/3" (the numbered-tree-list phrasing councils actually use in
+    # application descriptions) already cover genuine tree-work mentions.
+    "felling", "fell to ground", "fell 1", "fell 2", "fell 3", "sectional dismantle", "dismantle",
     "stump grinding", "stump removal", "stump",
     "pollard", "pollarding", "re-pollard",
     "crown reduction", "crown lift", "crown thin", "crown raising", "crown clean",
@@ -197,7 +206,7 @@ def scan_leeds_leads() -> int:
         "f": "json"
     }
     try:
-        res = requests.get(url, params=params, timeout=20, verify=False)
+        res = net_utils.smart_get(url, params=params, timeout=20)
         if res.status_code == 200:
             features = res.json().get("features", [])
             for feature in features:
@@ -221,7 +230,7 @@ def scan_leeds_leads() -> int:
             try:
                 import time
                 time.sleep(1.5) # Cron job throttle to prevent 6am ban
-                res = requests.get(
+                res = net_utils.smart_get(
                     "https://ukplanningapi.co.uk/v1/applications",
                     params={"postcode": prefix, "status": "received", "limit": 200},
                     headers=headers,
@@ -273,7 +282,7 @@ def scan_london_leads() -> int:
             headers = {"Authorization": GLA_API_KEY, "Accept": "application/json"}
             import time
             time.sleep(1.0) # London throttle
-            res = requests.get(
+            res = net_utils.smart_get(
                 "https://planningdata.london.gov.uk/api/applications",
                 params={"limit": 100},
                 headers=headers,
@@ -343,7 +352,7 @@ def scan_london_leads() -> int:
             try:
                 import time
                 time.sleep(1.5) # Cron job throttle to prevent 6am ban
-                res = requests.get(
+                res = net_utils.smart_get(
                     "https://ukplanningapi.co.uk/v1/applications",
                     params={"postcode": prefix, "status": "received", "limit": 200},
                     headers=headers,
@@ -456,7 +465,7 @@ def scan_city_planning_api(city_name: str) -> int:
                 if UK_PLANNING_API_KEY:
                     import time
                     time.sleep(1.5) # Cron job throttle to prevent 6am ban
-                    res = requests.get(
+                    res = net_utils.smart_get(
                         "https://ukplanningapi.co.uk/v1/applications",
                         params={"postcode": prefix, "status": "received", "limit": 200},
                         headers=headers,
@@ -471,7 +480,7 @@ def scan_city_planning_api(city_name: str) -> int:
             try:
                 import time
                 time.sleep(1.0) # Polite throttle for PlanIt
-                planit_res = requests.get(
+                planit_res = net_utils.smart_get(
                     "https://www.planit.org.uk/api/applics/json",
                     params={"postcode": prefix, "pg_sz": 50},
                     timeout=12
