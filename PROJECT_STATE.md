@@ -27,11 +27,11 @@
   radar icon was orbiting the center of its own quarter-wedge div instead of the
   circle's true center (`transform-origin` was `50% 50%`, needed `0% 100%` since the
   wedge is positioned top-right of the circle). Fixed in main.py's `.radar-sweep` CSS.
-- [ ] **NEXT ACTION (Aug 28 2026):** Tailwind is loaded from `cdn.tailwindcss.com` —
+- [x] **NEXT ACTION (Aug 28 2026):** Tailwind is loaded from `cdn.tailwindcss.com` —
   the browser itself warns this "should not be used in production." Fine at near-zero
   traffic, but should be swapped for a proper built/compiled Tailwind before the cold
   email sequence sends real traffic to the homepage (affects load speed / first
-  impression). Nick confirmed — do this one first, next session.
+  impression). Nick confirmed — do this one first, next session. **DONE (Aug 29 2026):** Compiled `static/tailwind.css` locally and updated `main.py` templates to use `<link rel="stylesheet">`.
 - [ ] **PRIORITY 1 FOR NEXT SESSION (Nick confirmed Aug 28 2026):** the four items
   below — hero copy, trust badges, pricing/lockout copy, FAQ. Nick agreed these
   matter more than anything else content-wise since they directly affect whether a
@@ -42,7 +42,7 @@
   - [x] **Trade Credibility & Badges — wording fixed (Aug 29 2026):** see "Wording
     precision" note below, folded into the same edit.
   - [ ] **Pricing Table & Lockout Text:** Fine-tune exclusive radial territory lockout copy and credit pack terms. NOT done yet.
-  - [ ] **FAQ Section Review:** Ensure contractor questions regarding lead exclusivity, notice speed, and cancellation are answered clearly. NOT done yet.
+  - [x] **FAQ Section Review — DONE (Aug 29 2026):** Replaced obsolete copy with explicit "Radial Territory Exclusivity" explanation, notice speed, and rolling monthly/credit pack options.
   - [x] **Wording precision — DONE (Aug 29 2026):** the homepage badge "Authorized UK
     Statutory Planning Data" reworded to "Published Under The Open Government
     Licence" — same true claim, no longer readable as government sanctioning
