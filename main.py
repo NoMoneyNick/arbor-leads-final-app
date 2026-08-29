@@ -186,7 +186,7 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
         target_lat, target_lng = float(lat), float(lng)
         try:
             req = urllib.request.Request(
-                f"https://api.postcodes.io/postcodes?lat={target_lat}&lon={target_lng}",
+                f"https://api.postcodes.io/postcodes?lat={target_lat}&lon={target_lng}&radius=2000",
                 headers={'User-Agent': 'TreeKey/1.0'}
             )
             with urllib.request.urlopen(req, timeout=2.0) as resp:
@@ -884,8 +884,9 @@ def public_homepage():
         let map = L.map('map', {{ zoomControl: false }}).setView([54.5, -4.0], 6);
         L.control.zoom({{ position: 'bottomright' }}).addTo(map);
         
-        L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-            attribution: '&copy; OpenStreetMap &copy; CARTO'
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
+            attribution: '&copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
+            maxZoom: 16
         }}).addTo(map);
         
         // Pin defaults to Birmingham (center of England)
