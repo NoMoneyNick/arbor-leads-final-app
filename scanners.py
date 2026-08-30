@@ -163,10 +163,26 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
 
 # ── Leeds Scanner (ArcGIS + Yorkshire Regional Councils) ──────────────────────
 
+_MESH_SCAN_NAME = "mesh_idox"
+
+
 def run_mesh_network_scan() -> int:
     """
     Executes a direct scan of all councils mapped in the Aggregator Mesh (Idox portals, etc.)
     Bypasses the third-party paid API entirely to save quota.
+
+    Checkpointed (Aug 30 2026): a Render deploy landing mid-scan kills this
+    function's background thread outright with no warning -- daemon threads
+    don't get a chance to finish or even log anything when the process they
+    live in is torn down. Before this fix, that silently truncated the
+    COUNCIL_REGISTRY list wherever it happened to be, and the next run always
+    restarted from the very top -- so councils late in the dict lost every
+    race against a deploy landing in roughly the same scan window, run after
+    run, while early ones were always covered. database.get/set_scan_progress
+    remembers the last council fully finished (leads fetched, inserted, AND
+    committed) and resumes right after it next time; a clean, uninterrupted
+    run resets the checkpoint to None so the following run starts at the top
+    again, same as before this fix for the common case.
     """
     try:
         import mesh_scrapers
@@ -174,16 +190,34 @@ def run_mesh_network_scan() -> int:
         logger.error("[MESH] mesh_scrapers.py not found.")
         return 0
 
+    council_items = list(mesh_scrapers.COUNCIL_REGISTRY.items())
+    resume_after = database.get_scan_progress(_MESH_SCAN_NAME)
+    if resume_after:
+        keys = [name for name, _ in council_items]
+        if resume_after in keys:
+            split_at = keys.index(resume_after) + 1
+            council_items = council_items[split_at:] + council_items[:split_at]
+            logger.info(
+                f"[MESH] Resuming interrupted scan after {resume_after!r} "
+                f"({len(council_items)} councils left this cycle)."
+            )
+        else:
+            # Checkpointed council no longer exists in the registry (e.g. it
+            # was removed as a confirmed-dead entry) -- nothing sensible to
+            # resume after, so just start the cycle fresh from the top.
+            logger.info(f"[MESH] Stale checkpoint {resume_after!r} not in registry; starting from the top.")
+
     new_leads = []
+    completed_fully = True
     conn = database.get_db_conn()
     cur = conn.cursor()
     try:
-        for council_name, url in mesh_scrapers.COUNCIL_REGISTRY.items():
+        for council_name, url in council_items:
             logger.info(f"[MESH] Scraping {council_name} directly from {url}...")
             # We add an artificial delay to respect council rate limits
             import time
             time.sleep(2)
-            
+
             leads = mesh_scrapers.scrape_mesh_council(council_name)
             for lead in leads:
                 ref = lead.get("reference")
@@ -202,15 +236,28 @@ def run_mesh_network_scan() -> int:
                 if inserted:
                     new_leads.append(inserted)
             conn.commit()
+            # Only checkpointed once this council's leads are safely
+            # committed -- if the process dies mid-council (mid-request, or
+            # mid-insert-loop above), the checkpoint stays at the PREVIOUS
+            # council, so this one gets retried next run rather than being
+            # treated as done when it wasn't.
+            database.set_scan_progress(_MESH_SCAN_NAME, council_name)
     except Exception as e:
         logger.error(f"[MESH] Fatal error during mesh scan: {e}")
+        completed_fully = False
     finally:
         cur.close()
         conn.close()
 
+    if completed_fully:
+        # Full cycle finished without interruption -- clear the checkpoint so
+        # the next run starts from the top of COUNCIL_REGISTRY again instead
+        # of resuming from the last (now stale) entry forever.
+        database.set_scan_progress(_MESH_SCAN_NAME, None)
+
     if new_leads:
         notifications.dispatch_lead_alerts("MESH-NATIONWIDE", new_leads)
-        
+
     logger.info(f"[MESH] Mesh Scan complete. {len(new_leads)} free leads extracted directly from councils.")
     return len(new_leads)
 

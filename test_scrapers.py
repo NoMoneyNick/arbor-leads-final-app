@@ -44,6 +44,8 @@ if "database" not in sys.modules:
     _fake_database = types.ModuleType("database")
     _fake_database.get_db_conn = MagicMock()
     _fake_database.increment_api_usage = MagicMock(return_value={"warning_needed": False})
+    _fake_database.get_scan_progress = MagicMock(return_value=None)
+    _fake_database.set_scan_progress = MagicMock()
     sys.modules["database"] = _fake_database
 
 if "notifications" not in sys.modules:

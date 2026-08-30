@@ -204,6 +204,25 @@ def init_db():
                 dispatched BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
+
+            -- Aug 30 2026: a Render deploy landing mid-scan kills the mesh
+            -- scan's background thread outright -- daemon threads don't
+            -- survive a process restart, so whatever hadn't been reached yet
+            -- in COUNCIL_REGISTRY was silently never scraped that run, with
+            -- no error and no record it even happened. This table lets
+            -- run_mesh_network_scan() (scanners.py) remember which council it
+            -- last finished, so an interrupted run resumes from there next
+            -- time instead of restarting the whole 50+ council list from the
+            -- top -- otherwise a council near the end of the dict would keep
+            -- losing the race against every deploy that happens to land
+            -- around the same point in the scan. One row per named scan (only
+            -- "mesh_idox" today) so other scan loops can use this later
+            -- without colliding.
+            CREATE TABLE IF NOT EXISTS scan_progress (
+                scan_name TEXT PRIMARY KEY,
+                last_council_key TEXT,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
         """)
 
         # Performance Indices for Instant High-Volume Queries
@@ -273,7 +292,8 @@ def init_db():
             "ALTER TABLE machinery_assets ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE contractor_auth_tokens ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE chip_drop_spots ENABLE ROW LEVEL SECURITY;",
-            "ALTER TABLE storm_weather_alerts ENABLE ROW LEVEL SECURITY;"
+            "ALTER TABLE storm_weather_alerts ENABLE ROW LEVEL SECURITY;",
+            "ALTER TABLE scan_progress ENABLE ROW LEVEL SECURITY;"
         ]
         for stmt in rls_statements:
             cur.execute(stmt)
@@ -325,6 +345,56 @@ def init_db():
 
         logger.error(f"[DB] Initialization error: {e}")
 
+
+
+def get_scan_progress(scan_name: str) -> Optional[str]:
+    """Returns the council_key this scan last FULLY finished (leads fetched,
+    inserted, and committed), or None if there's no in-progress cycle to
+    resume -- either this scan has never run, or its last run completed the
+    whole list cleanly (see set_scan_progress). Callers should treat the
+    returned key as "resume with whatever comes after this one", not "redo
+    this one" -- it's only ever written once a council is truly done.
+    """
+    if not SURL:
+        return None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT last_council_key FROM scan_progress WHERE scan_name = %s", (scan_name,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return row[0] if row else None
+    except Exception as e:
+        logger.error(f"[DB] Could not read scan progress for {scan_name!r}: {e}")
+        return None
+
+
+def set_scan_progress(scan_name: str, last_council_key: Optional[str]) -> None:
+    """Records the last council this scan fully finished this cycle. Pass
+    None when a full cycle just completed without interruption, so the next
+    run starts from the top again instead of resuming from the last entry
+    forever."""
+    if not SURL:
+        return
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO scan_progress (scan_name, last_council_key, updated_at)
+            VALUES (%s, %s, NOW())
+            ON CONFLICT (scan_name) DO UPDATE SET
+                last_council_key = EXCLUDED.last_council_key,
+                updated_at = EXCLUDED.updated_at
+            """,
+            (scan_name, last_council_key),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"[DB] Could not update scan progress for {scan_name!r}: {e}")
 
 
 def reset_monthly_quotas_if_needed() -> int:

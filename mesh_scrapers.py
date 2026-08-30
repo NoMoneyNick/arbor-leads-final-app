@@ -86,21 +86,47 @@ COUNCIL_REGISTRY = {
     "BROMLEY": "https://searchapplications.bromley.gov.uk/online-applications",
     "CROYDON": "https://publicaccess3.croydon.gov.uk/online-applications",
     "SOUTHWARK": "https://planning.southwark.gov.uk/online-applications",
-    "ISLINGTON": "https://planning.islington.gov.uk/online-applications",
     "LAMBETH": "https://planning.lambeth.gov.uk/online-applications",
     "BARNET": "https://publicaccess.barnet.gov.uk/online-applications",
     "BRENT": "https://pa.brent.gov.uk/online-applications",
     "EALING": "https://pam.ealing.gov.uk/online-applications",
-    "HOUNSLOW": "https://planning.hounslow.gov.uk/online-applications",
     "KINGSTON": "https://publicaccess.kingston.gov.uk/online-applications",
-    "MERTON": "https://planning.merton.gov.uk/online-applications",
     "GREENWICH": "https://planning.royalgreenwich.gov.uk/online-applications",
-    "HARINGEY": "https://planning.haringey.gov.uk/online-applications",
-    "REDBRIDGE": "https://planning.redbridge.gov.uk/online-applications",
     "BEXLEY": "https://pa.bexley.gov.uk/online-applications",
-    "HAVERING": "https://development.havering.gov.uk/online-applications",
-    "SUTTON": "https://planning.sutton.gov.uk/online-applications",
     "RICHMOND": "https://www2.richmond.gov.uk/lbrplanning/Planning_Search.aspx",
+
+    # Removed Aug 30 2026 -- confirmed dead against this exact "/online-applications"
+    # Idox path, not a transient network blip. Live scan logs from today showed each
+    # of these failing every single run (either DNS not resolving at all, or a flat
+    # 404), and a web check today confirms these councils have migrated off this
+    # Idox URL to a *different* portal platform entirely -- scrape_mesh_council()
+    # would need a brand-new scraper for each (different HTML/API, not just a new
+    # hostname), which IdoxScraper cannot handle. Leaving these registered was pure
+    # waste: every scan burned 3 retries + a long timeout on each, on every run,
+    # for zero leads, ever. Re-add only once a scraper matching the NEW platform
+    # exists for each:
+    #   "HOUNSLOW": DNS failed in logs; hounslow.gov.uk's own site now points
+    #       planning search at https://planning.hounslow.gov.uk/ (root, no
+    #       /online-applications path) -- may still be Idox under a different path,
+    #       worth a manual check before writing off entirely.
+    #   "MERTON": DNS failed in logs; council's current search lives at
+    #       merton.gov.uk/planning-and-buildings/planning/find, not this subdomain.
+    #   "SUTTON": DNS failed in logs; London Borough of Sutton's current portal
+    #       needs re-identifying (search results only surfaced an unrelated
+    #       Cambridgeshire parish council of the same name).
+    #   "HARINGEY": DNS failed in logs; Haringey has moved through more than one
+    #       replacement system (a legacy servlet-based search, and a newer
+    #       Salesforce-style "Public Register" at publicregister.haringey.gov.uk) --
+    #       neither is Idox, so this needs a dedicated scraper, not a URL swap.
+    #   "REDBRIDGE": 404 in logs; Redbridge now runs a "Citizen Portal" planning
+    #       system, a different platform from Idox's online-applications.
+    #   "HAVERING": 404 in logs; Havering's current search lives at
+    #       msp.havering.gov.uk/planning/search-applications, a different platform.
+    #   "ISLINGTON": DNS failed in logs (added to this list after a second scan run
+    #       caught it -- the first pass through this log only sampled part of a run
+    #       and missed it). islington.gov.uk's own site now points planning search
+    #       at islington.gov.uk/planningsearch, off the old Idox subdomain entirely.
+
     "WANDSWORTH": "https://planning1.wandsworth.gov.uk/Northgate/PlanningExplorer/GeneralSearch.aspx",
     "HAMMERSMITH & FULHAM": "https://public-access.lbhf.gov.uk/online-applications",
     "KENSINGTON & CHELSEA": "https://www.rbkc.gov.uk/planning/searches/default.aspx",
