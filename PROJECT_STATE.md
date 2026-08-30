@@ -271,6 +271,61 @@
 10. **PWA / "installable website" (Aug 29 2026):**
     - **PART 1 (DONE):** Added `manifest.json`, Service Worker caching, and iOS/Android meta tags. The app is now installable to the home screen.
     - **PART 2 (NOT STARTED):** Actual Web Push API push notifications. Good candidate for post-launch polish.
+11. **Pre-launch data-integrity audit (Aug 30 2026) — Agent/Applicant capture DONE, two items still OPEN:**
+    Nick, anxious ahead of sending outreach emails, asked me to verify (not assume) whether
+    the leads are real and whether "is this lead already taken by a contractor" is knowable.
+    Live-checked Cornwall Council's actual Idox portal (not a guess): 101 real TPO
+    applications filed in a 3-month window, and 6 individually opened — 3 had no Agent
+    listed (genuinely open), 3 already named a tree-surgery company as Agent (already
+    taken). Roughly 50/50 on that small real sample — nowhere near the fabricated
+    "75% already gone" figure another AI tool gave Nick with no real data behind it
+    (it admitted its own scrape attempts failed, then invented percentages anyway).
+    Found three concrete issues while tracing this:
+    - **DONE — Agent/Applicant capture added to `mesh_scrapers.py`:** the scraper
+      previously only read the search-results listing, which Idox never puts
+      Applicant/Agent info in. Added `IdoxScraper._fetch_applicant_and_agent()`,
+      which opens each application's own `activeTab=details` page (confirmed live
+      against Cornwall's real markup) and reads Applicant Name, Agent Name, and
+      Agent Company Name. New `leads` columns via `ALTER TABLE ... ADD COLUMN IF
+      NOT EXISTS` in `database.py`: `applicant_name`, `agent_name`,
+      `agent_company`, `has_agent` (nullable boolean — NULL means "not checked
+      yet", never treat it as "no agent"). `_insert_lead()` in `scanners.py`
+      updated to accept and store these; only the mesh/Idox path currently
+      populates them (~45 councils in `COUNCIL_REGISTRY`) — the Leeds/London/
+      other bespoke scan functions in `scanners.py` don't go through
+      `IdoxScraper` and still pass NULL for these fields, same as before.
+      4 new tests added to `test_scrapers.py` (fixture HTML matches Cornwall's
+      real page structure exactly) — full suite now 20/20 passing. Adds one
+      extra HTTP request per real lead found (not per search), with a small
+      delay between them; not yet load-tested against a live council at full
+      scan volume — same caveat as the rest of this project's scraper work.
+      **What this can never do:** councils do not publish a homeowner's phone
+      number or email, ever — this was confirmed by checking what the existing
+      `homeowner_contact` field actually contains across all 1,085 current
+      leads: only 2 rows have anything in it, and both are placeholder/test
+      data (an Ofcom-reserved fictional phone range, `@example.com` addresses).
+      So Applicant Name + property address is the real ceiling of "contact
+      info" this data source can ever provide — not a bug, a hard privacy-law
+      limit. Product/marketing copy should describe leads as name+address
+      leads (door/letter outreach), not phone-ready leads.
+    - **OPEN — fabricated numbers shown to a prospect before they pay:**
+      `/api/check-postcode` in `main.py` (the "Scan My Postcode Now" flow —
+      the homepage's main conversion CTA) invents the lead count, a £ contract-
+      value estimate, and a "competitors detected" warning using a sine/cosine
+      "spatial variance" formula whenever there's no real match, and inflates
+      the real count with the same formula even when one exists. The JS even
+      labels its own loading animation "Subconscious Trigger: Fake calculating
+      sequence to build tension/perceived value." Separately, `display_leads`
+      on the homepage silently pads the real lead count by +1,427 whenever the
+      real count drops under 1,000. Neither has been touched yet — Nick asked
+      to fix the Agent/Applicant question first since it went to whether the
+      business works at all; this is next.
+    - **OPEN — `council_source` region-label mismatches:** leads tagged
+      "Manchester" in the real `leads` export are mostly Kent/Medway addresses;
+      every lead tagged "Sheffield" (29 of 29 checked) is actually London/Home-
+      Counties, none near Sheffield. Doesn't break the real postcode-search
+      feature (that matches on the actual address, not this label) but is
+      wrong in any dashboard/report that trusts it. Not yet fixed.
     a native iOS/Android app (Apple Developer $99/yr + Google $25 one-time, app
     store review process outside our control, likely weeks of work, ongoing OS
     maintenance) against a PWA: add a web manifest + service worker to the

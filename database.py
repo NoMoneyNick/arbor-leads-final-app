@@ -245,6 +245,16 @@ def init_db():
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS statutory_deadline DATE;",
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS planning_status TEXT DEFAULT 'pending';",
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lifecycle_stage TEXT DEFAULT 'stage_1_application';",
+            # Aug 30 2026: added so we can tell a genuinely open lead (no agent
+            # listed on the planning application) from one where a contractor
+            # has already been hired to file it (Agent Name/Agent Company Name
+            # present). applicant_name is the real named person/business who
+            # filed it -- publicly published on the council's own application
+            # page, unlike a phone number or email which councils never publish.
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS applicant_name TEXT;",
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS agent_name TEXT;",
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS agent_company TEXT;",
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS has_agent BOOLEAN;",
         ]
         for stmt in resilience_cols:
             cur.execute(stmt)

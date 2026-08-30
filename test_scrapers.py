@@ -228,6 +228,103 @@ class TestIdoxResultsParsing(unittest.TestCase):
         self.assertEqual(leads[0]["reference"], "23/04321/TPO")
 
 
+class TestApplicantAgentExtraction(unittest.TestCase):
+    """_fetch_applicant_and_agent (added Aug 30 2026) reads each application's
+    own 'Details' tab to tell a genuinely open lead (no Agent listed) apart
+    from one where a contractor has already been hired to file it. Fixture
+    HTML below matches the real markup confirmed live against Cornwall
+    Council's Idox portal on Aug 30 2026 (th/td rows, exact label text)."""
+
+    DETAILS_WITH_AGENT = """
+    <html><body><table>
+    <tr class="row0"><th scope="row">Applicant Name</th><td>Mr Colin Hamilton</td></tr>
+    <tr class="row1"><th scope="row">Agent Name</th><td>Mr Richard Ede</td></tr>
+    <tr class="row0"><th scope="row">Agent Company Name</th><td>Rich Ede TreeSurgeon</td></tr>
+    <tr class="row1"><th scope="row">Agent Address</th><td>Rosemelling Cottage, Bodmin</td></tr>
+    </table></body></html>
+    """
+
+    DETAILS_NO_AGENT = """
+    <html><body><table>
+    <tr class="row0"><th scope="row">Applicant Name</th><td>Mr Matthew Cotton</td></tr>
+    <tr class="row1"><th scope="row">Applicant Address</th><td>The Old Coach House, Bodmin</td></tr>
+    <tr class="row0"><th scope="row">Environmental Assessment Requested</th><td>No</td></tr>
+    </table></body></html>
+    """
+
+    def _fake_response(self, status_code=200, text=""):
+        r = MagicMock()
+        r.status_code = status_code
+        r.text = text
+        return r
+
+    def test_agent_present_is_detected(self):
+        scraper = mesh_scrapers.IdoxScraper("https://example-council.gov.uk/online-applications")
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=self.DETAILS_WITH_AGENT)):
+            result = scraper._fetch_applicant_and_agent("ABC123")
+        self.assertEqual(result["applicant_name"], "Mr Colin Hamilton")
+        self.assertEqual(result["agent_name"], "Mr Richard Ede")
+        self.assertEqual(result["agent_company"], "Rich Ede TreeSurgeon")
+        self.assertTrue(result["has_agent"])
+
+    def test_no_agent_is_open_lead(self):
+        scraper = mesh_scrapers.IdoxScraper("https://example-council.gov.uk/online-applications")
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=self.DETAILS_NO_AGENT)):
+            result = scraper._fetch_applicant_and_agent("XYZ789")
+        self.assertEqual(result["applicant_name"], "Mr Matthew Cotton")
+        self.assertNotIn("agent_name", result)
+        self.assertNotIn("agent_company", result)
+        self.assertFalse(result["has_agent"])
+
+    def test_fetch_failure_returns_empty_not_a_crash(self):
+        """A timeout or non-200 must not blow up the whole lead -- caller
+        treats a missing key as 'unknown', never as 'no agent'."""
+        scraper = mesh_scrapers.IdoxScraper("https://example-council.gov.uk/online-applications")
+        with patch("net_utils.smart_get", return_value=self._fake_response(status_code=500)):
+            result = scraper._fetch_applicant_and_agent("BROKEN")
+        self.assertEqual(result, {})
+
+        with patch("net_utils.smart_get", side_effect=_requests.exceptions.Timeout()):
+            result = scraper._fetch_applicant_and_agent("TIMEOUT")
+        self.assertEqual(result, {})
+
+    def test_search_results_listing_attaches_agent_info_per_lead(self):
+        """End-to-end: a multi-result listing page, where each lead's own
+        detail page is then fetched for Applicant/Agent."""
+        listing_html = """
+        <html><body>
+        <ul id="searchresults">
+            <li class="searchresult">
+                <a href="/online-applications/applicationDetails.do?keyVal=OPEN001&activeTab=summary">23/01234/TPO | Crown reduction of mature oak tree</a>
+                <p class="address">12 Oak Lane, Birmingham, B1 1AA</p>
+            </li>
+            <li class="searchresult">
+                <a href="/online-applications/applicationDetails.do?keyVal=TAKEN002&activeTab=summary">23/09999/TPO | Felling of 2no. diseased ash trees</a>
+                <p class="address">7 The Green, Birmingham, B3 3CC</p>
+            </li>
+        </ul>
+        </body></html>
+        """
+
+        def fake_get(url, session=None, **kwargs):
+            if "keyVal=OPEN001" in url:
+                return self._fake_response(text=self.DETAILS_NO_AGENT)
+            if "keyVal=TAKEN002" in url:
+                return self._fake_response(text=self.DETAILS_WITH_AGENT)
+            return self._fake_response(text="<html></html>")  # initial CSRF-token GET
+
+        scraper = mesh_scrapers.IdoxScraper("https://example-council.gov.uk/online-applications")
+        with patch("net_utils.smart_get", side_effect=fake_get), \
+             patch("net_utils.smart_post", return_value=self._fake_response(text=listing_html)), \
+             patch("time.sleep", return_value=None):
+            leads = scraper.search_tree_applications(search_term="tree")
+
+        by_ref = {l["reference"]: l for l in leads}
+        self.assertFalse(by_ref["23/01234/TPO"]["has_agent"])
+        self.assertTrue(by_ref["23/09999/TPO"]["has_agent"])
+        self.assertEqual(by_ref["23/09999/TPO"]["agent_company"], "Rich Ede TreeSurgeon")
+
+
 class TestMeshCouncilDedup(unittest.TestCase):
     def test_dedupes_leads_seen_across_multiple_search_terms(self):
         """scrape_mesh_council runs one search per term in IDOX_SEARCH_TERMS

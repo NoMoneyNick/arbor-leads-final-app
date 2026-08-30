@@ -180,6 +180,50 @@ class IdoxScraper:
             return csrf_input['value']
         return ""
 
+    def _fetch_applicant_and_agent(self, key_val: str) -> Dict:
+        """
+        Aug 30 2026: opens one application's own "Details" tab (the summary/
+        results-list view does NOT include Applicant/Agent -- confirmed live
+        against Cornwall Council's portal, which is the same Idox theme every
+        council in COUNCIL_REGISTRY runs) and reads:
+          - Applicant Name / Applicant Company Name: the real person or business
+            who filed it. Councils never publish a phone number or email --
+            this name is the most identifying thing publicly available.
+          - Agent Name / Agent Company Name: present only when someone (usually
+            a tree surgeon) has already been hired to file the application on
+            the applicant's behalf. Its presence is what tells us a lead is
+            already taken rather than genuinely open.
+        Returns {} on any failure -- callers must treat a missing key as
+        "unknown", never silently as "no agent".
+        """
+        out = {}
+        try:
+            detail_url = f"{self.base_url}/applicationDetails.do?keyVal={key_val}&activeTab=details"
+            res = net_utils.smart_get(detail_url, session=self.session, timeout=15)
+            if res.status_code != 200:
+                return out
+            soup = BeautifulSoup(res.text, 'html.parser')
+            for th in soup.find_all('th'):
+                label = th.get_text(strip=True)
+                td = th.find_next_sibling('td')
+                if not td:
+                    continue
+                value = td.get_text(strip=True)
+                if not value:
+                    continue
+                if label == "Applicant Name":
+                    out["applicant_name"] = value
+                elif label == "Agent Name":
+                    out["agent_name"] = value
+                elif label == "Agent Company Name":
+                    out["agent_company"] = value
+            out["has_agent"] = bool(out.get("agent_name") or out.get("agent_company"))
+        except requests.exceptions.Timeout:
+            logger.debug(f"[MESH] Timeout fetching applicant/agent detail for keyVal={key_val} on {self.base_url}")
+        except Exception as e:
+            logger.debug(f"[MESH] Could not fetch applicant/agent detail for keyVal={key_val} on {self.base_url}: {e}")
+        return out
+
     def search_tree_applications(self, days_back: int = 30, search_term: str = "tree") -> List[Dict]:
         if not BeautifulSoup:
             logger.error("[MESH] BeautifulSoup not installed. Cannot run Idox Scraper.")
@@ -230,7 +274,11 @@ class IdoxScraper:
                         addr = addr_tag.find_next_sibling('td').text.strip() if addr_tag else "Unknown Address"
                         desc = desc_tag.find_next_sibling('td').text.strip()
                         if is_tree_related(desc):
-                            leads.append({"reference": ref, "address": addr, "description": desc})
+                            lead = {"reference": ref, "address": addr, "description": desc}
+                            key_match = re.search(r'keyVal=([^&]+)', res_post.url)
+                            if key_match:
+                                lead.update(self._fetch_applicant_and_agent(key_match.group(1)))
+                            leads.append(lead)
                     return leads
 
                 # Not the single-result redirect either. Before this fix, this
@@ -276,13 +324,23 @@ class IdoxScraper:
                 
                 address_p = li.find('p', class_='address')
                 addr = address_p.text.strip() if address_p else "Unknown Address"
-                
+
                 if is_tree_related(desc):
-                    leads.append({
+                    lead = {
                         "reference": ref,
                         "address": addr,
                         "description": desc
-                    })
+                    }
+                    # One extra request per real lead to read its Applicant/Agent
+                    # fields (see _fetch_applicant_and_agent) -- small delay to
+                    # stay gentle on the council's server since this multiplies
+                    # request volume for busy councils with many results.
+                    href = a_tag.get('href', '')
+                    key_match = re.search(r'keyVal=([^&]+)', href)
+                    if key_match:
+                        time.sleep(0.4)
+                        lead.update(self._fetch_applicant_and_agent(key_match.group(1)))
+                    leads.append(lead)
 
             logger.info(f"[MESH] Successfully scraped {len(leads)} tree leads from {self.base_url} (term='{search_term}')")
             return leads

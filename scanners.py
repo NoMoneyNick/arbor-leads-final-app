@@ -95,21 +95,30 @@ def _is_tree_related(text: str) -> bool:
     return any(word in text.lower() for word in TREE_GOLD)
 
 
-def _insert_lead(cur, reference: str, address: str, summary: str, source: str) -> Optional[dict]:
+def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
+                  applicant_name: Optional[str] = None, agent_name: Optional[str] = None,
+                  agent_company: Optional[str] = None, has_agent: Optional[bool] = None) -> Optional[dict]:
     """
     Inserts a lead into the DB. Returns the lead dict if new, None if duplicate or low-quality junk.
     Enforces a strict quality gate: blocks empty, generic placeholders like 'tree-preservation-order'.
+
+    applicant_name / agent_name / agent_company / has_agent (Aug 30 2026): whether this
+    application already names a contractor as its Agent. Only the mesh (Idox) scanner
+    currently populates these -- it visits each application's own page, not just the
+    search-results list, to read them. Other scan paths pass None/leave has_agent NULL,
+    which the UI/exports must treat as "unknown", not "no agent" -- those are different
+    things and conflating them would misrepresent leads we simply haven't checked yet.
     """
     if not summary or not reference:
         return None
-        
+
     s_clean = summary.strip().lower()
     # Reject generic placeholders that lack actionable details for contractors
     if s_clean in ["tree-preservation-order", "tpo", "work to trees", "works to trees", "tree work", "tree works", "trees"]:
         return None
     if len(s_clean) < 12:
         return None
-        
+
     addr_clean = address.strip() if address else ""
     if not addr_clean or addr_clean.lower() in ["greater london", "london", "uk", "england"]:
         # If address is completely generic, require higher description detail to avoid useless leads
@@ -119,16 +128,20 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str) -
     lead_score, lead_price = score_lead(summary)
     cur.execute(
         """
-        INSERT INTO leads (reference, address, summary, council_source, lead_score, lead_price)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO leads (reference, address, summary, council_source, lead_score, lead_price,
+                            applicant_name, agent_name, agent_company, has_agent)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (reference) DO NOTHING
         RETURNING id;
         """,
-        (reference, address, summary[:350], source, lead_score, lead_price)
+        (reference, address, summary[:350], source, lead_score, lead_price,
+         applicant_name, agent_name, agent_company, has_agent)
     )
     if cur.fetchone():
         return {"ref": reference, "addr": address, "summary": summary,
-                "lead_score": lead_score, "lead_price": lead_price}
+                "lead_score": lead_score, "lead_price": lead_price,
+                "applicant_name": applicant_name, "agent_name": agent_name,
+                "agent_company": agent_company, "has_agent": has_agent}
     return None
 
 
@@ -162,8 +175,14 @@ def run_mesh_network_scan() -> int:
                 desc = lead.get("description")
                 if not ref or not desc:
                     continue
-                
-                inserted = _insert_lead(cur, ref, addr, desc, council_name.title())
+
+                inserted = _insert_lead(
+                    cur, ref, addr, desc, council_name.title(),
+                    applicant_name=lead.get("applicant_name"),
+                    agent_name=lead.get("agent_name"),
+                    agent_company=lead.get("agent_company"),
+                    has_agent=lead.get("has_agent"),
+                )
                 if inserted:
                     new_leads.append(inserted)
             conn.commit()
