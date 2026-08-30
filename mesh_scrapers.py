@@ -303,7 +303,30 @@ class IdoxScraper:
                         "did not return any results", "no records"
                     )
                 )
-                if not looks_like_genuine_no_results:
+                # Aug 30 2026: Idox also returns a valid, non-error page when a
+                # search is too broad -- "too many results, please narrow your
+                # search" -- distinct from both "genuine zero results" and a
+                # real structural break. Recurring false "SCRAPER PAGE
+                # STRUCTURE" alerts on Cornwall/Nottingham/Glasgow/Bristol/
+                # Guildford/Dartford/Maidstone/Tunbridge Wells/Winchester were
+                # traced to this response not being recognized. It's logged
+                # distinctly (not silently folded into "no results") because
+                # unlike a genuine zero, it means real matching applications
+                # likely exist but weren't returned -- a future improvement
+                # (narrower date range or search term) could recover them.
+                looks_like_too_many_results = any(
+                    phrase in page_text for phrase in (
+                        "too many results", "narrow your search", "refine your search",
+                        "please refine", "more specific search"
+                    )
+                )
+                if looks_like_too_many_results:
+                    logger.info(
+                        f"[{self.base_url}] Idox search for '{search_term}' matched too many "
+                        f"results and was not returned -- consider a narrower search term or "
+                        f"date range for this council."
+                    )
+                elif not looks_like_genuine_no_results:
                     self._alert_possible_structure_change(search_term)
                 return leads
 

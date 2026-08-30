@@ -9,6 +9,7 @@ import base64
 import html
 import datetime
 import time
+import threading
 import database
 import scanners
 import research
@@ -32,6 +33,21 @@ if os.path.exists("static"):
 
 T_SEC      = os.getenv("TRIGGER_SECRET", "").strip()
 basic_auth = HTTPBasic()
+
+# Aug 30 2026: /trigger-daily-pipeline fires run_master_daily_pipeline() on a
+# background thread with NO guard against a second call while one is still
+# running -- confirmed live in production logs: Nick fired a manual trigger
+# while the previous run was still in Stage 3 (Companies House contractor
+# discovery), and both ran concurrently, competing for the same DB
+# connections/CPU on one instance (a likely contributor to the repeated
+# council timeouts/503s seen in that window). This is separate from the
+# 6am cron, which is presumably scheduled externally (a Render Cron Job or
+# similar) hitting this same endpoint -- so the same overlap can happen
+# between a manual trigger and the daily cron, not just two manual
+# triggers. _PIPELINE_LOCK (below) makes a second trigger a clean no-op
+# that reports "already running" instead of silently double-running.
+_PIPELINE_LOCK = threading.Lock()
+_pipeline_state = {"running": False, "started_at": None}
 
 optional_auth = HTTPBasic(auto_error=False)
 
@@ -57,9 +73,9 @@ def scan_nationwide_fast(secret: Optional[str] = Query(None)):
     Crawls all UK regions in parallel to capture thousands of planning and domestic leads.
     """
     verify_cron_secret(secret)
-    import threading
-    threading.Thread(target=scanners.scan_nationwide_bulk_crawler, daemon=True).start()
-    return {"status": "nationwide_crawl_dispatched_in_background", "coverage": "124 UK Outward Postcodes & 300+ Councils"}
+    result = _dispatch_locked_scan(scanners.scan_nationwide_bulk_crawler, "nationwide_bulk_crawl")
+    result["coverage"] = "124 UK Outward Postcodes & 300+ Councils"
+    return result
 
 
 UK_CITY_COORDS = {
@@ -297,48 +313,47 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
 
 
     # Query local database for lead matches (Strict bounding to prevent 'LL' double-letter wildcard explosion)
+    # Aug 30 2026: this endpoint used to report a REAL count from this query
+    # and then throw it away, replacing it with a sine/cosine "spatial
+    # variance" formula seeded from raw lat/lng (a JS comment on the
+    # frontend literally called the loading-spinner delay a "Subconscious
+    # Trigger: Fake calculating sequence to build tension/perceived value").
+    # A visitor with zero real leads in their area was shown a fabricated
+    # 12-40 "active leads" figure. Fixed: every number below is now derived
+    # from the actual leads table -- if there's nothing there, we say so.
     prefix_alpha = "".join([c for c in display_pc if c.isalpha()])[:3]
+    area_alpha = prefix_alpha[:2] if len(prefix_alpha) >= 2 else prefix_alpha
     conn = database.get_db_conn()
     cur = conn.cursor()
     if len(prefix_alpha) > 1:
-        # Match postcode prefix exactly with a space or at the end for unallocated leads
-        cur.execute("SELECT count(*) FROM leads WHERE (status = 'new' OR status IS NULL) AND (address ~* %s OR council_source ILIKE %s)", 
+        # Exact catchment: this specific outcode/district.
+        cur.execute("SELECT count(*) FROM leads WHERE (status = 'new' OR status IS NULL) AND (address ~* %s OR council_source ILIKE %s)",
         (f"\\y{prefix_alpha}[0-9]", f"%{district[:6]}%"))
+        direct_leads = cur.fetchone()[0]
+
+        # Wider catchment: the broader postcode area (e.g. "B" for "B1"),
+        # so we can honestly report "+N more in the surrounding area"
+        # without pretending it's a made-up multiple of the exact count.
+        cur.execute("SELECT count(*) FROM leads WHERE (status = 'new' OR status IS NULL) AND address ~* %s",
+        (f"\\y{area_alpha}[0-9]",))
+        area_leads = cur.fetchone()[0]
     else:
         cur.execute("SELECT count(*) FROM leads WHERE (status = 'new' OR status IS NULL) AND council_source ILIKE %s", (f"%{district[:6]}%",))
-    direct_leads = cur.fetchone()[0]
+        direct_leads = cur.fetchone()[0]
+        area_leads = direct_leads
     cur.close()
     conn.close()
 
-
-    # Continuous spatial micro-density distribution calculation
-    area_factor = (radius / 15.0) ** 1.35
-
-    # Spatial micro-harmonic variance based on precise coordinates
-    lat_harmonic = math.sin(target_lat * 28.5) * 0.28
-    lng_harmonic = math.cos(target_lng * 32.1) * 0.22
-    fine_harmonic = math.sin((target_lat + target_lng) * 45.0) * 0.15
-    spatial_variance = 1.0 + lat_harmonic + lng_harmonic + fine_harmonic
-
     if "Unregistered" in district:
-        base_count = 0
         selected_leads = 0
         connected_leads = 0
     else:
-        if direct_leads > 0:
-            base_count = direct_leads
-        else:
-            # Dynamic coordinate seed
-            base_count = int(abs(target_lat * 19.3 + target_lng * 23.7) * 7) % 28 + 12
+        selected_leads = direct_leads
+        connected_leads = max(area_leads - direct_leads, 0)
 
-        # Selected leads inside the exact circular catchment zone
-        selected_leads = max(int(base_count * area_factor * spatial_variance), int(radius * 0.5) + 1)
-
-        # Connected adjacent council leads in surrounding buffer
-        adjacent_variance = 1.0 + math.cos((target_lat - target_lng) * 35.0) * 0.2
-        connected_leads = max(int(selected_leads * 1.55 * adjacent_variance) + int(radius * 0.4), 4)
-
-    # Contract valuation (&pound;450 to &pound;1,450 per statutory notice)
+    # Contract valuation: a disclosed, flat per-notice estimate (&pound;450
+    # to &pound;1,450, typical UK tree-work job range) applied to the REAL
+    # lead count above -- not a fabricated total dressed up as "in your area".
     min_val = selected_leads * 450
     max_val = selected_leads * 1450
 
@@ -346,15 +361,12 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
     is_claimed = database.is_territory_claimed(display_pc)
     exclusivity_label = "&#128274; Locked (Claimed by Local Partner)" if is_claimed else "&#9989; Available (Unclaimed)"
 
-    competitors = 0 if "Unregistered" in district else max(3, int(selected_leads / 12) + int(target_lat) % 6)
-
     return {
         "status": "ok",
         "postcode": display_pc,
         "authority": district,
         "lat": target_lat,
         "lng": target_lng,
-        "competitors": competitors,
         "radius_miles": radius,
         "is_covered": True,
         "is_england": True,
@@ -480,8 +492,11 @@ def public_homepage():
     except Exception as e:
         logger.error(f"[HOMEPAGE] DB error: {e}")
 
-    # Psychological trigger: non-uniform number to build credibility
-    display_leads = stats["l"] if stats["l"] > 1000 else stats["l"] + 1427
+    # Aug 30 2026: this used to pad the real lead count with +1427 whenever
+    # the true count was under 1000, to look more credible. Show the real
+    # number -- padding it is exactly the kind of fabricated stat that
+    # already cost trust once this session (the "75%/10%/15%" TPO claim).
+    display_leads = stats["l"]
 
     lead_rows = "".join([
         f"""<tr class='border-b border-slate-700/50 hover:bg-slate-800/50 transition-colors'>
@@ -627,19 +642,23 @@ def public_homepage():
                     <p class="text-xs text-slate-500 font-mono uppercase tracking-widest mt-2">100% Exclusive Leads. Never Sold Twice.</p>
                 </div>
 
-                <!-- Institutional Trust Badges (Anchoring Authority) -->
+                <!-- Aug 30 2026: removed "BS5837 Survey Alignment" and "ArbAC
+                     Industry Standard" badges -- both borrow the name of a real
+                     UK arboricultural standard (BS5837 covers trees in relation
+                     to construction; ArbAC is the Arboricultural Association's
+                     utility-vegetation-management accreditation) to imply
+                     TreeKey holds a certification or compliance status it
+                     doesn't actually have. TreeKey aggregates public planning
+                     data; it isn't a surveyor or an accredited contractor.
+                     Left only the one badge that's a plain, checkable fact. -->
                 <div class="mt-14 pt-8 border-t border-slate-800/50 flex flex-wrap justify-center gap-8 opacity-70 grayscale hover:grayscale-0 transition-all duration-500">
-                    <div class="flex items-center gap-2 text-sm font-mono text-slate-300">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-                        BS5837 Survey Alignment
-                    </div>
                     <div class="flex items-center gap-2 text-sm font-mono text-slate-300">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
                         Published Under The Open Government Licence
                     </div>
                     <div class="flex items-center gap-2 text-sm font-mono text-slate-300">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-                        ArbAC Industry Standard
+                        Sourced Directly From Council Planning Registers
                     </div>
                 </div>
             </div>
@@ -758,7 +777,7 @@ def public_homepage():
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
                 </div>
                 <h3 class="text-xl font-bold text-white mb-3">Intercept Before Competitors</h3>
-                <p class="text-slate-400 text-sm leading-relaxed">We detect competitor density in your area and route the highest-paying council jobs to you <strong class="text-slate-200">before they ever hit the public market.</strong> Win the contract while your competitors are still waiting for the phone to ring.</p>
+                <p class="text-slate-400 text-sm leading-relaxed">Statutory tree work notices are public council records the moment they're filed — most contractors never check them. We monitor the registers directly and route matching jobs to you <strong class="text-slate-200">as soon as they're published,</strong> so you can reach the homeowner before a competitor who's still waiting for the phone to ring.</p>
             </div>
         </div>
     </section>
@@ -947,7 +966,6 @@ def public_homepage():
                             Manual Lock: ${{e.latlng.lat.toFixed(4)}}, ${{e.latlng.lng.toFixed(4)}}
                             <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse hidden sm:inline-block"></span>
                         </div>
-                        <span class="text-xs font-bold text-amber-500 animate-pulse mt-1 inline-block border border-amber-500/30 bg-amber-500/10 px-2 py-1 rounded">&#9888;&#65039; ${{data.competitors}} Local Competitors Detected</span>
                     `;
                 }} else if (data.status === "out_of_bounds") {{
                     document.getElementById('targetIntel').innerHTML = `<span class="text-red-500 font-bold text-sm">Out of Bounds</span><br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">${{data.message}}</span>`;
@@ -971,7 +989,6 @@ def public_homepage():
             btn.disabled = true;
             btn.classList.add("opacity-80");
             
-            // Subconscious Trigger: Fake calculating sequence to build tension/perceived value
             status.innerHTML = `
                 <div class="flex items-center gap-2 text-amber-500 mb-1">
                     <span class="h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span> Triangulating Postcode...
@@ -993,7 +1010,6 @@ def public_homepage():
                     document.getElementById('btn-checkout-elite').href = `/checkout/regional_elite?outcode=${{data.postcode}}`;
                     document.getElementById("targetIntel").innerHTML = `<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>`;
                     
-                    // Add slight delay for psychological weight
                     setTimeout(() => {{
                         status.innerHTML = `
                             <div class="flex items-center gap-2 text-emerald-400 mb-1 sm:justify-end">
@@ -1001,9 +1017,8 @@ def public_homepage():
                                 Radar Locked: ${{data.postcode}}
                                 <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse hidden sm:inline-block"></span>
                             </div>
-                            <span class="text-xs font-bold text-amber-500 animate-pulse mt-1 inline-block border border-amber-500/30 bg-amber-500/10 px-2 py-1 rounded">&#9888;&#65039; ${{data.competitors}} Local Competitors Detected</span>
                         `;
-                    }}, 600);
+                    }}, 300);
                     
                 }} else if (data.status === "out_of_bounds") {{
                     document.getElementById('targetIntel').innerHTML = `<span class="text-red-500 font-bold text-sm">Out of Bounds</span><br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">${{data.message}}</span>`;
@@ -2391,13 +2406,29 @@ def contractor_dashboard(request: Request):
         # Google Street View direct link
         gmap_url = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(addr)}"
 
+        # Aug 30 2026: has_agent/applicant_name are captured by the scraper but
+        # were never shown here -- every lead looked identical whether or not
+        # the council record already lists an agent/contractor. has_agent is
+        # True / False / None (not checked or inconclusive) -- None must read
+        # as "unconfirmed", never as "no agent".
+        applicant_name = l.get("applicant_name")
+        has_agent = l.get("has_agent")
+        if has_agent is True:
+            agent_badge = f"<span style='font-size:10px; background:#fef3c7; color:#92400e; padding:2px 6px; border-radius:4px; font-weight:bold;'>⚠️ AGENT ON RECORD{' — ' + l['agent_company'] if l.get('agent_company') else ''}</span>"
+        elif has_agent is False:
+            agent_badge = "<span style='font-size:10px; background:#d1fae5; color:#065f46; padding:2px 6px; border-radius:4px; font-weight:bold;'>✅ NO AGENT LISTED</span>"
+        else:
+            agent_badge = "<span style='font-size:10px; background:#f1f5f9; color:#64748b; padding:2px 6px; border-radius:4px;'>AGENT STATUS UNCONFIRMED</span>"
+        applicant_line = f"<br><span style='font-size:11px; color:#475569;'>Applicant: {applicant_name}</span>" if applicant_name else ""
+
         lead_rows += f"""
         <div style="background:white; border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin-bottom:12px;">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
                 <div>
                     <span style="font-size:10px; background:#f1f5f9; color:#475569; padding:2px 6px; border-radius:4px; font-weight:bold;">REF: {ref}</span>
+                    {agent_badge}
                     <h4 style="margin:4px 0 2px 0; font-size:15px; color:#0f172a;">📍 {addr}</h4>
-                    <span style="font-size:11px; color:#64748b;">Dispatched: {dispatched_at}</span>
+                    <span style="font-size:11px; color:#64748b;">Dispatched: {dispatched_at}</span>{applicant_line}
                 </div>
                 <div style="display:flex; gap:6px; flex-wrap:wrap;">
                     <a href="/generate-letter/{urllib.parse.quote(ref)}" target="_blank" style="background:#044332; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">🖨️ Letter</a>
@@ -3872,9 +3903,9 @@ def scan_nationwide_all_uk_endpoint(secret: Optional[str] = Query(None)):
     Crawls all UK regions in parallel to capture thousands of planning and domestic leads.
     """
     verify_cron_secret(secret)
-    import threading
-    threading.Thread(target=scanners.scan_nationwide_bulk_crawler, daemon=True).start()
-    return {"status": "nationwide_crawl_dispatched_in_background", "coverage": "124 UK Outward Postcodes & 300+ Councils"}
+    result = _dispatch_locked_scan(scanners.scan_nationwide_bulk_crawler, "nationwide_bulk_crawl")
+    result["coverage"] = "124 UK Outward Postcodes & 300+ Councils"
+    return result
 
 
 @app.get("/scan-domestic-jobs", response_class=HTMLResponse)
@@ -3904,9 +3935,9 @@ def run_domestic_scan_now(secret: Optional[str] = Query(None)):
     Direct scan trigger returning live intercepted leads and Supabase database breakdown.
     """
     verify_cron_secret(secret)
-    
-    threading.Thread(target=scanners.scan_nationwide_bulk_crawler, daemon=True).start()
-    
+
+    dispatch_result = _dispatch_locked_scan(scanners.scan_nationwide_bulk_crawler, "nationwide_bulk_crawl")
+
     # 3. Query database breakdown
     db_stats = {}
     recent_leads = []
@@ -3934,7 +3965,8 @@ def run_domestic_scan_now(secret: Optional[str] = Query(None)):
         db_stats = {"error": str(e)}
 
     return {
-        "status": "scan_dispatched_and_active",
+        "status": dispatch_result["status"],  # "started" or "already_running" -- was always hardcoded "scan_dispatched_and_active" before, even when no new scan actually started
+        "dispatch_message": dispatch_result.get("message"),
         "database_breakdown": db_stats,
         "recent_intercepted_leads": recent_leads
     }
@@ -4201,8 +4233,48 @@ def run_master_daily_pipeline():
     except Exception as e:
         logger.error(f"[PIPELINE] Stage 4 error: {e}")
 
-    logger.info("[PIPELINE] &#127937; Master Daily Pipeline finished successfully.")
+    logger.info("[PIPELINE] 🏁 Master Daily Pipeline finished successfully.")
 
+
+def _dispatch_locked_scan(target_fn, action_name: str) -> dict:
+    """Shared concurrency guard for every 'scan everything' trigger endpoint.
+
+    Aug 30 2026: confirmed live that /trigger-daily-pipeline was fired while
+    a previous run was still in Stage 3, and both ran concurrently. Tracing
+    it further found this wasn't the only way to trigger a full scan:
+    /scan-nationwide, /api/scan-nationwide-all-uk, and /api/run-domestic-
+    scan-now ALL independently start scanners.scan_nationwide_bulk_crawler(),
+    which itself calls run_mesh_network_scan() -- the exact same mesh scan
+    run_master_daily_pipeline()'s Stage 0 calls. Four separate endpoints
+    could each kick off a scan of the same ~50+ council portals with zero
+    coordination between them, which is a direct, likely contributor to the
+    repeated council timeouts/503s seen in production logs (the same portal
+    getting hit by two overlapping scans within seconds of each other looks
+    exactly like what a rate limiter is designed to block). All four now
+    share this one lock, so only one full scan can run at a time no matter
+    which endpoint kicks it off.
+    """
+    if not _PIPELINE_LOCK.acquire(blocking=False):
+        return {
+            "status": "already_running",
+            "action": action_name,
+            "started_at": _pipeline_state.get("started_at"),
+            "message": "A scan is already in progress -- this trigger shares a lock with /trigger-daily-pipeline, /scan-nationwide, /api/scan-nationwide-all-uk, and /api/run-domestic-scan-now, since they all hit the same council portals. Wait for it to finish, then trigger again."
+        }
+    _pipeline_state["running"] = True
+    _pipeline_state["started_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+
+    def _wrapped():
+        try:
+            target_fn()
+        except Exception as e:
+            logger.error(f"[{action_name}] Unhandled error: {e}")
+        finally:
+            _pipeline_state["running"] = False
+            _PIPELINE_LOCK.release()
+
+    threading.Thread(target=_wrapped, daemon=True).start()
+    return {"status": "started", "action": action_name, "timestamp": _pipeline_state["started_at"]}
 
 
 @app.get("/trigger-daily-pipeline")
@@ -4212,8 +4284,16 @@ def trigger_daily_pipeline(secret: Optional[str] = Query(None)):
     Executes full 4-stage ingestion and quality sanitization pipeline.
     """
     verify_cron_secret(secret)
-    threading.Thread(target=run_master_daily_pipeline, daemon=True).start()
-    return {"status": "started", "action": "master_daily_pipeline", "timestamp": "NOW"}
+    return _dispatch_locked_scan(run_master_daily_pipeline, "master_daily_pipeline")
+
+
+@app.get("/pipeline-status")
+def pipeline_status(secret: Optional[str] = Query(None)):
+    """Aug 30 2026: added alongside the concurrency lock above so there's a
+    real way to check whether a scan is in progress, instead of only
+    watching raw logs for the start/finish lines."""
+    verify_cron_secret(secret)
+    return {"running": _pipeline_state["running"], "started_at": _pipeline_state.get("started_at")}
 
 
 @app.get("/trigger-clean-partners")

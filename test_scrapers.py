@@ -43,12 +43,15 @@ import requests as _requests  # noqa: E402  (used for constructing real exceptio
 if "database" not in sys.modules:
     _fake_database = types.ModuleType("database")
     _fake_database.get_db_conn = MagicMock()
+    _fake_database.increment_api_usage = MagicMock(return_value={"warning_needed": False})
     sys.modules["database"] = _fake_database
 
 if "notifications" not in sys.modules:
     _fake_notifications = types.ModuleType("notifications")
     _fake_notifications.send_system_incident_alert = MagicMock()
     _fake_notifications.send_resend_email = MagicMock()
+    _fake_notifications.dispatch_lead_alerts = MagicMock()
+    _fake_notifications.send_api_quota_warning_email = MagicMock()
     sys.modules["notifications"] = _fake_notifications
 
 if "dotenv" not in sys.modules:
@@ -251,6 +254,22 @@ class TestIdoxResultsParsing(unittest.TestCase):
             )
         self.assertEqual(leads, [])
         mock_alert.assert_called_once()
+
+    def test_too_many_results_page_does_not_trigger_false_structure_alert(self):
+        """Aug 30 2026: Idox's own "too many results, please narrow your
+        search" response is a real, valid page distinct from both "no
+        results" and a structural break -- it was wrongly triggering the
+        false SCRAPER PAGE STRUCTURE alerts seen repeatedly in production
+        logs (Cornwall, Nottingham, Glasgow, Bristol, Guildford, Dartford,
+        Maidstone, Tunbridge Wells, Winchester)."""
+        too_many_html = "<html><body><p>Your search has returned too many results. Please narrow your search.</p></body></html>"
+        with patch.object(mesh_scrapers.IdoxScraper, "_alert_possible_structure_change") as mock_alert:
+            leads = self._run(
+                self._fake_response(text="<html></html>"),
+                self._fake_response(text=too_many_html),
+            )
+        self.assertEqual(leads, [])
+        mock_alert.assert_not_called()
 
     def test_single_result_redirect_page_is_parsed(self):
         leads = self._run(
@@ -458,6 +477,181 @@ class TestNetUtilsResilience(unittest.TestCase):
 
         self.assertIs(res, ok_response)
         fake_session.request.assert_called_once()
+
+
+class TestPlanitRealValueFilter(unittest.TestCase):
+    """_planit_real_value: PlanIt returns a placeholder like "See source"
+    when it hasn't actually captured a field -- that must never be stored
+    as if it were a real applicant/agent name."""
+
+    def test_real_value_passes_through(self):
+        self.assertEqual(scanners._planit_real_value("Mr John Smith"), "Mr John Smith")
+        self.assertEqual(scanners._planit_real_value("  Rich Ede TreeSurgeon  "), "Rich Ede TreeSurgeon")
+
+    def test_known_placeholders_are_filtered(self):
+        for junk in ["See source", "SEE SOURCE", "n/a", "N/A", "None", "", "   "]:
+            with self.subTest(junk=junk):
+                self.assertIsNone(scanners._planit_real_value(junk))
+
+    def test_non_string_or_missing_is_filtered(self):
+        self.assertIsNone(scanners._planit_real_value(None))
+        self.assertIsNone(scanners._planit_real_value(123))
+
+
+class TestPlanitFallback(unittest.TestCase):
+    """scan_city_planning_api's Aug 30 2026 rewrite. Root cause of the
+    "0 leads found everywhere" pipeline failure, confirmed live against
+    the real PlanIt API: wrong param name (postcode vs pcode), a missing
+    required radius, and invalid postcode values -- fixed by switching to
+    `auth=<real authority name>` via REGION_TOWNS. Also fixed: the free
+    PlanIt fallback was wrongly gated behind the paid UK_PLANNING_API_KEY,
+    and PlanIt's HTTP-200-but-{"error": ...} responses were silently
+    treated as zero results. These tests exercise fetch_planit only
+    (through the public scan_city_planning_api entry point), with the
+    paid key unset -- net_utils.smart_get is mocked, no real network call,
+    and scanners._insert_lead is mocked so these tests don't depend on
+    SQL/cursor internals covered separately by TestInsertLeadBackfill."""
+
+    PLANIT_OK = {
+        "records": [
+            {
+                "uid": "24/01111/TPO",
+                "description": "Felling of 1no. diseased ash tree, TPO protected.",
+                "address": "12 Example Road, Bristol",
+                "link": "https://www.planit.org.uk/planapplic/24-01111-tpo",
+                "other_fields": {
+                    "applicant_name": "Mr John Smith",
+                    "agent_name": "See source",      # PlanIt placeholder -- must be filtered out
+                    "agent_company": "See source",
+                },
+            },
+            {
+                "uid": "24/02222/FUL",
+                "description": "Change of use for former bank branch.",  # not tree-related -- must be skipped
+                "address": "1 High Street, Bristol",
+                "other_fields": {},
+            },
+        ]
+    }
+
+    PLANIT_WITH_REAL_AGENT = {
+        "records": [
+            {
+                "uid": "24/03333/TPO",
+                "description": "Crown reduction of mature oak tree, TPO protected.",
+                "address": "5 Park Lane, Bristol",
+                "other_fields": {
+                    "applicant_name": "Mrs Jane Doe",
+                    "agent_name": "A. Contractor",
+                    "agent_company": "Bristol Tree Surgeons Ltd",
+                },
+            },
+        ]
+    }
+
+    PLANIT_ERROR = {"error": "P0001: No valid query field combination supplied"}
+
+    def _fake_response(self, status_code=200, json_data=None):
+        resp = MagicMock(status_code=status_code)
+        resp.json.return_value = json_data if json_data is not None else {}
+        return resp
+
+    def setUp(self):
+        # Isolated fake DB conn/cursor -- _insert_lead itself is mocked in
+        # every test below, so these just need to not blow up when called.
+        self.cur = MagicMock()
+        self.conn = MagicMock()
+        self.conn.cursor.return_value = self.cur
+
+    def test_planit_runs_even_without_paid_key(self):
+        """Previously the whole region (both APIs) returned 0 immediately
+        whenever UK_PLANNING_API_KEY was unset -- the key-free PlanIt path
+        must still run and find real leads."""
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=self._fake_response(json_data=self.PLANIT_OK)), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "24/01111/TPO"}) as mock_insert, \
+             patch("time.sleep", return_value=None):
+            count = scanners.scan_city_planning_api("Bristol")
+
+        self.assertEqual(count, 1)  # only the tree-related record counts
+        self.assertEqual(mock_insert.call_count, 1)  # the bank-branch record was filtered before insert
+
+    def test_placeholder_agent_values_are_never_stored_as_real(self):
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=self._fake_response(json_data=self.PLANIT_OK)), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value=None) as mock_insert, \
+             patch("time.sleep", return_value=None):
+            scanners.scan_city_planning_api("Bristol")
+
+        _, kwargs = mock_insert.call_args
+        self.assertEqual(kwargs["applicant_name"], "Mr John Smith")
+        self.assertIsNone(kwargs["agent_name"])       # "See source" filtered out
+        self.assertIsNone(kwargs["agent_company"])    # "See source" filtered out
+        self.assertIsNone(kwargs["has_agent"])         # unknown, not "no agent" -- must not be False
+
+    def test_real_agent_sets_has_agent_true(self):
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=self._fake_response(json_data=self.PLANIT_WITH_REAL_AGENT)), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value=None) as mock_insert, \
+             patch("time.sleep", return_value=None):
+            scanners.scan_city_planning_api("Bristol")
+
+        _, kwargs = mock_insert.call_args
+        self.assertEqual(kwargs["agent_company"], "Bristol Tree Surgeons Ltd")
+        self.assertTrue(kwargs["has_agent"])
+
+    def test_planit_error_payload_is_not_treated_as_leads(self):
+        """PlanIt returns HTTP 200 even for error responses -- the old code
+        only checked status_code == 200 and silently read 0 leads from the
+        error body. Must now be detected and skipped, not crash."""
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=self._fake_response(json_data=self.PLANIT_ERROR)), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead") as mock_insert, \
+             patch("time.sleep", return_value=None):
+            count = scanners.scan_city_planning_api("Bristol")
+
+        self.assertEqual(count, 0)
+        mock_insert.assert_not_called()
+
+    def test_no_prefixes_and_no_towns_returns_zero_without_crashing(self):
+        self.assertEqual(scanners.scan_city_planning_api("Nonexistent Region"), 0)
+
+    def test_paid_api_mismatched_outcode_is_skipped_not_mislabeled(self):
+        """Aug 30 2026: ukplanningapi.co.uk was found (during the PlanIt
+        live-testing pass) to sometimes return an address that doesn't
+        actually match the requested postcode-prefix param -- e.g. a
+        "Sheffield"-requested scan returning a Kent/Tonbridge address.
+        Rather than trust the paid API's filtering and mislabel
+        council_source, the returned outcode must be checked against the
+        requested prefix; a mismatch is skipped, not relabeled or guessed."""
+        body = {
+            "data": [
+                {"reference": "24/1000/TPO", "description": "Felling of 2no. ash trees, TPO protected.",
+                 "address": "10 Example Road, Sheffield S1 2AB"},
+                {"reference": "24/2000/TPO", "description": "Crown reduction of oak tree, TPO protected.",
+                 "address": "5 High Street, Tonbridge TN9 1AB"},  # wrong region for prefix "S"
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = body
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", "fake-key"), \
+             patch.object(scanners, "CITY_POSTCODE_PREFIX", {"Sheffield": ["S"]}), \
+             patch.object(scanners, "REGION_TOWNS", {}), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "24/1000/TPO"}) as mock_insert, \
+             patch("time.sleep", return_value=None):
+            count = scanners.scan_city_planning_api("Sheffield")
+
+        self.assertEqual(count, 1)  # only the correctly-attributed Sheffield lead counts
+        mock_insert.assert_called_once()
+        args, _ = mock_insert.call_args
+        self.assertIn("S1 2AB", args[2])  # the Tonbridge/Kent record was skipped
 
 
 if __name__ == "__main__":

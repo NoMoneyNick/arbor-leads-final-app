@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 import time
 import logging
@@ -467,6 +468,58 @@ CITY_POSTCODE_PREFIX = {
     "North Wales":     ["LL", "SY", "CH"]
 }
 
+# Aug 30 2026: real town/local-authority names for the free PlanIt fallback
+# (planit.org.uk), added after discovering the fallback was silently broken --
+# it was calling PlanIt's API with the wrong parameter name (`postcode`
+# instead of `pcode`) and no required search radius, AND even fixed, the
+# bare 1-2 letter area codes in CITY_POSTCODE_PREFIX above (e.g. "B", "WS")
+# aren't valid UK postcodes/outcodes for PlanIt to geocode -- confirmed live
+# (`{"error": "pcode: Invalid format"}`). PlanIt instead supports searching
+# directly by real authority name (`auth=<name>`), confirmed live against
+# Birmingham and Walsall (both returned real, current applications). These
+# lists reuse genuine UK council/authority names already used elsewhere in
+# this codebase (COUNCIL_REGISTRY, bulk_contractor_extractor.py's
+# UK_TARGET_REGIONS) -- not exhaustive, but real and verified-working,
+# unlike the broken prefix approach it replaces.
+REGION_TOWNS = {
+    "London": ["Westminster", "Camden", "Islington", "Lambeth", "Southwark", "Wandsworth",
+               "Barnet", "Brent", "Ealing", "Croydon", "Bromley", "Greenwich", "Haringey"],
+    "South East": ["Guildford", "Reading", "Brighton and Hove", "Portsmouth", "Southampton",
+                   "Oxford", "Winchester", "Maidstone", "Tunbridge Wells", "Sevenoaks"],
+    "South West": ["Bristol", "Bath and North East Somerset", "Gloucester", "Cheltenham",
+                   "Exeter", "Plymouth", "Cornwall", "Dorset", "Wiltshire", "Swindon"],
+    "West Midlands": ["Birmingham", "Coventry", "Wolverhampton", "Solihull", "Dudley",
+                       "Walsall", "Warwick", "Stoke-on-Trent"],
+    "East Midlands": ["Nottingham", "Leicester", "Derby", "Northampton", "Lincoln"],
+    "Yorkshire": ["Leeds", "Sheffield", "Bradford", "York", "Wakefield"],
+    "North West": ["Manchester", "Liverpool", "Preston", "Blackpool", "Cheshire East",
+                    "Cheshire West and Chester"],
+    "North East": ["Newcastle upon Tyne", "Sunderland", "Durham", "Middlesbrough", "Darlington"],
+    "East of England": ["Norwich", "Cambridge", "Milton Keynes", "Peterborough", "Colchester"],
+    "Leeds": ["Leeds"],
+    "Birmingham": ["Birmingham"],
+    "Manchester": ["Manchester"],
+    "Bristol": ["Bristol"],
+    "Sheffield": ["Sheffield"],
+    "Scotland": ["Edinburgh", "Glasgow", "Aberdeen City", "Dundee City", "Fife",
+                 "Stirling", "Perth and Kinross"],
+    "Wales": ["Cardiff", "Swansea", "Newport", "Wrexham", "Bridgend"],
+}
+
+# Values PlanIt returns as a placeholder when it hasn't actually captured a
+# field (confirmed live: e.g. "agent_name": "See source") -- must not be
+# stored as if it were a real name.
+_PLANIT_PLACEHOLDER_VALUES = {"see source", "n/a", "none", ""}
+
+
+def _planit_real_value(value) -> Optional[str]:
+    """Returns value if it looks like a genuine PlanIt field, else None."""
+    if not value or not isinstance(value, str):
+        return None
+    if value.strip().lower() in _PLANIT_PLACEHOLDER_VALUES:
+        return None
+    return value.strip()
+
 
 
 
@@ -474,98 +527,169 @@ CITY_POSTCODE_PREFIX = {
 
 def scan_city_planning_api(city_name: str) -> int:
     """
-    Scans planning applications for a UK city and all its surrounding borough/county councils
-    using ukplanningapi.co.uk across all regional postcode prefixes in parallel.
-    """
-    if not UK_PLANNING_API_KEY:
-        logger.error(f"[{city_name}] UK_PLANNING_API_KEY is not set.")
-        return 0
+    Scans planning applications for a UK region using ukplanningapi.co.uk (paid,
+    postcode-prefix based) where a key is configured, and PlanIt (planit.org.uk,
+    free, no key needed) as a real fallback/supplement, queried by real
+    authority name via REGION_TOWNS.
 
+    Aug 30 2026 rewrite: previously this function returned 0 for the ENTIRE
+    region (both APIs) whenever UK_PLANNING_API_KEY was unset -- the free
+    PlanIt fallback was wrongly gated behind the paid key's presence. It also
+    called PlanIt with the wrong parameter name and no required search
+    radius, which PlanIt rejects with an error payload on a 200 OK response
+    -- silently swallowed by the old code as "0 leads found" with no visible
+    failure. Both confirmed live against the real API (see REGION_TOWNS
+    comment). Fixed: PlanIt now runs regardless of the paid key, using
+    `auth=<real authority name>` (verified working), and any error payload
+    from either API is now logged instead of silently treated as empty.
+    """
     postcode_prefixes = CITY_POSTCODE_PREFIX.get(city_name, [])
     if isinstance(postcode_prefixes, str):
         postcode_prefixes = [postcode_prefixes]
-    if not postcode_prefixes:
+    region_towns = REGION_TOWNS.get(city_name, [])
+
+    if not postcode_prefixes and not region_towns:
         return 0
 
-    headers = {"X-API-Key": UK_PLANNING_API_KEY}
+    headers = {"X-API-Key": UK_PLANNING_API_KEY} if UK_PLANNING_API_KEY else {}
     new_leads = []
 
     try:
         from concurrent.futures import ThreadPoolExecutor
 
-        def fetch_prefix(prefix):
-            # Try ukplanningapi.co.uk first if key exists
-            try:
-                if UK_PLANNING_API_KEY:
-                    import time
-                    time.sleep(1.5) # Cron job throttle to prevent 6am ban
-                    res = net_utils.smart_get(
-                        "https://ukplanningapi.co.uk/v1/applications",
-                        params={"postcode": prefix, "status": "received", "limit": 200},
-                        headers=headers,
-                        timeout=8
-                    )
-                    if res.status_code == 200:
-                        return prefix, res.json().get("data", [])
-            except Exception:
-                pass
-                
-            # Free Fallback: PlanIt API (Unlimited, No API Key needed)
+        def fetch_paid(prefix):
+            """ukplanningapi.co.uk -- paid, postcode-prefix based. Skipped
+            (not silently, now logged once) if no key is configured."""
+            if not UK_PLANNING_API_KEY:
+                return prefix, []
             try:
                 import time
-                time.sleep(1.0) # Polite throttle for PlanIt
-                planit_res = net_utils.smart_get(
-                    "https://www.planit.org.uk/api/applics/json",
-                    params={"postcode": prefix, "pg_sz": 50},
-                    timeout=12
+                time.sleep(1.5)  # Cron job throttle to prevent 6am ban
+                res = net_utils.smart_get(
+                    "https://ukplanningapi.co.uk/v1/applications",
+                    params={"postcode": prefix, "status": "received", "limit": 200},
+                    headers=headers,
+                    timeout=8
                 )
-                if planit_res.status_code == 200:
-                    data = planit_res.json()
-                    records = data.get("records", [])
-                    # Map PlanIt schema to our expected schema
-                    mapped_data = []
-                    for rec in records:
-                        mapped_data.append({
-                            "reference": rec.get("uid", ""),
-                            "description": rec.get("description", ""),
-                            "address": rec.get("address", ""),
-                            "url": rec.get("url", ""),
-                            "status": rec.get("system_status", "received"),
-                            "date": rec.get("creation_date", "")
-                        })
-                    return prefix, mapped_data
+                if res.status_code == 200:
+                    body = res.json()
+                    if isinstance(body, dict) and body.get("error"):
+                        logger.warning(f"[{city_name}] ukplanningapi.co.uk returned an error for prefix '{prefix}': {body.get('error')}")
+                        return prefix, []
+                    return prefix, body.get("data", [])
+                elif res.status_code not in (429,):
+                    logger.debug(f"[{city_name}] ukplanningapi.co.uk HTTP {res.status_code} for prefix '{prefix}'")
             except Exception as e:
-                pass
-                
+                logger.debug(f"[{city_name}] ukplanningapi.co.uk error for prefix '{prefix}': {e}")
             return prefix, []
 
+        def fetch_planit(town):
+            """PlanIt (planit.org.uk) -- free, no key, queried by real
+            authority name. `recent=45` matches this pipeline's general
+            lookback window; other_fields carries applicant/agent when
+            PlanIt has actually captured it (often "See source" -- filtered
+            out by _planit_real_value, never stored as a real name)."""
+            try:
+                import time
+                time.sleep(1.0)  # Polite throttle for PlanIt
+                planit_res = net_utils.smart_get(
+                    "https://www.planit.org.uk/api/applics/json",
+                    params={"auth": town, "recent": 45, "pg_sz": 50},
+                    timeout=12
+                )
+                if planit_res.status_code != 200:
+                    logger.debug(f"[{city_name}] PlanIt HTTP {planit_res.status_code} for authority '{town}'")
+                    return town, []
+                data = planit_res.json()
+                if isinstance(data, dict) and data.get("error"):
+                    logger.warning(f"[{city_name}] PlanIt returned an error for authority '{town}': {data.get('error')}")
+                    return town, []
+                records = data.get("records", [])
+                mapped_data = []
+                for rec in records:
+                    other = rec.get("other_fields") or {}
+                    mapped_data.append({
+                        "reference": rec.get("uid") or rec.get("name", ""),
+                        "description": rec.get("description", ""),
+                        "address": rec.get("address", ""),
+                        "url": rec.get("link", ""),
+                        "applicant_name": _planit_real_value(other.get("applicant_name")),
+                        "agent_name": _planit_real_value(other.get("agent_name")),
+                        "agent_company": _planit_real_value(other.get("agent_company")),
+                    })
+                return town, mapped_data
+            except Exception as e:
+                logger.debug(f"[{city_name}] PlanIt error for authority '{town}': {e}")
+            return town, []
+
         with ThreadPoolExecutor(max_workers=6) as executor:
-            prefix_results = list(executor.map(fetch_prefix, postcode_prefixes))
+            paid_results = list(executor.map(fetch_paid, postcode_prefixes)) if postcode_prefixes else []
+            planit_results = list(executor.map(fetch_planit, region_towns)) if region_towns else []
 
         # Track monthly usage and trigger predictive warning email when burn rate will breach 500 cap
-        usage_info = database.increment_api_usage("UK Planning API", increment=len(postcode_prefixes), cap=500)
-        if usage_info.get("warning_needed"):
-            notifications.send_api_quota_warning_email(
-                api_name="UK PLANNING DATA API",
-                current_calls=usage_info.get("count", 350),
-                cap=500,
-                projected_monthly=usage_info.get("projected_monthly", 600),
-                reason=usage_info.get("reason", "Projected monthly pace exceeds 500 limit")
-            )
-
-
+        if UK_PLANNING_API_KEY and postcode_prefixes:
+            usage_info = database.increment_api_usage("UK Planning API", increment=len(postcode_prefixes), cap=500)
+            if usage_info.get("warning_needed"):
+                notifications.send_api_quota_warning_email(
+                    api_name="UK PLANNING DATA API",
+                    current_calls=usage_info.get("count", 350),
+                    cap=500,
+                    projected_monthly=usage_info.get("projected_monthly", 600),
+                    reason=usage_info.get("reason", "Projected monthly pace exceeds 500 limit")
+                )
 
         conn = database.get_db_conn()
         cur = conn.cursor()
         try:
-            for prefix, records in prefix_results:
+            for prefix, records in paid_results:
                 for item in records:
                     summary = item.get("description", "") or ""
                     if not _is_tree_related(summary):
                         continue
                     ref  = item.get("reference") or f"{prefix}-{int(time.time())}"
                     addr = item.get("address", city_name)
+                    # Aug 30 2026: ukplanningapi.co.uk was found (during the
+                    # PlanIt live-testing pass) to sometimes return results
+                    # whose address doesn't actually match the requested
+                    # postcode-prefix param -- e.g. a "Sheffield"-requested
+                    # scan returning a London/Home Counties address. Rather
+                    # than trust the paid API's own filtering and mislabel
+                    # council_source, verify the returned address's outcode
+                    # actually starts with the prefix we asked for; skip
+                    # (don't guess a relabel) if it clearly doesn't.
+                    outcode_match = re.search(r'\b([A-Z]{1,2})[0-9][A-Z0-9]?\s*[0-9][A-Z]{2}\b', addr.upper())
+                    if outcode_match and not outcode_match.group(1).startswith(prefix.upper()):
+                        logger.warning(
+                            f"[{city_name}] ukplanningapi.co.uk returned an address outcode "
+                            f"'{outcode_match.group(1)}' for requested prefix '{prefix}' -- "
+                            f"skipping to avoid mislabeling council_source ('{addr}')."
+                        )
+                        continue
                     lead = _insert_lead(cur, ref, addr, summary, city_name)
+                    if lead:
+                        new_leads.append(lead)
+
+            for town, records in planit_results:
+                for item in records:
+                    summary = item.get("description", "") or ""
+                    if not summary or not _is_tree_related(summary):
+                        continue
+                    ref  = item.get("reference") or f"PLANIT-{town}-{int(time.time())}"
+                    addr = item.get("address") or f"{city_name} / {town}"
+                    agent_name = item.get("agent_name")
+                    agent_company = item.get("agent_company")
+                    lead = _insert_lead(
+                        cur, ref, addr, summary, city_name,
+                        applicant_name=item.get("applicant_name"),
+                        agent_name=agent_name,
+                        agent_company=agent_company,
+                        # Only PlanIt records that actually captured an agent name/company
+                        # count as a confident "yes" -- PlanIt frequently just doesn't have
+                        # this field ("See source"), which is NOT the same as confirming no
+                        # agent exists, so we deliberately leave has_agent as None (unknown)
+                        # rather than guessing False.
+                        has_agent=(True if (agent_name or agent_company) else None),
+                    )
                     if lead:
                         new_leads.append(lead)
 

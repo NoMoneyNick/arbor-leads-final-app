@@ -16,6 +16,21 @@ SCORE_EMOJI = {"small": "🟡", "medium": "🟠", "large": "🔴"}
 SCORE_LABEL = {"small": "Small — £19", "medium": "Medium — £29", "large": "Large — £49"}
 
 
+def _agent_status_badge(lead: dict) -> str:
+    """Aug 30 2026: has_agent is now captured on some leads (mesh_scrapers.py's
+    Idox detail-page scrape, and PlanIt's other_fields) but was never shown to
+    contractors anywhere -- every lead was presented identically as "exclusive"
+    even when the council record already lists an agent/contractor. has_agent
+    is True / False / None ("not checked" or inconclusive) -- None must read as
+    unknown, never as "confirmed no agent"."""
+    has_agent = lead.get("has_agent")
+    if has_agent is True:
+        return "<span style='color:#b45309; font-weight:bold;'>⚠️ Agent on record</span>"
+    if has_agent is False:
+        return "<span style='color:#059669;'>✅ No agent listed</span>"
+    return "<span style='color:#94a3b8;'>— Unconfirmed</span>"
+
+
 def send_resend_email(subject: str, html_body: str):
     """Sends an email alert via the Resend API."""
     if not RESEND_API_KEY or not TEST_EMAIL:
@@ -51,24 +66,59 @@ def send_purchased_lead_email(customer_email: str, lead_data: dict):
         return
         
     subject = f"🌳 Unlocked Lead: {lead_data.get('council_source', 'Local')} Tree Surgery"
+
+    # Aug 30 2026: applicant_name/agent_name/agent_company/has_agent are now
+    # captured by the scraper (see mesh_scrapers.py) and returned by
+    # database.burn_lead_inventory, but this email never surfaced them --
+    # the buyer paid for a lead and got an address with no homeowner name
+    # and no honest signal of whether a tree surgeon may already be
+    # instructed. has_agent can be True / False / None ("not checked" or
+    # "checked but inconclusive" -- never treat None as "no agent").
+    applicant_name = lead_data.get("applicant_name")
+    agent_name = lead_data.get("agent_name")
+    agent_company = lead_data.get("agent_company")
+    has_agent = lead_data.get("has_agent")
+
+    applicant_row = (
+        f'<p style="margin: 0 0 10px 0;"><strong>Homeowner / Applicant:</strong> {applicant_name}</p>'
+        if applicant_name else
+        '<p style="margin: 0 0 10px 0; color: #94a3b8;"><strong>Homeowner / Applicant:</strong> Not published by the council for this application.</p>'
+    )
+
+    if has_agent is True:
+        agent_label = agent_company or agent_name or "an agent"
+        agent_row = (
+            f'<p style="margin: 10px 0 0 0; color: #b45309;">⚠️ <strong>Heads up:</strong> this application already lists an agent/contractor '
+            f'on record ({agent_label}) — the homeowner may already have someone instructed. Worth confirming before you invest time quoting.</p>'
+        )
+    elif has_agent is False:
+        agent_row = '<p style="margin: 10px 0 0 0; color: #059669;">✅ No agent/contractor is listed on record for this application.</p>'
+    else:
+        agent_row = '<p style="margin: 10px 0 0 0; color: #94a3b8;">Agent/contractor status: not confirmed — the council record didn\'t clearly show one way or the other.</p>'
+
     html = f"""
     <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
         <h2 style="color: #059669; margin-top: 0;">Lead Unlocked Successfully!</h2>
-        <p style="color: #374151;">Thank you for your purchase. Here are the exclusive details for the lead you just secured. This lead has been permanently removed from the marketplace.</p>
-        
+        <p style="color: #374151;">Thank you for your purchase. Here are the details for the lead you just secured. This lead has been permanently removed from the marketplace.</p>
+
         <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
             <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {lead_data.get('reference', 'N/A')}</p>
             <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {lead_data.get('address', 'N/A')}</p>
             <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source', 'N/A')}</p>
             <p style="margin: 0 0 10px 0;"><strong>Estimated Value Grade:</strong> {lead_data.get('lead_score', 'Medium').title()}</p>
+            {applicant_row}
             <p style="margin: 0;"><strong>Description / Summary:</strong><br/>
                <span style="color: #475569; font-size: 14px;">{lead_data.get('summary', 'No summary available.')}</span>
             </p>
+            {agent_row}
         </div>
-        
+
         <p style="font-size: 13px; color: #64748b;">
-            To view this property on Google Maps, click here: 
+            To view this property on Google Maps, click here:
             <a href="https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(lead_data.get('address', ''))}" style="color: #0ea5e9;">View on Map</a>
+        </p>
+        <p style="font-size: 12px; color: #94a3b8;">
+            Note: UK councils do not publish a homeowner's phone number or email address on planning applications. This lead includes everything that is legally published: the address, the applicant name (when the council records it), and the application details above.
         </p>
     </div>
     """
@@ -246,6 +296,7 @@ def dispatch_lead_alerts(city: str, leads: list):
             f"<td style='padding:8px;'>{SCORE_EMOJI.get(l.get('lead_score','small'), '🌳')}</td>"
             f"<td style='padding:8px;'><b>{l['addr']}</b></td>"
             f"<td style='padding:8px;'>{l['summary'][:90]}...</td>"
+            f"<td style='padding:8px; font-size:11px; white-space:nowrap;'>{_agent_status_badge(l)}</td>"
             f"<td style='padding:8px; white-space:nowrap;'>"
             f"<a href='{PUBLIC_APP_URL}/generate-letter/{urllib.parse.quote(l.get('ref', l.get('reference', '')))}' style='background:#044332; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px; margin-right:4px;'>🖨️ Letter</a>"
             f"<a href='{PUBLIC_APP_URL}/generate-street-flyer/{urllib.parse.quote(l.get('ref', l.get('reference', '')))}' style='background:#059669; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px;'>🏘️ Flyer</a>"
@@ -256,9 +307,9 @@ def dispatch_lead_alerts(city: str, leads: list):
         ])
         body = f"""
             <div style="font-family:sans-serif; max-width:640px; margin:auto; color:#0f172a;">
-                <h2 style="color:#044332; margin-bottom:4px;">🌳 TreeKey Intelligence — {len(routed_leads)} New Exclusive Leads</h2>
-                <p style="color:#64748b; font-size:14px; margin-top:0;">Here are the latest statutory tree work applications registered for your crew:</p>
-                
+                <h2 style="color:#044332; margin-bottom:4px;">🌳 TreeKey Intelligence — {len(routed_leads)} New Leads</h2>
+                <p style="color:#64748b; font-size:14px; margin-top:0;">Here are the latest statutory tree work applications registered for your crew. "Exclusive" means this lead is sent only to you — it does not mean the homeowner hasn't already engaged someone; check the Agent column below.</p>
+
                 {notice_banner}
 
                 <table border='1' cellspacing='0' style='border-collapse:collapse; width:100%; font-size:13px; border-color:#e2e8f0;'>
@@ -266,6 +317,7 @@ def dispatch_lead_alerts(city: str, leads: list):
                         <th style='padding:8px; text-align:left;'>Type</th>
                         <th style='padding:8px; text-align:left;'>Location</th>
                         <th style='padding:8px; text-align:left;'>Description</th>
+                        <th style='padding:8px; text-align:left;'>Agent</th>
                         <th style='padding:8px; text-align:left;'>Tool</th>
                     </tr>
                     {rows}
@@ -333,6 +385,7 @@ def dispatch_lead_alerts(city: str, leads: list):
                 <p><b>Ref:</b> {lead['ref']}</p>
                 <p><b>Description:</b> {lead['summary']}</p>
                 <p><b>Grade:</b> {SCORE_LABEL.get(score, 'Small')} &nbsp; <b>Value: £{price}</b></p>
+                <p><b>Agent/contractor on record:</b> {_agent_status_badge(lead)}</p>
                 <p><a href='{wa}' style='background:#25D366; color:white; padding:10px 20px;
                    border-radius:8px; text-decoration:none;'>📲 Forward on WhatsApp</a></p>
                 <p><a href='{PUBLIC_APP_URL or "#"}'>Open Dashboard →</a></p>

@@ -266,19 +266,39 @@ def _extract_emails_from_html(html_text: str) -> list[str]:
     return valid_emails
 
 
-def scrape_email_from_website(website_url: str) -> Optional[str]:
+def scrape_contact_info_from_website(website_url: str):
     """
-    Fast non-blocking email scraper:
-    1. Fetches homepage (2.0s strict timeout).
-    2. If no email found, checks /contact (1.5s strict timeout).
+    Fetches a company's own website and pulls both email and phone from the
+    same page fetch (no extra HTTP requests over the old email-only version).
+
+    Aug 30 2026: added phone extraction here after tracing why production
+    logs showed "Phone: N/A" for essentially every single contractor found
+    (30/30 in one sample window) -- get_google_places_info() below was
+    migrated from the paid Google Places API to scraping DuckDuckGo's
+    organic HTML search results, but DDG's html.duckduckgo.com endpoint
+    returns organic links + snippets, not a business-directory/knowledge-
+    panel API -- it has no structured phone field the way Google Places'
+    formatted_phone_number did, so its phone regex searching page-snippet
+    text was very rarely going to match anything. A company's OWN website is
+    a far more reliable place to find a real published phone number than a
+    search engine's result blurb, and this function was already fetching
+    that page for email -- so it now checks for both there instead of
+    leaving phone entirely dependent on the DDG snippet. Also loosened the
+    original 2.0s/1.5s timeouts to 4.0s/3.0s: small business sites on cheap
+    hosting routinely take longer than 2s, and these calls already run
+    inside a ThreadPoolExecutor, so the tighter timeout was trading away
+    real matches for a speedup this codebase doesn't actually need serially.
+
+    Returns (email, phone) -- either can be None.
     """
     if not website_url:
-        return None
+        return None, None
+    email, phone = None, None
     try:
         # Ignore obvious foreign TLDs
         lower_url = website_url.lower()
         if any(lower_url.endswith(ext) or f"{ext}/" in lower_url for ext in [".com.au", ".net.au", ".co.nz", ".nz", ".au"]):
-            return None
+            return None, None
 
         if not website_url.startswith("http"):
             website_url = "https://" + website_url.lstrip("/")
@@ -286,31 +306,47 @@ def scrape_email_from_website(website_url: str) -> Optional[str]:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        
-        # 1. Fetch Homepage (fast 2s timeout)
-        try:
-            res = net_utils.smart_get(website_url, headers=headers, timeout=2.0)
-            if res.status_code == 200:
-                emails = _extract_emails_from_html(res.text)
+
+        def _scan_page(html_text):
+            nonlocal email, phone
+            if not email:
+                emails = _extract_emails_from_html(html_text)
                 if emails:
-                    return emails[0]
+                    email = emails[0]
+            if not phone:
+                phone_match = re.search(r'\b(07\d{3}\s?\d{6}|0[12]\d{3}\s?\d{5,6})\b', html_text)
+                if phone_match:
+                    phone = _is_valid_uk_phone(phone_match.group(1))
+
+        # 1. Fetch Homepage (4s timeout)
+        try:
+            res = net_utils.smart_get(website_url, headers=headers, timeout=4.0)
+            if res.status_code == 200:
+                _scan_page(res.text)
         except Exception:
             pass
 
-        # 2. Check /contact sub-page (fast 1.5s timeout)
-        base_url = website_url.rstrip("/")
-        try:
-            sub_res = net_utils.smart_get(base_url + "/contact", headers=headers, timeout=1.5)
-            if sub_res.status_code == 200:
-                sub_emails = _extract_emails_from_html(sub_res.text)
-                if sub_emails:
-                    return sub_emails[0]
-        except Exception:
-            pass
+        # 2. Check /contact sub-page (3s timeout) if either is still missing
+        if not (email and phone):
+            base_url = website_url.rstrip("/")
+            try:
+                sub_res = net_utils.smart_get(base_url + "/contact", headers=headers, timeout=3.0)
+                if sub_res.status_code == 200:
+                    _scan_page(sub_res.text)
+            except Exception:
+                pass
 
     except Exception as e:
-        logger.debug(f"[Email Scraper] Could not scrape {website_url}: {e}")
-    return None
+        logger.debug(f"[Contact Scraper] Could not scrape {website_url}: {e}")
+    return email, phone
+
+
+def scrape_email_from_website(website_url: str) -> Optional[str]:
+    """Back-compat wrapper around scrape_contact_info_from_website for any
+    caller that only wants the email. Prefer the combined function directly
+    when you also need phone, so the site is only fetched once."""
+    email, _phone = scrape_contact_info_from_website(website_url)
+    return email
 
 
 def get_google_places_info(company_name: str, city_or_addr: str = ""):
@@ -710,7 +746,11 @@ def perform_research(city_name: str):
             try:
                 md_name = get_director_from_ch(company_number)
                 rating, phone, website = get_google_places_info(name, f"{addr} {assigned_city}")
-                email = scrape_email_from_website(website) if website else None
+                # DDG's search-snippet phone regex above rarely matches (see
+                # scrape_contact_info_from_website's docstring) -- the
+                # company's own site is a much better source for both.
+                email, site_phone = scrape_contact_info_from_website(website) if website else (None, None)
+                phone = phone or site_phone
 
                 co_conn = database.get_db_conn()
                 co_cur = co_conn.cursor()
@@ -834,8 +874,10 @@ def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -
                     website = website or g_website
 
                 email = existing_email
-                if not email and website:
-                    email = scrape_email_from_website(website)
+                if (not email or not phone) and website:
+                    site_email, site_phone = scrape_contact_info_from_website(website)
+                    email = email or site_email
+                    phone = phone or site_phone
 
                 return (md_name, phone, rating, website, email, pid)
             except Exception as e:
@@ -1112,7 +1154,11 @@ def sweep_100_random_contractors(target_count: int = 50) -> dict:
             co, name, company_number, addr, assigned_region = item
             md_name = get_director_from_ch(company_number)
             rating, phone, website = get_google_places_info(name, f"{addr} {assigned_region}")
-            email = None
+            # Aug 30 2026: this used to hardcode email = None and never even
+            # attempt to scrape it, despite website often being found above --
+            # same bug fixed in process_single_candidate/enrich_single_partner.
+            email, site_phone = scrape_contact_info_from_website(website) if website else (None, None)
+            phone = phone or site_phone
             return (
                 name, company_number, co.get("company_status"),
                 addr, assigned_region,
@@ -1246,11 +1292,15 @@ def populate_2000_partners_into_db() -> dict:
                 co, name, company_number, addr, assigned_region = item
                 md_name = get_director_from_ch(company_number)
                 rating, phone, website = get_google_places_info(name, f"{addr} {assigned_region}")
+                # Aug 30 2026: same fix as the other enrich_item -- this used
+                # to hardcode email=None and never attempt to scrape it.
+                email, site_phone = scrape_contact_info_from_website(website) if website else (None, None)
+                phone = phone or site_phone
                 return (
                     name, company_number, co.get("company_status"),
                     addr, assigned_region,
                     co.get("sic_codes", []), md_name, phone, rating,
-                    website, None
+                    website, email
                 )
 
             with ThreadPoolExecutor(max_workers=20) as enrich_exec:
@@ -1269,7 +1319,8 @@ def populate_2000_partners_into_db() -> dict:
                     md_name       = COALESCE(EXCLUDED.md_name, potential_partners.md_name),
                     phone_number  = COALESCE(EXCLUDED.phone_number, potential_partners.phone_number),
                     google_rating = COALESCE(EXCLUDED.google_rating, potential_partners.google_rating),
-                    website       = COALESCE(EXCLUDED.website, potential_partners.website)
+                    website       = COALESCE(EXCLUDED.website, potential_partners.website),
+                    email         = COALESCE(EXCLUDED.email, potential_partners.email)
             """, enriched_rows, page_size=100)
             conn.commit()
 

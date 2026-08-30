@@ -666,10 +666,11 @@ def burn_lead_inventory(lead_id: str, buyer_email: str) -> dict:
         cur = conn.cursor()
         try:
             cur.execute("""
-                UPDATE leads 
+                UPDATE leads
                 SET status = 'claimed'
                 WHERE (id::text = %s OR reference = %s) AND (status = 'new' OR status IS NULL)
-                RETURNING id, reference, address, summary, council_source, lead_score, lead_price;
+                RETURNING id, reference, address, summary, council_source, lead_score, lead_price,
+                          applicant_name, agent_name, agent_company, has_agent;
             """, (lead_id, lead_id))
             row = cur.fetchone()
             conn.commit()
@@ -682,7 +683,11 @@ def burn_lead_inventory(lead_id: str, buyer_email: str) -> dict:
                     "summary": row[3],
                     "council_source": row[4],
                     "lead_score": row[5],
-                    "lead_price": row[6]
+                    "lead_price": row[6],
+                    "applicant_name": row[7],
+                    "agent_name": row[8],
+                    "agent_company": row[9],
+                    "has_agent": row[10],
                 }
             return None
         finally:
@@ -1448,7 +1453,8 @@ def get_contractor_dashboard_data(email: str) -> dict:
 
             # 2. Fetch dispatched leads
             cur.execute("""
-                SELECT l.id, l.reference, l.address, l.summary, l.council_source, l.lead_score, l.lead_price, d.dispatched_at, d.dispatch_type
+                SELECT l.id, l.reference, l.address, l.summary, l.council_source, l.lead_score, l.lead_price,
+                       d.dispatched_at, d.dispatch_type, l.applicant_name, l.agent_name, l.agent_company, l.has_agent
                 FROM lead_dispatches d
                 JOIN leads l ON l.id = d.lead_id
                 WHERE d.contractor_email = %s
@@ -1456,7 +1462,8 @@ def get_contractor_dashboard_data(email: str) -> dict:
                 LIMIT 30;
             """, (email.strip().lower(),))
             leads_rows = cur.fetchall()
-            cols = ["id", "ref", "addr", "summary", "council", "score", "price", "dispatched_at", "dispatch_type"]
+            cols = ["id", "ref", "addr", "summary", "council", "score", "price", "dispatched_at", "dispatch_type",
+                     "applicant_name", "agent_name", "agent_company", "has_agent"]
             dispatched_leads = [dict(zip(cols, r)) for r in leads_rows]
 
             return {

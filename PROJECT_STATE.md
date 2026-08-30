@@ -271,7 +271,7 @@
 10. **PWA / "installable website" (Aug 29 2026):**
     - **PART 1 (DONE):** Added `manifest.json`, Service Worker caching, and iOS/Android meta tags. The app is now installable to the home screen.
     - **PART 2 (NOT STARTED):** Actual Web Push API push notifications. Good candidate for post-launch polish.
-11. **Pre-launch data-integrity audit (Aug 30 2026) — Agent/Applicant capture DONE, two items still OPEN:**
+11. **Pre-launch data-integrity audit (Aug 30 2026) — Agent/Applicant capture DONE, both follow-on items now fixed in item 12 below:**
     Nick, anxious ahead of sending outreach emails, asked me to verify (not assume) whether
     the leads are real and whether "is this lead already taken by a contractor" is knowable.
     Live-checked Cornwall Council's actual Idox portal (not a guess): 101 real TPO
@@ -308,24 +308,165 @@
       info" this data source can ever provide — not a bug, a hard privacy-law
       limit. Product/marketing copy should describe leads as name+address
       leads (door/letter outreach), not phone-ready leads.
-    - **OPEN — fabricated numbers shown to a prospect before they pay:**
-      `/api/check-postcode` in `main.py` (the "Scan My Postcode Now" flow —
-      the homepage's main conversion CTA) invents the lead count, a £ contract-
-      value estimate, and a "competitors detected" warning using a sine/cosine
-      "spatial variance" formula whenever there's no real match, and inflates
-      the real count with the same formula even when one exists. The JS even
-      labels its own loading animation "Subconscious Trigger: Fake calculating
-      sequence to build tension/perceived value." Separately, `display_leads`
-      on the homepage silently pads the real lead count by +1,427 whenever the
-      real count drops under 1,000. Neither has been touched yet — Nick asked
-      to fix the Agent/Applicant question first since it went to whether the
-      business works at all; this is next.
-    - **OPEN — `council_source` region-label mismatches:** leads tagged
-      "Manchester" in the real `leads` export are mostly Kent/Medway addresses;
-      every lead tagged "Sheffield" (29 of 29 checked) is actually London/Home-
-      Counties, none near Sheffield. Doesn't break the real postcode-search
-      feature (that matches on the actual address, not this label) but is
-      wrong in any dashboard/report that trusts it. Not yet fixed.
+    - **DONE (Aug 30 2026, see item 12) — fabricated numbers shown to a
+      prospect before they pay.**
+    - **DONE (Aug 30 2026, see item 12) — `council_source` region-label
+      mismatches.**
+
+12. **"Fix everything" pass (Aug 30 2026)** — Nick's instruction after the
+    audit above: "implement everything you think is a good idea and right,
+    fix everything you think needs fixing... across the whole project." All
+    items below verified with `python3 -m py_compile` on every touched file
+    and the full `test_scrapers.py` suite (32/32 passing) before being
+    written to disk; committed to device after.
+    - **Root cause of "0 leads found everywhere" (both pipeline stages) —
+      FIXED.** Live-tested directly against `planit.org.uk` (the free
+      fallback used when a paid `UK_PLANNING_API_KEY` region search comes up
+      short, or no key is set at all) and found three compounding bugs: (1)
+      wrong query param — code sent `postcode`, PlanIt requires `pcode`; (2)
+      a required `krad` search-radius param was missing entirely, confirmed
+      live via `{"error": "P0001: No valid query field combination
+      supplied"}`; (3) even fixed, the 1-2 letter area codes already in
+      `CITY_POSTCODE_PREFIX` (e.g. `"B"`, `"WS"`) aren't valid values for
+      PlanIt's `pcode` geocoder, confirmed live via `{"error": "pcode:
+      Invalid format"}`. Separately, PlanIt returns these error bodies with
+      HTTP 200, and the old code only checked `status_code == 200` — so
+      every one of these failures was silently logged as "0 new leads
+      found" with no visible error. `scan_city_planning_api()` in
+      `scanners.py` rewritten: new `REGION_TOWNS` dict (real UK council/
+      authority names per region, reusing names already used elsewhere in
+      this codebase) + `auth=<authority name>` queries, confirmed live
+      against Birmingham and Walsall. Any `{"error": ...}` payload from
+      either PlanIt or the paid API is now logged, never silently treated as
+      zero. The free PlanIt fallback also no longer requires
+      `UK_PLANNING_API_KEY` to be set — it used to return 0 for the entire
+      region (both APIs) whenever the paid key was absent. New
+      `_planit_real_value()` helper filters PlanIt's `"See source"`
+      placeholder (and similar) out of applicant/agent fields so they're
+      never stored as if real. 8 new tests in `TestPlanitFallback` /
+      `TestPlanitRealValueFilter`.
+    - **`council_source` region-label mismatches — FIXED for the paid-API
+      path.** Root cause found while live-testing PlanIt: `ukplanningapi.co.uk`
+      was seen returning addresses that don't actually match the requested
+      postcode-prefix param (the "Sheffield"-tagged-but-actually-Kent
+      pattern this doc flagged as OPEN). Rather than trust the paid API's
+      own filtering, the returned address's outcode is now checked against
+      the requested prefix before insert; a mismatch is skipped (logged),
+      never relabeled or guessed. PlanIt's own `auth=<authority>` results
+      don't have this problem (PlanIt scopes by authority server-side), so
+      only the paid-API branch needed the check. 1 new test.
+    - **`/api/check-postcode` fabricated numbers — FIXED.** This endpoint
+      computed a real lead count from the database, then threw it away and
+      replaced it with a sine/cosine "spatial variance" formula seeded from
+      raw lat/lng — a visitor with zero real leads nearby was shown a
+      fabricated 12-40 "active leads" figure, plus an invented £ contract-
+      value estimate and a "competitors detected" warning (`max(3,
+      selected_leads/12 + lat%6)`, not backed by any real competitor data).
+      The frontend JS literally commented its own loading-spinner delay as
+      "Subconscious Trigger: Fake calculating sequence to build tension/
+      perceived value." Fixed: `selected_leads` is now always the real DB
+      count; `connected_leads` is a real second query against the wider
+      postcode area instead of a formula; the fabricated "competitors"
+      field and both "Local Competitors Detected" frontend banners were
+      removed entirely (no real data exists to back that claim); the £
+      value estimate is now a disclosed flat per-notice range (£450-£1,450)
+      applied to the real count, not a hidden multiplier. Homepage
+      `display_leads = stats["l"] + 1427` padding (whenever the real count
+      was under 1,000) also removed — the real count is shown, always.
+    - **Purchased/dispatched leads showed no applicant name and no agent
+      status, despite both now being captured — FIXED.** `database.
+      burn_lead_inventory()` (runs on Stripe purchase) and `database.
+      get_contractor_dashboard_data()` (the `/dashboard` page) didn't select
+      `applicant_name`/`agent_name`/`agent_company`/`has_agent` at all, so
+      even leads where the scraper had found this data, the buyer never saw
+      it. Both queries updated. `notifications.send_purchased_lead_email()`
+      (the email sent right after Stripe payment), `notifications.
+      dispatch_lead_alerts()` (the routed-lead table + individual-lead
+      emails sent to subscribers), and the `/dashboard` lead cards in
+      `main.py` all now show the applicant name (when the council recorded
+      one) and an honest agent-status badge: "⚠️ Agent on record" (has_agent
+      = True), "✅ No agent listed" (has_agent = False), or "Unconfirmed"
+      (has_agent = None — not checked, or checked but inconclusive; never
+      shown as "no agent"). Subscriber emails no longer blanket-label every
+      lead "Exclusive" without qualification.
+    - **False "SCRAPER PAGE STRUCTURE" alerts — FIXED.** Recurring alerts on
+      Cornwall/Nottingham/Glasgow/Bristol/Guildford/Dartford/Maidstone/
+      Tunbridge Wells/Winchester in production logs were traced to Idox's
+      "too many results, please narrow your search" response — a real,
+      valid page distinct from both "no results" and an actual structural
+      break — not being recognized by the existing no-results heuristic.
+      Now detected and logged distinctly (worth revisiting later: unlike a
+      genuine zero, this means real matching applications likely exist but
+      weren't returned). 1 new test.
+    - **STILL OPEN — Resend email domain not verified.** `treekey.uk` is not
+      verified on Resend, so every email — system alerts AND the customer-
+      facing purchase-confirmation email above — fails with HTTP 403. This
+      is an external account fix on resend.com/domains that only Nick can
+      do; nothing in this pass touches it because there's no code fix for
+      it. This remains the single most urgent pre-launch blocker.
+
+13. **"Leave no stone unturned" follow-up pass (Aug 30 2026, same day)** —
+    Nick asked me to fix everything I could on my own before we discuss the
+    rest together. Went back through main.py, payments.py, and the
+    supporting pipelines (research.py, bulk_contractor_extractor.py) looking
+    specifically for more of the same pattern as items 11-12: numbers or
+    claims presented as fact with nothing real behind them.
+    - **FIXED — two fabricated-authority trust badges on the homepage.**
+      "BS5837 Survey Alignment" and "ArbAC Industry Standard" both borrow
+      the name of a real UK arboricultural standard (BS5837 covers trees in
+      relation to construction/demolition; ArbAC is a genuine Arboricultural
+      Association accreditation, confirmed by web search — but it's for
+      utility vegetation-management *contractors*, not planning-data
+      platforms) to imply TreeKey holds a certification it doesn't have.
+      TreeKey aggregates public planning data; it isn't a surveyor or an
+      accredited contractor. Removed both, kept the one trust badge that's a
+      plain checkable fact (Open Government Licence) and added a second
+      equally plain one (sourced directly from council registers).
+    - **FIXED — "Intercept Before Competitors" homepage copy** claimed "we
+      detect competitor density in your area," which was the same fabricated
+      sine/cosine `competitors` number removed in item 12. Reworded to
+      describe what's actually true: council notices are public the moment
+      they're filed, and TreeKey monitors the registers directly.
+    - **FIXED — three undeliverable promises in `payments.py`'s pricing
+      copy:** (1) all three single-lead tiers promised "homeowner name" as a
+      guaranteed instant unlock — it's only present when the council itself
+      published one, so this now says "when the council has published one,"
+      matching what `send_purchased_lead_email` actually tells the buyer
+      per-lead. (2) The large single-lead tier promised "developer contact"
+      outright — never deliverable, no phone/email exists in this data
+      source, ever (same hard privacy-law limit documented in item 11) —
+      removed entirely. (3) `arb_consultant`'s description promised "direct
+      developer company contacts" — no code path in this project actually
+      looks up or delivers a developer's contact details (Companies House
+      enrichment in `bulk_contractor_extractor.py` is a separate pipeline
+      for finding tree-surgery companies to sell subscriptions *to*, not for
+      enriching a lead's developer applicant) — removed. Also reworded
+      `commercial_pro`'s "The average commercial site clearance pays
+      £2,500+" (stated as a verified average with no source) to match the
+      hypothetical "if you land one job at £X" framing already used by
+      every other tier's `real_world_roi`, rather than asserting an
+      unsourced statistic.
+    - **Checked and found clean:** `research.py` and
+      `bulk_contractor_extractor.py` (the Companies House / director /
+      phone-number contractor-discovery pipeline) — no fabricated numbers,
+      fake ratings, or invented statistics found; `random.shuffle()` calls
+      there are query-ordering only, not data generation.
+    - **NOT done — extending Applicant/Agent capture to the Leeds/London
+      bespoke scan functions.** These use ArcGIS (Leeds) and GLA Datahub
+      (London) JSON APIs, not Idox HTML pages, so `_fetch_applicant_and_agent`
+      doesn't apply as-is — it would need each API's actual field names
+      confirmed live first (the same "verify, don't assume" standard used
+      for the PlanIt fix), and I couldn't get a live browser session
+      connected to check ArcGIS's real attribute schema in this pass. Left
+      as a known, documented gap rather than guessing field names.
+    - **DELIBERATELY NOT done — pricing/discount for `has_agent=True`
+      leads.** These leads are now clearly flagged to the buyer (dashboard
+      badge + dispatch email) *before* they pay, which is the part that
+      was actually misleading. Whether to also discount the price or pull
+      these leads from sale is a revenue decision, not a bug — Nick asked
+      this exact pricing question earlier today and I'm answering it with
+      him directly rather than guessing at a discount percentage.
+
     a native iOS/Android app (Apple Developer $99/yr + Google $25 one-time, app
     store review process outside our control, likely weeks of work, ongoing OS
     maintenance) against a PWA: add a web manifest + service worker to the

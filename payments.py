@@ -49,7 +49,15 @@ PLANS = {
     },
     "arb_consultant": {
         "name": "TreeKey Consultant (Planning & Survey)",
-        "description": "For qualified arborists (TechArb/MICFor). Developer condition 7 discharges, BS5837 impact assessments, and direct developer company contacts.",
+        # Aug 30 2026: dropped "direct developer company contacts" -- no code
+        # path in this project actually looks up or delivers a developer's
+        # contact details (that would need Companies House enrichment wired
+        # to a lead's applicant, which doesn't exist here; bulk_contractor_
+        # extractor.py's Companies House lookups are for a separate pipeline
+        # that finds tree-surgery companies to sell subscriptions to, not
+        # for enriching a lead's developer applicant). Only the two
+        # deliverables the pipeline actually produces are listed.
+        "description": "For qualified arborists (TechArb/MICFor). Developer condition 7 discharges and BS5837 impact assessment planning intelligence.",
         "amount": 8900,   # £89/month
         "mode": "subscription",
         "badge": "Planning & Surveyors",
@@ -86,7 +94,13 @@ PLANS = {
         "amount": 14900,  # £149/month
         "mode": "subscription",
         "badge": "Best for Crews",  # was "Most Popular" — duplicated climber_domestic's badge on the same pricing page
-        "real_world_roi": "The average commercial site clearance pays £2,500+. One job pays for the year."
+        # Aug 30 2026: was "The average commercial site clearance pays
+        # £2,500+" -- stated as a verified average with no source behind it,
+        # the same pattern as the fabricated lead-count stats fixed
+        # elsewhere this pass. Reworded to match the hypothetical framing
+        # used by every other tier's real_world_roi (an illustrative "if you
+        # land one job at £X" calculation, not an asserted statistic).
+        "real_world_roi": "One commercial site clearance landed at £2,500 pays for the year."
     },
     "regional_elite": {
         "name": "TreeKey Regional Elite",
@@ -97,13 +111,26 @@ PLANS = {
         "real_world_roi": "50-mile radial boundary with first-priority API routing and a dedicated account manager."
     },
     # Single Lead Pay-As-You-Go Purchases (Single-Sale Inventory Burn)
+    # Aug 30 2026: all three single-lead tiers previously promised "homeowner
+    # name" as a guaranteed instant unlock, and the large tier promised
+    # "developer contact" outright. Neither is accurate: UK councils never
+    # publish a phone number or email on a planning application (a privacy-
+    # law limit, not a scraper gap -- confirmed by auditing what the
+    # homeowner_contact field actually contained across 1,085 real leads:
+    # only placeholder/test data), and the applicant name is only present
+    # when the council itself chose to record and publish it -- it isn't on
+    # every application. Reworded to promise only what's actually, reliably
+    # delivered: the address and application details, with the applicant
+    # name and agent status shown *when the council recorded them* (see
+    # notifications.py's send_purchased_lead_email, which now says exactly
+    # that on a per-lead basis rather than promising it here as a given).
     "single_lead_small": {
         "name": "Single Lead Unlock (Domestic Maintenance)",
         "description": "100% Exclusive unshared planning lead. Once purchased, this lead is permanently deleted from all systems and never sold again.",
         "amount": 1900,   # £19 one-off
         "mode": "payment",
         "badge": "Single Purchase",
-        "real_world_roi": "Instant unlocked property address, homeowner name, and Street View brief."
+        "real_world_roi": "Instant unlocked property address and application details, plus a Street View brief. Applicant name included when the council has published one."
     },
     "single_lead_medium": {
         "name": "Single Lead Unlock (Standard Felling / Tree Removal)",
@@ -111,7 +138,7 @@ PLANS = {
         "amount": 2900,   # £29 one-off
         "mode": "payment",
         "badge": "Single Purchase",
-        "real_world_roi": "Instant unlocked property address, homeowner name, and Street View brief."
+        "real_world_roi": "Instant unlocked property address and application details, plus a Street View brief. Applicant name included when the council has published one."
     },
     "single_lead_large": {
         "name": "Single Lead Unlock (Commercial / Site Clearance / TPO)",
@@ -119,7 +146,7 @@ PLANS = {
         "amount": 4900,   # £49 one-off
         "mode": "payment",
         "badge": "Single Purchase",
-        "real_world_roi": "Instant unlocked property address, developer contact, and planning specs."
+        "real_world_roi": "Instant unlocked property address and full planning specs. Applicant name included when the council has published one."
     }
 }
 
