@@ -13,20 +13,40 @@ logger = logging.getLogger("vector-data-labs")
 # Best-effort in-process dedup for retried Stripe webhooks (Stripe redelivers the same
 # event id on timeout/non-2xx — that's a normal retry, not a fraud/race signal). Doesn't
 # survive a restart or a multi-instance deploy, but removes the common false-positive case.
+#
+# Aug 30 2026: this used to be one function that BOTH checked and marked an event id as
+# processed in the same call, at the very top of handle_stripe_webhook -- before any
+# actual fulfillment (database.burn_lead_inventory, etc.) had even been attempted. That
+# meant a genuinely failed first attempt (e.g. a transient DB error while burning a lead)
+# still marked the event id as "seen", so if Stripe retried the SAME webhook, the retry
+# was wrongly classified as "just a duplicate delivery of an already-handled event" --
+# silently skipping fulfillment a second time AND suppressing the CRITICAL "double sale"
+# alert that exists specifically to catch a customer paying and not receiving their lead.
+# Split into a peek (no side effect, used for the "is this worth alerting about" check)
+# and an explicit mark-as-fulfilled call made ONLY after real success, so a failed first
+# attempt is retried honestly instead of being swallowed.
 _PROCESSED_STRIPE_EVENT_IDS: Dict[str, float] = {}
 
 
-def _is_duplicate_stripe_event(event_id: str) -> bool:
+def _seen_stripe_event(event_id: str) -> bool:
+    """Peek only -- does NOT mark the event as processed. Safe to call before
+    fulfillment has been attempted."""
     import time
     now = time.time()
     for k in [k for k, t in _PROCESSED_STRIPE_EVENT_IDS.items() if now - t > 86400]:
         del _PROCESSED_STRIPE_EVENT_IDS[k]
     if not event_id:
         return False
-    if event_id in _PROCESSED_STRIPE_EVENT_IDS:
-        return True
-    _PROCESSED_STRIPE_EVENT_IDS[event_id] = now
-    return False
+    return event_id in _PROCESSED_STRIPE_EVENT_IDS
+
+
+def _mark_stripe_event_fulfilled(event_id: str) -> None:
+    """Call ONLY after the event's action has actually succeeded (lead burned,
+    subscription registered, etc.) -- marks it so a Stripe redelivery of this
+    same event id is correctly recognised as a harmless duplicate, not retried."""
+    if event_id:
+        import time
+        _PROCESSED_STRIPE_EVENT_IDS[event_id] = time.time()
 
 # ── Pricing Plans (5 Tailored Packages + Single Purchase Marketplace) ─────────
 # All amounts in pence (GBP)
@@ -249,7 +269,8 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
 
     event_type = event["type"]
     data = event["data"]["object"]
-    is_retry = _is_duplicate_stripe_event(event.get("id"))
+    event_id = event.get("id")
+    is_retry = _seen_stripe_event(event_id)
 
     # GDPR Masking for logs
     mask = lambda e: f"{e[0]}***@{e.split('@')[1]}" if e and '@' in e else "unknown"
@@ -269,6 +290,7 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
             if lead_data:
                 logger.info(f"[Stripe] Lead {lead_id} burned from inventory for {mask(customer_email)}")
                 notifications.send_purchased_lead_email(customer_email, lead_data)
+                _mark_stripe_event_fulfilled(event_id)
             elif is_retry:
                 # Stripe redelivers the same event on timeout/non-2xx — this is an
                 # expected retry of an already-fulfilled purchase, not a real double-sale.
@@ -298,6 +320,8 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
                 radius=sub_radius
             )
             logger.info(f"[Stripe] Subscription registered for {mask(customer_email)} ({sub_tier} in {sub_outcode} ±{sub_radius}mi): {reg_ok}")
+            if reg_ok:
+                _mark_stripe_event_fulfilled(event_id)
 
         logger.info(f"[Stripe] Payment complete — {mask(customer_email)} — £{amount / 100:.2f}")
         return {"event": "payment_complete", "email": customer_email,

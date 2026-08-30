@@ -603,19 +603,54 @@ def scan_city_planning_api(city_name: str) -> int:
             authority name. `recent=45` matches this pipeline's general
             lookback window; other_fields carries applicant/agent when
             PlanIt has actually captured it (often "See source" -- filtered
-            out by _planit_real_value, never stored as a real name)."""
-            try:
-                import time
-                time.sleep(1.0)  # Polite throttle for PlanIt
-                planit_res = net_utils.smart_get(
-                    "https://www.planit.org.uk/api/applics/json",
-                    params={"auth": town, "recent": 45, "pg_sz": 50},
-                    timeout=12
-                )
-                if planit_res.status_code != 200:
-                    logger.debug(f"[{city_name}] PlanIt HTTP {planit_res.status_code} for authority '{town}'")
-                    planit_failures.append(f"'{town}': HTTP {planit_res.status_code}")
+            out by _planit_real_value, never stored as a real name).
+
+            Aug 30 2026: live logs showed PlanIt returning HTTP 429 for
+            EVERY authority in EVERY one of the 16 regions in a single run --
+            the actual root cause of days of "0 new leads" that looked
+            identical to a genuine empty result. PlanIt's own docs confirm
+            429 responses come with a Retry-After header telling callers
+            exactly how long to back off, which this code never checked --
+            it just gave up immediately, every time. Now waits out
+            Retry-After (capped at 20s so one slow authority can't stall the
+            whole region) and retries once before giving up for real. This
+            was previously run inside the same 6-worker pool as the paid
+            API -- with up to 6 concurrent PlanIt requests per region, 16
+            regions back-to-back, no pause between them -- which is very
+            likely what triggered the rate limit in the first place; see the
+            reduced, dedicated executor below."""
+            import time
+            for attempt in range(2):
+                try:
+                    time.sleep(1.5)  # Polite throttle for PlanIt
+                    planit_res = net_utils.smart_get(
+                        "https://www.planit.org.uk/api/applics/json",
+                        params={"auth": town, "recent": 45, "pg_sz": 50},
+                        timeout=12
+                    )
+                    if planit_res.status_code == 429:
+                        retry_after = planit_res.headers.get("Retry-After")
+                        try:
+                            wait_s = min(float(retry_after), 20.0) if retry_after else 8.0
+                        except (ValueError, TypeError):
+                            wait_s = 8.0
+                        if attempt == 0:
+                            logger.info(f"[{city_name}] PlanIt rate-limited (429) for '{town}', waiting {wait_s:.0f}s and retrying once...")
+                            time.sleep(wait_s)
+                            continue
+                        logger.debug(f"[{city_name}] PlanIt still 429 for '{town}' after backoff, giving up for this run.")
+                        planit_failures.append(f"'{town}': HTTP 429 (rate limited, retry also failed)")
+                        return town, []
+                    if planit_res.status_code != 200:
+                        logger.debug(f"[{city_name}] PlanIt HTTP {planit_res.status_code} for authority '{town}'")
+                        planit_failures.append(f"'{town}': HTTP {planit_res.status_code}")
+                        return town, []
+                    break
+                except Exception as e:
+                    logger.debug(f"[{city_name}] PlanIt error for authority '{town}': {e}")
+                    planit_failures.append(f"'{town}': {e}")
                     return town, []
+            try:
                 data = planit_res.json()
                 if isinstance(data, dict) and data.get("error"):
                     logger.warning(f"[{city_name}] PlanIt returned an error for authority '{town}': {data.get('error')}")
@@ -642,7 +677,16 @@ def scan_city_planning_api(city_name: str) -> int:
 
         with ThreadPoolExecutor(max_workers=6) as executor:
             paid_results = list(executor.map(fetch_paid, postcode_prefixes)) if postcode_prefixes else []
-            planit_results = list(executor.map(fetch_planit, region_towns)) if region_towns else []
+
+        # Aug 30 2026: PlanIt gets its own smaller pool, separate from the
+        # paid API's -- up to 6 concurrent PlanIt requests per region, times
+        # 16 regions run back-to-back with no pause, is the most likely
+        # trigger for the blanket 429s seen in production. 2 workers plus
+        # the 1.5s throttle inside fetch_planit itself keeps this run
+        # noticeably gentler without materially slowing the pipeline down
+        # (PlanIt calls were never the bottleneck stage).
+        with ThreadPoolExecutor(max_workers=2) as planit_executor:
+            planit_results = list(planit_executor.map(fetch_planit, region_towns)) if region_towns else []
 
         if UK_PLANNING_API_KEY and postcode_prefixes and len(paid_failures) == len(postcode_prefixes):
             logger.warning(

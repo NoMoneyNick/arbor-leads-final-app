@@ -44,8 +44,6 @@ if "database" not in sys.modules:
     _fake_database = types.ModuleType("database")
     _fake_database.get_db_conn = MagicMock()
     _fake_database.increment_api_usage = MagicMock(return_value={"warning_needed": False})
-    _fake_database.get_scan_progress = MagicMock(return_value=None)
-    _fake_database.set_scan_progress = MagicMock()
     sys.modules["database"] = _fake_database
 
 if "notifications" not in sys.modules:
@@ -407,6 +405,47 @@ class TestMeshCouncilDedup(unittest.TestCase):
         self.assertEqual(len(leads), 2)
 
 
+class TestIdoxPathRouting(unittest.TestCase):
+    """Aug 30 2026: scrape_mesh_council() used to only recognise
+    "online-applications" in a council's URL as a working Idox instance --
+    anything else (including other standard Idox conventions like
+    "publicaccess" and "idoxpa-web") silently returned [] with no error,
+    no log, nothing. Confirmed live against the registry: Edinburgh
+    (idoxpa-web) and Dacorum (publicaccess) were both being scraped for
+    zero leads every run despite being real, working Idox portals."""
+
+    def _fake_no_leads(self, days_back=30, search_term="tree"):
+        return []
+
+    def test_publicaccess_path_is_routed_to_idox_engine(self):
+        with patch.object(mesh_scrapers.IdoxScraper, "search_tree_applications", self._fake_no_leads), \
+             patch("time.sleep", return_value=None), \
+             patch.dict(mesh_scrapers.COUNCIL_REGISTRY, {"TEST PUBLICACCESS": "https://planning.example.gov.uk/publicaccess"}):
+            with patch.object(mesh_scrapers, "logger") as mock_logger:
+                mesh_scrapers.scrape_mesh_council("TEST PUBLICACCESS")
+                mock_logger.info.assert_any_call(
+                    "[MESH] Routing TEST PUBLICACCESS to free Idox Engine..."
+                )
+
+    def test_idoxpa_web_path_is_routed_to_idox_engine(self):
+        with patch.object(mesh_scrapers.IdoxScraper, "search_tree_applications", self._fake_no_leads), \
+             patch("time.sleep", return_value=None), \
+             patch.dict(mesh_scrapers.COUNCIL_REGISTRY, {"TEST IDOXPA": "https://planning.example.gov.uk/idoxpa-web"}):
+            with patch.object(mesh_scrapers, "logger") as mock_logger:
+                mesh_scrapers.scrape_mesh_council("TEST IDOXPA")
+                mock_logger.info.assert_any_call(
+                    "[MESH] Routing TEST IDOXPA to free Idox Engine..."
+                )
+
+    def test_genuinely_non_idox_url_still_returns_empty_without_routing(self):
+        """A council on a real non-Idox platform (Northgate, Salesforce,
+        etc.) must NOT be routed into IdoxScraper -- that would just waste
+        requests hammering a page IdoxScraper can't parse."""
+        with patch.dict(mesh_scrapers.COUNCIL_REGISTRY, {"TEST NORTHGATE": "https://planning1.example.gov.uk/Northgate/PlanningExplorer/GeneralSearch.aspx"}):
+            leads = mesh_scrapers.scrape_mesh_council("TEST NORTHGATE")
+        self.assertEqual(leads, [])
+
+
 class TestNetUtilsResilience(unittest.TestCase):
     """net_utils.smart_get/smart_post -- the retry/backoff/TLS-fallback
     wrapper every scraper now goes through. All network calls are mocked;
@@ -621,6 +660,54 @@ class TestPlanitFallback(unittest.TestCase):
 
     def test_no_prefixes_and_no_towns_returns_zero_without_crashing(self):
         self.assertEqual(scanners.scan_city_planning_api("Nonexistent Region"), 0)
+
+    def test_planit_429_backs_off_and_retries_once_then_succeeds(self):
+        """Aug 30 2026: live logs showed PlanIt returning 429 for every
+        single authority in every region, days in a row -- indistinguishable
+        from a genuine zero-results run until the new aggregate warning
+        surfaced it. PlanIt's own docs say a 429 carries a Retry-After
+        header callers should wait out before retrying. This must actually
+        wait it out and succeed on the retry, not give up immediately."""
+        rate_limited = MagicMock(status_code=429)
+        rate_limited.headers = {"Retry-After": "3"}
+        success = self._fake_response(json_data={"records": [
+            {"uid": "23/9999/TRE", "description": "Fell 1 Oak", "address": "1 Test St", "link": "", "other_fields": {}}
+        ]})
+        success.headers = {}
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", side_effect=[rate_limited, success]), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"reference": "23/9999/TRE"}), \
+             patch("time.sleep") as mock_sleep:
+            count = scanners.scan_city_planning_api("Bristol")
+
+        self.assertEqual(count, 1)
+        # Must have waited out the Retry-After value (3s) somewhere in its sleeps.
+        slept_for = [c.args[0] for c in mock_sleep.call_args_list if c.args]
+        self.assertIn(3.0, slept_for)
+
+    def test_planit_429_gives_up_after_one_retry_and_is_counted_as_a_failure(self):
+        """If the retry ALSO 429s, this must be recorded as a real failure
+        (so the "PlanIt failed for ALL authorities" aggregate warning can
+        fire) rather than silently returning an empty, indistinguishable-
+        from-genuine-zero result."""
+        rate_limited = MagicMock(status_code=429)
+        rate_limited.headers = {"Retry-After": "1"}
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=rate_limited), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead") as mock_insert, \
+             patch("time.sleep", return_value=None), \
+             patch.object(scanners, "logger") as mock_logger:
+            count = scanners.scan_city_planning_api("Bristol")
+
+        self.assertEqual(count, 0)
+        mock_insert.assert_not_called()
+        # The "failed for ALL authorities" warning must have fired.
+        warning_texts = [c.args[0] for c in mock_logger.warning.call_args_list if c.args]
+        self.assertTrue(any("PlanIt failed for ALL" in t for t in warning_texts))
 
     def test_paid_api_mismatched_outcode_is_skipped_not_mislabeled(self):
         """Aug 30 2026: ukplanningapi.co.uk was found (during the PlanIt

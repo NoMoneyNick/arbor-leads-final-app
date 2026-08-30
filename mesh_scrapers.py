@@ -55,9 +55,29 @@ COUNCIL_REGISTRY = {
     "BRISTOL": "https://planningonline.bristol.gov.uk/online-applications",
     "LEEDS": "https://publicaccess.leeds.gov.uk/online-applications",
     "SHEFFIELD": "https://planningapps.sheffield.gov.uk/online-applications",
-    "NEWCASTLE": "https://publicaccess.newcastle.gov.uk/online-applications",
+
+    # Removed Aug 30 2026 -- same "confirmed dead against this exact URL,
+    # not a transient blip" situation as the London-borough block further
+    # down, verified against today's live scan logs plus an independent web
+    # check before removing:
+    #   "NEWCASTLE": DNS failed in logs (3x NameResolutionError). Newcastle's
+    #       own site confirms the search moved to a new host entirely --
+    #       portal.newcastle.gov.uk/planning/index.html, described as a
+    #       "Public Access" system (so likely still Idox-based software, just
+    #       a new hostname). Tried the obvious guess of swapping in
+    #       portal.newcastle.gov.uk/online-applications directly, but it
+    #       returned an HTTP 406 rather than confirming a working advanced
+    #       search page -- not safe to assume that's the right path without
+    #       manually confirming the real URL structure first.
+    #   "CAMBRIDGE": Connection refused in logs (3x, not a DNS failure --
+    #       the domain still resolves but nothing is listening on port 443
+    #       anymore, consistent with an old server being decommissioned
+    #       after a migration). Greater Cambridge Shared Planning announced
+    #       a full redesign of their planning search on Dec 10 2025, now
+    #       living at greatercambridgeplanning.org with postcode-based
+    #       search -- a different, non-Idox interface, so this needs a
+    #       dedicated scraper, not a URL swap.
     "OXFORD": "https://public.oxford.gov.uk/online-applications",
-    "CAMBRIDGE": "https://applications.greatercambridgeplanning.org/online-applications",
     "BATH & NORTH EAST SOMERSET": "https://www.bathnes.gov.uk/developmentmanagement/Detail.aspx",
     "YORK": "https://planningaccess.york.gov.uk/online-applications",
     "EXETER": "https://publicaccess.exeter.gov.uk/online-applications",
@@ -404,16 +424,40 @@ class IdoxScraper:
             
         return leads
 
+# Aug 30 2026: Idox's "Public Access" product is the same software regardless
+# of which base path a council's IT department chose to mount it at when they
+# set it up -- search.do, advancedSearchResults.do, applicationDetails.do,
+# and the <ul id="searchresults"> markup IdoxScraper parses are all part of
+# the underlying Idox application itself, not something a council can
+# customise. "online-applications" is by far the most common convention, but
+# "publicaccess" (a literal reference to the product's own name) and
+# "idoxpa-web" are also standard Idox deployments. Before this fix,
+# scrape_mesh_council() only recognised "online-applications" and silently
+# returned [] for anything else -- no error, no log line, nothing -- which
+# meant every council using one of these other two conventions (confirmed:
+# Edinburgh on idoxpa-web, Dacorum on publicaccess) was being scraped for
+# precisely zero leads on every single run despite being a perfectly working
+# Idox portal. Checked the other 12 currently-registered non-matching URLs
+# (Fife, Bath & North East Somerset, Derby, West Northamptonshire,
+# Stratford-on-Avon, Wiltshire, Dorset, Richmond, Wandsworth, Kensington &
+# Chelsea, Camden, New Forest) individually -- none of their URLs match any
+# known Idox path convention, so they're very likely genuinely different
+# software (Northgate/NEC for at least Wandsworth, going by its URL) and
+# are NOT silently-broken Idox instances -- left alone here, tracked
+# separately for dedicated scrapers.
+_KNOWN_IDOX_PATH_MARKERS = ("online-applications", "publicaccess", "idoxpa-web")
+
+
 def scrape_mesh_council(city_name: str) -> List[Dict]:
     """
-    Entry point for the MESH orchestrator. 
+    Entry point for the MESH orchestrator.
     Returns a list of leads, or [] if no leads/failure.
     """
     city_upper = city_name.strip().upper()
 
     # Handle known IDOX implementations
     base_url = COUNCIL_REGISTRY.get(city_upper)
-    if base_url and "online-applications" in base_url.lower():
+    if base_url and any(marker in base_url.lower() for marker in _KNOWN_IDOX_PATH_MARKERS):
         logger.info(f"[MESH] Routing {city_upper} to free Idox Engine...")
         scraper = IdoxScraper(base_url)
 

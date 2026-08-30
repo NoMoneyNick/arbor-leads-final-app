@@ -31,11 +31,17 @@ def _agent_status_badge(lead: dict) -> str:
     return "<span style='color:#94a3b8;'>— Unconfirmed</span>"
 
 
-def send_resend_email(subject: str, html_body: str):
-    """Sends an email alert via the Resend API."""
+def send_resend_email(subject: str, html_body: str) -> bool:
+    """Sends an email alert via the Resend API. Returns True only on a
+    confirmed successful send -- callers (notably send_system_incident_alert's
+    throttle and its own "Sent" log line) previously assumed this always
+    succeeded, which meant a real failure (e.g. today's unverified-domain
+    403s) was logged as "Sent" and silently started the alert's throttle
+    window anyway, delaying the NEXT attempt by hours even though nothing
+    had actually gone out."""
     if not RESEND_API_KEY or not TEST_EMAIL:
         logging.warning("[Email] RESEND_API_KEY or TEST_EMAIL not set — skipping.")
-        return
+        return False
     try:
         res = requests.post(
             "https://api.resend.com/emails",
@@ -53,10 +59,14 @@ def send_resend_email(subject: str, html_body: str):
         )
         if res.status_code not in (200, 201):
             logging.error(f"[Email] Resend returned {res.status_code}: {res.text[:200]}")
+            return False
+        return True
     except requests.exceptions.Timeout:
         logging.error("[Email] Resend request timed out.")
+        return False
     except Exception as e:
         logging.error(f"[Email] Unexpected error: {e}")
+        return False
 
 
 def send_purchased_lead_email(customer_email: str, lead_data: dict):
@@ -474,8 +484,10 @@ def send_api_quota_warning_email(
         </div>
     </div>
     """
-    send_resend_email(subject, html_body)
-    logging.warning(f"[URGENT QUOTA WARNING] Dispatched ALL-CAPS alert for {api_name} ({current_calls}/{cap}, projected {projected_monthly}) to {TEST_EMAIL}")
+    if send_resend_email(subject, html_body):
+        logging.warning(f"[URGENT QUOTA WARNING] Dispatched ALL-CAPS alert for {api_name} ({current_calls}/{cap}, projected {projected_monthly}) to {TEST_EMAIL}")
+    else:
+        logging.error(f"[URGENT QUOTA WARNING] FAILED to dispatch alert for {api_name} ({current_calls}/{cap}) — email did not go out.")
 
 
 import time
@@ -502,7 +514,12 @@ def send_system_incident_alert(
         logging.info(f"[ALERT THROTTLED] Suppressed duplicate alert for {cache_key} (sent {round((now_ts - last_sent)/60)}m ago).")
         return
 
-    _ALERT_THROTTLE_CACHE[cache_key] = now_ts
+    # Aug 30 2026: the throttle window used to start here, before the send
+    # below was even attempted -- a failed send (Resend down, unverified
+    # domain, etc.) still "used up" the throttle, silently blocking the next
+    # real attempt for up to throttle_hours even though nothing had gone out
+    # yet. Now only set once send_resend_email confirms success, further
+    # down.
 
     color_map = {
         "CRITICAL": {"border": "#b91c1c", "bg": "#b91c1c", "card_bg": "#fef2f2", "card_border": "#f87171", "btn": "#dc2626"},
@@ -560,5 +577,9 @@ def send_system_incident_alert(
         </div>
     </div>
     """
-    send_resend_email(subject, html_body)
-    logging.warning(f"[SYSTEM INCIDENT ALERT] Sent {severity} email for {category}: {title} to {TEST_EMAIL}")
+    sent_ok = send_resend_email(subject, html_body)
+    if sent_ok:
+        _ALERT_THROTTLE_CACHE[cache_key] = now_ts
+        logging.warning(f"[SYSTEM INCIDENT ALERT] Sent {severity} email for {category}: {title} to {TEST_EMAIL}")
+    else:
+        logging.error(f"[SYSTEM INCIDENT ALERT] FAILED to send {severity} email for {category}: {title} — not throttling, will retry on next occurrence.")
