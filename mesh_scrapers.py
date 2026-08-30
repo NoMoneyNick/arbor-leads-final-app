@@ -4,7 +4,7 @@ import datetime
 import urllib3
 import re
 import time
-from typing import List, Dict
+from typing import List, Dict, Optional, Tuple
 
 import net_utils
 
@@ -262,6 +262,17 @@ class IdoxScraper:
                     continue
                 if label == "Applicant Name":
                     out["applicant_name"] = value
+                elif label == "Applicant Company Name" and not out.get("applicant_name"):
+                    # Aug 30 2026: when the applicant is a company/organisation
+                    # rather than a person, Idox's own detail page labels this
+                    # row "Applicant Company Name", not "Applicant Name" -- the
+                    # docstring above already anticipated this second label,
+                    # but only the first was ever actually matched, so every
+                    # company-applicant case (a business filing its own
+                    # planning application) silently lost its name here. Only
+                    # used as a fallback so a genuine "Applicant Name" row
+                    # (when both happen to be present) always wins.
+                    out["applicant_name"] = value
                 elif label == "Agent Name":
                     out["agent_name"] = value
                 elif label == "Agent Company Name":
@@ -446,6 +457,56 @@ class IdoxScraper:
 # are NOT silently-broken Idox instances -- left alone here, tracked
 # separately for dedicated scrapers.
 _KNOWN_IDOX_PATH_MARKERS = ("online-applications", "publicaccess", "idoxpa-web")
+
+
+def _parse_idox_detail_url(source_url: str) -> Optional[Tuple[str, str]]:
+    """Aug 30 2026: PlanIt's own published field dictionary confirms
+    applicant_name/agent_name are DELIBERATELY never stored by PlanIt itself
+    ("For Data Protection reasons this value is not stored but there is a
+    note if it is available in the source") -- that's why they're empty on
+    essentially every PlanIt-sourced lead; it isn't a scraper bug. But
+    PlanIt's own "url" field (the original planning authority's own
+    website) and other_fields.source_url point straight back to the real
+    council portal page it scraped from -- which, for the large majority of
+    UK authorities, is the exact same Idox software this file already knows
+    how to read directly (see COUNCIL_REGISTRY / IdoxScraper above).
+
+    Given one of those URLs, returns (base_url, key_val) -- the two
+    arguments IdoxScraper needs -- if it's a recognisable Idox detail page
+    with a keyVal, else None (a non-Idox authority, or an unparseable URL --
+    both leave the lead exactly as "unconfirmed" as before this function
+    existed; this can only ever ADD confirmations, never remove
+    information)."""
+    if not source_url or not isinstance(source_url, str):
+        return None
+    lower = source_url.lower()
+    key_match = re.search(r'keyVal=([^&]+)', source_url, re.I)
+    if not key_match:
+        return None
+    for marker in _KNOWN_IDOX_PATH_MARKERS:
+        idx = lower.find(marker)
+        if idx != -1:
+            base_url = source_url[:idx + len(marker)]
+            return base_url.rstrip("/"), key_match.group(1)
+    return None
+
+
+def confirm_agent_status_from_source(source_url: str) -> Dict:
+    """Reuses IdoxScraper._fetch_applicant_and_agent -- built for
+    mesh_scrapers.py's own directly-registered councils -- against ANY
+    Idox authority PlanIt covers, by following PlanIt's own link back to
+    the original source page. This is what turns most of PlanIt's
+    structural "we don't know" into a real, confirmed yes/no, at the scale
+    of however many of PlanIt's 420 authorities run recognisable Idox
+    software -- not just the handful in COUNCIL_REGISTRY. Returns {} --
+    unconfirmed, exactly as if this function didn't exist -- for a
+    non-Idox authority, an unparseable URL, or any fetch failure."""
+    parsed = _parse_idox_detail_url(source_url)
+    if not parsed:
+        return {}
+    base_url, key_val = parsed
+    scraper = IdoxScraper(base_url)
+    return scraper._fetch_applicant_and_agent(key_val)
 
 
 def scrape_mesh_council(city_name: str) -> List[Dict]:

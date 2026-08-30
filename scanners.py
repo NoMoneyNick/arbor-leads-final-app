@@ -2,6 +2,8 @@ import os
 import re
 import requests
 import time
+import datetime
+import threading
 import logging
 from typing import Optional, List, Tuple, Dict, Any
 import database
@@ -163,11 +165,39 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
 
 # ── Leeds Scanner (ArcGIS + Yorkshire Regional Councils) ──────────────────────
 
+# Aug 30 2026: Nick flagged that troubleshooting/manual re-triggers of the
+# pipeline (redeploys, manual /scan-nationwide calls, active testing --
+# exactly what a heavy development day like today looks like) were each
+# separately hammering all 50+ real council government websites in
+# COUNCIL_REGISTRY a second, third, fourth time in the same day. Unlike
+# ukplanningapi.co.uk's monthly quota (a money problem, fixed above with
+# rotation), this is a good-citizen problem: these are small councils'
+# own servers, not built to be scraped repeatedly in one afternoon, and
+# the "same portal hit by two overlapping scans within seconds" pattern
+# is already on record (see _dispatch_locked_scan in main.py) as a likely
+# cause of real 503s/timeouts. Same-day dedup, in-memory (resets on a
+# Render restart, which is rare compared to daily cron runs) -- the worst
+# case is one extra full sweep right after a redeploy, not a recurring
+# problem.
+_MESH_SCAN_DAY_CACHE: Optional[str] = None
+
+
 def run_mesh_network_scan() -> int:
     """
     Executes a direct scan of all councils mapped in the Aggregator Mesh (Idox portals, etc.)
     Bypasses the third-party paid API entirely to save quota.
     """
+    global _MESH_SCAN_DAY_CACHE
+    today_str = datetime.date.today().isoformat()
+    if _MESH_SCAN_DAY_CACHE == today_str:
+        logger.info(
+            "[MESH] Already ran the full council sweep once today (this process) -- "
+            "skipping this re-trigger rather than hitting all 50+ council websites again. "
+            "Set the PAID_API_ROTATION_DAYS-style override aside; this one has no override "
+            "since re-scraping free council sites has no quota to spend, only their goodwill."
+        )
+        return 0
+
     try:
         import mesh_scrapers
     except ImportError:
@@ -210,7 +240,12 @@ def run_mesh_network_scan() -> int:
 
     if new_leads:
         notifications.dispatch_lead_alerts("MESH-NATIONWIDE", new_leads)
-        
+
+    # Mark today's sweep as done regardless of outcome -- a same-day retry
+    # wouldn't fix a real council-side outage anyway, and the goal here is
+    # strictly "at most one full council sweep per calendar day".
+    _MESH_SCAN_DAY_CACHE = today_str
+
     logger.info(f"[MESH] Mesh Scan complete. {len(new_leads)} free leads extracted directly from councils.")
     return len(new_leads)
 
@@ -219,8 +254,22 @@ def scan_leeds_leads() -> int:
     """
     Scans both:
     1. Leeds City Council ArcGIS MapServer Layer 12 (15-mile spatial boundary)
-    2. Surrounding Yorkshire councils (Bradford, Wakefield, Kirklees, Calderdale, York, Harrogate, North Yorkshire)
-       via UK Planning API postcodes (LS, BD, WF, HX, HD, YO, HG, HU, DL, TS).
+    2. Surrounding Yorkshire councils (Bradford, Wakefield, Kirklees, Calderdale,
+       York, Harrogate, North Yorkshire) -- delegated to scan_city_planning_api("Leeds").
+
+    Aug 30 2026: part 2 used to carry its own hardcoded copy of these exact
+    Yorkshire postcode prefixes (LS, BD, WF, HX, HD, YO, HG, HU, DL, TS --
+    identical to CITY_POSTCODE_PREFIX["Leeds"]) in a raw loop straight
+    against ukplanningapi.co.uk, with no rotation, no same-day dedup, and
+    no 429/quota-aware logging. This function is only reachable via
+    scan_nationwide_bulk_crawler()'s "Leeds" special-case (manual/admin
+    endpoints), so every manual trigger of it was completely bypassing the
+    quota-headroom and good-citizen fixes added to scan_city_planning_api()
+    above -- found while checking whether any other code path had the same
+    gap as scan_london_leads() (which had the identical problem, fixed the
+    same way just above). Delegating here closes that gap and picks up
+    PlanIt coverage for Leeds as a bonus (this function never queried
+    PlanIt directly before).
     """
     new_leads = []
     conn = database.get_db_conn()
@@ -257,166 +306,183 @@ def scan_leeds_leads() -> int:
     except Exception as e:
         logger.debug(f"[Leeds ArcGIS] Error: {e}")
 
-    # 2. Yorkshire Surrounding Councils Scan via UK Planning API
-    if UK_PLANNING_API_KEY:
-        yorkshire_prefixes = ["LS", "BD", "WF", "HX", "HD", "YO", "HG", "HU", "DL", "TS"]
-        headers = {"X-API-Key": UK_PLANNING_API_KEY}
-        for prefix in yorkshire_prefixes:
-            try:
-                import time
-                time.sleep(1.5) # Cron job throttle to prevent 6am ban
-                res = net_utils.smart_get(
-                    "https://ukplanningapi.co.uk/v1/applications",
-                    params={"postcode": prefix, "status": "received", "limit": 200},
-                    headers=headers,
-                    timeout=15
-                )
-                if res.status_code == 429:
-                    break
-                if res.status_code == 200:
-                    records = res.json().get("data", [])
-                    for item in records:
-                        summary = item.get("description", "") or ""
-                        if not _is_tree_related(summary):
-                            continue
-                        ref  = item.get("reference") or f"{prefix}-{int(time.time())}"
-                        addr = item.get("address", f"Leeds / {prefix}")
-                        lead = _insert_lead(cur, ref, addr, summary, "Leeds")
-                        if lead:
-                            new_leads.append(lead)
-            except Exception as pe:
-                logger.debug(f"[Leeds Yorkshire Radar] Error scanning prefix '{prefix}': {pe}")
-
     conn.commit()
     cur.close()
     conn.close()
 
+    # 2. Surrounding Yorkshire councils -- delegated (see docstring above),
+    # so it inherits rotation + same-day dedup automatically.
+    yorkshire_count = scan_city_planning_api("Leeds")
+
     if new_leads:
         notifications.dispatch_lead_alerts("Leeds", new_leads)
-    logger.info(f"[Leeds] Scan complete. {len(new_leads)} new leads found across Yorkshire.")
-    return len(new_leads)
+    total = len(new_leads) + yorkshire_count
+    logger.info(
+        f"[Leeds] Scan complete. {total} new leads found "
+        f"({len(new_leads)} via ArcGIS, {yorkshire_count} via Yorkshire radar)."
+    )
+    return total
 
 
 
 # ── London Scanner (GLA Datahub + Complete London & Green Belt Postcodes) ──────
- 
+
+# Aug 30 2026: same-day dedup, same reasoning as _MESH_SCAN_DAY_CACHE above --
+# a single request per call, so the stakes are much lower than the mesh
+# scan, but there's no reason to hit a re-trigger's worth of extra calls
+# against someone else's free government API either.
+_GLA_DAY_CACHE: Optional[str] = None
+
+
+def scan_gla_datahub_london() -> int:
+    """
+    Aug 30 2026: extracted out of scan_london_leads() below. That function's
+    part 2 duplicates ALL of its own postcode-prefix logic against the now-
+    hardened scan_city_planning_api() -- same 29 London/Home-Counties
+    prefixes (see CITY_POSTCODE_PREFIX["London"] further down), same
+    ukplanningapi.co.uk endpoint, just without the 429 backoff, aggregate-
+    failure warning, or dedup this file's Aug 30 hardening pass added
+    everywhere else. Stage 1 of the daily pipeline (main.py's
+    run_master_daily_pipeline) already calls scan_city_planning_api("London")
+    for that exact coverage every single day, so re-running scan_london_
+    leads()'s part 2 there would double-fetch the same prefixes and burn
+    through the 500/month free-tier quota twice as fast for zero new leads.
+
+    The ONE genuinely distinct, non-duplicated piece is this: the free
+    London GLA Planning Datahub (planningdata.london.gov.uk) -- a separate
+    government open-data API, not ukplanningapi.co.uk or PlanIt, that this
+    project has had built and working since before this hardening pass.
+    But scan_london_leads() itself was never actually wired into the
+    scheduled daily pipeline (it's only reachable from three manual/admin-
+    triggered endpoints via scan_nationwide_bulk_crawler()) -- so this free
+    third source has been sitting unused on every automated daily run.
+    Pulled out on its own so Stage 1 can call it directly for the London
+    region, ADDITIONALLY to (not instead of) the existing
+    scan_city_planning_api("London") call -- exactly the "more free sources
+    to spread the request load across" strategy this was built for.
+    """
+    global _GLA_DAY_CACHE
+    if not GLA_API_KEY:
+        return 0
+    today_str = datetime.date.today().isoformat()
+    if _GLA_DAY_CACHE == today_str:
+        logger.debug("[London GLA] Already queried once today (this process) -- skipping re-trigger.")
+        return 0
+    _GLA_DAY_CACHE = today_str
+
+    new_leads = []
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        headers = {"Authorization": GLA_API_KEY, "Accept": "application/json"}
+        import time
+        time.sleep(1.0)  # London throttle
+        res = net_utils.smart_get(
+            "https://planningdata.london.gov.uk/api/applications",
+            params={"limit": 100},
+            headers=headers,
+            timeout=15
+        )
+        if res.status_code in (401, 403):
+            notifications.send_system_incident_alert(
+                category="SECURITY & API KEYS",
+                title="LONDON GLA PLANNING DATAHUB TOKEN INVALID",
+                description="CRITICAL: London GLA Planning Datahub rejected requests with HTTP 401/403 Unauthorized.",
+                impact="Planning lead scraping across all 32 London Boroughs via the free GLA Datahub is paused.",
+                action_required="Check GLA_API_KEY in Render and regenerate token at planningdata.london.gov.uk.",
+                severity="CRITICAL",
+                throttle_hours=6.0
+            )
+        elif res.status_code == 200:
+            records = res.json().get("data", [])
+            for item in records:
+                # Search across all possible GLA description fields to avoid placeholder names
+                summary = (
+                    item.get("description")
+                    or item.get("proposal")
+                    or item.get("development_description")
+                    or item.get("details")
+                    or item.get("proposal_summary")
+                    or item.get("title")
+                    or ""
+                ).strip()
+
+                if not summary or not _is_tree_related(summary):
+                    continue
+
+                # Extract nested or flat address
+                addr = ""
+                if isinstance(item.get("location"), dict):
+                    addr = item["location"].get("address", "")
+                elif isinstance(item.get("site"), dict):
+                    addr = item["site"].get("address", "")
+                if not addr:
+                    addr = item.get("site_address") or item.get("address") or item.get("address_text") or "London"
+
+                ref = (
+                    item.get("reference")
+                    or item.get("application_reference")
+                    or item.get("lpa_app_no")
+                    or item.get("planning_reference")
+                    or f"LON-{int(time.time())}"
+                )
+
+                lead = _insert_lead(cur, ref, addr, summary, "London")
+                if lead:
+                    new_leads.append(lead)
+        else:
+            logger.debug(f"[London GLA] HTTP {res.status_code}")
+    except Exception as e:
+        logger.error(f"[London GLA] Error: {e}")
+    finally:
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    if new_leads:
+        notifications.dispatch_lead_alerts("London", new_leads)
+    logger.info(f"[London GLA Datahub] Scan complete. {len(new_leads)} tree-related leads found.")
+    return len(new_leads)
+
+
 def scan_london_leads() -> int:
     """
     Scans London & Green Belt planning applications:
     1. London GLA Planning Datahub (deep multi-field extraction across all 32 London Boroughs)
     2. Comprehensive UK Planning API & PlanIt radar covering all Inner & Outer London + Home Counties postcodes:
        (SW, SE, NW, N, E, EC, WC, CR, BR, EN, HA, UB, KT, TW, DA, RM, IG, SM, RH, TN, GU, CM, SS, SL, HP, AL, SG, WD, ME).
+
+    Aug 30 2026: only reachable via scan_nationwide_bulk_crawler() (the
+    manual /scan-nationwide-style endpoints), never from the scheduled
+    daily pipeline. Part 1 (GLA Datahub) is now shared with Stage 1's own
+    direct call via scan_gla_datahub_london() above -- kept here too so
+    this function's existing manual-trigger callers keep working exactly
+    as before, without duplicating the GLA-fetching code itself.
+
+    Part 2 used to carry its own hardcoded copy of these exact 29 London/
+    Home-Counties postcode prefixes (identical to CITY_POSTCODE_PREFIX
+    ["London"]) in a raw loop straight against ukplanningapi.co.uk -- no
+    rotation, no same-day dedup, no 429/quota-aware logging. Since this
+    function is only reachable via manual/admin endpoints, every manual
+    trigger of it completely bypassed the quota-headroom fixes added to
+    scan_city_planning_api() -- exactly the gap Nick asked about ("will
+    that cover it though?"). Delegating here closes it and picks up
+    PlanIt coverage for London as a bonus (this loop never queried PlanIt
+    directly before).
     """
-    new_leads = []
-    conn = database.get_db_conn()
-    cur = conn.cursor()
+    gla_count = scan_gla_datahub_london()  # runs + inserts + dispatches alerts on its own connection
 
-    # 1. GLA Datahub Scan with robust schema mapping
-    if GLA_API_KEY:
-        try:
-            headers = {"Authorization": GLA_API_KEY, "Accept": "application/json"}
-            import time
-            time.sleep(1.0) # London throttle
-            res = net_utils.smart_get(
-                "https://planningdata.london.gov.uk/api/applications",
-                params={"limit": 100},
-                headers=headers,
-                timeout=15
-            )
-            if res.status_code in (401, 403):
-                notifications.send_system_incident_alert(
-                    category="SECURITY & API KEYS",
-                    title="LONDON GLA PLANNING DATAHUB TOKEN INVALID",
-                    description="CRITICAL: London GLA Planning Datahub rejected requests with HTTP 401/403 Unauthorized.",
-                    impact="Planning lead scraping across all 32 London Boroughs is paused.",
-                    action_required="Check GLA_API_KEY in Render and regenerate token at planningdata.london.gov.uk.",
-                    severity="CRITICAL",
-                    throttle_hours=6.0
-                )
-            elif res.status_code == 200:
-                records = res.json().get("data", [])
-                for item in records:
-                    # Search across all possible GLA description fields to avoid placeholder names
-                    summary = (
-                        item.get("description")
-                        or item.get("proposal")
-                        or item.get("development_description")
-                        or item.get("details")
-                        or item.get("proposal_summary")
-                        or item.get("title")
-                        or ""
-                    ).strip()
-                    
-                    if not summary or not _is_tree_related(summary):
-                        continue
-                        
-                    # Extract nested or flat address
-                    addr = ""
-                    if isinstance(item.get("location"), dict):
-                        addr = item["location"].get("address", "")
-                    elif isinstance(item.get("site"), dict):
-                        addr = item["site"].get("address", "")
-                    if not addr:
-                        addr = item.get("site_address") or item.get("address") or item.get("address_text") or "London"
-                        
-                    ref = (
-                        item.get("reference")
-                        or item.get("application_reference")
-                        or item.get("lpa_app_no")
-                        or item.get("planning_reference")
-                        or f"LON-{int(time.time())}"
-                    )
-                    
-                    lead = _insert_lead(cur, ref, addr, summary, "London")
-                    if lead:
-                        new_leads.append(lead)
-        except Exception as e:
-            logger.error(f"[London GLA] Error: {e}")
+    # 2. Surrounding London & Home Counties radar -- delegated (see
+    # docstring above), so it inherits rotation + same-day dedup + PlanIt
+    # automatically instead of duplicating a second, unprotected copy.
+    radar_count = scan_city_planning_api("London")
 
-
-    # 2. Comprehensive London & Home Counties Radar Scan via UK Planning API & PlanIt
-    if UK_PLANNING_API_KEY:
-        london_all_prefixes = [
-            # Inner & Outer London
-            "SW", "SE", "NW", "N", "E", "EC", "WC", "CR", "BR", "EN", "HA", "UB", "KT", "TW", "DA", "RM", "IG", "SM",
-            # Green Belt & Home Counties
-            "RH", "TN", "GU", "CM", "SS", "SL", "HP", "AL", "SG", "WD", "ME"
-        ]
-        headers = {"X-API-Key": UK_PLANNING_API_KEY}
-        for prefix in london_all_prefixes:
-            try:
-                import time
-                time.sleep(1.5) # Cron job throttle to prevent 6am ban
-                res = net_utils.smart_get(
-                    "https://ukplanningapi.co.uk/v1/applications",
-                    params={"postcode": prefix, "status": "received", "limit": 200},
-                    headers=headers,
-                    timeout=15
-                )
-                if res.status_code == 429:
-                    break
-                if res.status_code == 200:
-                    records = res.json().get("data", [])
-                    for item in records:
-                        summary = (item.get("description", "") or "").strip()
-                        if not summary or not _is_tree_related(summary):
-                            continue
-                        ref  = item.get("reference") or f"{prefix}-{int(time.time())}"
-                        addr = item.get("address", f"London / {prefix}")
-                        lead = _insert_lead(cur, ref, addr, summary, "London")
-                        if lead:
-                            new_leads.append(lead)
-            except Exception as pe:
-                logger.debug(f"[London Radar] Error scanning prefix '{prefix}': {pe}")
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    if new_leads:
-        notifications.dispatch_lead_alerts("London", new_leads)
-    logger.info(f"[London] Scan complete. {len(new_leads)} high-quality leads found across London & Green Belt councils.")
-    return len(new_leads)
+    total = radar_count + gla_count
+    logger.info(
+        f"[London] Scan complete. {total} high-quality leads found across London & Green Belt "
+        f"councils ({gla_count} via GLA Datahub, {radar_count} via UK Planning API + PlanIt radar)."
+    )
+    return total
 
 
 
@@ -521,8 +587,74 @@ def _planit_real_value(value) -> Optional[str]:
     return value.strip()
 
 
+# Aug 30 2026: keyed by (city_name, ISO date) -- see scan_city_planning_api's
+# rotation/dedup comment. Marks a region's paid-API rotation bucket as
+# already attempted today so a same-day manual re-trigger doesn't burn
+# quota re-fetching it for zero new coverage.
+_PAID_API_DAY_CACHE: dict = {}
+
+# Same idea, applied to PlanIt. PlanIt has no monthly money quota to
+# protect (unlike ukplanningapi.co.uk above), but Nick's "these keep
+# pinging planning data software sites" concern applies here too --
+# it's still someone else's free public API, and a same-day re-trigger
+# gains nothing by re-querying the exact same authority names again.
+# Unlike the paid API there's no rotation, just a flat "once per region
+# per day" -- PlanIt isn't rationed by a monthly cap, only by its own
+# per-request rate limit (handled with backoff inside fetch_planit).
+_PLANIT_DAY_CACHE: dict = {}
+
+# Aug 30 2026: root cause of PlanIt returning 429 for nearly every authority
+# in 7 of 8 regions in one production run, even with the earlier "wait 20s
+# and retry once" fix in place. That fix had two problems: (1) it capped
+# the wait at min(Retry-After, 20s) -- if PlanIt's server genuinely asked
+# for longer, the code ignored it and retried too soon anyway; (2) the
+# throttle (time.sleep(1.5) inside fetch_planit) was purely LOCAL to one
+# region's ThreadPoolExecutor call -- it had zero memory of how many PlanIt
+# requests the previous 15 (of 16) ALL_CITIES regions had already made in
+# the same run. PlanIt's rate limiter is IP-based, not aware of TreeKey's
+# internal region groupings, so 16 regions run back-to-back each resetting
+# their own "1.5s since my last request" clock will still blow through
+# PlanIt's real limit well before the last few regions are reached.
+#
+# Fix: one shared lock + one shared "last request" timestamp for the whole
+# process, so EVERY PlanIt request -- whichever region's fetch_planit is
+# calling it -- waits out the same minimum gap from the previous one,
+# process-wide. Defaults to 60s, matching PlanIt's own documented "one
+# request per minute" safe-rate guidance (confirmed via their FAQ).
+PLANIT_MIN_INTERVAL_SECONDS = float(os.getenv("PLANIT_MIN_INTERVAL_SECONDS", "60") or "60")
+
+# Aug 30 2026: caps how many real agent-status confirmation fetches
+# (mesh_scrapers.confirm_agent_status_from_source, following PlanIt's own
+# source-authority link) one scan_city_planning_api() call will attempt --
+# each one is a genuine new HTTP request straight to that specific
+# authority's own server. Raised from an initial cautious 15 to 200 once a
+# DB check (see the PlanIt insertion loop) started skipping any reference
+# that's already resolved from a previous day WITHOUT spending budget or a
+# network call -- that's what makes a generous number safe as a permanent
+# setting rather than a one-off: it only ever gets spent on genuinely new
+# or still-unresolved leads, which is a small, naturally shrinking set once
+# the existing backlog clears, not "200 real requests every single day
+# forever". Nick's explicit ask (Aug 30 2026): needed the current ~1,200-lead
+# backlog checked in one pass today, not trickled in over days/weeks -- this
+# is what makes that one full nationwide run actually cover most of it.
+PLANIT_AGENT_CONFIRM_LIMIT = int(os.getenv("PLANIT_AGENT_CONFIRM_LIMIT", "200") or "200")
+_PLANIT_PACING_LOCK = threading.Lock()
+_PLANIT_LAST_REQUEST_AT: float = 0.0
 
 
+def _planit_wait_for_slot() -> None:
+    """Block the calling thread until it's been at least
+    PLANIT_MIN_INTERVAL_SECONDS since the last PlanIt request made by ANY
+    thread/region in this process, then claims the slot. Call this
+    immediately before every real PlanIt HTTP request (initial attempt and
+    retry alike) -- see the module comment above _PLANIT_PACING_LOCK for why
+    a per-region-local throttle wasn't enough."""
+    global _PLANIT_LAST_REQUEST_AT
+    with _PLANIT_PACING_LOCK:
+        wait_s = PLANIT_MIN_INTERVAL_SECONDS - (time.monotonic() - _PLANIT_LAST_REQUEST_AT)
+        if wait_s > 0:
+            time.sleep(wait_s)
+        _PLANIT_LAST_REQUEST_AT = time.monotonic()
 
 
 def scan_city_planning_api(city_name: str) -> int:
@@ -551,6 +683,66 @@ def scan_city_planning_api(city_name: str) -> int:
     if not postcode_prefixes and not region_towns:
         return 0
 
+    # Aug 30 2026: Nick hit ukplanningapi.co.uk's free 500/month cap last
+    # week -- root cause found by counting. Stage 1 was calling ALL 178
+    # postcode prefixes across all 16 daily regions, EVERY single day
+    # (London alone is 29). ~178/day burns the entire month's 500-request
+    # budget in under 3 days, then this API goes dark for the remaining
+    # ~27 days -- previously silently, now visibly, thanks to the 429 fix
+    # above, but visibility alone doesn't get the leads back. PlanIt has
+    # no monthly cap (only the per-request rate limit already handled with
+    # backoff above) and the free Idox mesh has none either, so this fix
+    # is specific to this one API: instead of querying every prefix every
+    # day, round-robin through a rotation so the full prefix list is still
+    # covered on a rolling basis, but total monthly calls land well under
+    # the free tier's cap.
+    #
+    # The rotation period (default 12 days, not the bare-minimum-viable 11)
+    # was picked to also absorb a second real-world pattern: on a heavy
+    # development/testing day (like the day this was built), the pipeline
+    # can get manually re-triggered multiple times on top of the one
+    # scheduled daily cron run. The separate same-day dedup guard just
+    # below means a same-calendar-day re-trigger is now FREE (it skips the
+    # paid API entirely and reuses today's rotation results), so the
+    # number that actually matters is "one paid-API pass per distinct
+    # calendar day", not "one pass per trigger" -- 178 prefixes / 12-day
+    # rotation =~ 14.8/day, which even in a 31-day month is ~460 calls,
+    # leaving a real ~40-call/month buffer for edge cases (transient-error
+    # retries, a region added later, etc.) that a bare 500-on-the-nose
+    # target wouldn't have. Uses the date's ordinal (not day-of-month) so
+    # the cycle doesn't reset oddly at month boundaries of different
+    # lengths. Set PAID_API_ROTATION_DAYS=1 in the environment to disable
+    # rotation entirely and query every prefix every day again -- e.g.
+    # after upgrading to a paid tier with enough headroom that pacing is
+    # no longer needed.
+    todays_paid_prefixes = postcode_prefixes
+    if postcode_prefixes:
+        rotation_days = max(1, int(os.getenv("PAID_API_ROTATION_DAYS", "12") or "12"))
+        if rotation_days > 1:
+            day_index = datetime.date.today().toordinal() % rotation_days
+            todays_paid_prefixes = [p for i, p in enumerate(postcode_prefixes) if i % rotation_days == day_index]
+            if len(todays_paid_prefixes) < len(postcode_prefixes):
+                logger.info(
+                    f"[{city_name}] Paid API rotation: querying {len(todays_paid_prefixes)} of "
+                    f"{len(postcode_prefixes)} postcode prefixes today (day {day_index + 1}/{rotation_days} "
+                    f"of the rotation cycle) to keep monthly usage under the free-tier cap."
+                )
+
+        # Same-day dedup: a manual re-trigger later the same calendar day
+        # (a redeploy, a manual /scan-nationwide, testing) would otherwise
+        # re-fetch this exact same rotated subset again for zero new
+        # coverage -- the rotation bucket only changes when the date does.
+        # In-memory only (resets on a Render restart/redeploy, which is
+        # rare compared to daily cron runs) -- the worst case is one extra
+        # day's spend right after a redeploy, not a recurring problem.
+        today_key = (city_name, datetime.date.today().isoformat())
+        if todays_paid_prefixes and _PAID_API_DAY_CACHE.get(today_key):
+            logger.debug(
+                f"[{city_name}] ukplanningapi.co.uk already queried once today (this process) -- "
+                f"skipping to conserve monthly quota; PlanIt and the free mesh still run below."
+            )
+            todays_paid_prefixes = []
+
     headers = {"X-API-Key": UK_PLANNING_API_KEY} if UK_PLANNING_API_KEY else {}
     new_leads = []
 
@@ -570,8 +762,25 @@ def scan_city_planning_api(city_name: str) -> int:
         planit_failures = []
 
         def fetch_paid(prefix):
-            """ukplanningapi.co.uk -- paid, postcode-prefix based. Skipped
-            (not silently, now logged once) if no key is configured."""
+            """ukplanningapi.co.uk -- postcode-prefix based. Freemium, not
+            purely "paid" as earlier comments here assumed: their own
+            pricing page confirms a free tier capped at 500 requests/month
+            with paid tiers above that -- and this project's own
+            increment_api_usage() call below caps at exactly 500, which is
+            the free-tier limit, not a paid one. Skipped (not silently, now
+            logged once) if no key is configured.
+
+            Aug 30 2026: a 429 here used to be silently excluded from BOTH
+            logging and paid_failures -- carved out of the `elif` below on
+            the (correct, for a burst rate limit) assumption that net_utils
+            already handles 429 upstream. But this API's 429 is much more
+            likely a MONTHLY QUOTA EXHAUSTION on a free-tier key than a
+            per-second burst limit, and unlike a burst limit, retrying
+            seconds later can't fix that -- so this now logs it clearly and
+            counts it as a real failure instead of a silent, indistinguishable
+            "0 results", which is exactly the blind spot that let a possible
+            month-long quota exhaustion look identical to genuinely zero
+            leads with no visible cause anywhere in the logs."""
             if not UK_PLANNING_API_KEY:
                 return prefix, []
             try:
@@ -590,7 +799,14 @@ def scan_city_planning_api(city_name: str) -> int:
                         paid_failures.append(f"'{prefix}': API error {body.get('error')}")
                         return prefix, []
                     return prefix, body.get("data", [])
-                elif res.status_code not in (429,):
+                elif res.status_code == 429:
+                    logger.warning(
+                        f"[{city_name}] ukplanningapi.co.uk returned 429 for prefix '{prefix}' -- "
+                        f"likely the monthly request quota is exhausted (this key appears to be on "
+                        f"the free 500/month tier), not a transient rate limit."
+                    )
+                    paid_failures.append(f"'{prefix}': HTTP 429 (likely monthly quota exhausted)")
+                else:
                     logger.debug(f"[{city_name}] ukplanningapi.co.uk HTTP {res.status_code} for prefix '{prefix}'")
                     paid_failures.append(f"'{prefix}': HTTP {res.status_code}")
             except Exception as e:
@@ -608,21 +824,21 @@ def scan_city_planning_api(city_name: str) -> int:
             Aug 30 2026: live logs showed PlanIt returning HTTP 429 for
             EVERY authority in EVERY one of the 16 regions in a single run --
             the actual root cause of days of "0 new leads" that looked
-            identical to a genuine empty result. PlanIt's own docs confirm
-            429 responses come with a Retry-After header telling callers
-            exactly how long to back off, which this code never checked --
-            it just gave up immediately, every time. Now waits out
-            Retry-After (capped at 20s so one slow authority can't stall the
-            whole region) and retries once before giving up for real. This
-            was previously run inside the same 6-worker pool as the paid
-            API -- with up to 6 concurrent PlanIt requests per region, 16
-            regions back-to-back, no pause between them -- which is very
-            likely what triggered the rate limit in the first place; see the
-            reduced, dedicated executor below."""
-            import time
+            identical to a genuine empty result. Two fixes: (1) every real
+            request -- initial attempt and retry alike -- now goes through
+            _planit_wait_for_slot() first, a process-wide pacing gate shared
+            by all 16 regions (a per-region time.sleep(1.5) had no memory of
+            what earlier regions in the same run had already sent PlanIt).
+            (2) the previous fix capped the wait at min(Retry-After, 20s) --
+            if PlanIt's server genuinely asked for longer, the old code
+            ignored that and retried too soon anyway. The cap is gone: a
+            server-specified Retry-After is now honored in full, falling
+            back to PLANIT_MIN_INTERVAL_SECONDS (not a fixed 8s) when it's
+            absent or unparseable, since that's the same safe interval
+            we're already pacing every other request to."""
             for attempt in range(2):
                 try:
-                    time.sleep(1.5)  # Polite throttle for PlanIt
+                    _planit_wait_for_slot()
                     planit_res = net_utils.smart_get(
                         "https://www.planit.org.uk/api/applics/json",
                         params={"auth": town, "recent": 45, "pg_sz": 50},
@@ -631,9 +847,9 @@ def scan_city_planning_api(city_name: str) -> int:
                     if planit_res.status_code == 429:
                         retry_after = planit_res.headers.get("Retry-After")
                         try:
-                            wait_s = min(float(retry_after), 20.0) if retry_after else 8.0
+                            wait_s = float(retry_after) if retry_after else PLANIT_MIN_INTERVAL_SECONDS
                         except (ValueError, TypeError):
-                            wait_s = 8.0
+                            wait_s = PLANIT_MIN_INTERVAL_SECONDS
                         if attempt == 0:
                             logger.info(f"[{city_name}] PlanIt rate-limited (429) for '{town}', waiting {wait_s:.0f}s and retrying once...")
                             time.sleep(wait_s)
@@ -668,6 +884,18 @@ def scan_city_planning_api(city_name: str) -> int:
                         "applicant_name": _planit_real_value(other.get("applicant_name")),
                         "agent_name": _planit_real_value(other.get("agent_name")),
                         "agent_company": _planit_real_value(other.get("agent_company")),
+                        # Aug 30 2026: "url" above is PlanIt's OWN page for
+                        # this application (kept as-is for the outbound link
+                        # this pipeline already shows) -- this is a SEPARATE
+                        # field, PlanIt's documented "original planning
+                        # authority's website" link, plus its other_fields
+                        # equivalent. Neither is PlanIt's applicant/agent
+                        # data (PlanIt deliberately never stores real names --
+                        # see mesh_scrapers.confirm_agent_status_from_source's
+                        # docstring) -- it's the real source page we can
+                        # follow to actually check, the same way the mesh
+                        # scanner already does for its own registered councils.
+                        "source_url": rec.get("url") or other.get("source_url") or "",
                     })
                 return town, mapped_data
             except Exception as e:
@@ -676,34 +904,58 @@ def scan_city_planning_api(city_name: str) -> int:
             return town, []
 
         with ThreadPoolExecutor(max_workers=6) as executor:
-            paid_results = list(executor.map(fetch_paid, postcode_prefixes)) if postcode_prefixes else []
+            paid_results = list(executor.map(fetch_paid, todays_paid_prefixes)) if todays_paid_prefixes else []
+        if todays_paid_prefixes:
+            # Mark today's rotation bucket attempted regardless of outcome --
+            # a same-day retry wouldn't fix a real quota exhaustion or key
+            # problem anyway, and the goal here is strictly "at most one
+            # paid-API pass per region per calendar day".
+            _PAID_API_DAY_CACHE[(city_name, datetime.date.today().isoformat())] = True
 
-        # Aug 30 2026: PlanIt gets its own smaller pool, separate from the
-        # paid API's -- up to 6 concurrent PlanIt requests per region, times
-        # 16 regions run back-to-back with no pause, is the most likely
-        # trigger for the blanket 429s seen in production. 2 workers plus
-        # the 1.5s throttle inside fetch_planit itself keeps this run
-        # noticeably gentler without materially slowing the pipeline down
-        # (PlanIt calls were never the bottleneck stage).
-        with ThreadPoolExecutor(max_workers=2) as planit_executor:
-            planit_results = list(planit_executor.map(fetch_planit, region_towns)) if region_towns else []
+        # Aug 30 2026: dropped from 6, then 2, down to 1 worker. With
+        # _planit_wait_for_slot() now serializing every PlanIt request
+        # process-wide to one per PLANIT_MIN_INTERVAL_SECONDS regardless of
+        # which region is asking, extra workers here can't buy any real
+        # concurrency -- they'd just queue up on the same pacing lock. One
+        # worker keeps the code simple and makes the actual request order
+        # predictable (PlanIt calls were never the pipeline's bottleneck
+        # stage, so there's no throughput cost to this).
+        #
+        # Same-day dedup (separate from the pacing gate): a manual
+        # re-trigger later the same calendar day gains nothing by
+        # re-querying the exact same authority names against PlanIt again.
+        planit_today_key = (city_name, datetime.date.today().isoformat())
+        todays_region_towns = region_towns
+        if region_towns and _PLANIT_DAY_CACHE.get(planit_today_key):
+            logger.debug(f"[{city_name}] PlanIt already queried once today (this process) -- skipping re-trigger.")
+            todays_region_towns = []
 
-        if UK_PLANNING_API_KEY and postcode_prefixes and len(paid_failures) == len(postcode_prefixes):
+        with ThreadPoolExecutor(max_workers=1) as planit_executor:
+            planit_results = list(planit_executor.map(fetch_planit, todays_region_towns)) if todays_region_towns else []
+        if todays_region_towns:
+            _PLANIT_DAY_CACHE[planit_today_key] = True
+
+        if UK_PLANNING_API_KEY and todays_paid_prefixes and len(paid_failures) == len(todays_paid_prefixes):
             logger.warning(
-                f"[{city_name}] ukplanningapi.co.uk failed for ALL {len(postcode_prefixes)} postcode "
-                f"prefixes this run (e.g. {paid_failures[0]}) -- this looks like an invalid/expired "
+                f"[{city_name}] ukplanningapi.co.uk failed for ALL {len(todays_paid_prefixes)} postcode "
+                f"prefixes queried today (e.g. {paid_failures[0]}) -- this looks like an invalid/expired "
                 f"UK_PLANNING_API_KEY or an API outage, not a genuine zero-results run."
             )
-        if region_towns and len(planit_failures) == len(region_towns):
+        if todays_region_towns and len(planit_failures) == len(todays_region_towns):
             logger.warning(
-                f"[{city_name}] PlanIt failed for ALL {len(region_towns)} authorities this run "
+                f"[{city_name}] PlanIt failed for ALL {len(todays_region_towns)} authorities queried today "
                 f"(e.g. {planit_failures[0]}) -- this looks like an outage or a bad authority name, "
                 f"not a genuine zero-results run."
             )
 
-        # Track monthly usage and trigger predictive warning email when burn rate will breach 500 cap
-        if UK_PLANNING_API_KEY and postcode_prefixes:
-            usage_info = database.increment_api_usage("UK Planning API", increment=len(postcode_prefixes), cap=500)
+        # Track monthly usage and trigger predictive warning email when burn rate will breach 500 cap.
+        # Aug 30 2026: counts todays_paid_prefixes (what rotation/dedup actually
+        # queried today), not the region's full postcode_prefixes list -- counting
+        # the full list here would make the usage tracker think every region's
+        # entire prefix set was queried every day, defeating the point of the
+        # rotation above and falsely projecting a cap breach that isn't real.
+        if UK_PLANNING_API_KEY and todays_paid_prefixes:
+            usage_info = database.increment_api_usage("UK Planning API", increment=len(todays_paid_prefixes), cap=500)
             if usage_info.get("warning_needed"):
                 notifications.send_api_quota_warning_email(
                     api_name="UK PLANNING DATA API",
@@ -744,6 +996,26 @@ def scan_city_planning_api(city_name: str) -> int:
                     if lead:
                         new_leads.append(lead)
 
+            # Aug 30 2026: Nick's exact concern -- "I can't sell leads to
+            # jobs that already have someone signed up for them" -- and
+            # PlanIt's own field dictionary confirms it deliberately never
+            # stores real applicant/agent names, so almost every PlanIt lead
+            # was landing as permanently "unconfirmed", not a real "no
+            # agent". mesh_scrapers.confirm_agent_status_from_source follows
+            # PlanIt's own source-authority link back to the real council
+            # portal page and reuses the exact same detail-page check the
+            # mesh scanner already does for its own registered councils --
+            # turning "unconfirmed" into a real, confirmed yes/no wherever
+            # that authority runs recognisable Idox software. Bounded per
+            # region per run (PLANIT_AGENT_CONFIRM_LIMIT) since this is a
+            # brand new real HTTP request PER lead, straight to that
+            # council's own server -- not PlanIt's, so it doesn't share
+            # PlanIt's pacing gate, but it's a different server every time
+            # (whichever authority the lead belongs to) rather than one
+            # shared one, so a modest per-call cap plus a short sleep is the
+            # right amount of caution rather than a full pacing lock.
+            confirm_budget = PLANIT_AGENT_CONFIRM_LIMIT
+
             for town, records in planit_results:
                 for item in records:
                     summary = item.get("description", "") or ""
@@ -751,19 +1023,57 @@ def scan_city_planning_api(city_name: str) -> int:
                         continue
                     ref  = item.get("reference") or f"PLANIT-{town}-{int(time.time())}"
                     addr = item.get("address") or f"{city_name} / {town}"
+                    applicant_name = item.get("applicant_name")
                     agent_name = item.get("agent_name")
                     agent_company = item.get("agent_company")
+                    has_agent = (True if (agent_name or agent_company) else None)
+
+                    if has_agent is None and confirm_budget > 0 and item.get("source_url"):
+                        # Aug 30 2026: Nick's point -- re-confirming a
+                        # reference we already resolved on a PREVIOUS day
+                        # would spend a real HTTP request to that council's
+                        # server, forever, every single day PlanIt keeps
+                        # returning that still-live application (up to 45
+                        # days). PlanIt's own record never carries the
+                        # answer (it structurally never stores names), so
+                        # without this check we'd have re-confirmed the same
+                        # already-known lead again and again. This one cheap
+                        # DB lookup -- no network call -- is what makes it
+                        # safe to run this with a generous budget as a
+                        # PERMANENT setting, not just a one-off: once a
+                        # reference is resolved, every future day it costs a
+                        # SELECT, never another real request.
+                        cur.execute("SELECT has_agent FROM leads WHERE reference = %s", (ref,))
+                        existing_row = cur.fetchone()
+                        if existing_row and existing_row[0] is not None:
+                            pass  # already resolved -- _insert_lead's COALESCE keeps it either way
+                        else:
+                            confirm_budget -= 1
+                            try:
+                                import mesh_scrapers
+                                time.sleep(1.0)  # polite -- this hits the council's own server, not PlanIt's
+                                confirmed = mesh_scrapers.confirm_agent_status_from_source(item["source_url"])
+                            except Exception as e:
+                                logger.debug(f"[{city_name}] Agent-status confirmation failed for '{ref}': {e}")
+                                confirmed = {}
+                            if confirmed:
+                                applicant_name = applicant_name or confirmed.get("applicant_name")
+                                agent_name = agent_name or confirmed.get("agent_name")
+                                agent_company = agent_company or confirmed.get("agent_company")
+                                # confirmed["has_agent"] is a REAL True/False
+                                # (the detail page was actually visited) --
+                                # unlike PlanIt's own data, this can safely
+                                # be trusted as a genuine "no agent" too, not
+                                # just "yes".
+                                if "has_agent" in confirmed:
+                                    has_agent = confirmed["has_agent"]
+
                     lead = _insert_lead(
                         cur, ref, addr, summary, city_name,
-                        applicant_name=item.get("applicant_name"),
+                        applicant_name=applicant_name,
                         agent_name=agent_name,
                         agent_company=agent_company,
-                        # Only PlanIt records that actually captured an agent name/company
-                        # count as a confident "yes" -- PlanIt frequently just doesn't have
-                        # this field ("See source"), which is NOT the same as confirming no
-                        # agent exists, so we deliberately leave has_agent as None (unknown)
-                        # rather than guessing False.
-                        has_agent=(True if (agent_name or agent_company) else None),
+                        has_agent=has_agent,
                     )
                     if lead:
                         new_leads.append(lead)

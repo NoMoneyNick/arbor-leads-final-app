@@ -27,6 +27,7 @@ matched almost any ordinary sentence using "fell" as a verb ("a branch
 fell in the storm", "the applicant fell ill") -- see scanners.py's comment
 at that entry for the fix.
 """
+import os
 import sys
 import types
 import unittest
@@ -307,6 +308,18 @@ class TestApplicantAgentExtraction(unittest.TestCase):
     </table></body></html>
     """
 
+    # Aug 30 2026: some applications are filed by a company/organisation
+    # rather than a person -- Idox labels that row "Applicant Company Name"
+    # instead of "Applicant Name". Before this fix, that row was never
+    # matched at all, so every company-applicant lead silently lost its
+    # applicant name entirely.
+    DETAILS_COMPANY_APPLICANT = """
+    <html><body><table>
+    <tr class="row0"><th scope="row">Applicant Company Name</th><td>Bodmin Property Holdings Ltd</td></tr>
+    <tr class="row1"><th scope="row">Applicant Address</th><td>Unit 4, Bodmin Business Park</td></tr>
+    </table></body></html>
+    """
+
     def _fake_response(self, status_code=200, text=""):
         r = MagicMock()
         r.status_code = status_code
@@ -330,6 +343,14 @@ class TestApplicantAgentExtraction(unittest.TestCase):
         self.assertNotIn("agent_name", result)
         self.assertNotIn("agent_company", result)
         self.assertFalse(result["has_agent"])
+
+    def test_company_applicant_uses_company_name_label(self):
+        """The 'Applicant Company Name' fallback must fill applicant_name
+        when the plain 'Applicant Name' row isn't present at all."""
+        scraper = mesh_scrapers.IdoxScraper("https://example-council.gov.uk/online-applications")
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=self.DETAILS_COMPANY_APPLICANT)):
+            result = scraper._fetch_applicant_and_agent("COMPANY001")
+        self.assertEqual(result["applicant_name"], "Bodmin Property Holdings Ltd")
 
     def test_fetch_failure_returns_empty_not_a_crash(self):
         """A timeout or non-200 must not blow up the whole lead -- caller
@@ -378,6 +399,69 @@ class TestApplicantAgentExtraction(unittest.TestCase):
         self.assertFalse(by_ref["23/01234/TPO"]["has_agent"])
         self.assertTrue(by_ref["23/09999/TPO"]["has_agent"])
         self.assertEqual(by_ref["23/09999/TPO"]["agent_company"], "Rich Ede TreeSurgeon")
+
+
+class TestConfirmAgentStatusFromSource(unittest.TestCase):
+    """confirm_agent_status_from_source / _parse_idox_detail_url (Aug 30
+    2026): PlanIt's own field dictionary confirms it deliberately never
+    stores real applicant/agent names, but its "url" field (and
+    other_fields.source_url) point back to the real council portal page --
+    usually the same Idox software this file already knows how to read.
+    This turns most of PlanIt's structural "unconfirmed" into a real,
+    confirmed yes/no by following that link."""
+
+    def _fake_response(self, status_code=200, text=""):
+        r = MagicMock()
+        r.status_code = status_code
+        r.text = text
+        return r
+
+    def test_parses_online_applications_url_with_keyval(self):
+        result = mesh_scrapers._parse_idox_detail_url(
+            "https://publicaccess.somecouncil.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=ABC123"
+        )
+        self.assertEqual(result, ("https://publicaccess.somecouncil.gov.uk/online-applications", "ABC123"))
+
+    def test_parses_idoxpa_web_variant(self):
+        result = mesh_scrapers._parse_idox_detail_url(
+            "https://citydev-portal.edinburgh.gov.uk/idoxpa-web/applicationDetails.do?keyVal=XYZ789&activeTab=summary"
+        )
+        self.assertEqual(result, ("https://citydev-portal.edinburgh.gov.uk/idoxpa-web", "XYZ789"))
+
+    def test_non_idox_url_returns_none(self):
+        """A council on genuinely different software (e.g. Northgate/NEC) --
+        must not be misparsed as an Idox authority."""
+        result = mesh_scrapers._parse_idox_detail_url("https://planning.somecouncil.gov.uk/portal/servlet/planning?keyVal=ABC123")
+        self.assertIsNone(result)
+
+    def test_missing_keyval_returns_none(self):
+        result = mesh_scrapers._parse_idox_detail_url("https://publicaccess.somecouncil.gov.uk/online-applications/search.do?action=advanced")
+        self.assertIsNone(result)
+
+    def test_empty_or_non_string_returns_none(self):
+        self.assertIsNone(mesh_scrapers._parse_idox_detail_url(""))
+        self.assertIsNone(mesh_scrapers._parse_idox_detail_url(None))
+
+    def test_confirm_fetches_real_agent_status_for_idox_source(self):
+        details_html = """
+        <html><body><table>
+        <tr><th scope="row">Applicant Name</th><td>Mrs Angela Ford</td></tr>
+        <tr><th scope="row">Agent Company Name</th><td>Ford & Sons Tree Surgery</td></tr>
+        </table></body></html>
+        """
+        source_url = "https://publicaccess.somecouncil.gov.uk/online-applications/applicationDetails.do?keyVal=REAL001&activeTab=summary"
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=details_html)):
+            result = mesh_scrapers.confirm_agent_status_from_source(source_url)
+        self.assertEqual(result["applicant_name"], "Mrs Angela Ford")
+        self.assertEqual(result["agent_company"], "Ford & Sons Tree Surgery")
+        self.assertTrue(result["has_agent"])
+
+    def test_confirm_returns_empty_dict_for_non_idox_source(self):
+        result = mesh_scrapers.confirm_agent_status_from_source("https://planning.somecouncil.gov.uk/portal/servlet/planning?keyVal=ABC123")
+        self.assertEqual(result, {})
+
+    def test_confirm_returns_empty_dict_for_blank_source(self):
+        self.assertEqual(mesh_scrapers.confirm_agent_status_from_source(""), {})
 
 
 class TestMeshCouncilDedup(unittest.TestCase):
@@ -603,6 +687,19 @@ class TestPlanitFallback(unittest.TestCase):
         self.cur = MagicMock()
         self.conn = MagicMock()
         self.conn.cursor.return_value = self.cur
+        # Aug 30 2026: the same-day dedup caches are module-level and keyed
+        # by (city_name, today's date) -- without clearing them, running
+        # more than one "Sheffield"/"Bristol" test on the same real calendar
+        # day would make the second test see the first test's cache entry
+        # and wrongly skip the paid-API/PlanIt fetch entirely.
+        scanners._PAID_API_DAY_CACHE.clear()
+        scanners._PLANIT_DAY_CACHE.clear()
+        # Aug 30 2026: the cross-region PlanIt pacing gate is also
+        # module-level, tracking real wall-clock time (time.monotonic())
+        # across the whole process -- reset it so one test's PlanIt calls
+        # don't leave the "last request" timestamp fresh enough to make the
+        # next test's very first call think it needs to wait too.
+        scanners._PLANIT_LAST_REQUEST_AT = 0.0
 
     def test_planit_runs_even_without_paid_key(self):
         """Previously the whole region (both APIs) returned 0 immediately
@@ -709,6 +806,169 @@ class TestPlanitFallback(unittest.TestCase):
         warning_texts = [c.args[0] for c in mock_logger.warning.call_args_list if c.args]
         self.assertTrue(any("PlanIt failed for ALL" in t for t in warning_texts))
 
+    def test_planit_pacing_gate_waits_out_the_minimum_interval(self):
+        """_planit_wait_for_slot() is the Aug 30 2026 fix for the blanket-429
+        failure: a per-region-local time.sleep(1.5) had no memory of earlier
+        regions' PlanIt requests in the same run. A second call immediately
+        after a first must wait out roughly the full configured minimum
+        interval, not a fixed local throttle."""
+        scanners._PLANIT_LAST_REQUEST_AT = 0.0
+        with patch("time.sleep") as mock_sleep:
+            scanners._planit_wait_for_slot()  # first call: nothing to wait out yet
+            scanners._planit_wait_for_slot()  # second call: must wait ~ full interval
+        slept_for = [c.args[0] for c in mock_sleep.call_args_list if c.args]
+        self.assertEqual(len(slept_for), 1)
+        self.assertAlmostEqual(slept_for[0], scanners.PLANIT_MIN_INTERVAL_SECONDS, delta=1.0)
+
+    def test_planit_pacing_gate_is_shared_across_regions(self):
+        """The gate is module-level/process-wide, not reset per
+        scan_city_planning_api call -- a second region's PlanIt fetch,
+        immediately after a first region's, must still wait out the shared
+        interval. This is the specific behavior the previous per-region
+        throttle lacked, and which let 16 back-to-back regions each reset
+        their own local 1.5s clock and blow through PlanIt's real limit."""
+        ok_response = self._fake_response(json_data={"records": []})
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=ok_response), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value=None), \
+             patch("time.sleep") as mock_sleep:
+            scanners.scan_city_planning_api("Bristol")    # single-town region
+            scanners.scan_city_planning_api("Sheffield")  # different single-town region
+
+        slept_for = [c.args[0] for c in mock_sleep.call_args_list if c.args]
+        # If the gate were still per-region-local, every wait here would be
+        # ~0s (a fresh, unclaimed throttle for each region). A wait close to
+        # the full shared interval proves the second region's request saw
+        # the first region's claim on the pacing gate.
+        self.assertTrue(any(s >= scanners.PLANIT_MIN_INTERVAL_SECONDS - 1.0 for s in slept_for))
+
+    def test_confirms_agent_status_via_source_url_when_planit_gives_nothing(self):
+        """Aug 30 2026: PlanIt's own field dictionary confirms it never
+        stores real applicant/agent names -- but does return the original
+        authority's own URL. When PlanIt itself gives no agent info, that
+        URL must be followed via mesh_scrapers.confirm_agent_status_from_
+        source to get a REAL confirmed answer instead of leaving the lead
+        permanently unconfirmed."""
+        planit_body = {
+            "records": [{
+                "uid": "24/05555/TPO",
+                "description": "Felling of 1no. diseased ash tree, TPO protected.",
+                "address": "9 Real Street, Bristol",
+                "link": "https://www.planit.org.uk/planapplic/24-05555-tpo",
+                "url": "https://planningonline.bristol.gov.uk/online-applications/applicationDetails.do?keyVal=REALSRC1&activeTab=summary",
+                "other_fields": {},  # PlanIt itself has nothing -- not even a placeholder
+            }]
+        }
+        idox_details_html = """
+        <html><body><table>
+        <tr><th scope="row">Applicant Name</th><td>Mr Real Homeowner</td></tr>
+        </table></body></html>
+        """  # no agent row at all -- a genuine, confirmed "no agent"
+
+        planit_resp = self._fake_response(json_data=planit_body)
+        idox_resp = MagicMock(status_code=200, text=idox_details_html)
+        # Aug 30 2026: the confirmation step now does a cheap DB lookup
+        # first ("has this reference already been resolved on a previous
+        # day?") before ever spending a real HTTP request -- fetchone()
+        # must explicitly report "never seen before" (None), or a bare
+        # MagicMock's default truthy return would look like an
+        # already-resolved row and skip confirmation entirely.
+        self.cur.fetchone.return_value = None
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", side_effect=[planit_resp, idox_resp]), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value=None) as mock_insert, \
+             patch("time.sleep", return_value=None):
+            scanners.scan_city_planning_api("Bristol")
+
+        _, kwargs = mock_insert.call_args
+        self.assertEqual(kwargs["applicant_name"], "Mr Real Homeowner")
+        self.assertFalse(kwargs["has_agent"])  # a REAL confirmed no, not None/unconfirmed
+
+    def test_confirmation_skipped_when_already_resolved_in_db(self):
+        """The other half of the same fix: if a PREVIOUS day's scan already
+        resolved this exact reference, today's re-encounter (PlanIt keeps
+        returning the same still-live application for up to 45 days) must
+        NOT spend another real HTTP request confirming it again -- that
+        would mean re-confirming every known lead forever, once per day,
+        for as long as it stays in PlanIt's window."""
+        planit_body = {
+            "records": [{
+                "uid": "24/07777/TPO",
+                "description": "Felling of 1no. diseased ash tree, TPO protected.",
+                "address": "1 Previously Resolved Rd, Bristol",
+                "other_fields": {},
+                "url": "https://planningonline.bristol.gov.uk/online-applications/applicationDetails.do?keyVal=ALREADYKNOWN&activeTab=summary",
+            }]
+        }
+        self.cur.fetchone.return_value = (False,)  # already resolved on a previous day: confirmed no agent
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=self._fake_response(json_data=planit_body)), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value=None), \
+             patch("mesh_scrapers.confirm_agent_status_from_source") as mock_confirm, \
+             patch("time.sleep", return_value=None):
+            scanners.scan_city_planning_api("Bristol")
+
+        mock_confirm.assert_not_called()
+
+    def test_confirmation_skipped_when_planit_already_gave_an_agent(self):
+        """No need to spend an extra real HTTP request confirming something
+        PlanIt already told us directly."""
+        planit_body = {
+            "records": [{
+                "uid": "24/06666/TPO",
+                "description": "Crown reduction of mature oak tree, TPO protected.",
+                "address": "3 Already Known Ave, Bristol",
+                "other_fields": {"agent_company": "Known Tree Surgeons Ltd"},
+                "url": "https://planningonline.bristol.gov.uk/online-applications/applicationDetails.do?keyVal=SHOULDNOTFETCH&activeTab=summary",
+            }]
+        }
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=self._fake_response(json_data=planit_body)), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value=None) as mock_insert, \
+             patch("mesh_scrapers.confirm_agent_status_from_source") as mock_confirm, \
+             patch("time.sleep", return_value=None):
+            scanners.scan_city_planning_api("Bristol")
+
+        mock_confirm.assert_not_called()
+        _, kwargs = mock_insert.call_args
+        self.assertTrue(kwargs["has_agent"])
+        self.assertEqual(kwargs["agent_company"], "Known Tree Surgeons Ltd")
+
+    def test_confirmation_attempts_are_capped_per_call(self):
+        """Each confirmation is a real HTTP request straight to a council's
+        own server -- PLANIT_AGENT_CONFIRM_LIMIT must actually bound how
+        many of those one scan_city_planning_api() call will attempt."""
+        planit_body = {
+            "records": [
+                {
+                    "uid": f"24/0700{i}/TPO",
+                    "description": "Felling of 1no. diseased ash tree, TPO protected.",
+                    "address": f"{i} Budget Test Rd, Bristol",
+                    "other_fields": {},
+                    "url": f"https://planningonline.bristol.gov.uk/online-applications/applicationDetails.do?keyVal=BUDGET{i}&activeTab=summary",
+                }
+                for i in range(3)
+            ]
+        }
+        self.cur.fetchone.return_value = None  # none of these 3 have been seen/resolved before
+
+        with patch.object(scanners, "PLANIT_AGENT_CONFIRM_LIMIT", 1), \
+             patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=self._fake_response(json_data=planit_body)), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value=None), \
+             patch("mesh_scrapers.confirm_agent_status_from_source", return_value={}) as mock_confirm, \
+             patch("time.sleep", return_value=None):
+            scanners.scan_city_planning_api("Bristol")
+
+        self.assertEqual(mock_confirm.call_count, 1)
+
     def test_paid_api_mismatched_outcode_is_skipped_not_mislabeled(self):
         """Aug 30 2026: ukplanningapi.co.uk was found (during the PlanIt
         live-testing pass) to sometimes return an address that doesn't
@@ -731,6 +991,7 @@ class TestPlanitFallback(unittest.TestCase):
         with patch.object(scanners, "UK_PLANNING_API_KEY", "fake-key"), \
              patch.object(scanners, "CITY_POSTCODE_PREFIX", {"Sheffield": ["S"]}), \
              patch.object(scanners, "REGION_TOWNS", {}), \
+             patch.dict(os.environ, {"PAID_API_ROTATION_DAYS": "1"}), \
              patch("net_utils.smart_get", return_value=resp), \
              patch("database.get_db_conn", return_value=self.conn), \
              patch.object(scanners, "_insert_lead", return_value={"ref": "24/1000/TPO"}) as mock_insert, \
@@ -741,6 +1002,319 @@ class TestPlanitFallback(unittest.TestCase):
         mock_insert.assert_called_once()
         args, _ = mock_insert.call_args
         self.assertIn("S1 2AB", args[2])  # the Tonbridge/Kent record was skipped
+
+    def test_paid_api_429_is_logged_and_counted_as_failure_not_silent_zero(self):
+        """Aug 30 2026: this used to be worse than PlanIt's 429 bug -- a 429
+        from ukplanningapi.co.uk was deliberately carved out of the `elif`
+        chain so it was never logged AND never added to paid_failures,
+        meaning it couldn't even trip the "failed for ALL prefixes" aggregate
+        warning. A free-tier key hitting its 500/month cap would silently
+        look exactly like a genuine zero-results run, indistinguishable in
+        the logs from a real empty scan, for the rest of the month. Must now
+        be a visible, real, aggregatable failure -- not a retry (a monthly
+        quota can't be fixed by waiting a few seconds, unlike PlanIt's
+        burst limit)."""
+        rate_limited = MagicMock(status_code=429)
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", "fake-key"), \
+             patch.object(scanners, "CITY_POSTCODE_PREFIX", {"Sheffield": ["S"]}), \
+             patch.object(scanners, "REGION_TOWNS", {}), \
+             patch.dict(os.environ, {"PAID_API_ROTATION_DAYS": "1"}), \
+             patch("net_utils.smart_get", return_value=rate_limited), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead") as mock_insert, \
+             patch("time.sleep", return_value=None), \
+             patch.object(scanners, "logger") as mock_logger:
+            count = scanners.scan_city_planning_api("Sheffield")
+
+        self.assertEqual(count, 0)
+        mock_insert.assert_not_called()
+        warning_texts = [c.args[0] for c in mock_logger.warning.call_args_list if c.args]
+        # The per-prefix 429 must be logged (previously silently excluded)...
+        self.assertTrue(any("429" in t and "quota" in t.lower() for t in warning_texts))
+        # ...AND counted, so the aggregate "failed for ALL" warning can fire.
+        self.assertTrue(any("ukplanningapi.co.uk failed for ALL" in t for t in warning_texts))
+
+
+class TestPaidApiRotationAndDedup(unittest.TestCase):
+    """The Aug 30 2026 quota-headroom fix: Nick hit ukplanningapi.co.uk's
+    500/month free-tier cap last week because scan_city_planning_api()
+    queried every postcode prefix in every region every single day
+    (~178/day, exhausting 500/month in under 3 days). Instead of querying
+    every prefix every day, it now rotates through a subset each day
+    (PAID_API_ROTATION_DAYS, default 12) and skips a second paid-API pass
+    for the same region on the same calendar day, so a manual re-trigger
+    on a heavy testing/development day doesn't multiply quota usage for
+    zero new coverage."""
+
+    def setUp(self):
+        self.cur = MagicMock()
+        self.conn = MagicMock()
+        self.conn.cursor.return_value = self.cur
+        scanners._PAID_API_DAY_CACHE.clear()
+        scanners._PLANIT_DAY_CACHE.clear()
+
+    def _fake_response(self, status_code=200, json_data=None):
+        resp = MagicMock(status_code=status_code)
+        resp.json.return_value = json_data if json_data is not None else {"data": []}
+        return resp
+
+    def test_rotation_only_queries_a_subset_of_prefixes_on_a_given_day(self):
+        import datetime as real_datetime
+        prefixes = ["A", "B", "C", "D", "E", "F"]  # 6 prefixes, period 3 -> 2/day
+
+        class FixedDate(real_datetime.date):
+            @classmethod
+            def today(cls):
+                return cls(2026, 1, 4)
+
+        expected_day_index = FixedDate(2026, 1, 4).toordinal() % 3
+        expected_prefixes = sorted(p for i, p in enumerate(prefixes) if i % 3 == expected_day_index)
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", "fake-key"), \
+             patch.object(scanners, "CITY_POSTCODE_PREFIX", {"TestRegion": prefixes}), \
+             patch.object(scanners, "REGION_TOWNS", {}), \
+             patch.dict(os.environ, {"PAID_API_ROTATION_DAYS": "3"}), \
+             patch("datetime.date", FixedDate), \
+             patch("net_utils.smart_get", return_value=self._fake_response()) as mock_get, \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value=None), \
+             patch("time.sleep", return_value=None):
+            scanners.scan_city_planning_api("TestRegion")
+
+        queried = sorted(c.kwargs["params"]["postcode"] for c in mock_get.call_args_list)
+        self.assertEqual(queried, expected_prefixes)
+        self.assertLess(len(queried), len(prefixes))  # confirms rotation actually narrowed it
+
+    def test_rotation_disabled_queries_every_prefix_every_day(self):
+        """PAID_API_ROTATION_DAYS=1 must restore the old behaviour exactly
+        -- e.g. for a future paid tier with enough headroom that pacing is
+        no longer needed."""
+        prefixes = ["A", "B", "C", "D"]
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", "fake-key"), \
+             patch.object(scanners, "CITY_POSTCODE_PREFIX", {"TestRegion": prefixes}), \
+             patch.object(scanners, "REGION_TOWNS", {}), \
+             patch.dict(os.environ, {"PAID_API_ROTATION_DAYS": "1"}), \
+             patch("net_utils.smart_get", return_value=self._fake_response()) as mock_get, \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value=None), \
+             patch("time.sleep", return_value=None):
+            scanners.scan_city_planning_api("TestRegion")
+
+        self.assertEqual(mock_get.call_count, len(prefixes))
+
+    def test_same_day_retrigger_skips_the_paid_api_the_second_time(self):
+        """Directly the scenario Nick flagged: multiple manual triggers on
+        one development day must not multiply quota usage for the same
+        region -- only the first pass that day should hit the network."""
+        prefixes = ["A", "B"]
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", "fake-key"), \
+             patch.object(scanners, "CITY_POSTCODE_PREFIX", {"TestRegion": prefixes}), \
+             patch.object(scanners, "REGION_TOWNS", {}), \
+             patch.dict(os.environ, {"PAID_API_ROTATION_DAYS": "1"}), \
+             patch("net_utils.smart_get", return_value=self._fake_response()) as mock_get, \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value=None), \
+             patch("time.sleep", return_value=None):
+            scanners.scan_city_planning_api("TestRegion")  # first trigger today
+            first_call_count = mock_get.call_count
+            scanners.scan_city_planning_api("TestRegion")  # second trigger, same day
+
+        self.assertEqual(first_call_count, len(prefixes))
+        self.assertEqual(mock_get.call_count, first_call_count)  # no extra calls on retrigger
+
+    def test_usage_tracking_counts_only_todays_rotated_subset(self):
+        """increment_api_usage must be told how many prefixes were
+        ACTUALLY queried today (post-rotation), not the region's full
+        prefix list -- otherwise the usage tracker (and its predictive
+        quota-breach warning email) would think the full list runs every
+        day, defeating the entire point of rotating in the first place."""
+        prefixes = ["A", "B", "C", "D"]
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", "fake-key"), \
+             patch.object(scanners, "CITY_POSTCODE_PREFIX", {"TestRegion": prefixes}), \
+             patch.object(scanners, "REGION_TOWNS", {}), \
+             patch.dict(os.environ, {"PAID_API_ROTATION_DAYS": "2"}), \
+             patch("net_utils.smart_get", return_value=self._fake_response()), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value=None), \
+             patch("database.increment_api_usage", return_value={"warning_needed": False}) as mock_usage, \
+             patch("time.sleep", return_value=None):
+            scanners.scan_city_planning_api("TestRegion")
+
+        mock_usage.assert_called_once()
+        _, kwargs = mock_usage.call_args
+        self.assertEqual(kwargs["increment"], 2)  # half of 4 (rotation period 2), not all 4
+
+
+class TestMeshScanSameDayDedup(unittest.TestCase):
+    """run_mesh_network_scan() -- Aug 30 2026 same-day dedup, prompted
+    directly by Nick noticing that troubleshooting/manual re-triggers each
+    separately re-scraped all 50+ real council websites in
+    COUNCIL_REGISTRY again on the same day. Unlike the paid-API rotation
+    (a money quota), this is about not hammering other people's free
+    council government servers with a full sweep every time the pipeline
+    gets manually kicked off. Must run the full sweep at most once per
+    calendar day."""
+
+    def setUp(self):
+        self.cur = MagicMock()
+        self.conn = MagicMock()
+        self.conn.cursor.return_value = self.cur
+        scanners._MESH_SCAN_DAY_CACHE = None
+
+    def test_first_call_today_runs_the_full_sweep(self):
+        fake_registry = {"Testville": "https://example-council.gov.uk/online-applications"}
+        with patch.object(mesh_scrapers, "COUNCIL_REGISTRY", fake_registry), \
+             patch.object(mesh_scrapers, "scrape_mesh_council", return_value=[]) as mock_scrape, \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch("time.sleep", return_value=None):
+            scanners.run_mesh_network_scan()
+
+        mock_scrape.assert_called_once_with("Testville")
+
+    def test_same_day_retrigger_skips_the_sweep_entirely(self):
+        fake_registry = {"Testville": "https://example-council.gov.uk/online-applications"}
+        with patch.object(mesh_scrapers, "COUNCIL_REGISTRY", fake_registry), \
+             patch.object(mesh_scrapers, "scrape_mesh_council", return_value=[]) as mock_scrape, \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch("time.sleep", return_value=None):
+            scanners.run_mesh_network_scan()            # first trigger today
+            first_call_count = mock_scrape.call_count
+            result = scanners.run_mesh_network_scan()   # second trigger, same day
+
+        self.assertEqual(first_call_count, 1)
+        self.assertEqual(mock_scrape.call_count, first_call_count)  # no re-scraping
+        self.assertEqual(result, 0)
+
+
+class TestGlaDatahubLondon(unittest.TestCase):
+    """scan_gla_datahub_london() -- extracted Aug 30 2026 out of the legacy
+    scan_london_leads() function, which was found (while chasing Nick's
+    recalled "use multiple free planning sites to spread out the request
+    caps" strategy) to never actually be called anywhere in the scheduled
+    daily pipeline -- only from three manual/admin-triggered endpoints.
+    This free GLA Planning Datahub source is now called directly from
+    Stage 1 for the London region, additionally to the existing
+    scan_city_planning_api("London") call."""
+
+    def setUp(self):
+        self.cur = MagicMock()
+        self.conn = MagicMock()
+        self.conn.cursor.return_value = self.cur
+        # Module-level, keyed only by date (one call/day, no per-city key) --
+        # must reset between tests run on the same real calendar day.
+        scanners._GLA_DAY_CACHE = None
+
+    def test_returns_zero_without_crashing_when_key_not_configured(self):
+        """If GLA_API_KEY isn't set in Render, this must be a harmless no-op
+        (not an exception, not a wasted DB connection) -- Stage 1 calls this
+        unconditionally for London every day regardless of whether the key
+        is configured."""
+        with patch.object(scanners, "GLA_API_KEY", ""), \
+             patch("database.get_db_conn") as mock_get_conn:
+            count = scanners.scan_gla_datahub_london()
+
+        self.assertEqual(count, 0)
+        mock_get_conn.assert_not_called()
+
+    def test_valid_response_inserts_only_tree_related_leads(self):
+        body = {
+            "data": [
+                {"reference": "GLA-1", "description": "Crown reduction of protected oak tree, TPO.",
+                 "location": {"address": "1 Borough High St, London"}},
+                {"reference": "GLA-2", "description": "Change of use to former bank branch.",
+                 "location": {"address": "2 Borough High St, London"}},  # not tree-related
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = body
+
+        with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "GLA-1"}) as mock_insert, \
+             patch("time.sleep", return_value=None):
+            count = scanners.scan_gla_datahub_london()
+
+        self.assertEqual(count, 1)
+        mock_insert.assert_called_once()
+        self.conn.commit.assert_called_once()
+
+    def test_401_triggers_critical_alert_not_a_crash(self):
+        resp = MagicMock(status_code=401)
+
+        with patch.object(scanners, "GLA_API_KEY", "stale-key"), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch("time.sleep", return_value=None), \
+             patch("notifications.send_system_incident_alert") as mock_alert:
+            count = scanners.scan_gla_datahub_london()
+
+        self.assertEqual(count, 0)
+        mock_alert.assert_called_once()
+        self.assertEqual(mock_alert.call_args.kwargs["severity"], "CRITICAL")
+
+    def test_scan_london_leads_still_includes_gla_count_in_its_total(self):
+        """scan_london_leads() (the legacy manual-trigger entry point) must
+        still report GLA-sourced leads in its own return value, and now
+        delegates its postcode-radar coverage entirely to
+        scan_city_planning_api("London") -- Aug 30 2026: this used to carry
+        its own duplicate, unrotated, undeduped copy of the same 29
+        prefixes, which meant a manual trigger of scan_london_leads()
+        completely bypassed the quota-headroom fixes added to
+        scan_city_planning_api(). Delegating closes that gap."""
+        with patch.object(scanners, "scan_gla_datahub_london", return_value=3), \
+             patch.object(scanners, "scan_city_planning_api", return_value=7) as mock_radar:
+            total = scanners.scan_london_leads()
+
+        mock_radar.assert_called_once_with("London")
+        self.assertEqual(total, 10)  # 3 from GLA + 7 from the delegated radar call
+
+    def test_same_day_retrigger_skips_the_gla_fetch(self):
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {"data": []}
+
+        with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
+             patch("net_utils.smart_get", return_value=resp) as mock_get, \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch("time.sleep", return_value=None):
+            scanners.scan_gla_datahub_london()   # first trigger today
+            first_call_count = mock_get.call_count
+            result = scanners.scan_gla_datahub_london()  # second trigger, same day
+
+        self.assertEqual(first_call_count, 1)
+        self.assertEqual(mock_get.call_count, first_call_count)  # no second HTTP call
+        self.assertEqual(result, 0)
+
+
+class TestLeedsScanDelegation(unittest.TestCase):
+    """scan_leeds_leads() -- same Aug 30 2026 gap as scan_london_leads()
+    (found while checking "will that cover it though?"): part 2 used to
+    carry its own duplicate, unrotated, undeduped copy of the Yorkshire
+    postcode prefixes queried directly against ukplanningapi.co.uk. Since
+    this function is only reachable via manual/admin endpoints, every
+    manual trigger completely bypassed the quota-headroom fixes. Now
+    delegates to scan_city_planning_api("Leeds") instead."""
+
+    def setUp(self):
+        self.cur = MagicMock()
+        self.conn = MagicMock()
+        self.conn.cursor.return_value = self.cur
+
+    def test_yorkshire_radar_is_delegated_to_scan_city_planning_api(self):
+        arcgis_resp = MagicMock(status_code=200)
+        arcgis_resp.json.return_value = {"features": []}
+
+        with patch("net_utils.smart_get", return_value=arcgis_resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "scan_city_planning_api", return_value=5) as mock_radar:
+            total = scanners.scan_leeds_leads()
+
+        mock_radar.assert_called_once_with("Leeds")
+        self.assertEqual(total, 5)  # 0 from ArcGIS (no features) + 5 delegated
 
 
 if __name__ == "__main__":

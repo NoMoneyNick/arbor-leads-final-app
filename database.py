@@ -204,25 +204,6 @@ def init_db():
                 dispatched BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
-
-            -- Aug 30 2026: a Render deploy landing mid-scan kills the mesh
-            -- scan's background thread outright -- daemon threads don't
-            -- survive a process restart, so whatever hadn't been reached yet
-            -- in COUNCIL_REGISTRY was silently never scraped that run, with
-            -- no error and no record it even happened. This table lets
-            -- run_mesh_network_scan() (scanners.py) remember which council it
-            -- last finished, so an interrupted run resumes from there next
-            -- time instead of restarting the whole 50+ council list from the
-            -- top -- otherwise a council near the end of the dict would keep
-            -- losing the race against every deploy that happens to land
-            -- around the same point in the scan. One row per named scan (only
-            -- "mesh_idox" today) so other scan loops can use this later
-            -- without colliding.
-            CREATE TABLE IF NOT EXISTS scan_progress (
-                scan_name TEXT PRIMARY KEY,
-                last_council_key TEXT,
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            );
         """)
 
         # Performance Indices for Instant High-Volume Queries
@@ -292,8 +273,7 @@ def init_db():
             "ALTER TABLE machinery_assets ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE contractor_auth_tokens ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE chip_drop_spots ENABLE ROW LEVEL SECURITY;",
-            "ALTER TABLE storm_weather_alerts ENABLE ROW LEVEL SECURITY;",
-            "ALTER TABLE scan_progress ENABLE ROW LEVEL SECURITY;"
+            "ALTER TABLE storm_weather_alerts ENABLE ROW LEVEL SECURITY;"
         ]
         for stmt in rls_statements:
             cur.execute(stmt)
@@ -345,56 +325,6 @@ def init_db():
 
         logger.error(f"[DB] Initialization error: {e}")
 
-
-
-def get_scan_progress(scan_name: str) -> Optional[str]:
-    """Returns the council_key this scan last FULLY finished (leads fetched,
-    inserted, and committed), or None if there's no in-progress cycle to
-    resume -- either this scan has never run, or its last run completed the
-    whole list cleanly (see set_scan_progress). Callers should treat the
-    returned key as "resume with whatever comes after this one", not "redo
-    this one" -- it's only ever written once a council is truly done.
-    """
-    if not SURL:
-        return None
-    try:
-        conn = get_db_conn()
-        cur = conn.cursor()
-        cur.execute("SELECT last_council_key FROM scan_progress WHERE scan_name = %s", (scan_name,))
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        return row[0] if row else None
-    except Exception as e:
-        logger.error(f"[DB] Could not read scan progress for {scan_name!r}: {e}")
-        return None
-
-
-def set_scan_progress(scan_name: str, last_council_key: Optional[str]) -> None:
-    """Records the last council this scan fully finished this cycle. Pass
-    None when a full cycle just completed without interruption, so the next
-    run starts from the top again instead of resuming from the last entry
-    forever."""
-    if not SURL:
-        return
-    try:
-        conn = get_db_conn()
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO scan_progress (scan_name, last_council_key, updated_at)
-            VALUES (%s, %s, NOW())
-            ON CONFLICT (scan_name) DO UPDATE SET
-                last_council_key = EXCLUDED.last_council_key,
-                updated_at = EXCLUDED.updated_at
-            """,
-            (scan_name, last_council_key),
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        logger.error(f"[DB] Could not update scan progress for {scan_name!r}: {e}")
 
 
 def reset_monthly_quotas_if_needed() -> int:
@@ -1213,17 +1143,28 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
         conn = get_db_conn()
         cur = conn.cursor()
         try:
+            # Aug 30 2026: has_agent was captured by the scraper and shown to a
+            # buyer only AFTER they'd already paid (the "lead unlocked" email)
+            # -- this query, which feeds the public pre-purchase marketplace
+            # listing, never selected it at all. Nick flagged this directly:
+            # a contractor could pay £19-49 for a lead and only find out from
+            # the unlock email that a tree surgeon was already on record for
+            # that job. Added here so marketplace_view can show the same
+            # honest yes/no/unconfirmed signal before checkout -- without
+            # revealing WHICH agent/company (that detail stays part of what
+            # unlocking pays for).
             cur.execute("""
-                SELECT id, reference, address, summary, council_source, lead_score, lead_price, 
+                SELECT id, reference, address, summary, council_source, lead_score, lead_price,
                        discovered_at, planning_status, registered_date,
-                       COALESCE(lead_source_type, 'council_planning') as source_type
-                FROM leads 
-                WHERE status = 'new' OR status IS NULL 
-                ORDER BY discovered_at DESC 
+                       COALESCE(lead_source_type, 'council_planning') as source_type,
+                       has_agent
+                FROM leads
+                WHERE status = 'new' OR status IS NULL
+                ORDER BY discovered_at DESC
                 LIMIT 150;
             """)
             rows = cur.fetchall()
-            cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date", "source_type"]
+            cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date", "source_type", "has_agent"]
             raw_leads = [dict(zip(cols, r)) for r in rows]
 
             enriched = []
@@ -1232,6 +1173,22 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 if freshness.get("tier") == "expired":
                     continue
                 l.update(freshness)
+
+                # Aug 30 2026: Nick was explicit -- "I can't sell leads to
+                # jobs that already have someone signed up for them." A
+                # has_agent=True lead means the council record itself already
+                # names an agent/contractor, which is a genuine, confirmed
+                # signal (not a guess) that this job may already be taken.
+                # Showing a warning badge next to it (as of the marketplace
+                # fix earlier today) isn't enough on its own if we're still
+                # taking someone's money for it -- pull it from sale outright.
+                # has_agent is True / False / None; only True is excluded --
+                # None ("never checked") still needs a real decision from
+                # Nick on how strict to be, since almost the entire current
+                # lead pool is in that unconfirmed state, not a confirmed
+                # False.
+                if l.get("has_agent") is True:
+                    continue
 
                 # Custom source badges
                 if l["source_type"] == "direct_homeowner":

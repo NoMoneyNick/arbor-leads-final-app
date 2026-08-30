@@ -53,10 +53,29 @@ optional_auth = HTTPBasic(auto_error=False)
 
 
 # All UK Regions with nationwide council & partner coverage (England, Scotland, Wales)
+# Aug 30 2026: this used to also list "Leeds", "Birmingham", "Manchester",
+# "Bristol", "Sheffield" as their OWN entries alongside the multi-town
+# regions that already contain them (Yorkshire includes Leeds AND
+# Sheffield; West Midlands includes Birmingham; North West includes
+# Manchester; South West includes Bristol). Confirmed directly:
+# CITY_POSTCODE_PREFIX["Birmingham"] and ["West Midlands"] are the exact
+# same 10 postcode prefixes -- so the same date-based rotation formula
+# picked the identical subset for both, EVERY day. Every "for city in
+# ALL_CITIES" pass (the daily pipeline's Stage 1, the nationwide bulk
+# crawler) was silently querying Birmingham's, Leeds', Sheffield's,
+# Manchester's, and Bristol's planning data TWICE -- once under their
+# region, once again under their own standalone entry -- against both
+# ukplanningapi.co.uk (burning paid-tier quota twice as fast for those
+# areas) and PlanIt (doubling the request volume that was already
+# triggering blanket 429s). Removed here; the five are still real,
+# individually scannable entries in REGION_TOWNS and CITY_POSTCODE_PREFIX,
+# so /scan/leeds, /scan/birmingham etc. still work fine for one-off manual
+# troubleshooting of a single city -- they're just no longer part of the
+# automatic "scan everything" sweep where they'd double up with their
+# parent region.
 ALL_CITIES = [
     "London", "South East", "South West", "West Midlands",
     "East Midlands", "Yorkshire", "North West", "North East", "East of England",
-    "Leeds", "Birmingham", "Manchester", "Bristol", "Sheffield",
     "Scotland", "Wales"
 ]
 
@@ -1051,7 +1070,12 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
         conn = database.get_db_conn(); cur = conn.cursor()
         cur.execute("SELECT count(*) FROM potential_partners"); stats["p"] = cur.fetchone()[0]
         cur.execute("SELECT count(*) FROM leads"); stats["l"] = cur.fetchone()[0]
-        cur.execute("SELECT count(*) FROM leads WHERE source_type IN ('direct_homeowner', 'domestic_classified')")
+        # Aug 30 2026: this queried a column named "source_type", which has
+        # never existed -- the real column, used correctly everywhere else
+        # in this file, is "lead_source_type". Every /admin page load has
+        # been hitting this, logging "[ADMIN] DB error: column source_type
+        # does not exist" and silently leaving l_domestic/l_council at 0.
+        cur.execute("SELECT count(*) FROM leads WHERE lead_source_type IN ('direct_homeowner', 'domestic_classified')")
         stats["l_domestic"] = cur.fetchone()[0]
         stats["l_council"] = stats["l"] - stats["l_domestic"]
         cur.execute("SELECT count(*) FROM potential_partners WHERE phone_number IS NOT NULL OR email IS NOT NULL")
@@ -1097,18 +1121,38 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
         for l in stats["leads"]
     ])
 
-    city_buttons = "".join([
-        f"""<div style='display:inline-block; margin:6px; padding:12px 16px;
-            background:#f8fafc; border-radius:12px; border:1px solid #e2e8f0;'>
-            <b> {city}</b><br>
-            <div style='margin-top:6px; font-size:12px;'>
-                <a href='/scan/{city.lower().replace(" ", "-")}' style='color:#059669; font-weight:bold; text-decoration:none;'>&#128269; Scan Leads</a> &nbsp;|&nbsp;
-                <a href='/research/{city.lower().replace(" ", "-")}' style='color:#0284c7; text-decoration:none;'>&#128373; Find New</a> &nbsp;|&nbsp;
-                <a href='/enrich-region/{city.lower().replace(" ", "-")}' style='color:#7c3aed; font-weight:bold; text-decoration:none;'>&#10024; Enrich</a>
-            </div>
-        </div>"""
+    # Aug 30 2026 simplification: this used to be 48 buttons (16 regions x
+    # Scan/Find New/Enrich) plus 7 batch-operation buttons -- 55 action
+    # links on one page, none of them showing whether a scan was already
+    # running, so it was easy to fire an overlapping trigger by hand. Now
+    # that every trigger shares _PIPELINE_LOCK (see _dispatch_locked_scan),
+    # the page reflects that: one status banner, one big "run everything"
+    # button, and a plain list of per-region "Scan" links for the one real
+    # troubleshooting case (re-checking a single council after a fix) --
+    # the per-region "Find New"/"Enrich" buttons are dropped since
+    # /research-all and /enrich-all already cover that nationwide, and
+    # nothing this session observed Nick using them city-by-city. The
+    # underlying /research/{city} and /enrich-region/{city} routes are
+    # untouched -- only the buttons here are removed.
+    city_links = "".join([
+        f"<a href='/scan/{city.lower().replace(' ', '-')}' "
+        f"style='display:inline-block; margin:4px; padding:8px 14px; background:#f8fafc; "
+        f"border:1px solid #e2e8f0; border-radius:8px; color:#059669; font-weight:bold; "
+        f"font-size:13px; text-decoration:none;'>&#128269; {city}</a>"
         for city in ALL_CITIES  # Display all UK regions including Scotland and Wales
     ])
+
+    if _pipeline_state.get("running"):
+        pipeline_banner = f"""<div style='background:#fef3c7; border:1px solid #f59e0b; border-radius:10px;
+            padding:12px 18px; margin-bottom:18px; font-size:14px;'>
+            &#9203; <b>A scan is running right now</b> (started {html.escape(str(_pipeline_state.get('started_at') or '?'))}).
+            Any trigger clicked below while this is running will just report "already running" and change nothing -- that's expected, not a bug.
+        </div>"""
+    else:
+        pipeline_banner = """<div style='background:#ecfdf5; border:1px solid #10b981; border-radius:10px;
+            padding:12px 18px; margin-bottom:18px; font-size:14px;'>
+            &#9989; No scan currently running -- safe to trigger one below.
+        </div>"""
 
     pct = int((stats['enriched'] / stats['p'] * 100)) if stats['p'] else 0
 
@@ -1122,8 +1166,10 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
             <a href="/" target="_blank" style="background:#10b981; color:white; padding:8px 14px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;"> View Public Homepage</a>
         </div>
 
-        <p>Verified LTD Partners: <b>{stats['p']}</b> &nbsp;|&nbsp; 
-           Enriched with Contacts: <b style="color:#059669;">{stats['enriched']} ({pct}%)</b> 
+        {pipeline_banner}
+
+        <p>Verified LTD Partners: <b>{stats['p']}</b> &nbsp;|&nbsp;
+           Enriched with Contacts: <b style="color:#059669;">{stats['enriched']} ({pct}%)</b>
            <br><br>
            <span style="background:#0f172a; color:white; padding:4px 8px; border-radius:4px;">Total Planning Council Leads: <b>{stats['l_council']}</b></span>
            &nbsp;
@@ -1135,36 +1181,34 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
            &nbsp;|&nbsp; <a href='/export-directors.csv' style='color:#1b5e20; font-weight:bold;'>&#128190; Download CSV</a>
         </p>
         <hr>
-        <h3>&#128225; Nationwide Territory Scanners, Discovery & Instant Enrichment</h3>
-        <p style="color:#64748b; font-size:13px; margin-top:-5px;">Click <b>&#128269; Scan Leads</b> to fetch local planning applications, <b>&#128373; Find New</b> to discover tree surgery LTDs via Companies House, or <b>&#10024; Enrich</b> to pull direct phones and ratings in ~5 seconds.</p>
-        {city_buttons}
-        <hr>
 
-        <h3> Batch Operations</h3>
+        <h3>&#128640; Run Everything</h3>
+        <p style="color:#64748b; font-size:13px; margin-top:-5px;">One button runs the full nationwide pipeline (all council scans, PlanIt, partner discovery, and enrichment) in the background. It shares the same lock as every link on this page, so it can never double up with another trigger.</p>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
-            <a href='/scan-domestic-jobs' style="background:#ea580c; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px; box-shadow:0 2px 6px rgba(234,88,12,0.3);">
-                 🏡 Sweep Domestic Homeowner Leads
+            <a href='/trigger-daily-pipeline' style="background:#064e3b; color:white; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; box-shadow:0 2px 6px rgba(6,78,59,0.35);">
+                &#9889; Run Full Daily Pipeline
             </a>
-            <a href='/populate-2000-partners' style="background:#047857; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px; box-shadow:0 2px 6px rgba(4,120,87,0.3);">
-                 Harvest 2,000+ Contractors (Nationwide GB)
+            <a href='/scan-domestic-jobs' style="background:#ea580c; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
+                &#127968; Sweep Domestic Homeowner Leads
+            </a>
+            <a href='/populate-2000-partners' style="background:#047857; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
+                Harvest Contractors (Nationwide)
             </a>
             <a href='/enrich-all' style="background:#1b5e20; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                &#10024; Enrich All (All Remaining Partners)
-            </a>
-            <a href='/enrich-batch' style="background:#7c3aed; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                &#10024; Enrich Next 50 Partners (5-8 Seconds)
+                &#10024; Enrich All Partners
             </a>
             <a href='/research-all' style="background:#0284c7; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                 Discover All Regions (Find New)
+                Discover All Regions
             </a>
             <a href='/clean-partners' style="background:#b71c1c; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                 Clean Database (Purge False Substrings)
-            </a>
-            <a href='/export-directors.csv' style="background:#064e3b; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                 Export Contacts CSV
+                Clean Database
             </a>
         </div>
+        <hr>
 
+        <h3>&#128269; Scan One Region</h3>
+        <p style="color:#64748b; font-size:13px; margin-top:-5px;">For troubleshooting a single council only -- e.g. re-checking one region right after fixing its scraper. Same lock, same rotation, same once-per-day dedup as the full pipeline: clicking a region twice in one day is a safe no-op, not a second real scan.</p>
+        {city_links}
 
         <hr>
         <h4>Recent Leads (Past 24-48 Hours)</h4>
@@ -1841,12 +1885,29 @@ def marketplace_view(tier: Optional[str] = "all"):
         if len(addr_parts) >= 2:
             masked_area = f"{addr_parts[-2]}, {addr_parts[-1]}"
 
+        # Aug 30 2026: this is the single most important fix Nick asked for --
+        # has_agent was already captured and already shown post-purchase (the
+        # unlock email, the internal dispatch view) but NEVER shown here, on
+        # the public listing a contractor sees BEFORE paying. That meant
+        # someone could pay for a lead and only discover a tree surgeon was
+        # already on record for it after the money had changed hands. This
+        # shows the same honest yes/no/unconfirmed signal up front -- WHICH
+        # agent/company is still only revealed after unlocking, so there's
+        # still a real reason to pay even on an "agent on record" lead.
+        if l.get("has_agent") is True:
+            agent_badge = "<span style='font-size:11px; background:#fef3c7; color:#92400e; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;'>⚠️ Agent already on record</span>"
+        elif l.get("has_agent") is False:
+            agent_badge = "<span style='font-size:11px; background:#d1fae5; color:#065f46; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;'>✅ No agent listed</span>"
+        else:
+            agent_badge = "<span style='font-size:11px; background:#f1f5f9; color:#64748b; padding:3px 8px; border-radius:12px; margin-left:6px;'>Agent status: unconfirmed</span>"
+
         lead_cards += f"""
         <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; padding:20px; margin-bottom:14px; box-shadow:0 2px 8px rgba(0,0,0,0.03);">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
                 <div>
                     <span style="font-size:11px; background:{badge_bg}; color:{badge_color}; font-weight:bold; padding:4px 10px; border-radius:12px; text-transform:uppercase;">{badge_text}</span>
                     <span style="font-size:11px; background:#f1f5f9; color:#475569; padding:3px 8px; border-radius:12px; margin-left:6px;">LPA: {council}</span>
+                    {agent_badge}
                     <h3 style="margin:10px 0 4px 0; font-size:17px; color:#0f172a;">📍 {masked_area}</h3>
                 </div>
                 <div style="text-align:right;">
@@ -3856,6 +3917,19 @@ def _resolve_city_param(slug: str) -> Optional[str]:
     return city_map.get(clean) or city_map.get(compact)
 
 
+def _run_single_city_scan(city: str) -> None:
+    """The actual scan work for one region/city -- shared by /scan/{city}
+    and /trigger-leads/{city} below, both of which now dispatch this
+    through _dispatch_locked_scan instead of running it inline."""
+    if city in ("Leeds", "Yorkshire"):
+        count = scanners.scan_leeds_leads()
+    elif city in ("London", "South East"):
+        count = scanners.scan_london_leads()
+    else:
+        count = scanners.scan_city_planning_api(city)
+    logger.info(f"[{city}] scan complete: {count} new leads.")
+
+
 @app.get("/scan/{city_slug}", response_class=HTMLResponse)
 def scan_city(city_slug: str, request: Request, secret: Optional[str] = Query(None)):
 
@@ -3864,20 +3938,33 @@ def scan_city(city_slug: str, request: Request, secret: Optional[str] = Query(No
     if not city:
         raise HTTPException(status_code=404, detail=f"Region/City '{city_slug}' not configured.")
 
-    if city in ("Leeds", "Yorkshire"):
-        count = scanners.scan_leeds_leads()
-    elif city in ("London", "South East"):
-        count = scanners.scan_london_leads()
-    else:
-        count = scanners.scan_city_planning_api(city)
+    # Aug 30 2026: this used to call scan_leeds_leads/scan_london_leads/
+    # scan_city_planning_api directly, INLINE, in the request handler --
+    # with no _PIPELINE_LOCK protection at all, unlike every other "scan
+    # everything" trigger in this file. That meant a manual /scan/{city}
+    # click could run concurrently with the nightly full pipeline (or with
+    # another /scan/{city} click), both hitting the same council portals
+    # at once. It also ran synchronously: now that PlanIt is correctly
+    # paced at ~1 request/minute (see scanners._planit_wait_for_slot), a
+    # multi-authority region like London (13 authorities) can take over 10
+    # minutes just for PlanIt calls -- long enough to risk an HTTP request
+    # timeout on Render. Routed through the same shared lock + background
+    # thread every other scan trigger already uses.
+    result = _dispatch_locked_scan(lambda: _run_single_city_scan(city), f"scan_{city}")
+
+    if result["status"] == "already_running":
+        return f"""<html><body style="font-family:sans-serif; padding:40px;">
+            <p>A scan is already running (started {result.get('started_at', 'earlier')}) -- this shares a lock with every other scan trigger in this app, since they all hit the same council portals. Wait for it to finish, then try {city} again.</p>
+            <a href="/admin">&#9194; Back to Admin Command</a>
+        </body></html>"""
 
     return f"""<html><body style="font-family:sans-serif; padding:40px;">
-        <p> {city} scan complete. <b>{count}</b> new leads found.</p>
+        <p>{city} scan started in the background. PlanIt is now paced at roughly one request per minute (per the Aug 30 2026 rate-limit fix), so a multi-authority region can take several minutes -- check <a href="/admin">/admin</a> shortly for the new lead count.</p>
         <a href="/admin">&#9194; Back to Admin Command</a>
     </body></html>"""
 
 
-#  City Cron Routes (External  Trigger Secret) 
+#  City Cron Routes (External  Trigger Secret)
 
 @app.get("/trigger-leads/{city_slug}")
 def cron_trigger_slash(city_slug: str, secret: Optional[str] = Query(None)):
@@ -3886,15 +3973,18 @@ def cron_trigger_slash(city_slug: str, secret: Optional[str] = Query(None)):
     if not city:
         raise HTTPException(status_code=404, detail=f"Region/City '{city_slug}' not configured.")
 
-    if city in ("Leeds", "Yorkshire"):
-        count = scanners.scan_leeds_leads()
-    elif city in ("London", "South East"):
-        count = scanners.scan_london_leads()
-    else:
-        count = scanners.scan_city_planning_api(city)
-
-    logger.info(f"[CRON] {city}: {count} new leads.")
-    return {"status": "success", "city": city, "new_leads": count}
+    # Aug 30 2026: same fix as /scan/{city} above -- was previously
+    # synchronous with no lock, so an external cron hit here could run
+    # concurrently with the nightly full pipeline against the same
+    # council portals, and (now that PlanIt pacing is slower) risked a
+    # timed-out cron request. Dispatches through the same shared lock;
+    # the caller no longer gets a "new_leads" count back since the scan
+    # now runs after this response is returned -- callers that only care
+    # whether the trigger fired (the normal use for an external cron) are
+    # unaffected, since "started"/"already_running" is still a clear 200.
+    result = _dispatch_locked_scan(lambda: _run_single_city_scan(city), f"cron_scan_{city}")
+    result["city"] = city
+    return result
 
 
 @app.get("/api/scan-nationwide-all-uk")
@@ -4168,6 +4258,22 @@ def run_master_daily_pipeline():
         for city in ALL_CITIES:
             leads = scanners.scan_city_planning_api(city)
             total_leads_scanned += len(leads) if isinstance(leads, list) else int(leads or 0)
+            # Aug 30 2026: scanners.scan_gla_datahub_london() -- the free
+            # London GLA Planning Datahub -- was built and working but never
+            # actually wired into this scheduled pipeline; it only ran from
+            # three manual/admin-triggered endpoints. Calling it here, ADDITIONALLY
+            # to (not instead of) the scan_city_planning_api("London") call above,
+            # gives London a genuine third free data source distinct from
+            # ukplanningapi.co.uk and PlanIt -- directly the "spread requests
+            # across multiple free sources" approach this pipeline was meant
+            # to use, previously sitting unused every single day. No-ops
+            # (returns 0) if GLA_API_KEY isn't configured.
+            if city == "London":
+                try:
+                    gla_leads = scanners.scan_gla_datahub_london()
+                    total_leads_scanned += gla_leads
+                except Exception as gla_e:
+                    logger.error(f"[PIPELINE] Stage 1 GLA Datahub error: {gla_e}")
         logger.info(f"[PIPELINE] Stage 1 Complete: All UK regions scanned ({total_leads_scanned} planning leads processed).")
     except Exception as e:
         logger.error(f"[PIPELINE] Stage 1 error: {e}")
