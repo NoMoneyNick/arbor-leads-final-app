@@ -163,26 +163,10 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
 
 # ── Leeds Scanner (ArcGIS + Yorkshire Regional Councils) ──────────────────────
 
-_MESH_SCAN_NAME = "mesh_idox"
-
-
 def run_mesh_network_scan() -> int:
     """
     Executes a direct scan of all councils mapped in the Aggregator Mesh (Idox portals, etc.)
     Bypasses the third-party paid API entirely to save quota.
-
-    Checkpointed (Aug 30 2026): a Render deploy landing mid-scan kills this
-    function's background thread outright with no warning -- daemon threads
-    don't get a chance to finish or even log anything when the process they
-    live in is torn down. Before this fix, that silently truncated the
-    COUNCIL_REGISTRY list wherever it happened to be, and the next run always
-    restarted from the very top -- so councils late in the dict lost every
-    race against a deploy landing in roughly the same scan window, run after
-    run, while early ones were always covered. database.get/set_scan_progress
-    remembers the last council fully finished (leads fetched, inserted, AND
-    committed) and resumes right after it next time; a clean, uninterrupted
-    run resets the checkpoint to None so the following run starts at the top
-    again, same as before this fix for the common case.
     """
     try:
         import mesh_scrapers
@@ -190,34 +174,16 @@ def run_mesh_network_scan() -> int:
         logger.error("[MESH] mesh_scrapers.py not found.")
         return 0
 
-    council_items = list(mesh_scrapers.COUNCIL_REGISTRY.items())
-    resume_after = database.get_scan_progress(_MESH_SCAN_NAME)
-    if resume_after:
-        keys = [name for name, _ in council_items]
-        if resume_after in keys:
-            split_at = keys.index(resume_after) + 1
-            council_items = council_items[split_at:] + council_items[:split_at]
-            logger.info(
-                f"[MESH] Resuming interrupted scan after {resume_after!r} "
-                f"({len(council_items)} councils left this cycle)."
-            )
-        else:
-            # Checkpointed council no longer exists in the registry (e.g. it
-            # was removed as a confirmed-dead entry) -- nothing sensible to
-            # resume after, so just start the cycle fresh from the top.
-            logger.info(f"[MESH] Stale checkpoint {resume_after!r} not in registry; starting from the top.")
-
     new_leads = []
-    completed_fully = True
     conn = database.get_db_conn()
     cur = conn.cursor()
     try:
-        for council_name, url in council_items:
+        for council_name, url in mesh_scrapers.COUNCIL_REGISTRY.items():
             logger.info(f"[MESH] Scraping {council_name} directly from {url}...")
             # We add an artificial delay to respect council rate limits
             import time
             time.sleep(2)
-
+            
             leads = mesh_scrapers.scrape_mesh_council(council_name)
             for lead in leads:
                 ref = lead.get("reference")
@@ -236,28 +202,15 @@ def run_mesh_network_scan() -> int:
                 if inserted:
                     new_leads.append(inserted)
             conn.commit()
-            # Only checkpointed once this council's leads are safely
-            # committed -- if the process dies mid-council (mid-request, or
-            # mid-insert-loop above), the checkpoint stays at the PREVIOUS
-            # council, so this one gets retried next run rather than being
-            # treated as done when it wasn't.
-            database.set_scan_progress(_MESH_SCAN_NAME, council_name)
     except Exception as e:
         logger.error(f"[MESH] Fatal error during mesh scan: {e}")
-        completed_fully = False
     finally:
         cur.close()
         conn.close()
 
-    if completed_fully:
-        # Full cycle finished without interruption -- clear the checkpoint so
-        # the next run starts from the top of COUNCIL_REGISTRY again instead
-        # of resuming from the last (now stale) entry forever.
-        database.set_scan_progress(_MESH_SCAN_NAME, None)
-
     if new_leads:
         notifications.dispatch_lead_alerts("MESH-NATIONWIDE", new_leads)
-
+        
     logger.info(f"[MESH] Mesh Scan complete. {len(new_leads)} free leads extracted directly from councils.")
     return len(new_leads)
 
@@ -604,6 +557,18 @@ def scan_city_planning_api(city_name: str) -> int:
     try:
         from concurrent.futures import ThreadPoolExecutor
 
+        # Aug 30 2026: per-prefix/per-town failures below stay at DEBUG (with
+        # dozens of prefixes per region, a WARNING per one-off timeout would
+        # flood the log) -- but a run where EVERY prefix/town for a region
+        # failed was previously indistinguishable from a run that genuinely
+        # found zero tree-related applications. That's a real blind spot: an
+        # expired/invalid UK_PLANNING_API_KEY, or PlanIt being down, would
+        # silently look identical to "0 new leads found" with no visible
+        # cause anywhere in the log. These two lists collect failures so a
+        # 100%-failure run gets ONE explicit WARNING naming the likely cause.
+        paid_failures = []
+        planit_failures = []
+
         def fetch_paid(prefix):
             """ukplanningapi.co.uk -- paid, postcode-prefix based. Skipped
             (not silently, now logged once) if no key is configured."""
@@ -622,12 +587,15 @@ def scan_city_planning_api(city_name: str) -> int:
                     body = res.json()
                     if isinstance(body, dict) and body.get("error"):
                         logger.warning(f"[{city_name}] ukplanningapi.co.uk returned an error for prefix '{prefix}': {body.get('error')}")
+                        paid_failures.append(f"'{prefix}': API error {body.get('error')}")
                         return prefix, []
                     return prefix, body.get("data", [])
                 elif res.status_code not in (429,):
                     logger.debug(f"[{city_name}] ukplanningapi.co.uk HTTP {res.status_code} for prefix '{prefix}'")
+                    paid_failures.append(f"'{prefix}': HTTP {res.status_code}")
             except Exception as e:
                 logger.debug(f"[{city_name}] ukplanningapi.co.uk error for prefix '{prefix}': {e}")
+                paid_failures.append(f"'{prefix}': {e}")
             return prefix, []
 
         def fetch_planit(town):
@@ -646,10 +614,12 @@ def scan_city_planning_api(city_name: str) -> int:
                 )
                 if planit_res.status_code != 200:
                     logger.debug(f"[{city_name}] PlanIt HTTP {planit_res.status_code} for authority '{town}'")
+                    planit_failures.append(f"'{town}': HTTP {planit_res.status_code}")
                     return town, []
                 data = planit_res.json()
                 if isinstance(data, dict) and data.get("error"):
                     logger.warning(f"[{city_name}] PlanIt returned an error for authority '{town}': {data.get('error')}")
+                    planit_failures.append(f"'{town}': API error {data.get('error')}")
                     return town, []
                 records = data.get("records", [])
                 mapped_data = []
@@ -667,11 +637,25 @@ def scan_city_planning_api(city_name: str) -> int:
                 return town, mapped_data
             except Exception as e:
                 logger.debug(f"[{city_name}] PlanIt error for authority '{town}': {e}")
+                planit_failures.append(f"'{town}': {e}")
             return town, []
 
         with ThreadPoolExecutor(max_workers=6) as executor:
             paid_results = list(executor.map(fetch_paid, postcode_prefixes)) if postcode_prefixes else []
             planit_results = list(executor.map(fetch_planit, region_towns)) if region_towns else []
+
+        if UK_PLANNING_API_KEY and postcode_prefixes and len(paid_failures) == len(postcode_prefixes):
+            logger.warning(
+                f"[{city_name}] ukplanningapi.co.uk failed for ALL {len(postcode_prefixes)} postcode "
+                f"prefixes this run (e.g. {paid_failures[0]}) -- this looks like an invalid/expired "
+                f"UK_PLANNING_API_KEY or an API outage, not a genuine zero-results run."
+            )
+        if region_towns and len(planit_failures) == len(region_towns):
+            logger.warning(
+                f"[{city_name}] PlanIt failed for ALL {len(region_towns)} authorities this run "
+                f"(e.g. {planit_failures[0]}) -- this looks like an outage or a bad authority name, "
+                f"not a genuine zero-results run."
+            )
 
         # Track monthly usage and trigger predictive warning email when burn rate will breach 500 cap
         if UK_PLANNING_API_KEY and postcode_prefixes:

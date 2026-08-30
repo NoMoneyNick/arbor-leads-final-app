@@ -126,6 +126,10 @@ COUNCIL_REGISTRY = {
     #       caught it -- the first pass through this log only sampled part of a run
     #       and missed it). islington.gov.uk's own site now points planning search
     #       at islington.gov.uk/planningsearch, off the old Idox subdomain entirely.
+    #   "ST ALBANS": clean 404 x3 in the newest logs (this exact
+    #       /rpa/online-applications path). Not yet re-identified where St Albans'
+    #       planning search actually lives now -- needs a manual check before any
+    #       replacement scraper can be written.
 
     "WANDSWORTH": "https://planning1.wandsworth.gov.uk/Northgate/PlanningExplorer/GeneralSearch.aspx",
     "HAMMERSMITH & FULHAM": "https://public-access.lbhf.gov.uk/online-applications",
@@ -141,7 +145,6 @@ COUNCIL_REGISTRY = {
     "TUNBRIDGE WELLS": "https://twbcpa.midkent.gov.uk/online-applications",
     "WINCHESTER": "https://planningapps.winchester.gov.uk/online-applications",
     "NEW FOREST": "https://forms.newforest.gov.uk/planning",
-    "ST ALBANS": "https://planningapplications.stalbans.gov.uk/rpa/online-applications",
     "DACORUM": "https://planning.dacorum.gov.uk/publicaccess"
 }
 
