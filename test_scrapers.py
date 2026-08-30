@@ -69,6 +69,42 @@ def _ssl_error():
     return _requests.exceptions.SSLError("simulated certificate failure")
 
 
+class TestInsertLeadBackfill(unittest.TestCase):
+    """_insert_lead (Aug 30 2026 change): the daily scan re-finds the same
+    still-pending applications every run, so ON CONFLICT DO NOTHING alone
+    would mean a lead's applicant/agent fields -- discovered on some later
+    day the scraper re-visits it -- could never reach an already-existing
+    row. Switched to DO UPDATE ... COALESCE (fills a NULL field once, never
+    overwrites) with Postgres' xmax=0 trick to tell a genuine insert apart
+    from a backfill-only touch. This test covers the Python-side branch
+    (the SQL COALESCE itself only runs for real inside Postgres) -- a
+    mocked cursor can't verify the update happened, only that the function
+    correctly treats was_inserted=False as "not a new lead"."""
+
+    def _mock_cursor(self, fetchone_return):
+        cur = MagicMock()
+        cur.fetchone.return_value = fetchone_return
+        return cur
+
+    def test_genuine_insert_returns_lead_dict(self):
+        cur = self._mock_cursor(("some-uuid", True))  # (id, was_inserted)
+        result = scanners._insert_lead(
+            cur, "23/09999/TPO", "7 The Green, Birmingham", "Felling of 2no. diseased ash trees", "Birmingham"
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["ref"], "23/09999/TPO")
+
+    def test_backfill_only_touch_returns_none(self):
+        """Same reference already existed -- fields got backfilled in the DB,
+        but this must NOT be treated as a new lead to notify/count."""
+        cur = self._mock_cursor(("some-uuid", False))  # (id, was_inserted=False)
+        result = scanners._insert_lead(
+            cur, "23/09999/TPO", "7 The Green, Birmingham", "Felling of 2no. diseased ash trees", "Birmingham",
+            applicant_name="Mrs Jane Smith", has_agent=False
+        )
+        self.assertIsNone(result)
+
+
 class TestTreeGoldFiltering(unittest.TestCase):
     """The compound-phrase relevance filter deciding whether a planning
     application description is tree-work at all. Highest-value thing to

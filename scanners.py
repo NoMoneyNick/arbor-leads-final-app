@@ -108,6 +108,16 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
     search-results list, to read them. Other scan paths pass None/leave has_agent NULL,
     which the UI/exports must treat as "unknown", not "no agent" -- those are different
     things and conflating them would misrepresent leads we simply haven't checked yet.
+
+    Backfill note: the daily scan re-finds the same still-pending applications on
+    every run (a TPO application stays in the council's "recent" search for weeks),
+    so most of what a run turns up on any given day are references already in the
+    table from an earlier day -- ON CONFLICT DO NOTHING alone would silently skip
+    those forever and this new data would never reach a single existing row. Fixed
+    below with DO UPDATE ... COALESCE: an existing row gets these 4 fields filled
+    in the first time they're seen (never overwritten once set), while `was_inserted`
+    (Postgres' xmax=0 trick) keeps the return value None for a backfill-only touch,
+    so callers' "is this a brand-new lead to notify about" logic is unaffected.
     """
     if not summary or not reference:
         return None
@@ -131,13 +141,18 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
         INSERT INTO leads (reference, address, summary, council_source, lead_score, lead_price,
                             applicant_name, agent_name, agent_company, has_agent)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (reference) DO NOTHING
-        RETURNING id;
+        ON CONFLICT (reference) DO UPDATE SET
+            applicant_name = COALESCE(leads.applicant_name, EXCLUDED.applicant_name),
+            agent_name     = COALESCE(leads.agent_name, EXCLUDED.agent_name),
+            agent_company  = COALESCE(leads.agent_company, EXCLUDED.agent_company),
+            has_agent      = COALESCE(leads.has_agent, EXCLUDED.has_agent)
+        RETURNING id, (xmax = 0) AS was_inserted;
         """,
         (reference, address, summary[:350], source, lead_score, lead_price,
          applicant_name, agent_name, agent_company, has_agent)
     )
-    if cur.fetchone():
+    row = cur.fetchone()
+    if row and row[1]:  # was_inserted -- a genuinely new lead, not a backfill of an existing one
         return {"ref": reference, "addr": address, "summary": summary,
                 "lead_score": lead_score, "lead_price": lead_price,
                 "applicant_name": applicant_name, "agent_name": agent_name,
