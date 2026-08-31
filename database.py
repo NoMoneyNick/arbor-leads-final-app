@@ -36,14 +36,33 @@ def get_db_conn():
 
 
 def init_db():
-    """Ensures all required tables and columns exist. Safe to run on every startup."""
+    """Ensures all required tables and columns exist. Safe to run on every startup.
+
+    Aug 31 2026: this used to be ONE giant transaction with a single commit
+    at the very end -- discovered live when agent_is_tree_surgeon was added
+    to resilience_cols below, the app deployed fine, but every single PlanIt
+    insert then failed all afternoon with 'column agent_is_tree_surgeon does
+    not exist'. Root cause: SOME statement further down in the old single
+    block (never confirmed which -- the exception was only logged, never
+    surfaced) raised, which rolled back the ENTIRE transaction including the
+    schema change, silently -- the app kept running as if startup had
+    succeeded. Splitting into independent phases, each with its own
+    commit/rollback, means a schema change always lands even if an unrelated
+    later phase (RLS, hygiene cleanup) fails, and each phase's own failure is
+    now individually visible in the logs instead of one opaque catch-all.
+    """
     if not SURL:
         logger.warning("[DB] No SUPABASE_DB_URL found. Running in blind mode.")
         return
-    try:
-        conn = get_db_conn()
-        cur = conn.cursor()
 
+    conn = get_db_conn()
+
+    # Phase 1: schema (tables, indices, columns) -- the part that MUST land
+    # for the rest of the app to work at all, so it's isolated and committed
+    # first, before anything riskier (RLS, data cleanup) gets a chance to
+    # take it down with it.
+    try:
+        cur = conn.cursor()
         cur.execute("""
             CREATE TABLE IF NOT EXISTS potential_partners (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -269,8 +288,42 @@ def init_db():
         ]
         for stmt in resilience_cols:
             cur.execute(stmt)
-            
-        # SECURITY MANDATE: Enable Row-Level Security to block public REST API access
+
+        # Add lat/lon columns for geographic radius matching (safe, idempotent)
+        cur.execute("ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS lat FLOAT;")
+        cur.execute("ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS lon FLOAT;")
+        # Contractor Portal Upgrades (Phase 2, part 1 — PROJECT_STATE.md item 8):
+        # preferred lead-notification format. 'email' = plain email (current default
+        # behaviour), 'whatsapp'/'both' = the batch lead email also includes a
+        # click-to-forward WhatsApp button per lead. Note: this is a forward-to-self
+        # convenience link (create_whatsapp_link), not push delivery via WhatsApp's
+        # Business API — no such integration exists in this codebase.
+        cur.execute("ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS notification_preference TEXT DEFAULT 'email';")
+
+        conn.commit()
+        cur.close()
+        logger.info("[DB] Phase 1 OK: tables, indices, and columns are up to date.")
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"[DB] Phase 1 (schema) FAILED -- app is likely broken until this is fixed: {e}")
+        try:
+            import notifications
+            notifications.send_system_incident_alert(
+                category="DATABASE SCHEMA MIGRATION",
+                title="init_db() schema phase failed",
+                description=f"A CREATE TABLE / ADD COLUMN / index statement failed: {str(e)[:300]}",
+                impact="Any code path that reads/writes a column added here will fail until this is fixed.",
+                action_required="Check the exact error above and fix the migration SQL, then redeploy.",
+                severity="CRITICAL",
+                throttle_hours=1.0
+            )
+        except Exception:
+            pass
+
+    # Phase 2: Row-Level Security. Independent of Phase 1/3 -- a failure
+    # here should not be able to block schema changes or hygiene cleanup.
+    try:
+        cur = conn.cursor()
         rls_statements = [
             "ALTER TABLE potential_partners ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE leads ENABLE ROW LEVEL SECURITY;",
@@ -288,22 +341,23 @@ def init_db():
         ]
         for stmt in rls_statements:
             cur.execute(stmt)
+        conn.commit()
+        cur.close()
+        logger.info("[DB] Phase 2 OK: RLS lockout applied.")
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"[DB] Phase 2 (RLS) FAILED -- schema changes from Phase 1 are unaffected: {e}")
 
-        # Add lat/lon columns for geographic radius matching (safe, idempotent)
-        cur.execute("ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS lat FLOAT;")
-        cur.execute("ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS lon FLOAT;")
-        # Contractor Portal Upgrades (Phase 2, part 1 — PROJECT_STATE.md item 8):
-        # preferred lead-notification format. 'email' = plain email (current default
-        # behaviour), 'whatsapp'/'both' = the batch lead email also includes a
-        # click-to-forward WhatsApp button per lead. Note: this is a forward-to-self
-        # convenience link (create_whatsapp_link), not push delivery via WhatsApp's
-        # Business API — no such integration exists in this codebase.
-        cur.execute("ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS notification_preference TEXT DEFAULT 'email';")
-
+    # Phase 3: hygiene cleanup (DELETE/UPDATE junk rows). The riskiest phase
+    # (regex-based, touches existing data) -- isolated last so a bad regex or
+    # data-shape surprise here can NEVER take the schema or RLS phases down
+    # with it, unlike before.
+    try:
+        cur = conn.cursor()
         # DATA QUALITY HYGIENE: Purge any old blank or uninformative placeholder leads
         cur.execute("""
-            DELETE FROM leads 
-            WHERE summary IS NULL 
+            DELETE FROM leads
+            WHERE summary IS NULL
                OR LOWER(TRIM(summary)) IN ('tree-preservation-order', 'tpo', 'work to trees', 'works to trees', 'trees', '')
                OR (LENGTH(TRIM(summary)) < 15 AND (address = 'Greater London' OR address = 'London' OR address IS NULL));
         """)
@@ -330,11 +384,12 @@ def init_db():
 
         conn.commit()
         cur.close()
-        conn.close()
-        logger.info("[DB] Database initialized successfully with high-performance indices, strict RLS lockout, and lead hygiene filters.")
+        logger.info("[DB] Phase 3 OK: lead/partner hygiene cleanup applied.")
     except Exception as e:
+        conn.rollback()
+        logger.error(f"[DB] Phase 3 (hygiene cleanup) FAILED -- schema and RLS from Phases 1-2 are unaffected: {e}")
 
-        logger.error(f"[DB] Initialization error: {e}")
+    conn.close()
 
 
 

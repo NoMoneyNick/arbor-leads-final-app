@@ -330,7 +330,7 @@ class IdoxScraper:
         out = {}
         try:
             detail_url = f"{self.base_url}/applicationDetails.do?keyVal={key_val}&activeTab=details"
-            res = net_utils.smart_get(detail_url, session=self.session, timeout=25)
+            res = net_utils.smart_get(detail_url, session=self.session, timeout=12)
             if res.status_code != 200:
                 return out
             soup = BeautifulSoup(res.text, 'html.parser')
@@ -393,7 +393,7 @@ class IdoxScraper:
         try:
             # Step 1: Establish session and get CSRF token
             adv_search_url = f"{self.base_url}/search.do?action=advanced"
-            res = net_utils.smart_get(adv_search_url, session=self.session, timeout=25)
+            res = net_utils.smart_get(adv_search_url, session=self.session, timeout=12)
             if res.status_code != 200:
                 logger.warning(f"[MESH] Failed to connect to {self.base_url}. Status: {res.status_code}")
                 return leads
@@ -415,7 +415,7 @@ class IdoxScraper:
 
             # Step 3: Execute Search
             search_url = f"{self.base_url}/advancedSearchResults.do?action=searchCriteria"
-            res_post = net_utils.smart_post(search_url, session=self.session, data=payload, timeout=30)
+            res_post = net_utils.smart_post(search_url, session=self.session, data=payload, timeout=15)
 
             # Step 4: Parse Results
             soup = BeautifulSoup(res_post.text, 'html.parser')
