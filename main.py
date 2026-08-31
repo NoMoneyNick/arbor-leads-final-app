@@ -1879,6 +1879,24 @@ def marketplace_view(tier: Optional[str] = "all"):
         badge_text = l["badge_text"]
         days_left = l["days_left"]
 
+        # Aug 31 2026: Nick noticed the marketplace never actually showed
+        # WHEN a lead was listed -- only a derived "days left" countdown.
+        # discovered_at was already selected by the query, just never
+        # rendered. Handles both a real datetime (the normal case, from
+        # psycopg2's TIMESTAMPTZ) and a string (defensive, in case a caller
+        # ever passes one) the same way calculate_lead_freshness already does.
+        listed_date = "Date unavailable"
+        raw_discovered_at = l.get("discovered_at")
+        try:
+            if isinstance(raw_discovered_at, str):
+                dt = datetime.datetime.fromisoformat(raw_discovered_at.replace("Z", "+00:00"))
+            else:
+                dt = raw_discovered_at
+            if dt:
+                listed_date = dt.strftime("%d %b %Y, %H:%M")
+        except Exception:
+            pass
+
         # Mask exact street number/name to prevent bypassing, but show neighborhood/town & postcode
         addr_parts = [p.strip() for p in addr.split(",") if p.strip()]
         masked_area = addr_parts[-1] if len(addr_parts) > 1 else addr
@@ -1909,12 +1927,21 @@ def marketplace_view(tier: Optional[str] = "all"):
         else:
             agent_badge = "<span style='font-size:11px; background:#f1f5f9; color:#64748b; padding:3px 8px; border-radius:12px; margin-left:6px;'>Agent status: unconfirmed</span>"
 
+        # Aug 31 2026: Nick's point -- a lead whose own description already
+        # signals danger/urgency (see database.is_urgent_lead) genuinely
+        # needs faster action than a routine application, so it's flagged
+        # here and also sorted to the front by the query itself.
+        urgent_badge = ""
+        if l.get("is_urgent"):
+            urgent_badge = "<span style='font-size:11px; background:#fee2e2; color:#991b1b; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;'>🚨 Urgent</span>"
+
         lead_cards += f"""
-        <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; padding:20px; margin-bottom:14px; box-shadow:0 2px 8px rgba(0,0,0,0.03);">
+        <div style="background:white; border:1px solid {'#fca5a5' if l.get('is_urgent') else '#e2e8f0'}; border-radius:12px; padding:20px; margin-bottom:14px; box-shadow:0 2px 8px rgba(0,0,0,0.03);">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
                 <div>
                     <span style="font-size:11px; background:{badge_bg}; color:{badge_color}; font-weight:bold; padding:4px 10px; border-radius:12px; text-transform:uppercase;">{badge_text}</span>
                     <span style="font-size:11px; background:#f1f5f9; color:#475569; padding:3px 8px; border-radius:12px; margin-left:6px;">LPA: {council}</span>
+                    {urgent_badge}
                     {agent_badge}
                     <h3 style="margin:10px 0 4px 0; font-size:17px; color:#0f172a;">📍 {masked_area}</h3>
                 </div>
@@ -1923,7 +1950,9 @@ def marketplace_view(tier: Optional[str] = "all"):
                     <span style="font-size:11px; color:#64748b;">{days_left}</span>
                 </div>
             </div>
-            
+
+            <div style="font-size:11px; color:#94a3b8; margin-top:4px;">📅 Listed: {listed_date}</div>
+
             <div style="background:#f8fafc; border-left:3px solid #044332; padding:12px 14px; margin:12px 0; font-size:13px; color:#334155; line-height:1.5;">
                 <b>Job Specification:</b> {summary[:220]}...
             </div>

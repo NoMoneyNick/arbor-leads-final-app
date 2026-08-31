@@ -832,6 +832,33 @@ class TestPlanitFallback(unittest.TestCase):
         slept_for = [c.args[0] for c in mock_sleep.call_args_list if c.args]
         self.assertIn(3.0, slept_for)
 
+    def test_planit_429_with_huge_retry_after_is_skipped_not_slept_through(self):
+        """Aug 31 2026 incident: PlanIt returned Retry-After: 20070 (5.6
+        hours) after PLANIT_MIN_INTERVAL_SECONDS was lowered. Sleeping that
+        out synchronously on the single PlanIt worker thread stalled the
+        whole pipeline for hours -- indistinguishable from a hang. Past
+        PLANIT_MAX_RETRY_WAIT_SECONDS, this must give up on the town
+        immediately (no multi-hour time.sleep) rather than block."""
+        rate_limited = MagicMock(status_code=429)
+        rate_limited.headers = {"Retry-After": "20070"}
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=rate_limited), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead") as mock_insert, \
+             patch("time.sleep", return_value=None) as mock_sleep, \
+             patch.object(scanners, "logger") as mock_logger:
+            count = scanners.scan_city_planning_api("Bristol")
+
+        self.assertEqual(count, 0)
+        mock_insert.assert_not_called()
+        # The one real sleep here is the pacing gate (<= PLANIT_MIN_INTERVAL_SECONDS);
+        # the 20070s Retry-After itself must never reach time.sleep().
+        slept_for = [c.args[0] for c in mock_sleep.call_args_list if c.args]
+        self.assertTrue(all(s < 100 for s in slept_for), f"a huge Retry-After leaked into a real sleep: {slept_for}")
+        warning_texts = [c.args[0] for c in mock_logger.warning.call_args_list if c.args]
+        self.assertTrue(any("hard block" in t for t in warning_texts))
+
     def test_planit_429_gives_up_after_one_retry_and_is_counted_as_a_failure(self):
         """If the retry ALSO 429s, this must be recorded as a real failure
         (so the "PlanIt failed for ALL authorities" aggregate warning can

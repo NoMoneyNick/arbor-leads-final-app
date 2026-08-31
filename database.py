@@ -1197,6 +1197,57 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
         }
 
 
+# Aug 31 2026: Nick's point -- "some leads are more vital than others...
+# surely a fallen tree would need immediate action". Honest caveat baked
+# into this design: a genuinely fallen/dangerous tree is legally EXEMPT
+# from needing planning permission at all (immediate risk to safety), so
+# most of these words never show up in most council-application leads --
+# this doesn't create a new category of leads, it just flags the subset
+# whose own description already uses danger/urgency language (a
+# retrospective consent application, a dangerous-tree notification, etc).
+# False positives here just mean an extra badge on an ordinary lead --
+# far lower stakes than the has_agent exclusion, so this list is
+# deliberately broader/more liberal than that one.
+_URGENT_KEYWORDS = (
+    "dangerous", "danger", "fallen", "fall down", "collapsed", "collapse",
+    "storm damage", "storm-damaged", "wind damage", "risk to public",
+    "risk to life", "public safety", "emergency", "urgent", "immediate action",
+    "immediate risk", "blocking the road", "blocking highway", "obstructing highway",
+    "structurally unsound", "split trunk", "hanging branch", "dead and dangerous",
+    "high risk", "unsafe", "hazardous", "subsidence risk",
+)
+
+
+def is_urgent_lead(summary: str) -> bool:
+    """Best-effort flag for a lead whose own description already signals
+    danger/urgency -- see _URGENT_KEYWORDS comment above for what this is
+    and isn't. Used to badge and sort marketplace leads, not to exclude
+    anything."""
+    if not summary:
+        return False
+    text = summary.lower()
+    return any(kw in text for kw in _URGENT_KEYWORDS)
+
+
+def _sort_key_discovered_at(lead: dict) -> float:
+    """Descending-time sort key (most recent first) for use as the secondary
+    key alongside urgency in get_marketplace_leads_with_freshness. Missing
+    or unparseable dates sort last within their urgency group rather than
+    raising."""
+    import datetime
+    dt = lead.get("discovered_at")
+    if dt is None:
+        return 0.0
+    try:
+        if isinstance(dt, str):
+            dt = datetime.datetime.fromisoformat(dt.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return -dt.timestamp()
+    except Exception:
+        return 0.0
+
+
 def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 40) -> list:
     """
     Returns unallocated leads enriched with their dynamic statutory freshness calculation.
@@ -1287,6 +1338,8 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                     if not l.get("badge_text") or l["badge_text"] == "Lead":
                         l["badge_text"] = "🏛️ Council Statutory"
 
+                l["is_urgent"] = is_urgent_lead(l.get("summary"))
+
                 # Filter routing
                 if not filter_tier or filter_tier == "all":
                     enriched.append(l)
@@ -1297,10 +1350,16 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 elif l["tier"] == filter_tier:
                     enriched.append(l)
 
-                if len(enriched) >= limit:
-                    break
+                # Aug 31 2026: this used to break out of the loop as soon as
+                # `limit` matching leads were collected, in discovered_at-DESC
+                # order -- which meant an urgent lead sitting just past the
+                # cutoff could never surface at all. Now the loop runs to
+                # completion over the (already capped at 150) SQL rows, and
+                # urgent leads are sorted to the front before the limit is
+                # applied, so urgency can't be starved out by recency.
 
-            return enriched
+            enriched.sort(key=lambda x: (not x.get("is_urgent"), _sort_key_discovered_at(x)))
+            return enriched[:limit]
         finally:
             cur.close()
             conn.close()

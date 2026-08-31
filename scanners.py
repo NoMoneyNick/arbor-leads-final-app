@@ -649,6 +649,18 @@ PLANIT_AGENT_CONFIRM_LIMIT = int(os.getenv("PLANIT_AGENT_CONFIRM_LIMIT", "1000")
 _PLANIT_PACING_LOCK = threading.Lock()
 _PLANIT_LAST_REQUEST_AT: float = 0.0
 
+# Aug 31 2026: production incident -- after PLANIT_MIN_INTERVAL_SECONDS was
+# lowered to 10s, PlanIt returned a 429 with Retry-After: 20070 (5.6 hours),
+# a real hard block, not a routine rate limit. Honoring Retry-After "in
+# full" (the Aug 30 fix above) meant time.sleep(20070) ran synchronously on
+# the single PlanIt worker thread (max_workers=1), stalling that region --
+# and everything queued behind it in the same run -- for over 5 hours,
+# which looked identical to the pipeline being stuck/hung. A genuinely long
+# Retry-After means "stop asking for a long while", not "block this thread
+# for that whole while": past this cap, give up on the town for this run
+# instead of sleeping through it.
+PLANIT_MAX_RETRY_WAIT_SECONDS = float(os.getenv("PLANIT_MAX_RETRY_WAIT_SECONDS", "30") or "30")
+
 
 def _planit_wait_for_slot() -> None:
     """Block the calling thread until it's been at least
@@ -858,6 +870,10 @@ def scan_city_planning_api(city_name: str) -> int:
                             wait_s = float(retry_after) if retry_after else PLANIT_MIN_INTERVAL_SECONDS
                         except (ValueError, TypeError):
                             wait_s = PLANIT_MIN_INTERVAL_SECONDS
+                        if wait_s > PLANIT_MAX_RETRY_WAIT_SECONDS:
+                            logger.warning(f"[{city_name}] PlanIt asked for a {wait_s:.0f}s wait for '{town}' -- treating as a hard block (exceeds the {PLANIT_MAX_RETRY_WAIT_SECONDS:.0f}s cap) and skipping it this run instead of stalling the pipeline.")
+                            planit_failures.append(f"'{town}': HTTP 429 (server requested {wait_s:.0f}s, exceeds cap, skipped)")
+                            return town, []
                         if attempt == 0:
                             logger.info(f"[{city_name}] PlanIt rate-limited (429) for '{town}', waiting {wait_s:.0f}s and retrying once...")
                             time.sleep(wait_s)
