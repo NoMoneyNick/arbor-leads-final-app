@@ -192,12 +192,21 @@ class IdoxScraper:
     _structure_alert_throttle: dict = {}
     _structure_alert_throttle_hours = 24.0
 
-    def _alert_possible_structure_change(self, search_term: str):
+    def _alert_possible_structure_change(self, search_term: str, page_text_snippet: str = ""):
         now = time.time()
         last = IdoxScraper._structure_alert_throttle.get(self.base_url, 0)
         if now - last < IdoxScraper._structure_alert_throttle_hours * 3600:
             return
         IdoxScraper._structure_alert_throttle[self.base_url] = now
+        # Aug 31 2026: the alert used to say only "no recognisable page" with
+        # no way to tell, without live-browsing the portal ourselves, whether
+        # the real cause was already-known (e.g. a "too many results" wording
+        # variant not yet in the phrase list) or something genuinely new.
+        # Including a snippet of the actual page text turns every alert into
+        # its own diagnostic -- the fix for a future recurrence of this exact
+        # council can usually be read straight off the snippet instead of
+        # requiring a manual portal visit first.
+        snippet = (page_text_snippet or "")[:400]
         try:
             import notifications
             notifications.send_system_incident_alert(
@@ -210,10 +219,14 @@ class IdoxScraper:
                     f"result, or the council has changed their Idox theme/markup and "
                     f"our parser (which looks for <ul id='searchresults'>) no longer "
                     f"matches anything on this portal -- which would mean leads from "
-                    f"this specific council are being silently missed."
+                    f"this specific council are being silently missed.\n\n"
+                    f"First ~400 chars of the page's visible text (use this to spot a "
+                    f"wording variant we should add to the known-phrase lists, e.g. "
+                    f"another way of saying 'too many results' or 'no results'):\n"
+                    f"{snippet}"
                 ),
                 impact="Possible silent lead loss from this one council if it's a structure change, not a genuine empty result.",
-                action_required=f"Manually open {self.base_url}/search.do?action=advanced, run a broad search, and compare the page structure against what mesh_scrapers.py expects.",
+                action_required=f"Check the page text snippet above first -- if it's a wording variant of a known case, add the phrase to mesh_scrapers.py's phrase lists. Otherwise manually open {self.base_url}/search.do?action=advanced to compare page structure.",
                 severity="WARNING",
                 throttle_hours=IdoxScraper._structure_alert_throttle_hours
             )
@@ -387,7 +400,7 @@ class IdoxScraper:
                         f"date range for this council."
                     )
                 elif not looks_like_genuine_no_results:
-                    self._alert_possible_structure_change(search_term)
+                    self._alert_possible_structure_change(search_term, page_text_snippet=page_text)
                 return leads
 
             # Parse multiple results

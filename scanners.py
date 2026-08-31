@@ -637,7 +637,7 @@ PLANIT_MIN_INTERVAL_SECONDS = float(os.getenv("PLANIT_MIN_INTERVAL_SECONDS", "60
 # forever". Nick's explicit ask (Aug 30 2026): needed the current ~1,200-lead
 # backlog checked in one pass today, not trickled in over days/weeks -- this
 # is what makes that one full nationwide run actually cover most of it.
-PLANIT_AGENT_CONFIRM_LIMIT = int(os.getenv("PLANIT_AGENT_CONFIRM_LIMIT", "200") or "200")
+PLANIT_AGENT_CONFIRM_LIMIT = int(os.getenv("PLANIT_AGENT_CONFIRM_LIMIT", "1000") or "1000")
 _PLANIT_PACING_LOCK = threading.Lock()
 _PLANIT_LAST_REQUEST_AT: float = 0.0
 
@@ -1015,6 +1015,16 @@ def scan_city_planning_api(city_name: str) -> int:
             # shared one, so a modest per-call cap plus a short sleep is the
             # right amount of caution rather than a full pacing lock.
             confirm_budget = PLANIT_AGENT_CONFIRM_LIMIT
+            # Aug 31 2026: attempts vs outcome wasn't visible anywhere -- a
+            # blank has_agent after this loop could mean "never attempted"
+            # (no source_url, non-Idox authority, or budget exhausted) or
+            # "attempted but the portal page didn't have enough info to say
+            # either way" (confirm_agent_status_from_source returned {}).
+            # Those are very different signals for how fast the backlog of
+            # unconfirmed leads will actually resolve, so tally and log them
+            # explicitly instead of only being able to infer outcomes later
+            # from a DB export.
+            confirm_stats = {"attempted": 0, "resolved_true": 0, "resolved_false": 0, "inconclusive": 0}
 
             for town, records in planit_results:
                 for item in records:
@@ -1049,6 +1059,7 @@ def scan_city_planning_api(city_name: str) -> int:
                             pass  # already resolved -- _insert_lead's COALESCE keeps it either way
                         else:
                             confirm_budget -= 1
+                            confirm_stats["attempted"] += 1
                             try:
                                 import mesh_scrapers
                                 time.sleep(1.0)  # polite -- this hits the council's own server, not PlanIt's
@@ -1056,7 +1067,7 @@ def scan_city_planning_api(city_name: str) -> int:
                             except Exception as e:
                                 logger.debug(f"[{city_name}] Agent-status confirmation failed for '{ref}': {e}")
                                 confirmed = {}
-                            if confirmed:
+                            if confirmed and "has_agent" in confirmed:
                                 applicant_name = applicant_name or confirmed.get("applicant_name")
                                 agent_name = agent_name or confirmed.get("agent_name")
                                 agent_company = agent_company or confirmed.get("agent_company")
@@ -1065,8 +1076,10 @@ def scan_city_planning_api(city_name: str) -> int:
                                 # unlike PlanIt's own data, this can safely
                                 # be trusted as a genuine "no agent" too, not
                                 # just "yes".
-                                if "has_agent" in confirmed:
-                                    has_agent = confirmed["has_agent"]
+                                has_agent = confirmed["has_agent"]
+                                confirm_stats["resolved_true" if has_agent else "resolved_false"] += 1
+                            else:
+                                confirm_stats["inconclusive"] += 1
 
                     lead = _insert_lead(
                         cur, ref, addr, summary, city_name,
@@ -1085,6 +1098,13 @@ def scan_city_planning_api(city_name: str) -> int:
 
         if new_leads:
             notifications.dispatch_lead_alerts(city_name, new_leads)
+        if confirm_stats["attempted"]:
+            logger.info(
+                f"[{city_name}] Agent-status confirmation: {confirm_stats['attempted']} checked against "
+                f"the council's own portal -- {confirm_stats['resolved_true']} confirmed has-agent, "
+                f"{confirm_stats['resolved_false']} confirmed no-agent, "
+                f"{confirm_stats['inconclusive']} inconclusive (portal page didn't say either way)."
+            )
         logger.info(f"[{city_name}] Parallel scan complete. {len(new_leads)} new leads found.")
         return len(new_leads)
 
