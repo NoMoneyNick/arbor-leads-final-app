@@ -255,6 +255,17 @@ def init_db():
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS agent_name TEXT;",
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS agent_company TEXT;",
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS has_agent BOOLEAN;",
+            # Aug 31 2026: has_agent alone conflated two very different
+            # situations -- a tree surgeon already hired to file the
+            # application (job genuinely taken) vs. an architect, planning
+            # consultant, block management company, or the council itself
+            # acting as "agent" purely to handle the paperwork (the tree work
+            # itself may still be wide open). mesh_scrapers.classify_agent_as_tree_surgeon()
+            # gives a best-effort True/False/unknown read on which case this
+            # is, stored separately so has_agent keeps meaning exactly what
+            # it always meant ("an agent is on record") without losing that
+            # distinction.
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS agent_is_tree_surgeon BOOLEAN;",
         ]
         for stmt in resilience_cols:
             cur.execute(stmt)
@@ -1157,14 +1168,14 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 SELECT id, reference, address, summary, council_source, lead_score, lead_price,
                        discovered_at, planning_status, registered_date,
                        COALESCE(lead_source_type, 'council_planning') as source_type,
-                       has_agent
+                       has_agent, agent_is_tree_surgeon
                 FROM leads
                 WHERE status = 'new' OR status IS NULL
                 ORDER BY discovered_at DESC
                 LIMIT 150;
             """)
             rows = cur.fetchall()
-            cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date", "source_type", "has_agent"]
+            cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date", "source_type", "has_agent", "agent_is_tree_surgeon"]
             raw_leads = [dict(zip(cols, r)) for r in rows]
 
             enriched = []
@@ -1187,7 +1198,21 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 # Nick on how strict to be, since almost the entire current
                 # lead pool is in that unconfirmed state, not a confirmed
                 # False.
-                if l.get("has_agent") is True:
+                #
+                # Aug 31 2026: Nick's follow-up -- "an agent" on the
+                # application isn't always a tree surgeon. Architects,
+                # planning consultants, block management companies, and even
+                # the council itself all show up as "agent" too, and in those
+                # cases the tree work itself is very likely still open even
+                # though has_agent is technically True. agent_is_tree_surgeon
+                # is a best-effort classification of the agent name/company
+                # text (see mesh_scrapers.classify_agent_as_tree_surgeon):
+                # only exclude here when it's True or unknown (never
+                # classified, or genuinely ambiguous) -- when it's explicitly
+                # False (clearly NOT a tree company), keep the lead for sale,
+                # since we now have real evidence the job may still be open
+                # despite technically having "an agent" on record.
+                if l.get("has_agent") is True and l.get("agent_is_tree_surgeon") is not False:
                     continue
 
                 # Custom source badges

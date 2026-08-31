@@ -100,7 +100,8 @@ def _is_tree_related(text: str) -> bool:
 
 def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
                   applicant_name: Optional[str] = None, agent_name: Optional[str] = None,
-                  agent_company: Optional[str] = None, has_agent: Optional[bool] = None) -> Optional[dict]:
+                  agent_company: Optional[str] = None, has_agent: Optional[bool] = None,
+                  agent_is_tree_surgeon: Optional[bool] = None) -> Optional[dict]:
     """
     Inserts a lead into the DB. Returns the lead dict if new, None if duplicate or low-quality junk.
     Enforces a strict quality gate: blocks empty, generic placeholders like 'tree-preservation-order'.
@@ -142,24 +143,26 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
     cur.execute(
         """
         INSERT INTO leads (reference, address, summary, council_source, lead_score, lead_price,
-                            applicant_name, agent_name, agent_company, has_agent)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (reference) DO UPDATE SET
             applicant_name = COALESCE(leads.applicant_name, EXCLUDED.applicant_name),
             agent_name     = COALESCE(leads.agent_name, EXCLUDED.agent_name),
             agent_company  = COALESCE(leads.agent_company, EXCLUDED.agent_company),
-            has_agent      = COALESCE(leads.has_agent, EXCLUDED.has_agent)
+            has_agent      = COALESCE(leads.has_agent, EXCLUDED.has_agent),
+            agent_is_tree_surgeon = COALESCE(leads.agent_is_tree_surgeon, EXCLUDED.agent_is_tree_surgeon)
         RETURNING id, (xmax = 0) AS was_inserted;
         """,
         (reference, address, summary[:350], source, lead_score, lead_price,
-         applicant_name, agent_name, agent_company, has_agent)
+         applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon)
     )
     row = cur.fetchone()
     if row and row[1]:  # was_inserted -- a genuinely new lead, not a backfill of an existing one
         return {"ref": reference, "addr": address, "summary": summary,
                 "lead_score": lead_score, "lead_price": lead_price,
                 "applicant_name": applicant_name, "agent_name": agent_name,
-                "agent_company": agent_company, "has_agent": has_agent}
+                "agent_company": agent_company, "has_agent": has_agent,
+                "agent_is_tree_surgeon": agent_is_tree_surgeon}
     return None
 
 
@@ -228,6 +231,7 @@ def run_mesh_network_scan() -> int:
                     agent_name=lead.get("agent_name"),
                     agent_company=lead.get("agent_company"),
                     has_agent=lead.get("has_agent"),
+                    agent_is_tree_surgeon=lead.get("agent_is_tree_surgeon"),
                 )
                 if inserted:
                     new_leads.append(inserted)
@@ -575,7 +579,11 @@ REGION_TOWNS = {
 # Values PlanIt returns as a placeholder when it hasn't actually captured a
 # field (confirmed live: e.g. "agent_name": "See source") -- must not be
 # stored as if it were a real name.
-_PLANIT_PLACEHOLDER_VALUES = {"see source", "n/a", "none", ""}
+_PLANIT_PLACEHOLDER_VALUES = {
+    "see source", "n/a", "none", "", "not available", "not known", "unknown",
+    "n a", "not applicable", "not given", "not provided", "tbc", "to be confirmed",
+    "-", "--",
+}
 
 
 def _planit_real_value(value) -> Optional[str]:
@@ -1037,6 +1045,10 @@ def scan_city_planning_api(city_name: str) -> int:
                     agent_name = item.get("agent_name")
                     agent_company = item.get("agent_company")
                     has_agent = (True if (agent_name or agent_company) else None)
+                    agent_is_tree_surgeon = None
+                    if has_agent:
+                        import mesh_scrapers
+                        agent_is_tree_surgeon = mesh_scrapers.classify_agent_as_tree_surgeon(agent_name, agent_company)
 
                     if has_agent is None and confirm_budget > 0 and item.get("source_url"):
                         # Aug 30 2026: Nick's point -- re-confirming a
@@ -1077,6 +1089,7 @@ def scan_city_planning_api(city_name: str) -> int:
                                 # be trusted as a genuine "no agent" too, not
                                 # just "yes".
                                 has_agent = confirmed["has_agent"]
+                                agent_is_tree_surgeon = confirmed.get("agent_is_tree_surgeon") if has_agent else None
                                 confirm_stats["resolved_true" if has_agent else "resolved_false"] += 1
                             else:
                                 confirm_stats["inconclusive"] += 1
@@ -1087,6 +1100,7 @@ def scan_city_planning_api(city_name: str) -> int:
                         agent_name=agent_name,
                         agent_company=agent_company,
                         has_agent=has_agent,
+                        agent_is_tree_surgeon=agent_is_tree_surgeon,
                     )
                     if lead:
                         new_leads.append(lead)

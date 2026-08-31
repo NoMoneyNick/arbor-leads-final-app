@@ -13,6 +13,75 @@ try:
 except ImportError:
     BeautifulSoup = None
 
+# Aug 31 2026: council portals routinely fill an empty Agent/Applicant field
+# with placeholder text ("Not Available", "N/A", "-") instead of leaving it
+# blank -- confirmed live: 8 of 186 "has agent" leads in one export had
+# agent_company literally equal to "Not Available", wrongly flagging a
+# genuinely open lead as taken. Shared by _fetch_applicant_and_agent below.
+_PLACEHOLDER_FIELD_VALUES = {
+    "see source", "n/a", "none", "", "not available", "not known", "unknown",
+    "n a", "not applicable", "not given", "not provided", "tbc", "to be confirmed",
+    "-", "--",
+}
+
+
+def _looks_like_real_value(value: Optional[str]) -> bool:
+    """False for empty/placeholder text (see _PLACEHOLDER_FIELD_VALUES), True otherwise."""
+    if not value or not isinstance(value, str):
+        return False
+    return value.strip().lower() not in _PLACEHOLDER_FIELD_VALUES
+
+
+# Aug 31 2026: Nick's point -- "an agent" on a planning application isn't
+# always a tree surgeon. Architects, planning consultants, block management
+# companies, and even the council itself all get filed as the "Agent" too
+# (they handled the paperwork), and in those cases the actual tree work may
+# still be wide open even though has_agent is technically True. This is a
+# best-effort keyword classifier of the agent's name/company text -- company
+# naming isn't standardised, so it can't be perfect -- but it's strictly
+# better than treating every non-empty agent field as "job taken".
+#
+# Deliberately asymmetric: a wrong "still open" call risks selling a lead
+# that's actually taken (a refund + trust problem), while a wrong "already
+# taken" call only means an ambiguous lead is held back from sale (no harm
+# done, just conservative). So ambiguous or unmatched text is treated as
+# "can't tell" (None), and callers should keep excluding it from sale --
+# only a CLEAR non-tree keyword match (with no tree keyword present) flips
+# a lead back to sellable.
+_TREE_SURGEON_KEYWORDS = (
+    "tree", "arb", "arboricultur", "forestry", "woodland", "hedge", "treecare",
+    "treescape", "surgeon", "grounds maintenance", "grounds care",
+)
+_NON_TREE_AGENT_KEYWORDS = (
+    "architect", "planning consult", "town planning", "planning ltd",
+    "surveyor", "block management", "management company", "development",
+    "developments", "properties", "estate agent", "estates", "solicitor",
+    "legal", "council", "borough", "chartered", "design", "associates",
+)
+
+
+def classify_agent_as_tree_surgeon(agent_name: Optional[str], agent_company: Optional[str]) -> Optional[bool]:
+    """
+    Best-effort guess at whether the agent on record is actually a tree
+    surgeon (job genuinely taken) or a different kind of agent entirely
+    (in which case the tree work itself may still be open). Returns:
+      True  -- looks like a tree/arb company.
+      False -- looks like a clearly non-tree agent (architect, planning
+               consultant, block management, the council itself, etc.).
+      None  -- can't tell (bare personal name, or text matching neither/both
+               keyword lists) -- treat the same as "unknown", not "open".
+    """
+    text = f"{agent_name or ''} {agent_company or ''}".strip().lower()
+    if not text:
+        return None
+    has_tree_kw = any(kw in text for kw in _TREE_SURGEON_KEYWORDS)
+    has_non_tree_kw = any(kw in text for kw in _NON_TREE_AGENT_KEYWORDS)
+    if has_tree_kw and not has_non_tree_kw:
+        return True
+    if has_non_tree_kw and not has_tree_kw:
+        return False
+    return None
+
 # Reuse the same false-positive-safe compound-phrase list scanners.py already
 # built for the UK Planning API / GLA feeds (Aug 28 2026). The old local
 # keyword list here was single bare words ("crown", "branch", "oak", "ash",
@@ -261,7 +330,7 @@ class IdoxScraper:
         out = {}
         try:
             detail_url = f"{self.base_url}/applicationDetails.do?keyVal={key_val}&activeTab=details"
-            res = net_utils.smart_get(detail_url, session=self.session, timeout=15)
+            res = net_utils.smart_get(detail_url, session=self.session, timeout=25)
             if res.status_code != 200:
                 return out
             soup = BeautifulSoup(res.text, 'html.parser')
@@ -272,6 +341,20 @@ class IdoxScraper:
                     continue
                 value = td.get_text(strip=True)
                 if not value:
+                    continue
+                # Aug 31 2026: councils routinely fill this cell with a
+                # placeholder like "Not Available" / "N/A" / "-" instead of
+                # leaving it blank when there's genuinely no agent on record.
+                # Treated as a real name before this fix, that placeholder
+                # text was silently flipping has_agent to True for leads that
+                # actually have no agent at all -- confirmed live: 8 of 186
+                # "has agent" leads in one export had agent_company literally
+                # equal to "Not Available". _looks_like_real_value() below is
+                # the same defensive filter scanners.py applies to PlanIt's
+                # own placeholder values, applied here too since this
+                # function feeds the same has_agent field from a different
+                # source (the council portal itself, not PlanIt).
+                if not _looks_like_real_value(value):
                     continue
                 if label == "Applicant Name":
                     out["applicant_name"] = value
@@ -291,6 +374,10 @@ class IdoxScraper:
                 elif label == "Agent Company Name":
                     out["agent_company"] = value
             out["has_agent"] = bool(out.get("agent_name") or out.get("agent_company"))
+            if out["has_agent"]:
+                out["agent_is_tree_surgeon"] = classify_agent_as_tree_surgeon(
+                    out.get("agent_name"), out.get("agent_company")
+                )
         except requests.exceptions.Timeout:
             logger.debug(f"[MESH] Timeout fetching applicant/agent detail for keyVal={key_val} on {self.base_url}")
         except Exception as e:
@@ -306,7 +393,7 @@ class IdoxScraper:
         try:
             # Step 1: Establish session and get CSRF token
             adv_search_url = f"{self.base_url}/search.do?action=advanced"
-            res = net_utils.smart_get(adv_search_url, session=self.session, timeout=15)
+            res = net_utils.smart_get(adv_search_url, session=self.session, timeout=25)
             if res.status_code != 200:
                 logger.warning(f"[MESH] Failed to connect to {self.base_url}. Status: {res.status_code}")
                 return leads
@@ -328,7 +415,7 @@ class IdoxScraper:
 
             # Step 3: Execute Search
             search_url = f"{self.base_url}/advancedSearchResults.do?action=searchCriteria"
-            res_post = net_utils.smart_post(search_url, session=self.session, data=payload, timeout=20)
+            res_post = net_utils.smart_post(search_url, session=self.session, data=payload, timeout=30)
 
             # Step 4: Parse Results
             soup = BeautifulSoup(res_post.text, 'html.parser')

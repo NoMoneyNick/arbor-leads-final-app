@@ -1894,8 +1894,16 @@ def marketplace_view(tier: Optional[str] = "all"):
         # shows the same honest yes/no/unconfirmed signal up front -- WHICH
         # agent/company is still only revealed after unlocking, so there's
         # still a real reason to pay even on an "agent on record" lead.
+        # Aug 31 2026: database.get_marketplace_leads_with_freshness() now
+        # only lets a has_agent=True lead reach this page at all when
+        # agent_is_tree_surgeon is explicitly False (a non-tree agent --
+        # architect, planning consultant, block management, the council
+        # itself -- filed the paperwork, so the tree work itself may still
+        # be open). So any has_agent=True lead seen here is that specific
+        # case, not "job definitely taken" -- the badge below reflects that
+        # instead of showing the old blanket warning.
         if l.get("has_agent") is True:
-            agent_badge = "<span style='font-size:11px; background:#fef3c7; color:#92400e; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;'>⚠️ Agent already on record</span>"
+            agent_badge = "<span style='font-size:11px; background:#f1f5f9; color:#475569; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;' title=\"An agent handled the paperwork but doesn't look like a tree company -- the tree work itself may still be open.\">ℹ️ Non-tree agent on record</span>"
         elif l.get("has_agent") is False:
             agent_badge = "<span style='font-size:11px; background:#d1fae5; color:#065f46; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;'>✅ No agent listed</span>"
         else:

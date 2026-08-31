@@ -400,6 +400,54 @@ class TestApplicantAgentExtraction(unittest.TestCase):
         self.assertTrue(by_ref["23/09999/TPO"]["has_agent"])
         self.assertEqual(by_ref["23/09999/TPO"]["agent_company"], "Rich Ede TreeSurgeon")
 
+    def test_placeholder_agent_company_is_not_treated_as_a_real_agent(self):
+        """Aug 31 2026: councils fill an empty Agent Company Name cell with
+        text like 'Not Available' instead of leaving it blank -- confirmed
+        live (8 of 186 'has agent' leads in one export were literally 'Not
+        Available'). That must not flip has_agent to True."""
+        details_html = """
+        <html><body><table>
+        <tr class="row0"><th scope="row">Applicant Name</th><td>Mrs Jane Doe</td></tr>
+        <tr class="row1"><th scope="row">Agent Company Name</th><td>Not Available</td></tr>
+        </table></body></html>
+        """
+        scraper = mesh_scrapers.IdoxScraper("https://example-council.gov.uk/online-applications")
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=details_html)):
+            result = scraper._fetch_applicant_and_agent("PLACEHOLDER1")
+        self.assertNotIn("agent_company", result)
+        self.assertFalse(result.get("has_agent"))
+        self.assertEqual(result.get("applicant_name"), "Mrs Jane Doe")
+
+
+class TestClassifyAgentAsTreeSurgeon(unittest.TestCase):
+    """classify_agent_as_tree_surgeon (Aug 31 2026): Nick's point -- 'an
+    agent' on a planning application isn't always a tree surgeon. An
+    architect, planning consultant, or block management company filing the
+    paperwork doesn't mean the tree work itself is taken."""
+
+    def test_obvious_tree_company_classifies_true(self):
+        self.assertTrue(mesh_scrapers.classify_agent_as_tree_surgeon(None, "Red Squirrel Tree Surgery"))
+        self.assertTrue(mesh_scrapers.classify_agent_as_tree_surgeon(None, "Cheltenham Tree Services Ltd"))
+        self.assertTrue(mesh_scrapers.classify_agent_as_tree_surgeon("John Smith", "ABC Arboriculture Ltd"))
+
+    def test_obvious_non_tree_agent_classifies_false(self):
+        self.assertFalse(mesh_scrapers.classify_agent_as_tree_surgeon(None, "DP Architecture"))
+        self.assertFalse(mesh_scrapers.classify_agent_as_tree_surgeon(None, "D&G Block Management"))
+        self.assertFalse(mesh_scrapers.classify_agent_as_tree_surgeon(None, "Nottingham City Council"))
+        self.assertFalse(mesh_scrapers.classify_agent_as_tree_surgeon(None, "Hybrid Planning & Development"))
+
+    def test_bare_personal_name_is_unknown_not_assumed_open(self):
+        # A person's name alone gives no signal either way -- must not be
+        # assumed "still open" (that's the costlier mistake to get wrong).
+        self.assertIsNone(mesh_scrapers.classify_agent_as_tree_surgeon("Julian Schad", None))
+
+    def test_ambiguous_text_matching_both_lists_is_unknown(self):
+        self.assertIsNone(mesh_scrapers.classify_agent_as_tree_surgeon(None, "Tree Design Associates"))
+
+    def test_empty_input_is_unknown(self):
+        self.assertIsNone(mesh_scrapers.classify_agent_as_tree_surgeon(None, None))
+        self.assertIsNone(mesh_scrapers.classify_agent_as_tree_surgeon("", ""))
+
 
 class TestConfirmAgentStatusFromSource(unittest.TestCase):
     """confirm_agent_status_from_source / _parse_idox_detail_url (Aug 30
