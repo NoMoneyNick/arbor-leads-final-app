@@ -608,6 +608,97 @@ CITY_SUB_AREAS = {
 
 
 
+# Strict tree surgery trade phrases -- a match here is trusted on its own,
+# see is_tree_trade_company_name()'s docstring for why.
+REQUIRED_PHRASES = [
+    "tree surgery", "tree surgeon", "tree surgeons", "tree care",
+    "tree service", "tree services", "tree work", "tree works", "tree felling",
+    "arboricultural", "arboriculture", "arborist", "arborists",
+    "forestry", "woodland management", "woodland services",
+    "stump grinding", "stump removal", "hedge cutting", "hedge trimming"
+]
+
+EXCLUDED_NAME_WORDS = [
+    "breast", "plastic", "cosmetic", "dental", "medical", "clinic",
+    "hospital", "fruit", "olive", "palm", "christmas", "bonsai", "pyo",
+    "surgery centre", "surgical", "ortho", "optic", "laser", "eye", "neck", "spine",
+    "doctor", "health", "physio", "chiropractic", "therapy",
+    "hair", "skin", "beauty", "nail", "tattoo", "piercing", "ink",
+    "estate agent", "letting", "solicitor", "accountant",
+    "restaurant", "café", "cafe", "bakery", "food", "bar", "pub", "coffee",
+    "homes", "housing", "ales", "beer", "brewery", "capital", "investment", "financial",
+    "construction", "rail", "railway", "events", "properties", "property",
+    "logistics", "transport", "security", "cleaning", "plumbing", "electrical", "roofing",
+    "mot", "garage", "auto", "car", "motor", "vehicle", "repairs", "mechanic",
+    "development", "developments", "holdings", "management company", "residents", "flats", "apartments",
+    # Aug 31 2026: added after a real production run enriched all of
+    # these as "new partners" -- see is_tree_trade_company_name()'s
+    # docstring for the exact company names this caught live.
+    "psychology", "counselling",
+    # NOT "consultancy"/"consultants" alone -- "___ Tree Consultancy"
+    # is a genuine, common real arboricultural-consultancy naming
+    # pattern (confirmed against actual production agent names, e.g.
+    # "JN Tree Consultancy"); excluding it wrongly would create a new
+    # false negative to fix the psychology one, which "psychology"
+    # above already catches on its own.
+    "children", "nursery", "childcare", "montessori", "school",
+    "mortgage", "broker", "insurance", "pension",
+    "court", "rtm company", "right to manage", "leaseholders",
+    "padel", "tennis", "gym", "fitness", "leisure centre",
+    "protectors", "conservation", "wildlife trust", "friends of",
+    "recruitment", "staffing", "training academy",
+    "it services", "it support", "software", "web design", "web development",
+]
+
+
+def is_tree_trade_company_name(name: str) -> bool:
+    """
+    Aug 31 2026 fix: found live in production -- a real scan enriched
+    "ACORN TREE PSYCHOLOGY AND CONSULTANCY SERVICES LTD", "APPLE TREE
+    CHILDREN'S SERVICES LIMITED", "APPLE TREE IT SERVICES LTD", "APPLE
+    TREE MORTGAGE SERVICES LTD", "APPLE TREE COURT (LEWISHAM) RTM COMPANY
+    LIMITED", "THE HERTFORDSHIRE PADEL TREE LTD" and more, all as "new
+    partners" -- burning real Companies House/Google Places/website-scrape
+    calls on a psychology practice, a nursery, an IT company, a mortgage
+    broker, a leaseholders' management company, and a padel court, none of
+    which do tree work.
+
+    Root cause: the bare `tree` word fallback treated ANY company with
+    "tree" somewhere in its name as sufficient evidence on its own -- and
+    "tree" is an extremely common, unrelated branding word in the UK
+    (nurseries, restaurants/pubs, retirement/managed developments named
+    "___ Court", conservation groups). A denylist can never fully
+    anticipate every such category on its own.
+
+    Fixed two ways:
+    1. A genuine trade-phrase match (REQUIRED_PHRASES: "tree surgery",
+       "arborist", "forestry", "hedge cutting", ...) is trusted on its own
+       and skips EXCLUDED_NAME_WORDS entirely -- those phrases are
+       specific enough to the trade that a real match should never be
+       vetoed by an unrelated word elsewhere in the name (a genuine "XYZ
+       Arboricultural Consultancy Ltd" must not be thrown out just because
+       "consultancy" is also a useful exclusion word for the weak signal
+       below).
+    2. The weak bare-"tree" fallback still requires clearing
+       EXCLUDED_NAME_WORDS, which now also catches the specific non-trade
+       categories proven live above.
+
+    Known remaining gap (pre-existing, not introduced by this fix): this
+    only matches "tree" as a separate word, so a concatenated brand name
+    like "TreeCare" or "TreeRangers" (no space) won't match here even
+    though mesh_scrapers.classify_agent_as_tree_surgeon's plain substring
+    match would catch it. Left as-is rather than switching to a substring
+    match, which would also match unrelated words like "entree" -- flagged
+    for a future pass rather than risking a new false-positive class here.
+    """
+    name_lower = name.lower()
+    if any(w in name_lower for w in REQUIRED_PHRASES):
+        return True
+    if not re.search(r'\btree\b', name_lower):
+        return False
+    return not any(w in name_lower for w in EXCLUDED_NAME_WORDS)
+
+
 def perform_research(city_name: str):
     """
     Finds Tree Surgery LTD companies via Companies House across major boroughs/districts,
@@ -617,30 +708,6 @@ def perform_research(city_name: str):
     if not CH_KEY:
         logger.error("[Investigator] COMPANIES_HOUSE_KEY not set. Aborting.")
         return
-
-    # Strict tree surgery trade phrases and isolated 'tree' word boundary
-    REQUIRED_PHRASES = [
-        "tree surgery", "tree surgeon", "tree surgeons", "tree care",
-        "tree service", "tree services", "tree work", "tree works", "tree felling",
-        "arboricultural", "arboriculture", "arborist", "arborists",
-        "forestry", "woodland management", "woodland services",
-        "stump grinding", "stump removal", "hedge cutting", "hedge trimming"
-    ]
-    EXCLUDED_NAME_WORDS = [
-        "breast", "plastic", "cosmetic", "dental", "medical", "clinic",
-        "hospital", "fruit", "olive", "palm", "christmas", "bonsai", "pyo",
-        "surgery centre", "surgical", "ortho", "optic", "laser", "eye", "neck", "spine",
-        "doctor", "health", "physio", "chiropractic", "therapy",
-        "hair", "skin", "beauty", "nail", "tattoo", "piercing", "ink",
-        "estate agent", "letting", "solicitor", "accountant",
-        "restaurant", "café", "cafe", "bakery", "food", "bar", "pub", "coffee",
-        "homes", "housing", "ales", "beer", "brewery", "capital", "investment", "financial",
-        "construction", "rail", "railway", "events", "properties", "property",
-        "logistics", "transport", "security", "cleaning", "plumbing", "electrical", "roofing",
-        "mot", "garage", "auto", "car", "motor", "vehicle", "repairs", "mechanic",
-        "development", "developments", "holdings", "management company", "residents", "flats", "apartments"
-    ]
-
 
     try:
         conn = database.get_db_conn()
@@ -726,12 +793,7 @@ def perform_research(city_name: str):
             if company_number in already_enriched:
                 continue
 
-            name_lower = name.lower()
-            has_trade_phrase = any(w in name_lower for w in REQUIRED_PHRASES)
-            has_isolated_tree = bool(re.search(r'\btree\b', name_lower))
-            if not (has_trade_phrase or has_isolated_tree):
-                continue
-            if any(w in name_lower for w in EXCLUDED_NAME_WORDS):
+            if not is_tree_trade_company_name(name):
                 continue
 
             addr = co.get("address_snippet") or ""

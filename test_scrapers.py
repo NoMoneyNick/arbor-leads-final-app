@@ -63,6 +63,7 @@ if "dotenv" not in sys.modules:
 import net_utils   # noqa: E402
 import scanners    # noqa: E402
 import mesh_scrapers  # noqa: E402
+import research    # noqa: E402
 
 
 def _connection_error():
@@ -968,7 +969,9 @@ class TestPlanitFallback(unittest.TestCase):
         returning the same still-live application for up to 45 days) must
         NOT spend another real HTTP request confirming it again -- that
         would mean re-confirming every known lead forever, once per day,
-        for as long as it stays in PlanIt's window."""
+        for as long as it stays in PlanIt's window. has_agent=False here
+        (a real confirmed "no agent"), so there's nothing left to classify
+        either -- agent_is_tree_surgeon should stay None."""
         planit_body = {
             "records": [{
                 "uid": "24/07777/TPO",
@@ -978,17 +981,96 @@ class TestPlanitFallback(unittest.TestCase):
                 "url": "https://planningonline.bristol.gov.uk/online-applications/applicationDetails.do?keyVal=ALREADYKNOWN&activeTab=summary",
             }]
         }
-        self.cur.fetchone.return_value = (False,)  # already resolved on a previous day: confirmed no agent
+        # (has_agent, applicant_name, agent_name, agent_company, agent_is_tree_surgeon)
+        self.cur.fetchone.return_value = (False, "Mr Previously Confirmed", None, None, None)
 
         with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
              patch("net_utils.smart_get", return_value=self._fake_response(json_data=planit_body)), \
              patch("database.get_db_conn", return_value=self.conn), \
-             patch.object(scanners, "_insert_lead", return_value=None), \
+             patch.object(scanners, "_insert_lead", return_value=None) as mock_insert, \
              patch("mesh_scrapers.confirm_agent_status_from_source") as mock_confirm, \
              patch("time.sleep", return_value=None):
             scanners.scan_city_planning_api("Bristol")
 
         mock_confirm.assert_not_called()
+        _, kwargs = mock_insert.call_args
+        self.assertFalse(kwargs["has_agent"])
+        self.assertIsNone(kwargs["agent_is_tree_surgeon"])
+        self.assertEqual(kwargs["applicant_name"], "Mr Previously Confirmed")
+
+    def test_already_resolved_has_agent_gets_classified_with_no_new_network_call(self):
+        """Regression test for a real bug found live in a production
+        export: 187 leads sitting at has_agent=True with
+        agent_is_tree_surgeon still NULL, permanently excluded from the
+        marketplace (get_marketplace_leads_with_freshness treats a NULL
+        classification the same as a confirmed tree surgeon -- excluded
+        either way). Root cause -- this same "already resolved, skip"
+        check only ever looked at has_agent, so once has_agent was
+        resolved (e.g. before agent_is_tree_surgeon existed as a field at
+        all) it skipped re-checking forever, and agent_is_tree_surgeon was
+        never given a chance to be computed from the agent name/company
+        already sitting right there in the same row. Fixed: when has_agent
+        is already True but agent_is_tree_surgeon is still NULL, classify
+        it from the on-file agent name/company -- pure string matching, no
+        HTTP request -- instead of leaving it stuck at NULL forever."""
+        planit_body = {
+            "records": [{
+                "uid": "24/08888/TPO",
+                "description": "Felling of 1no. diseased ash tree, TPO protected.",
+                "address": "1 Stuck Unclassified Rd, Bristol",
+                "other_fields": {},
+                "url": "https://planningonline.bristol.gov.uk/online-applications/applicationDetails.do?keyVal=STUCKREF&activeTab=summary",
+            }]
+        }
+        # has_agent already True, agent_company already on file, but
+        # agent_is_tree_surgeon (last column) is still NULL -- exactly the
+        # stuck state found in production.
+        self.cur.fetchone.return_value = (True, None, None, "Bristol Tree Surgeons Ltd", None)
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=self._fake_response(json_data=planit_body)), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value=None) as mock_insert, \
+             patch("mesh_scrapers.confirm_agent_status_from_source") as mock_confirm, \
+             patch("time.sleep", return_value=None):
+            scanners.scan_city_planning_api("Bristol")
+
+        mock_confirm.assert_not_called()  # zero new network requests -- pure classification from on-file data
+        _, kwargs = mock_insert.call_args
+        self.assertTrue(kwargs["has_agent"])
+        self.assertEqual(kwargs["agent_company"], "Bristol Tree Surgeons Ltd")
+        self.assertTrue(kwargs["agent_is_tree_surgeon"], "a real tree-surgeon company name must classify True, not stay stuck at None")
+
+    def test_already_resolved_and_already_classified_is_left_alone(self):
+        """When agent_is_tree_surgeon is already set (not NULL), the fix
+        must not re-classify or otherwise touch it -- it's already a real,
+        previously-computed answer."""
+        planit_body = {
+            "records": [{
+                "uid": "24/09999/TPO",
+                "description": "Felling of 1no. diseased ash tree, TPO protected.",
+                "address": "1 Already Classified Rd, Bristol",
+                "other_fields": {},
+                "url": "https://planningonline.bristol.gov.uk/online-applications/applicationDetails.do?keyVal=ALREADYCLASSIFIED&activeTab=summary",
+            }]
+        }
+        # Already classified False (e.g. an architect, not a tree surgeon)
+        # on a previous run -- must be preserved exactly, not recomputed.
+        self.cur.fetchone.return_value = (True, None, None, "DP Architecture", False)
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=self._fake_response(json_data=planit_body)), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value=None) as mock_insert, \
+             patch("mesh_scrapers.classify_agent_as_tree_surgeon") as mock_classify, \
+             patch("mesh_scrapers.confirm_agent_status_from_source") as mock_confirm, \
+             patch("time.sleep", return_value=None):
+            scanners.scan_city_planning_api("Bristol")
+
+        mock_confirm.assert_not_called()
+        mock_classify.assert_not_called()
+        _, kwargs = mock_insert.call_args
+        self.assertFalse(kwargs["agent_is_tree_surgeon"])
 
     def test_confirmation_skipped_when_planit_already_gave_an_agent(self):
         """No need to spend an extra real HTTP request confirming something
@@ -1390,6 +1472,70 @@ class TestLeedsScanDelegation(unittest.TestCase):
 
         mock_radar.assert_called_once_with("Leeds")
         self.assertEqual(total, 5)  # 0 from ArcGIS (no features) + 5 delegated
+
+
+class TestIsTreeTradeCompanyName(unittest.TestCase):
+    """research.is_tree_trade_company_name (Aug 31 2026): a real production
+    run of perform_research() enriched a psychology practice, a nursery, an
+    IT company, a mortgage broker, a leaseholders' management company, and
+    a padel court as "new tree surgery partners" -- all because the old
+    bare `tree`-word fallback treated ANY company with "tree" somewhere in
+    its name as sufficient evidence on its own. These are the exact
+    real-world names (and a few genuine tree companies that must keep
+    passing) that drove the fix."""
+
+    def test_real_false_positives_from_production_are_now_excluded(self):
+        false_positives = [
+            "ACORN TREE PSYCHOLOGY AND CONSULTANCY SERVICES LTD",
+            "YEW TREE COURT KINGSTON BAGPUIZE LIMITED",
+            "APPLE TREE COURT (LEWISHAM) RTM COMPANY LIMITED",
+            "HARINGEY TREE PROTECTORS LTD",
+            "APPLE TREE CHILDREN'S SERVICES LIMITED",
+            "APPLE TREE IT SERVICES LTD",
+            "APPLE TREE MORTGAGE SERVICES LTD",
+            "THE HERTFORDSHIRE PADEL TREE LTD",
+        ]
+        for name in false_positives:
+            with self.subTest(name=name):
+                self.assertFalse(research.is_tree_trade_company_name(name))
+
+    def test_genuine_tree_trade_phrase_matches_are_kept(self):
+        legit = [
+            "ACE TREE SERVICES LTD",
+            "ARGYLL FORESTRY FENCING LIMITED",
+            "ARBORICULTURAL SERVICES TREEWORK LIMITED",
+            "LUUX TREE SURGERY LIMITED",
+            "ARBORTECH PROFESSIONAL TREE SERVICES LTD",
+        ]
+        for name in legit:
+            with self.subTest(name=name):
+                self.assertTrue(research.is_tree_trade_company_name(name))
+
+    def test_trade_phrase_match_bypasses_the_exclusion_list(self):
+        """A real arboricultural consultancy must not be thrown out just
+        because 'consultancy' is also useful for catching the weak
+        bare-tree-word false positives -- the trade phrase itself
+        ('arboricultural') is specific enough to trust on its own."""
+        self.assertTrue(research.is_tree_trade_company_name("XYZ ARBORICULTURAL CONSULTANCY LTD"))
+
+    def test_weak_bare_tree_match_without_a_trade_phrase_still_requires_exclusion_check(self):
+        """'JN Tree Consultancy' has no REQUIRED_PHRASES match (just the
+        bare word 'tree' + 'consultancy') -- 'consultancy' is deliberately
+        NOT in EXCLUDED_NAME_WORDS (see the comment in research.py) because
+        this exact name is a real production example of a genuine tree
+        consultancy, so it must still pass."""
+        self.assertTrue(research.is_tree_trade_company_name("JN TREE CONSULTANCY"))
+        self.assertTrue(research.is_tree_trade_company_name("THE BERKELEY TREE COMPANY LIMITED"))
+
+    def test_ambiguous_weak_match_with_no_excluded_word_is_kept(self):
+        """No trade phrase, no excluded word -- genuinely ambiguous small
+        outfits (a huge fraction of real tree surgeons trade under a bare
+        '<Name> Tree Ltd'/'<Name> Tree Services' style name) must still be
+        allowed through rather than over-tightened into false negatives."""
+        self.assertTrue(research.is_tree_trade_company_name("CHERRY TREE KENT LTD"))
+
+    def test_no_tree_word_at_all_is_excluded(self):
+        self.assertFalse(research.is_tree_trade_company_name("BLOGGS PLUMBING AND HEATING LTD"))
 
 
 if __name__ == "__main__":

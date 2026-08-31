@@ -1066,7 +1066,7 @@ def scan_city_planning_api(city_name: str) -> int:
                         import mesh_scrapers
                         agent_is_tree_surgeon = mesh_scrapers.classify_agent_as_tree_surgeon(agent_name, agent_company)
 
-                    if has_agent is None and confirm_budget > 0 and item.get("source_url"):
+                    if has_agent is None and item.get("source_url"):
                         # Aug 30 2026: Nick's point -- re-confirming a
                         # reference we already resolved on a PREVIOUS day
                         # would spend a real HTTP request to that council's
@@ -1081,11 +1081,45 @@ def scan_city_planning_api(city_name: str) -> int:
                         # PERMANENT setting, not just a one-off: once a
                         # reference is resolved, every future day it costs a
                         # SELECT, never another real request.
-                        cur.execute("SELECT has_agent FROM leads WHERE reference = %s", (ref,))
+                        #
+                        # Aug 31 2026 fix: found live in a production export
+                        # -- 187 leads sitting at has_agent=True with
+                        # agent_is_tree_surgeon still NULL, permanently
+                        # excluded from the marketplace by the has_agent/
+                        # agent_is_tree_surgeon filter in
+                        # get_marketplace_leads_with_freshness (NULL is
+                        # treated the same as "confirmed tree surgeon" --
+                        # excluded either way). Root cause: has_agent got
+                        # resolved (either before agent_is_tree_surgeon
+                        # existed, or via a path that only set has_agent)
+                        # and this same "already resolved, skip" check then
+                        # skipped it on every subsequent day forever, since
+                        # it only ever checked has_agent, never whether
+                        # agent_is_tree_surgeon specifically still needed
+                        # classifying. Fixed by pulling the agent name/
+                        # company already on file too and classifying from
+                        # them right here when needed -- classify_agent_as_
+                        # tree_surgeon is pure string matching, zero network
+                        # cost, so there's no reason this has to wait for
+                        # (or be gated by) a real confirm_budget-limited
+                        # HTTP request at all.
+                        cur.execute(
+                            "SELECT has_agent, applicant_name, agent_name, agent_company, agent_is_tree_surgeon "
+                            "FROM leads WHERE reference = %s", (ref,)
+                        )
                         existing_row = cur.fetchone()
                         if existing_row and existing_row[0] is not None:
-                            pass  # already resolved -- _insert_lead's COALESCE keeps it either way
-                        else:
+                            existing_has_agent, existing_applicant, existing_agent_name, existing_agent_company, existing_ats = existing_row
+                            has_agent = existing_has_agent
+                            applicant_name = applicant_name or existing_applicant
+                            agent_name = agent_name or existing_agent_name
+                            agent_company = agent_company or existing_agent_company
+                            if has_agent and existing_ats is None and (agent_name or agent_company):
+                                import mesh_scrapers
+                                agent_is_tree_surgeon = mesh_scrapers.classify_agent_as_tree_surgeon(agent_name, agent_company)
+                            else:
+                                agent_is_tree_surgeon = existing_ats
+                        elif confirm_budget > 0:
                             confirm_budget -= 1
                             confirm_stats["attempted"] += 1
                             try:
