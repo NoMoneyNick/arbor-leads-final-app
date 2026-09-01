@@ -339,23 +339,60 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
         agent_is_tree_surgeon = None
 
     lead_score, lead_price = score_lead(summary)
-    cur.execute(
-        """
-        INSERT INTO leads (reference, address, summary, council_source, lead_score, lead_price,
-                            applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon,
-                            vertical)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (reference) DO UPDATE SET
-            applicant_name = COALESCE(leads.applicant_name, EXCLUDED.applicant_name),
-            agent_name     = COALESCE(leads.agent_name, EXCLUDED.agent_name),
-            agent_company  = COALESCE(leads.agent_company, EXCLUDED.agent_company),
-            has_agent      = COALESCE(leads.has_agent, EXCLUDED.has_agent),
-            agent_is_tree_surgeon = COALESCE(leads.agent_is_tree_surgeon, EXCLUDED.agent_is_tree_surgeon)
-        RETURNING id, (xmax = 0) AS was_inserted;
-        """,
-        (reference, address, summary[:350], source, lead_score, lead_price,
-         applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon, vertical)
-    )
+    try:
+        cur.execute(
+            """
+            INSERT INTO leads (reference, address, summary, council_source, lead_score, lead_price,
+                                applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon,
+                                vertical)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (reference) DO UPDATE SET
+                applicant_name = COALESCE(leads.applicant_name, EXCLUDED.applicant_name),
+                agent_name     = COALESCE(leads.agent_name, EXCLUDED.agent_name),
+                agent_company  = COALESCE(leads.agent_company, EXCLUDED.agent_company),
+                has_agent      = COALESCE(leads.has_agent, EXCLUDED.has_agent),
+                agent_is_tree_surgeon = COALESCE(leads.agent_is_tree_surgeon, EXCLUDED.agent_is_tree_surgeon)
+            RETURNING id, (xmax = 0) AS was_inserted;
+            """,
+            (reference, address, summary[:350], source, lead_score, lead_price,
+             applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon, vertical)
+        )
+    except Exception as e:
+        # Sep 2 2026 (production incident fix): the `vertical` column's own
+        # migration can be delayed by lock contention (see
+        # database._run_ddl_statements_resiliently's docstring for the exact
+        # incident this guards against) -- without this fallback, EVERY lead
+        # insert across BOTH verticals fails with "column vertical does not
+        # exist" until that migration lands, taking lead capture to zero.
+        # Detect specifically that failure mode and fall back to the
+        # pre-Sep-2 11-column INSERT (vertical defaults to 'tree' at the
+        # column level once it does exist, so no data is misrepresented in
+        # the meantime -- an HMO lead inserted this way just isn't
+        # distinguishable as HMO until the column lands and a rescan backfills
+        # it). Any OTHER error still propagates unchanged.
+        if "vertical" not in str(e).lower():
+            raise
+        cur.connection.rollback()
+        logger.warning(
+            f"[_insert_lead] 'vertical' column not available yet ({e}) -- "
+            f"falling back to legacy INSERT without it for reference={reference!r}."
+        )
+        cur.execute(
+            """
+            INSERT INTO leads (reference, address, summary, council_source, lead_score, lead_price,
+                                applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (reference) DO UPDATE SET
+                applicant_name = COALESCE(leads.applicant_name, EXCLUDED.applicant_name),
+                agent_name     = COALESCE(leads.agent_name, EXCLUDED.agent_name),
+                agent_company  = COALESCE(leads.agent_company, EXCLUDED.agent_company),
+                has_agent      = COALESCE(leads.has_agent, EXCLUDED.has_agent),
+                agent_is_tree_surgeon = COALESCE(leads.agent_is_tree_surgeon, EXCLUDED.agent_is_tree_surgeon)
+            RETURNING id, (xmax = 0) AS was_inserted;
+            """,
+            (reference, address, summary[:350], source, lead_score, lead_price,
+             applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon)
+        )
     row = cur.fetchone()
     if row and row[1]:  # was_inserted -- a genuinely new lead, not a backfill of an existing one
         return {"ref": reference, "addr": address, "summary": summary,

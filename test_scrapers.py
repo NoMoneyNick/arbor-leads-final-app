@@ -215,6 +215,44 @@ class TestInsertLeadBackfill(unittest.TestCase):
         self.assertIs(result["has_agent"], True)
         self.assertIs(result["agent_is_tree_surgeon"], True)
 
+    def test_falls_back_to_legacy_insert_when_vertical_column_is_missing(self):
+        """Sep 2 2026 production incident: the `vertical` column's own ALTER
+        TABLE migration can be delayed by lock contention on the busy `leads`
+        table (see database._run_ddl_statements_resiliently's docstring for
+        the full incident) -- without this fallback, EVERY insert across
+        BOTH verticals fails with "column vertical does not exist" until
+        that migration lands, taking lead capture to zero. This is exactly
+        what happened live: caught only because Nick noticed an unrelated
+        page hadn't updated after a deploy. Proves _insert_lead detects that
+        specific failure and retries without the vertical column instead of
+        losing the lead."""
+        cur = self._mock_cursor(None)  # overwritten below via side_effect
+        cur.execute.side_effect = [
+            Exception('column "vertical" of relation "leads" does not exist'),
+            None,
+        ]
+        cur.fetchone.return_value = ("some-uuid", True)
+        result = scanners._insert_lead(
+            cur, "23/07777/TPO", "3 Oak Ave, Leeds", "Felling of 1no. diseased oak tree", "Leeds"
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(cur.execute.call_count, 2)
+        cur.connection.rollback.assert_called_once()
+        second_call_sql = cur.execute.call_args_list[1][0][0]
+        self.assertNotIn("vertical", second_call_sql)
+
+    def test_unrelated_insert_error_is_not_swallowed_by_the_vertical_fallback(self):
+        """Only the specific 'vertical column missing' failure mode should be
+        caught and retried -- any other DB error (a real constraint
+        violation, a dropped connection, etc.) must still propagate
+        normally rather than being silently masked."""
+        cur = self._mock_cursor(None)
+        cur.execute.side_effect = Exception("connection to server was lost")
+        with self.assertRaises(Exception):
+            scanners._insert_lead(
+                cur, "23/06666/TPO", "4 Oak Ave, Leeds", "Felling of 1no. diseased oak tree", "Leeds"
+            )
+
 
 class TestTreeGoldFiltering(unittest.TestCase):
     """The compound-phrase relevance filter deciding whether a planning

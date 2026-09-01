@@ -28,7 +28,7 @@ import os
 import sys
 import types
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 if "psycopg2" not in sys.modules:
     sys.modules["psycopg2"] = types.ModuleType("psycopg2")
@@ -117,6 +117,160 @@ class TestAgentAlreadyHandlingTheJob(unittest.TestCase):
         never wrongly excluding a sellable lead), not an oversight."""
         lead = {"vertical": "hmo", "has_agent": True, "agent_is_tree_surgeon": True}
         self.assertFalse(database._is_agent_already_handling_the_job(lead))
+
+
+class TestRunDdlStatementsResiliently(unittest.TestCase):
+    """_run_ddl_statements_resiliently -- the Sep 2 2026 production incident
+    fix. Real incident: the new `vertical` column's ALTER TABLE had to wait
+    for a lock on the busy `leads` table, Postgres's statement_timeout
+    eventually killed it, and because every resilience_cols statement used
+    to share ONE transaction with a single commit at the end, that single
+    failure rolled back everything else that had already succeeded in the
+    same call -- and left `vertical` missing, which took lead capture AND
+    the marketplace to zero (scanners._insert_lead lists the column
+    unconditionally; get_marketplace_leads_with_freshness's SELECT does
+    too). These tests use a fake connection/cursor -- no real Postgres --
+    and stub out time.sleep so retry-with-backoff doesn't slow the suite."""
+
+    def _make_conn(self, side_effects_by_substring):
+        """side_effects_by_substring: {sql_substring: [effect, effect, ...]}
+        consumed in order per matching statement across attempts. An effect
+        that's an Exception instance is raised; anything else is a no-op
+        success. A substring with no entry always succeeds immediately."""
+        conn = MagicMock()
+        call_counts = {}
+
+        def make_cursor():
+            cur = MagicMock()
+
+            def execute(sql, *args, **kwargs):
+                if sql.strip().upper().startswith("SET LOCAL"):
+                    return
+                for key, effects in side_effects_by_substring.items():
+                    if key in sql:
+                        idx = call_counts.get(key, 0)
+                        call_counts[key] = idx + 1
+                        effect = effects[min(idx, len(effects) - 1)]
+                        if isinstance(effect, Exception):
+                            raise effect
+                        return
+                return  # no configured effect -- plain success
+
+            cur.execute.side_effect = execute
+            return cur
+
+        conn.cursor.side_effect = make_cursor
+        return conn
+
+    @patch("time.sleep", return_value=None)
+    def test_statement_with_no_contention_lands_on_first_try(self, mock_sleep):
+        stmt = "ALTER TABLE leads ADD COLUMN IF NOT EXISTS vertical TEXT DEFAULT 'tree';"
+        conn = self._make_conn({})
+        failed = database._run_ddl_statements_resiliently(conn, [stmt], "test-phase")
+        self.assertEqual(failed, [])
+        conn.commit.assert_called()
+        mock_sleep.assert_not_called()
+
+    @patch("time.sleep", return_value=None)
+    def test_transient_lock_contention_is_retried_and_recovers(self, mock_sleep):
+        """Mirrors the real incident's likely shape: a scan job's transaction
+        briefly holds the lock, and it's gone a couple of retries later."""
+        stmt = "ALTER TABLE leads ADD COLUMN IF NOT EXISTS vertical TEXT DEFAULT 'tree';"
+        conn = self._make_conn({
+            stmt: [
+                Exception("canceling statement due to lock timeout"),
+                Exception("canceling statement due to lock timeout"),
+                None,
+            ]
+        })
+        failed = database._run_ddl_statements_resiliently(conn, [stmt], "test-phase", max_attempts=5)
+        self.assertEqual(failed, [])
+        self.assertEqual(mock_sleep.call_count, 2)
+
+    @patch("time.sleep", return_value=None)
+    def test_one_persistently_blocked_statement_does_not_take_down_a_sibling(self, mock_sleep):
+        """The actual bug being fixed: previously ALL of resilience_cols
+        shared one transaction, so this contended statement rolling back
+        would have undone the good one too. Proves the good one lands
+        (and is committed) independently of the bad one's fate."""
+        bad = "ALTER TABLE leads ADD COLUMN IF NOT EXISTS vertical TEXT DEFAULT 'tree';"
+        good = "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_score TEXT DEFAULT 'small';"
+        conn = self._make_conn({
+            bad: [Exception("canceling statement due to statement timeout")] * 10,
+        })
+        failed = database._run_ddl_statements_resiliently(conn, [bad, good], "test-phase", max_attempts=3)
+        self.assertEqual(len(failed), 1)
+        self.assertIn("vertical", failed[0][0])
+        conn.commit.assert_called()  # the good statement's own commit happened
+
+    @patch("time.sleep", return_value=None)
+    def test_gives_up_after_max_attempts_and_names_the_failing_statement(self, mock_sleep):
+        stmt = "ALTER TABLE leads ADD COLUMN IF NOT EXISTS vertical TEXT DEFAULT 'tree';"
+        conn = self._make_conn({stmt: [Exception("canceling statement due to statement timeout")] * 10})
+        failed = database._run_ddl_statements_resiliently(conn, [stmt], "test-phase", max_attempts=3)
+        self.assertEqual(len(failed), 1)
+        failed_stmt, failed_err = failed[0]
+        self.assertIn("vertical", failed_stmt)
+        self.assertIn("statement timeout", failed_err)
+        self.assertEqual(mock_sleep.call_count, 2)  # retried between attempts 1-2 and 2-3, gave up after 3
+
+
+class TestMarketplaceVerticalColumnFallback(unittest.TestCase):
+    """get_marketplace_leads_with_freshness -- Sep 2 2026 production
+    incident: its SELECT lists COALESCE(vertical, 'tree'), and when that
+    column's migration hasn't landed yet, the whole query used to raise
+    "column vertical does not exist" straight into the function's outer
+    except-return-[] -- i.e. the ENTIRE public marketplace shows zero leads
+    for every customer, not just HMO ones. Proves the fallback SELECT (no
+    vertical column, defaulted to 'tree' in Python) keeps the marketplace
+    working exactly as it did before that column existed."""
+
+    def _make_conn_where_vertical_select_fails_then_legacy_succeeds(self, legacy_rows):
+        conn = MagicMock()
+        cur = MagicMock()
+
+        def execute(sql, *args, **kwargs):
+            if "vertical" in sql:
+                raise Exception('column "vertical" does not exist')
+            # legacy SELECT (no vertical column) succeeds
+            cur.fetchall.return_value = legacy_rows
+
+        cur.execute.side_effect = execute
+        conn.cursor.return_value = cur
+        return conn, cur
+
+    def test_falls_back_to_legacy_select_and_defaults_vertical_to_tree(self):
+        import datetime
+        row = (
+            "some-uuid", "23/07777/TPO", "3 Oak Ave, Leeds",
+            "Felling of 1no. diseased oak tree", "Leeds", "small", 19,
+            datetime.datetime.now(datetime.timezone.utc), None, None,
+            "council_planning", None, None,
+        )
+        conn, cur = self._make_conn_where_vertical_select_fails_then_legacy_succeeds([row])
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            leads = database.get_marketplace_leads_with_freshness()
+        self.assertEqual(len(leads), 1)
+        self.assertEqual(leads[0]["vertical"], "tree")
+        self.assertEqual(cur.execute.call_count, 2)
+        conn.rollback.assert_called_once()
+
+    def test_unrelated_select_error_is_not_swallowed_by_the_vertical_fallback(self):
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.execute.side_effect = Exception("connection to server was lost")
+        conn.cursor.return_value = cur
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            # The outer try/except in get_marketplace_leads_with_freshness
+            # catches everything and returns [] -- this just proves an
+            # unrelated error still takes that path (i.e. is NOT retried as
+            # if it were the vertical-column issue) rather than raising or
+            # silently returning fabricated data.
+            leads = database.get_marketplace_leads_with_freshness()
+        self.assertEqual(leads, [])
+        self.assertEqual(cur.execute.call_count, 1)  # no fallback retry attempted
 
 
 if __name__ == "__main__":

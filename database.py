@@ -35,6 +35,77 @@ def get_db_conn():
 
 
 
+def _run_ddl_statements_resiliently(conn, statements: list, phase_label: str,
+                                     lock_timeout_ms: int = 4000, max_attempts: int = 5) -> list:
+    """Sep 2 2026 (production incident fix): runs each DDL statement in its
+    OWN transaction with a short SET LOCAL lock_timeout, retrying with
+    backoff on lock/statement-timeout errors instead of giving up instantly.
+
+    Why this exists: every statement in resilience_cols used to share ONE
+    transaction with a single commit at the very end of Phase 1. On Sep 2
+    2026 the newly-added `vertical` column's ALTER TABLE had to wait for an
+    ACCESS EXCLUSIVE lock on the `leads` table -- which the scan jobs write
+    to constantly -- and Postgres's own statement_timeout eventually killed
+    it ("canceling statement due to statement timeout") after roughly two
+    minutes. That rolled back the ENTIRE Phase 1 transaction, undoing every
+    other column/index that had already succeeded in this same call, and
+    left `vertical` missing in production. Every lead insert then failed
+    with "column vertical does not exist" (scanners._insert_lead lists it
+    unconditionally) and the marketplace query went the same way (its
+    COALESCE(vertical, ...) SELECT), so lead capture AND the public
+    marketplace both silently went to zero the moment this deployed --
+    caught only because Nick noticed the live site hadn't picked up an
+    unrelated privacy-policy change and asked about it.
+
+    Fix, two parts: (1) each statement gets its own transaction, so one
+    statement that's still stuck can never undo a sibling that already
+    landed; (2) a short SET LOCAL lock_timeout (auto-reverts at
+    commit/rollback, so it can't leak into later phases) makes a blocked
+    ALTER fail in ~4s instead of queuing for the full statement_timeout --
+    which also matters because while an ACCESS EXCLUSIVE-lock DDL statement
+    waits, it blocks every OTHER new query against that table that arrives
+    behind it, so failing fast limits the blast radius too. Failures are
+    retried with backoff (a few seconds' contention from a scan job's own
+    transaction is normal and often clears on the next attempt) and, if a
+    statement still hasn't landed after all attempts, it's logged
+    individually and returned to the caller instead of being buried inside
+    one opaque "Phase 1 failed" catch-all.
+    """
+    import time
+    failed = []
+    for stmt in statements:
+        last_err = None
+        landed = False
+        for attempt in range(1, max_attempts + 1):
+            cur = conn.cursor()
+            try:
+                cur.execute(f"SET LOCAL lock_timeout = '{lock_timeout_ms}ms';")
+                cur.execute(stmt)
+                conn.commit()
+                landed = True
+                break
+            except Exception as e:
+                conn.rollback()
+                last_err = e
+                if attempt < max_attempts:
+                    wait_s = min(2 ** attempt, 15)
+                    logger.warning(
+                        f"[DB:{phase_label}] Attempt {attempt}/{max_attempts} failed, "
+                        f"retrying in {wait_s}s: {stmt.strip()[:90]}... -- {e}"
+                    )
+                    time.sleep(wait_s)
+            finally:
+                cur.close()
+        if landed:
+            continue
+        logger.error(
+            f"[DB:{phase_label}] Gave up after {max_attempts} attempts -- statement did NOT land: "
+            f"{stmt.strip()[:150]} -- {last_err}"
+        )
+        failed.append((stmt, str(last_err)))
+    return failed
+
+
 def init_db():
     """Ensures all required tables and columns exist. Safe to run on every startup.
 
@@ -248,7 +319,15 @@ def init_db():
         for idx in indices:
             cur.execute(idx)
 
-        # Resilience: add any missing columns safely
+        conn.commit()
+        cur.close()
+
+        # Resilience: add any missing columns safely. Sep 2 2026: pulled out of the
+        # CREATE TABLE/index transaction above and run through
+        # _run_ddl_statements_resiliently -- see that function's docstring for the
+        # exact production incident (a single contended ALTER TABLE silently rolling
+        # back this entire phase, taking lead capture and the marketplace to zero)
+        # that made a shared all-or-nothing transaction here unsafe.
         resilience_cols = [
             "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS phone_number TEXT;",
             "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS md_name TEXT;",
@@ -294,34 +373,47 @@ def init_db():
             # matched vertical (see scanners._resolve_vertical's docstring for the
             # interim tree-priority-wins rule this implies).
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS vertical TEXT DEFAULT 'tree';",
+            # Add lat/lon columns for geographic radius matching (safe, idempotent)
+            "ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS lat FLOAT;",
+            "ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS lon FLOAT;",
+            # Contractor Portal Upgrades (Phase 2, part 1 — PROJECT_STATE.md item 8):
+            # preferred lead-notification format. 'email' = plain email (current default
+            # behaviour), 'whatsapp'/'both' = the batch lead email also includes a
+            # click-to-forward WhatsApp button per lead. Note: this is a forward-to-self
+            # convenience link (create_whatsapp_link), not push delivery via WhatsApp's
+            # Business API — no such integration exists in this codebase.
+            "ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS notification_preference TEXT DEFAULT 'email';",
         ]
-        for stmt in resilience_cols:
-            cur.execute(stmt)
+        failed_ddl = _run_ddl_statements_resiliently(conn, resilience_cols, phase_label="Phase1-columns")
 
-        # Add lat/lon columns for geographic radius matching (safe, idempotent)
-        cur.execute("ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS lat FLOAT;")
-        cur.execute("ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS lon FLOAT;")
-        # Contractor Portal Upgrades (Phase 2, part 1 — PROJECT_STATE.md item 8):
-        # preferred lead-notification format. 'email' = plain email (current default
-        # behaviour), 'whatsapp'/'both' = the batch lead email also includes a
-        # click-to-forward WhatsApp button per lead. Note: this is a forward-to-self
-        # convenience link (create_whatsapp_link), not push delivery via WhatsApp's
-        # Business API — no such integration exists in this codebase.
-        cur.execute("ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS notification_preference TEXT DEFAULT 'email';")
-
-        conn.commit()
-        cur.close()
-        logger.info("[DB] Phase 1 OK: tables, indices, and columns are up to date.")
+        if failed_ddl:
+            logger.error(f"[DB] Phase 1 columns: {len(failed_ddl)}/{len(resilience_cols)} statement(s) never landed after retries.")
+            try:
+                import notifications
+                notifications.send_system_incident_alert(
+                    category="DATABASE SCHEMA MIGRATION",
+                    title="init_db() Phase 1 column migration failed after retries",
+                    description=f"{len(failed_ddl)} ALTER TABLE statement(s) did not land after retrying with backoff: " +
+                                 "; ".join(f"{s.strip()[:80]} -> {err[:100]}" for s, err in failed_ddl[:5]),
+                    impact="Any code path that reads/writes a column added here will fail (or fall back to legacy behavior, where a fallback exists) until this is fixed.",
+                    action_required="Check Supabase for long-running/blocking transactions on the affected table(s), then let init_db() retry on the next restart, or run the ALTER manually with a short lock_timeout.",
+                    severity="CRITICAL",
+                    throttle_hours=1.0
+                )
+            except Exception:
+                pass
+        else:
+            logger.info("[DB] Phase 1 OK: tables, indices, and columns are up to date.")
     except Exception as e:
         conn.rollback()
-        logger.error(f"[DB] Phase 1 (schema) FAILED -- app is likely broken until this is fixed: {e}")
+        logger.error(f"[DB] Phase 1 (tables/indices) FAILED -- app is likely broken until this is fixed: {e}")
         try:
             import notifications
             notifications.send_system_incident_alert(
                 category="DATABASE SCHEMA MIGRATION",
                 title="init_db() schema phase failed",
-                description=f"A CREATE TABLE / ADD COLUMN / index statement failed: {str(e)[:300]}",
-                impact="Any code path that reads/writes a column added here will fail until this is fixed.",
+                description=f"A CREATE TABLE / index statement failed: {str(e)[:300]}",
+                impact="Any code path that reads/writes a table/index added here will fail until this is fixed.",
                 action_required="Check the exact error above and fix the migration SQL, then redeploy.",
                 severity="CRITICAL",
                 throttle_hours=1.0
@@ -1312,19 +1404,48 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
             # honest yes/no/unconfirmed signal before checkout -- without
             # revealing WHICH agent/company (that detail stays part of what
             # unlocking pays for).
-            cur.execute("""
-                SELECT id, reference, address, summary, council_source, lead_score, lead_price,
-                       discovered_at, planning_status, registered_date,
-                       COALESCE(lead_source_type, 'council_planning') as source_type,
-                       has_agent, agent_is_tree_surgeon, COALESCE(vertical, 'tree') as vertical
-                FROM leads
-                WHERE status = 'new' OR status IS NULL
-                ORDER BY discovered_at DESC
-                LIMIT 150;
-            """)
+            try:
+                cur.execute("""
+                    SELECT id, reference, address, summary, council_source, lead_score, lead_price,
+                           discovered_at, planning_status, registered_date,
+                           COALESCE(lead_source_type, 'council_planning') as source_type,
+                           has_agent, agent_is_tree_surgeon, COALESCE(vertical, 'tree') as vertical
+                    FROM leads
+                    WHERE status = 'new' OR status IS NULL
+                    ORDER BY discovered_at DESC
+                    LIMIT 150;
+                """)
+                cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date", "source_type", "has_agent", "agent_is_tree_surgeon", "vertical"]
+            except Exception as e:
+                # Sep 2 2026 (production incident fix): if the `vertical`
+                # column's migration hasn't landed yet (see
+                # _run_ddl_statements_resiliently's docstring), this SELECT
+                # used to raise "column vertical does not exist" straight
+                # into the outer except below, which returns [] -- i.e. the
+                # ENTIRE public marketplace shows zero leads for every
+                # customer, for every vertical, not just HMO. Fall back to
+                # the pre-Sep-2 SELECT (no vertical column) and default it to
+                # 'tree' in Python instead, so the marketplace keeps working
+                # exactly as it did before this column existed.
+                if "vertical" not in str(e).lower():
+                    raise
+                conn.rollback()
+                logger.warning(f"[Marketplace] 'vertical' column not available yet ({e}) -- falling back to legacy SELECT without it.")
+                cur.execute("""
+                    SELECT id, reference, address, summary, council_source, lead_score, lead_price,
+                           discovered_at, planning_status, registered_date,
+                           COALESCE(lead_source_type, 'council_planning') as source_type,
+                           has_agent, agent_is_tree_surgeon
+                    FROM leads
+                    WHERE status = 'new' OR status IS NULL
+                    ORDER BY discovered_at DESC
+                    LIMIT 150;
+                """)
+                cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date", "source_type", "has_agent", "agent_is_tree_surgeon"]
             rows = cur.fetchall()
-            cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date", "source_type", "has_agent", "agent_is_tree_surgeon", "vertical"]
             raw_leads = [dict(zip(cols, r)) for r in rows]
+            for l in raw_leads:
+                l.setdefault("vertical", "tree")
 
             enriched = []
             for l in raw_leads:
