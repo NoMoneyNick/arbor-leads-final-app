@@ -404,17 +404,45 @@ class IdoxScraper:
             end_date = datetime.datetime.now()
             start_date = end_date - datetime.timedelta(days=days_back)
 
+            # Sep 1 2026: root-caused via a live browser session against three
+            # independent Idox councils (Cornwall, Glasgow, Nottingham) after
+            # a near-simultaneous "0 leads / SCRAPER PAGE STRUCTURE" alert
+            # wave hit almost every council in COUNCIL_REGISTRY the same day
+            # -- too broad and too synchronized to be unrelated councils each
+            # redesigning their site independently, which pointed at a
+            # platform-wide Idox change instead of a per-council wording
+            # issue (the theory the Aug 30 "too many results" fix was built
+            # on). Inspecting the real advanced-search <form> on all three
+            # live sites (identical HTML across all three, confirming a
+            # shared Idox template) found a hidden `caseAddressType:
+            # "Application"` field present on every one of them that this
+            # payload never sent -- the actual page returned "a server
+            # problem prevented..." (an Idox-side error, not a "too many/no
+            # results" page), consistent with the server now rejecting a
+            # request missing a field its own form always includes. Added
+            # below. Also corrected the POST target to match what all three
+            # live forms actually submit to (?action=firstPage) instead of
+            # the previous ?action=searchCriteria, which may predate a
+            # platform update too. `date(applicationReceivedStart/End)` was
+            # left as-is -- confirmed still present on 2 of 3 sites checked
+            # (Glasgow, Nottingham); Cornwall's form only exposes an
+            # equivalent `applicationValidatedStart/End` pair, but a POST
+            # field a form doesn't declare is normally just ignored by the
+            # server rather than erroring, unlike a required field being
+            # absent -- so this isn't being treated as the same class of bug
+            # as the missing caseAddressType field above.
             payload = {
                 "searchCriteria.description": search_term,
                 "date(applicationReceivedStart)": start_date.strftime("%d/%m/%Y"),
                 "date(applicationReceivedEnd)": end_date.strftime("%d/%m/%Y"),
-                "searchType": "Application"
+                "searchType": "Application",
+                "caseAddressType": "Application",
             }
             if csrf_token:
                 payload["_csrf"] = csrf_token
 
             # Step 3: Execute Search
-            search_url = f"{self.base_url}/advancedSearchResults.do?action=searchCriteria"
+            search_url = f"{self.base_url}/advancedSearchResults.do?action=firstPage"
             res_post = net_utils.smart_post(search_url, session=self.session, data=payload, timeout=15)
 
             # Step 4: Parse Results
