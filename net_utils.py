@@ -116,22 +116,43 @@ def _request(method: str, url: str, session=None, max_retries: int = 2, backoff_
     kwargs.pop("verify", None)  # this module owns the verify negotiation now
     caller = session.request if session is not None else requests.request
 
-    # Sep 1 2026: identify ourselves on every request through this module.
-    # PlanIt's own usage policy explicitly asks callers to self-identify via
-    # a User-Agent with a contact email -- confirmed via three independent
-    # research passes (see PROJECT_STATE.md) -- but every request in this
-    # project was going out with requests' bare default UA
-    # ("python-requests/x.y.z"), telling PlanIt (or any council portal)
-    # nothing about who's hitting them or how to reach us. Set here once,
-    # for every caller (PlanIt, ukplanningapi.co.uk, and every Idox council
-    # portal alike) rather than only the one site that asked -- there's no
-    # downside to any of them knowing who we are, and a caller-supplied
-    # User-Agent (mesh_scrapers.IdoxScraper sets its own browser-like one to
-    # match normal browser traffic on council portals) always wins; this
-    # only fills in the gap for callers that didn't set one.
-    headers = dict(kwargs.pop("headers", None) or {})
-    headers.setdefault("User-Agent", "TreeKeyBot/1.0 (+https://treekey.uk; contact@treekey.uk)")
-    kwargs["headers"] = headers
+    # Sep 1 2026: identify ourselves on every request through this module
+    # that doesn't already identify itself some other way. PlanIt's own
+    # usage policy explicitly asks callers to self-identify via a
+    # User-Agent with a contact email (confirmed via three independent
+    # research passes -- see PROJECT_STATE.md), and PlanIt/ukplanningapi.co.uk
+    # calls (scanners.py, no session, no explicit headers) were going out
+    # with requests' bare default UA ("python-requests/x.y.z") -- this fills
+    # that gap.
+    #
+    # BUG FOUND AND FIXED SAME DAY: the first version of this always built a
+    # headers dict and passed it explicitly to `caller(...)`, even when
+    # neither this call nor the session set one -- but requests' own
+    # session-vs-per-call header merge means an EXPLICIT headers= dict on a
+    # session.request() call overrides the session's own headers for any
+    # key both set, not just fills gaps. mesh_scrapers.py's IdoxScraper
+    # deliberately sets a realistic browser User-Agent on its session
+    # (session=self.session is what every Idox council-portal call passes)
+    # specifically so council WAFs/bot-protection see normal-looking
+    # traffic. The first version silently clobbered that with the
+    # bot-identifying "TreeKeyBot/1.0" string on every single Idox request
+    # -- confirmed live: within seconds of that version deploying, Cornwall
+    # and Nottingham (previously-working councils) both started throwing
+    # "SCRAPER PAGE STRUCTURE"/"SCRAPER TLS FALLBACK" alerts on their very
+    # first request of the run, exactly the signature of a portal blocking
+    # or challenging traffic it no longer recognises as a browser. Fixed:
+    # only inject the default UA when NEITHER this call's own headers NOR
+    # the session's headers (if a session was passed) already set one, so
+    # IdoxScraper's browser UA is left completely untouched, and only truly
+    # anonymous callers (PlanIt, ukplanningapi.co.uk) pick up the new default.
+    caller_headers = kwargs.pop("headers", None)
+    has_explicit_ua = bool((caller_headers or {}).get("User-Agent"))
+    has_session_ua = bool(session is not None and session.headers.get("User-Agent"))
+    if not has_explicit_ua and not has_session_ua:
+        caller_headers = dict(caller_headers or {})
+        caller_headers["User-Agent"] = "TreeKeyBot/1.0 (+https://treekey.uk; contact@treekey.uk)"
+    if caller_headers is not None:
+        kwargs["headers"] = caller_headers
 
     verify_flag = True
     attempt = 0

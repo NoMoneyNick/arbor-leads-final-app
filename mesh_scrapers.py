@@ -591,6 +591,25 @@ def _parse_idox_detail_url(source_url: str) -> Optional[Tuple[str, str]]:
     return None
 
 
+def is_confirmable_idox_url(source_url: str) -> bool:
+    """Cheap (no network) pre-check for whether confirm_agent_status_from_source
+    below would actually make a real HTTP request for this URL, or return {}
+    immediately because it's not a recognisable Idox detail page. Sep 1 2026:
+    added so scanners.py's confirmation loop can skip its polite time.sleep(1.0)
+    for the non-Idox case -- live logs showed ~94% of confirmation attempts
+    across a full regional sweep (London 68, South East 43, South West 40,
+    etc.) coming back "inconclusive", well above what the large-majority-are-
+    Idox assumption in confirm_agent_status_from_source's docstring would
+    predict. Whether that gap is mostly non-Idox authorities, PlanIt records
+    missing a source_url, or genuinely-empty detail pages is still an open
+    question (worth a closer look with real data), but regardless of the
+    cause, sleeping a full second before a call that was always going to
+    return {} with zero network activity was pure wasted time -- across ~180
+    non-hits in one run, that's several real minutes of the "scans take
+    hours" complaint that bought nothing."""
+    return _parse_idox_detail_url(source_url) is not None
+
+
 def confirm_agent_status_from_source(source_url: str) -> Dict:
     """Reuses IdoxScraper._fetch_applicant_and_agent -- built for
     mesh_scrapers.py's own directly-registered councils -- against ANY

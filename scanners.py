@@ -1147,7 +1147,21 @@ def scan_city_planning_api(city_name: str) -> int:
                             confirm_stats["attempted"] += 1
                             try:
                                 import mesh_scrapers
-                                time.sleep(1.0)  # polite -- this hits the council's own server, not PlanIt's
+                                # Sep 1 2026: only sleep when we're actually
+                                # about to hit the council's own server --
+                                # live logs showed ~94% of these attempts are
+                                # non-Idox authorities/unparseable URLs that
+                                # confirm_agent_status_from_source rejects
+                                # instantly with zero network activity (see
+                                # is_confirmable_idox_url's docstring). The
+                                # unconditional sleep before every attempt,
+                                # Idox or not, was burning real minutes per
+                                # run for nothing -- directly the "scans take
+                                # hours" complaint, for zero benefit since
+                                # there's no server to be polite to when no
+                                # request is being made.
+                                if mesh_scrapers.is_confirmable_idox_url(item["source_url"]):
+                                    time.sleep(1.0)  # polite -- this hits the council's own server, not PlanIt's
                                 confirmed = mesh_scrapers.confirm_agent_status_from_source(item["source_url"])
                             except Exception as e:
                                 logger.debug(f"[{city_name}] Agent-status confirmation failed for '{ref}': {e}")
