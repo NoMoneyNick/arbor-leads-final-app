@@ -4506,6 +4506,55 @@ def test_mesh_council(city_slug: str, secret: Optional[str] = Query(None)):
         }
 
 
+@app.get("/trigger-backfill-tree-surgeon")
+def trigger_backfill_tree_surgeon(secret: Optional[str] = Query(None)):
+    """Sep 1 2026: same logic as backfill_agent_is_tree_surgeon.py, exposed
+    as an endpoint -- Render's Shell tab (where that script was meant to be
+    run) requires a paid compute plan and isn't available here. This does
+    the identical thing (zero network calls, re-classifies existing
+    has_agent=True / agent_is_tree_surgeon=NULL rows using the agent name/
+    company already on file) using the app's own live DB connection
+    instead. Safe to re-run any time -- only ever touches rows still
+    sitting at NULL."""
+    verify_cron_secret(secret)
+    import mesh_scrapers
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT reference, agent_name, agent_company FROM leads "
+            "WHERE has_agent = TRUE AND agent_is_tree_surgeon IS NULL"
+        )
+        rows = cur.fetchall()
+        resolved_true = 0
+        resolved_false = 0
+        still_unknown = 0
+        for reference, agent_name, agent_company in rows:
+            classification = mesh_scrapers.classify_agent_as_tree_surgeon(agent_name, agent_company)
+            if classification is None:
+                still_unknown += 1
+                continue
+            cur.execute(
+                "UPDATE leads SET agent_is_tree_surgeon = %s WHERE reference = %s",
+                (classification, reference),
+            )
+            if classification:
+                resolved_true += 1
+            else:
+                resolved_false += 1
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+    return {
+        "status": "complete",
+        "total_found": len(rows),
+        "resolved_true_tree_surgeon": resolved_true,
+        "resolved_false_not_tree_surgeon": resolved_false,
+        "still_indeterminate_left_null": still_unknown,
+    }
+
+
 @app.get("/trigger-clean-partners")
 def trigger_clean_partners(secret: Optional[str] = Query(None)):
     verify_cron_secret(secret)
