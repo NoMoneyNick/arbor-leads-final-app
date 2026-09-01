@@ -117,9 +117,18 @@ COUNCIL_REGISTRY = {
     # England Metros & Regions
     "CORNWALL": "https://planning.cornwall.gov.uk/online-applications",
     "NOTTINGHAM": "https://publicaccess.nottinghamcity.gov.uk/online-applications",
-    "MANCHESTER": "https://pa.manchester.gov.uk/online-applications",
     "EDINBURGH": "https://citydev-portal.edinburgh.gov.uk/idoxpa-web",
     "GLASGOW": "https://publicaccess.glasgow.gov.uk/online-applications",
+    # Sep 1 2026: this was flagged as "genuinely different software, not a
+    # silently-broken Idox instance" in the Aug 30 audit comment below --
+    # that turned out to be wrong for this one specifically. Verified live
+    # via browser: planning.fife.gov.uk/online is a real, working Idox
+    # portal (identical "Simple Search / My Profile / Saved Searches /
+    # Applications / Appeals / Enforcements / Weekly-Monthly Lists /
+    # Property Map" UI as every other confirmed Idox entry here) -- Idox
+    # just isn't mounted at the usual "/online-applications" path for this
+    # council, only "/online". See _CONFIRMED_IDOX_EXCEPTIONS below for why
+    # this needed code, not just a URL edit, to actually start scraping.
     "FIFE": "https://planning.fife.gov.uk/online",
     "BRISTOL": "https://planningonline.bristol.gov.uk/online-applications",
     "LEEDS": "https://publicaccess.leeds.gov.uk/online-applications",
@@ -146,8 +155,38 @@ COUNCIL_REGISTRY = {
     #       living at greatercambridgeplanning.org with postcode-based
     #       search -- a different, non-Idox interface, so this needs a
     #       dedicated scraper, not a URL swap.
+    #
+    # Sep 1 2026 correction: a SEPARATE, later audit of this file's other
+    # "confirmed non-Idox" comment blocks (below, in the London section)
+    # found that several of those calls were made by URL-shape reasoning
+    # alone, never actually opened in a browser -- and were wrong for Fife
+    # and Derby specifically (both real, live Idox, just at non-standard
+    # paths; fixed above and in the London section below) and for New
+    # Forest (never flagged as dead at all, just registered at the wrong
+    # subdomain the whole time). Newcastle and Cambridge above WERE
+    # verified against real HTTP behaviour (406 / connection refused) each
+    # backed by an independent web check of the replacement platform, so
+    # those two conclusions stand -- flagging this here so a future pass
+    # doesn't need to redo the entire audit, only knows which parts of it
+    # were actually verified live.
+    #   "MANCHESTER" (Sep 1 2026): the old pa.manchester.gov.uk Idox URL
+    #       failed DNS resolution entirely (flagged in TASKS.md). Verified
+    #       live via browser against manchester.gov.uk's own current "See or
+    #       comment on planning applications" page: the council's own
+    #       "View planning applications online" link now points to
+    #       https://arcusbe.manchester.gov.uk/pr/s/register-view -- Arcus
+    #       Global's "Arcus BE" platform (a Salesforce Experience Cloud
+    #       community, going by the URL shape), not Idox at all. Manchester
+    #       has fully migrated off Idox, so there is no correct Idox URL to
+    #       swap in here -- scrape_mesh_council's own _KNOWN_IDOX_PATH_
+    #       MARKERS guard would silently no-op on an Arcus URL anyway (same
+    #       zero-leads outcome as leaving it dead), so removing the entry is
+    #       more honest than leaving a URL that can never work. Re-adding
+    #       Manchester needs a genuine Arcus BE adapter (a different search
+    #       API/interface entirely, most likely a Salesforce REST/Apex
+    #       endpoint rather than an HTML form POST) -- real, separate build
+    #       work, not a config-only fix. Tracked in TASKS.md.
     "OXFORD": "https://public.oxford.gov.uk/online-applications",
-    "BATH & NORTH EAST SOMERSET": "https://www.bathnes.gov.uk/developmentmanagement/Detail.aspx",
     "YORK": "https://planningaccess.york.gov.uk/online-applications",
     "EXETER": "https://publicaccess.exeter.gov.uk/online-applications",
     "PLYMOUTH": "https://planning.plymouth.gov.uk/online-applications",
@@ -156,19 +195,28 @@ COUNCIL_REGISTRY = {
     "PORTSMOUTH": "https://publicaccess.portsmouth.gov.uk/online-applications",
     "BRIGHTON": "https://planningapps.brighton-hove.gov.uk/online-applications",
     "COVENTRY": "https://planapp.coventry.gov.uk/online-applications",
-    "DERBY": "https://eplanning.derby.gov.uk/active-applications",
+    # Sep 1 2026: registered at "/active-applications", a guessed path that
+    # 404s. Verified live via browser -- the domain root itself
+    # (eplanning.derby.gov.uk, no path at all) is a genuine, live Idox
+    # "Simple Search" portal. See _CONFIRMED_IDOX_EXCEPTIONS below: a bare
+    # root URL matches none of _KNOWN_IDOX_PATH_MARKERS, so the path fix
+    # alone isn't enough to make scrape_mesh_council recognise it.
+    "DERBY": "https://eplanning.derby.gov.uk",
     "LEICESTER": "https://planning.leicester.gov.uk/online-applications",
     "CHESHIRE EAST": "https://planning.cheshireeast.gov.uk/online-applications",
     "CHESHIRE WEST": "https://pa.cheshirewestandchester.gov.uk/online-applications",
     "NORTH NORTHAMPTONSHIRE": "https://publicaccess.northnorthants.gov.uk/online-applications",
-    "WEST NORTHAMPTONSHIRE": "https://wnc.planning-register.co.uk",
     "MILTON KEYNES": "https://publicaccess.milton-keynes.gov.uk/online-applications",
     "WARWICK": "https://planningdocuments.warwickdc.gov.uk/online-applications",
-    "STRATFORD-ON-AVON": "https://apps.stratford.gov.uk/eplanning",
     "CHELTENHAM": "https://publicaccess.cheltenham.gov.uk/online-applications",
-    "GLOUCESTER": "https://planning.gloucester.gov.uk/online-applications",
-    "WILTSHIRE": "https://development.wiltshire.gov.uk/pr/s",
-    "DORSET": "https://planning.dorsetcouncil.gov.uk",
+    # Sep 1 2026: the old "planning.gloucester.gov.uk" subdomain failed DNS
+    # resolution entirely (flagged in TASKS.md). Verified live via browser --
+    # the correct current host is "publicaccess.gloucester.gov.uk" (matches
+    # this registry's normal Idox naming convention, e.g. Nottingham above);
+    # confirmed it's a genuine, live Idox advanced-search form (Description
+    # Keyword, Application Type incl. Tree Preservation Order, Agent, Ward,
+    # Status fields all present) before shipping the swap.
+    "GLOUCESTER": "https://publicaccess.gloucester.gov.uk/online-applications",
 
     # London Boroughs Mesh (Direct Public Access)
     "WESTMINSTER": "https://idoxpa.westminster.gov.uk/online-applications",
@@ -182,7 +230,6 @@ COUNCIL_REGISTRY = {
     "KINGSTON": "https://publicaccess.kingston.gov.uk/online-applications",
     "GREENWICH": "https://planning.royalgreenwich.gov.uk/online-applications",
     "BEXLEY": "https://pa.bexley.gov.uk/online-applications",
-    "RICHMOND": "https://www2.richmond.gov.uk/lbrplanning/Planning_Search.aspx",
 
     # Removed Aug 30 2026 -- confirmed dead against this exact "/online-applications"
     # Idox path, not a transient network blip. Live scan logs from today showed each
@@ -194,36 +241,94 @@ COUNCIL_REGISTRY = {
     # waste: every scan burned 3 retries + a long timeout on each, on every run,
     # for zero leads, ever. Re-add only once a scraper matching the NEW platform
     # exists for each:
-    #   "HOUNSLOW": DNS failed in logs; hounslow.gov.uk's own site now points
-    #       planning search at https://planning.hounslow.gov.uk/ (root, no
-    #       /online-applications path) -- may still be Idox under a different path,
-    #       worth a manual check before writing off entirely.
-    #   "MERTON": DNS failed in logs; council's current search lives at
-    #       merton.gov.uk/planning-and-buildings/planning/find, not this subdomain.
-    #   "SUTTON": DNS failed in logs; London Borough of Sutton's current portal
-    #       needs re-identifying (search results only surfaced an unrelated
-    #       Cambridgeshire parish council of the same name).
-    #   "HARINGEY": DNS failed in logs; Haringey has moved through more than one
-    #       replacement system (a legacy servlet-based search, and a newer
-    #       Salesforce-style "Public Register" at publicregister.haringey.gov.uk) --
-    #       neither is Idox, so this needs a dedicated scraper, not a URL swap.
+    #   "HOUNSLOW": DNS failed in logs. Sep 1 2026 live-browser re-check (part
+    #       of the same second-pass audit that caught the Fife/Derby/New Forest
+    #       wrong calls below): confirmed non-Idox -- the current portal at
+    #       https://planningandbuilding.hounslow.gov.uk/NECSWS/ES/Presentation/
+    #       Planning/OnlinePlanning/OnlinePlanningSearch is Northgate/NEC's
+    #       product (NECSWS in the URL), the same platform family as
+    #       Wandsworth and Camden below. Three confirmed Northgate boroughs
+    #       now on file.
+    #   "MERTON": DNS failed in logs. Sep 1 2026 live-browser re-check:
+    #       confirmed non-Idox -- current search lives at
+    #       https://rspandlp.merton.gov.uk/planning/index.html?fa=search, a
+    #       bespoke "Regulatory Services Hub" single-page app, not Idox.
+    #   "HARINGEY": DNS failed in logs. Sep 1 2026 live-browser re-check:
+    #       confirmed non-Idox and confirmed the old planningservices.
+    #       haringey.gov.uk/portal Idox-era URL is genuinely dead (navigation
+    #       failed outright, not just a permission block). Haringey's current
+    #       planning page links to a bespoke in-house map viewer at
+    #       my.haringey.gov.uk/custom/haringeyLiteMap.html?layer=
+    #       planning_current_apps -- a custom GIS layer, not a text-search
+    #       portal of any kind, let alone Idox. No scraper exists for this
+    #       shape of platform.
     #   "REDBRIDGE": 404 in logs; Redbridge now runs a "Citizen Portal" planning
     #       system, a different platform from Idox's online-applications.
-    #   "HAVERING": 404 in logs; Havering's current search lives at
-    #       msp.havering.gov.uk/planning/search-applications, a different platform.
+    #   "HAVERING": 404 in logs. Sep 1 2026 live-browser re-check: confirmed
+    #       non-Idox -- https://msp.havering.gov.uk/planning/search-applications
+    #       is a bespoke search form (field names like "Applicant House
+    #       Number" / "Location Line 1-5" match no Idox convention seen
+    #       anywhere else in this registry), no ".do" endpoints anywhere.
     #   "ISLINGTON": DNS failed in logs (added to this list after a second scan run
     #       caught it -- the first pass through this log only sampled part of a run
-    #       and missed it). islington.gov.uk's own site now points planning search
-    #       at islington.gov.uk/planningsearch, off the old Idox subdomain entirely.
+    #       and missed it). Sep 1 2026 live-browser re-check: confirmed non-Idox --
+    #       the council's planning page links to
+    #       https://planning.agileapplications.co.uk/islington, which is Agile
+    #       Applications' "Citizen Portal" product (page title: "Citizen Portal
+    #       Planning") -- the SAME platform already confirmed for Redbridge and
+    #       Richmond, just a different council instance of it.
     #   "ST ALBANS": clean 404 x3 in the newest logs (this exact
-    #       /rpa/online-applications path). Not yet re-identified where St Albans'
-    #       planning search actually lives now -- needs a manual check before any
-    #       replacement scraper can be written.
+    #       /rpa/online-applications path). Sep 1 2026 live-browser re-check:
+    #       confirmed non-Idox -- current portal at
+    #       https://planningapplications.stalbans.gov.uk/planning is branded
+    #       "Portal360" (page title confirms it), a different vendor entirely.
+    #
+    # Sep 1 2026 additions -- same category, found while auditing every
+    # registry URL that doesn't match _KNOWN_IDOX_PATH_MARKERS (not from a
+    # log error this time, since these never even attempt a request -- see
+    # _KNOWN_IDOX_PATH_MARKERS' own comment for why that's worse, not
+    # better, than a visible DNS failure). Each verified live via browser
+    # before removing, not assumed from the URL string alone:
+    #   "RICHMOND": redirects to planning.richmond.gov.uk, a "Citizen
+    #       Portal Planning" site -- same non-Idox platform as Redbridge
+    #       above, not Idox.
+    #   "WANDSWORTH": URL already named it -- .../Northgate/PlanningExplorer/...
+    #       is Northgate/NEC's own product, confirmed live.
+    #   "KENSINGTON & CHELSEA": redirects to rbkc.gov.uk/planningsearch, a
+    #       modern JS search widget ("Time period / Search / All Filters"),
+    #       not Idox's classic form.
+    #   "CAMDEN": redirects to .../Northgate/PlanningExplorer/GeneralSearch.aspx
+    #       -- the same Northgate platform as Wandsworth. Two confirmed
+    #       Northgate boroughs now on file -- worth weighing a Northgate
+    #       adapter once the HMO build needs London coverage these two
+    #       currently can't provide at all.
+    #
+    # "WEST NORTHAMPTONSHIRE", "STRATFORD-ON-AVON", "BATH & NORTH EAST
+    # SOMERSET", "WILTSHIRE" and "DORSET" (formerly registered earlier in
+    # this file, non-London) were removed the same way, same day, for the
+    # same reason -- confirmed live via browser to be, respectively: a
+    # third-party "planning-register.co.uk" vendor platform; a "MyDistrict"
+    # branded e-planning system; a bespoke ASP.NET webforms app
+    # (app.bathnes.gov.uk); Arcus Global's "Arcus BE" (same platform as
+    # Manchester above); and a legacy "dorsetforyou.com" ASP.NET portal
+    # (disclaimer.aspx -- Idox always uses Java ".do" servlet endpoints,
+    # never ".aspx", a useful quick tell for future checks like this one).
 
-    "WANDSWORTH": "https://planning1.wandsworth.gov.uk/Northgate/PlanningExplorer/GeneralSearch.aspx",
     "HAMMERSMITH & FULHAM": "https://public-access.lbhf.gov.uk/online-applications",
-    "KENSINGTON & CHELSEA": "https://www.rbkc.gov.uk/planning/searches/default.aspx",
-    "CAMDEN": "https://planningrecords.camden.gov.uk",
+
+    # Sep 1 2026: re-added after the second-pass live-browser audit (see the
+    # "SUTTON" bullet that used to sit in the removed-entries block above --
+    # now deleted from there since it's back in service here). The original
+    # Aug 30 removal reasoned from a web search that only surfaced an
+    # unrelated Cambridgeshire parish council of the same name and gave up;
+    # a proper search this time found the real portal directly, and a live
+    # browser check confirmed it: title "Applications Search | Sutton
+    # Council" (the exact Idox title pattern already confirmed for
+    # Gloucester and Fife), a form with the classic Idox "Simple/Advanced"
+    # tabs and Application Type/Ward/Agent/Status fields, and a search URL
+    # containing both "online-applications" and the Java ".do" servlet
+    # signature -- the two strongest Idox tells this whole audit has used.
+    "SUTTON": "https://planningregister.sutton.gov.uk/online-applications",
 
     # Home Counties / Green Belt
     "SURREY HEATH": "https://publicaccess.surreyheath.gov.uk/online-applications",
@@ -233,7 +338,13 @@ COUNCIL_REGISTRY = {
     "MAIDSTONE": "https://pa.midkent.gov.uk/online-applications",
     "TUNBRIDGE WELLS": "https://twbcpa.midkent.gov.uk/online-applications",
     "WINCHESTER": "https://planningapps.winchester.gov.uk/online-applications",
-    "NEW FOREST": "https://forms.newforest.gov.uk/planning",
+    # Sep 1 2026: the old "forms.newforest.gov.uk/planning" path 404s.
+    # Verified live via browser -- the correct current host is
+    # "planning.newforest.gov.uk" (found via a direct web search hit on
+    # "planning.newforest.gov.uk/online-applications/search.do", already in
+    # the standard Idox convention this registry uses everywhere else);
+    # confirmed a genuine, live "Simple Search" Idox portal before shipping.
+    "NEW FOREST": "https://planning.newforest.gov.uk/online-applications",
     "DACORUM": "https://planning.dacorum.gov.uk/publicaccess"
 }
 
@@ -576,15 +687,47 @@ class IdoxScraper:
 # meant every council using one of these other two conventions (confirmed:
 # Edinburgh on idoxpa-web, Dacorum on publicaccess) was being scraped for
 # precisely zero leads on every single run despite being a perfectly working
-# Idox portal. Checked the other 12 currently-registered non-matching URLs
-# (Fife, Bath & North East Somerset, Derby, West Northamptonshire,
-# Stratford-on-Avon, Wiltshire, Dorset, Richmond, Wandsworth, Kensington &
-# Chelsea, Camden, New Forest) individually -- none of their URLs match any
-# known Idox path convention, so they're very likely genuinely different
-# software (Northgate/NEC for at least Wandsworth, going by its URL) and
-# are NOT silently-broken Idox instances -- left alone here, tracked
-# separately for dedicated scrapers.
+# Idox portal.
+#
+# Aug 30 2026 note (since corrected, see below): the other 12
+# currently-registered non-matching URLs at the time (Fife, Bath & North
+# East Somerset, Derby, West Northamptonshire, Stratford-on-Avon,
+# Wiltshire, Dorset, Richmond, Wandsworth, Kensington & Chelsea, Camden,
+# New Forest) were checked by URL-shape reasoning alone and assumed to all
+# be genuinely different software.
+#
+# Sep 1 2026 correction: actually opening each of those 12 in a browser
+# (not just reasoning about the URL string) found that assumption was
+# wrong for 3 of them -- Fife (/online) and Derby (bare domain root) are
+# both real, live, working Idox portals Idox just doesn't put at the usual
+# "/online-applications" path; New Forest was never non-Idox at all, just
+# registered at the wrong subdomain. The other 9 (Bath & North East
+# Somerset, West Northamptonshire, Stratford-on-Avon, Wiltshire, Dorset,
+# Richmond, Wandsworth, Kensington & Chelsea, Camden) really are different
+# platforms (Northgate, Arcus BE, Citizen Portal, and assorted bespoke
+# .aspx systems -- see the removed-entries comments in COUNCIL_REGISTRY
+# above for which is which) and stay excluded, now for a verified reason
+# instead of an assumed one.
+#
+# New Forest's fix was a path/subdomain correction (its corrected URL
+# already contains "online-applications", so the marker list alone now
+# recognises it -- no code change needed). Fife and Derby can't be fixed
+# by editing _KNOWN_IDOX_PATH_MARKERS itself: there is no single short
+# substring that would recognise "/online" and a bare domain root without
+# ALSO matching things that are almost certainly not Idox (bare "online"
+# in particular is common enough in ordinary council URLs to risk false
+# positives on councils never actually checked). Rather than loosen the
+# general-purpose marker list on unverified guesswork -- the exact mistake
+# this correction is fixing -- both are instead named explicitly in
+# _CONFIRMED_IDOX_EXCEPTIONS below, added only after being individually
+# opened and confirmed as the genuine Idox UI, same discipline as every
+# other live-verified fix in this file.
 _KNOWN_IDOX_PATH_MARKERS = ("online-applications", "publicaccess", "idoxpa-web")
+
+_CONFIRMED_IDOX_EXCEPTIONS = frozenset({
+    "https://planning.fife.gov.uk/online",
+    "https://eplanning.derby.gov.uk",
+})
 
 
 def _parse_idox_detail_url(source_url: str) -> Optional[Tuple[str, str]]:
@@ -665,7 +808,11 @@ def scrape_mesh_council(city_name: str) -> List[Dict]:
 
     # Handle known IDOX implementations
     base_url = COUNCIL_REGISTRY.get(city_upper)
-    if base_url and any(marker in base_url.lower() for marker in _KNOWN_IDOX_PATH_MARKERS):
+    is_known_idox = base_url and (
+        any(marker in base_url.lower() for marker in _KNOWN_IDOX_PATH_MARKERS)
+        or base_url in _CONFIRMED_IDOX_EXCEPTIONS
+    )
+    if is_known_idox:
         logger.info(f"[MESH] Routing {city_upper} to free Idox Engine...")
         scraper = IdoxScraper(base_url)
 

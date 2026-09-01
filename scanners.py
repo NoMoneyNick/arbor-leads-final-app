@@ -9,6 +9,7 @@ from typing import Optional, List, Tuple, Dict, Any
 import database
 import notifications
 import net_utils
+import persistent_dedup_cache as dedup
 
 logger = logging.getLogger("vector-data-labs")
 
@@ -64,6 +65,24 @@ TREE_GOLD = [
     # "fell 1/2/3" (the numbered-tree-list phrasing councils actually use in
     # application descriptions) already cover genuine tree-work mentions.
     "felling", "fell to ground", "fell 1", "fell 2", "fell 3", "sectional dismantle", "dismantle",
+    # Sep 2 2026: sanity-checking HMO_GOLD against real live PlanIt data
+    # (Nottingham, during the multi-vertical wiring verification pass) also
+    # surfaced a genuine, currently-live TREE_GOLD false NEGATIVE -- a real
+    # application literally titled "Fell a dead tree in rear garden." matched
+    # none of the phrases above (not "felling"/"fell to ground"/"fell 1/2/3",
+    # no species name, not "deadwood"/"dead wood"/"dead branches" either --
+    # "dead tree" is a distinct phrase this list never covered). This
+    # pre-dates and is unrelated to the multi-vertical work; found by luck
+    # of sampling real data while checking something else, so fixed here
+    # rather than filed away for later. Each addition below is a direct
+    # article-variant ("a"/"the") of an existing safe phrase, or "dead
+    # tree" itself -- all essentially unambiguous in real English (unlike
+    # bare "fell", these are never used non-arboriculturally), so this adds
+    # zero real false-positive risk while catching short, plain-English
+    # descriptions (this one reads like the applicant's own wording, not
+    # council-officer boilerplate) that the more formal phrasing above
+    # doesn't reach.
+    "dead tree", "fell a tree", "fell the tree", "remove a tree", "removal of a tree",
     "stump grinding", "stump removal", "stump",
     "pollard", "pollarding", "re-pollard",
     "crown reduction", "crown lift", "crown thin", "crown raising", "crown clean",
@@ -94,14 +113,167 @@ def score_lead(summary: str) -> tuple:
     return "small", 25
 
 
+# Sep 2 2026: first piece of the multi-vertical build (see
+# master_expansion_plan_v2.md) -- HMO / change-of-use conversions as vertical
+# 2, chosen for the smallest council footprint to prove the generalized
+# pipeline end to end. Deliberately narrower than a bare "change of use"
+# match: that phrase alone covers thousands of unrelated applications
+# (shop-to-restaurant, office-to-gym, etc.) and would flood this vertical
+# with false positives -- the same "avoid the too-broad bare word" lesson
+# TREE_GOLD's own "fell" removal (Aug 29 2026 comment above) already taught
+# this file once. Every "change of use" entry here is qualified by HMO/
+# multiple-occupation wording specifically, never used bare.
+HMO_GOLD = [
+    "house in multiple occupation", "houses in multiple occupation",
+    "hmo", "multiple occupation",
+    "class c4", "use class c4", "c3 to c4", "c4 to c3",
+    "large hmo", "small hmo",
+    "7 or more unrelated", "seven or more unrelated",
+    "unrelated individuals", "unrelated persons", "unrelated sharers",
+    "change of use to a house in multiple occupation",
+    "change of use to house in multiple occupation",
+    "conversion to a house in multiple occupation",
+    "conversion to house in multiple occupation",
+    "conversion into a house in multiple occupation",
+    # Sep 2 2026: an adversarial review pass (run before this multi-vertical
+    # build ships) caught two bare, ambiguous entries here that were the same
+    # class of bug as TREE_GOLD's bare-"fell" false positive above: a "large
+    # HMO" (7+ unrelated occupants) is legally classed as "sui generis" use,
+    # not C4 -- a real reason someone added the bare phrase -- but "sui
+    # generis" is ALSO the general planning catch-all for nightclubs,
+    # drive-throughs, casinos, scrapyards, betting shops, hostels and dozens
+    # of other totally unrelated uses, so the bare phrase alone would tag a
+    # description like "Change of use to sui generis (drive-through
+    # restaurant)" as an HMO lead. Similarly, "Article 4 Direction" is a
+    # general permitted-development-removal mechanism used for HMOs but also
+    # for shopfronts in conservation areas, agricultural building
+    # conversions, demolition control, and more -- a bare match would tag any
+    # of those as HMO too. Replaced both with phrasing that requires the HMO
+    # context to actually be present in the same description, which is how
+    # a genuine large-HMO/Article-4-for-HMO application is actually worded in
+    # practice (and is already additionally covered by the "hmo"/"house in
+    # multiple occupation"/"c4" phrases above in the common case where an
+    # application mentions both) -- this trades a small amount of unproven
+    # recall for real, demonstrated precision.
+    "sui generis hmo", "sui generis house in multiple occupation",
+    "hmo (sui generis)", "hmo sui generis", "large hmo (sui generis)",
+    "article 4 direction removing permitted development rights for a house in multiple occupation",
+    "article 4 direction restricting hmo",
+    "article 4 direction for hmo",
+]
+
+# Sep 2 2026: the verticals config the build plan calls for -- each entry's
+# "keywords" list is what _matches_vertical checks against. Adding a THIRD
+# vertical later should mean adding one more entry here, nothing else in
+# this section -- if it needs more than that, the generalization isn't
+# finished yet (see master_expansion_plan_v2.md's build-order note on this
+# exact point).
+#
+# "capture_identity" (Sep 2 2026, master_expansion_plan_v2.md build-order
+# step 3 -- the GDPR-safe lead format): tree's existing business model
+# captures and displays the planning applicant's name to the paying
+# contractor (see /dashboard's "Applicant: ..." line and the has_agent
+# exclusion-filter logic in database.py, both tree-specific, both already
+# live and unaffected by this flag). HMO is a deliberately different,
+# stricter design, built in from day one per the plan rather than
+# retrofitted later: never extract, store, or display the applicant's name
+# or the agent's identity at all -- sell address + project type + council
+# reference only, addressed to "The Owner/Occupier." This is real risk
+# reduction regardless of the unsettled legal question of whether an
+# address alone is personal data (see master_expansion_plan_v2.md's own
+# note that "the Occupier" fully exempting a mailing from the rules is the
+# weaker, less-cited claim across independent research -- this flag does
+# NOT rely on that claim being true; a full LIA/privacy-notice/rights
+# process still applies regardless, per the plan's own more conservative,
+# converged position). Defaults to True (tree's exact existing behaviour,
+# every call site written before this flag existed is unaffected) when a
+# vertical doesn't set it explicitly.
+VERTICALS = {
+    "tree": {"keywords": TREE_GOLD, "capture_identity": True},
+    "hmo": {"keywords": HMO_GOLD, "capture_identity": False},
+}
+
+
+def _matches_vertical(text: str, vertical_key: str) -> bool:
+    """True if `text` matches the given vertical's keyword list. Unknown
+    vertical_key -> False (never crashes a caller for a typo'd key).
+
+    Sep 2 2026: `text` used to go straight into `.lower()` with no type
+    check. Every call site was already extracting the source field with an
+    `or ""` fallback, which only substitutes when the value is missing or
+    falsy -- a genuinely messy upstream record (seen in practice from these
+    government APIs) returning a truthy non-string for a description field
+    (an int, a nested dict) passed straight through and raised AttributeError
+    here, uncaught by any per-item guard in the paid-API/PlanIt loops in
+    scan_city_planning_api -- which crashed the WHOLE loop, and since those
+    loops only conn.commit() once at the very end, every lead already
+    inserted earlier in that same run was implicitly rolled back too.
+    Coercing defensively here, at the one shared root, protects every
+    current and future caller in one place instead of relying on each call
+    site to remember its own guard."""
+    vertical = VERTICALS.get(vertical_key)
+    if not vertical:
+        return False
+    s = str(text or "").lower()
+    return any(word in s for word in vertical["keywords"])
+
+
+def classify_verticals(text: str) -> List[str]:
+    """Returns every vertical `text` matches, e.g. ["tree", "hmo"] for an
+    application that's both an HMO conversion and involves tree removal.
+    Empty list if it matches none. This is what makes the "sell one
+    matching application into every vertical it qualifies for" monetization
+    idea (master_expansion_plan_v2.md) possible -- the classification is
+    already multi-label, not a single best-guess category."""
+    return [key for key in VERTICALS if _matches_vertical(text, key)]
+
+
 def _is_tree_related(text: str) -> bool:
-    return any(word in text.lower() for word in TREE_GOLD)
+    # Kept as a thin wrapper over the generalized matcher -- every existing
+    # call site (score_lead's callers below, PlanIt/paid-API filtering)
+    # keeps working completely unchanged. Do not remove without updating
+    # those call sites to call _matches_vertical(text, "tree") directly.
+    return _matches_vertical(text, "tree")
+
+
+def _resolve_vertical(text: str) -> Optional[str]:
+    """Which single vertical a live scan call site should tag a lead with.
+
+    Sep 2 2026: classify_verticals() is already multi-label (an application
+    can match both "tree" and "hmo"), but the `leads` table's
+    ON CONFLICT (reference) clause makes `reference` the sole unique key --
+    it does not yet support one row per matched vertical for the same
+    application (that would need a composite unique constraint on
+    (reference, vertical), tracked in TASKS.md as a future schema decision,
+    not done here). Until that exists, each application becomes exactly one
+    row, and this picks which vertical wins:
+
+    - No match at all -> None. Callers skip the item exactly as every call
+      site already did before verticals existed (zero behaviour change for
+      non-matching applications).
+    - "tree" is one of the matches -> "tree" always wins, even if HMO also
+      matched. This is deliberate: it guarantees every existing tree lead's
+      behaviour and economics are provably unchanged by this refactor --
+      the whole point of shipping this as a foundation-first step.
+    - Otherwise -> the first (only, today) other match, e.g. "hmo". These
+      are leads that were previously silently discarded entirely (an
+      HMO-only application used to fail _is_tree_related and never reach
+      _insert_lead at all), so every one of these is new, additive
+      pipeline output, not a change to anything already flowing.
+    """
+    matches = classify_verticals(text)
+    if not matches:
+        return None
+    if "tree" in matches:
+        return "tree"
+    return matches[0]
 
 
 def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
                   applicant_name: Optional[str] = None, agent_name: Optional[str] = None,
                   agent_company: Optional[str] = None, has_agent: Optional[bool] = None,
-                  agent_is_tree_surgeon: Optional[bool] = None) -> Optional[dict]:
+                  agent_is_tree_surgeon: Optional[bool] = None,
+                  vertical: str = "tree") -> Optional[dict]:
     """
     Inserts a lead into the DB. Returns the lead dict if new, None if duplicate or low-quality junk.
     Enforces a strict quality gate: blocks empty, generic placeholders like 'tree-preservation-order'.
@@ -122,6 +294,16 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
     in the first time they're seen (never overwritten once set), while `was_inserted`
     (Postgres' xmax=0 trick) keeps the return value None for a backfill-only touch,
     so callers' "is this a brand-new lead to notify about" logic is unaffected.
+
+    vertical (Sep 2 2026): which VERTICALS key this lead was classified
+    into -- defaults to "tree" so every call site written before this
+    parameter existed keeps inserting tree leads exactly as before. Also
+    now governs data minimization: a vertical configured with
+    capture_identity=False (currently only "hmo") has applicant_name,
+    agent_name, agent_company, has_agent and agent_is_tree_surgeon all
+    forced to None before the INSERT, regardless of what the caller passed
+    in -- see the capture_identity block below and VERTICALS' own comment
+    for why this lives here rather than at each call site.
     """
     if not summary or not reference:
         return None
@@ -139,12 +321,30 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
         if len(s_clean) < 20:
             return None
 
+    # Sep 2 2026, master_expansion_plan_v2.md build-order step 3 (the
+    # GDPR-safe lead format): a vertical with capture_identity=False never
+    # gets an applicant/agent identity stored at all, however a caller
+    # invoked this function -- enforced here, at the one place every lead
+    # of every vertical passes through, rather than trusting every current
+    # and future call site to remember not to pass these fields for HMO.
+    # This is what "built in from day one, not retrofitted" actually means
+    # in code: it is not possible for an HMO row to ever end up with a name
+    # in it, regardless of what any scan function's PlanIt/paid-API/mesh
+    # extraction logic happens to pull out of the source record.
+    if not VERTICALS.get(vertical, {}).get("capture_identity", True):
+        applicant_name = None
+        agent_name = None
+        agent_company = None
+        has_agent = None
+        agent_is_tree_surgeon = None
+
     lead_score, lead_price = score_lead(summary)
     cur.execute(
         """
         INSERT INTO leads (reference, address, summary, council_source, lead_score, lead_price,
-                            applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon,
+                            vertical)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (reference) DO UPDATE SET
             applicant_name = COALESCE(leads.applicant_name, EXCLUDED.applicant_name),
             agent_name     = COALESCE(leads.agent_name, EXCLUDED.agent_name),
@@ -154,7 +354,7 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
         RETURNING id, (xmax = 0) AS was_inserted;
         """,
         (reference, address, summary[:350], source, lead_score, lead_price,
-         applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon)
+         applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon, vertical)
     )
     row = cur.fetchone()
     if row and row[1]:  # was_inserted -- a genuinely new lead, not a backfill of an existing one
@@ -162,7 +362,7 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
                 "lead_score": lead_score, "lead_price": lead_price,
                 "applicant_name": applicant_name, "agent_name": agent_name,
                 "agent_company": agent_company, "has_agent": has_agent,
-                "agent_is_tree_surgeon": agent_is_tree_surgeon}
+                "agent_is_tree_surgeon": agent_is_tree_surgeon, "vertical": vertical}
     return None
 
 
@@ -178,11 +378,22 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
 # own servers, not built to be scraped repeatedly in one afternoon, and
 # the "same portal hit by two overlapping scans within seconds" pattern
 # is already on record (see _dispatch_locked_scan in main.py) as a likely
-# cause of real 503s/timeouts. Same-day dedup, in-memory (resets on a
-# Render restart, which is rare compared to daily cron runs) -- the worst
-# case is one extra full sweep right after a redeploy, not a recurring
-# problem.
-_MESH_SCAN_DAY_CACHE: Optional[str] = None
+# cause of real 503s/timeouts. Same-day dedup.
+#
+# Sep 1 2026: this was an in-memory `_MESH_SCAN_DAY_CACHE` global, on the
+# stated assumption that "Render restarts are rare compared to daily cron
+# runs". That assumption held in steady state but broke down hard during
+# this exact week of active development -- a live log showed the paid-API
+# rotation's own identical in-memory guard (_PAID_API_DAY_CACHE, see below)
+# already having let a single day's usage hit ~2x its intended pace, and
+# the redeploy frequency this week is the same for all three of these day
+# caches, this one included. Every redeploy silently re-enables one more
+# full 50+-council sweep the same calendar day -- on a council-goodwill
+# guard rather than a hard money cap, but the reasoning that broke the paid
+# API guard applies equally here. Switched to persistent_dedup_cache,
+# backed by the same Postgres DB this function already opens a connection
+# to, so the guard survives a redeploy instead of resetting with it.
+_MESH_SCAN_DEDUP_KEY = "mesh_scan:full_sweep"
 
 
 def run_mesh_network_scan() -> int:
@@ -190,17 +401,6 @@ def run_mesh_network_scan() -> int:
     Executes a direct scan of all councils mapped in the Aggregator Mesh (Idox portals, etc.)
     Bypasses the third-party paid API entirely to save quota.
     """
-    global _MESH_SCAN_DAY_CACHE
-    today_str = datetime.date.today().isoformat()
-    if _MESH_SCAN_DAY_CACHE == today_str:
-        logger.info(
-            "[MESH] Already ran the full council sweep once today (this process) -- "
-            "skipping this re-trigger rather than hitting all 50+ council websites again. "
-            "Set the PAID_API_ROTATION_DAYS-style override aside; this one has no override "
-            "since re-scraping free council sites has no quota to spend, only their goodwill."
-        )
-        return 0
-
     try:
         import mesh_scrapers
     except ImportError:
@@ -210,6 +410,19 @@ def run_mesh_network_scan() -> int:
     new_leads = []
     conn = database.get_db_conn()
     cur = conn.cursor()
+
+    dedup.ensure_table(conn)
+    if dedup.already_done_today(conn, _MESH_SCAN_DEDUP_KEY):
+        logger.info(
+            "[MESH] Already ran the full council sweep once today (any process, "
+            "including one that has since restarted) -- skipping this re-trigger "
+            "rather than hitting all 50+ council websites again. This guard has no "
+            "override since re-scraping free council sites has no quota to spend, "
+            "only their goodwill."
+        )
+        cur.close()
+        conn.close()
+        return 0
     try:
         for council_name, url in mesh_scrapers.COUNCIL_REGISTRY.items():
             logger.info(f"[MESH] Scraping {council_name} directly from {url}...")
@@ -247,8 +460,11 @@ def run_mesh_network_scan() -> int:
 
     # Mark today's sweep as done regardless of outcome -- a same-day retry
     # wouldn't fix a real council-side outage anyway, and the goal here is
-    # strictly "at most one full council sweep per calendar day".
-    _MESH_SCAN_DAY_CACHE = today_str
+    # strictly "at most one full council sweep per calendar day". Persisted
+    # (see _MESH_SCAN_DEDUP_KEY comment above) so it survives a redeploy.
+    dedup_conn = database.get_db_conn()
+    dedup.mark_done_today(dedup_conn, _MESH_SCAN_DEDUP_KEY)
+    dedup_conn.close()
 
     logger.info(f"[MESH] Mesh Scan complete. {len(new_leads)} free leads extracted directly from councils.")
     return len(new_leads)
@@ -300,11 +516,12 @@ def scan_leeds_leads() -> int:
             for feature in features:
                 rec = feature.get("attributes", {})
                 summary = str(rec.get("DESCRIPTION") or "")
-                if not _is_tree_related(summary):
+                vertical = _resolve_vertical(summary)
+                if vertical is None:
                     continue
                 ref = str(rec.get("REFERENCE") or rec.get("OBJECTID") or f"LDS-{int(time.time())}")
                 addr = rec.get("ADDRESS") or "Leeds"
-                lead = _insert_lead(cur, ref, addr, summary, "Leeds")
+                lead = _insert_lead(cur, ref, addr, summary, "Leeds", vertical=vertical)
                 if lead:
                     new_leads.append(lead)
     except Exception as e:
@@ -331,11 +548,15 @@ def scan_leeds_leads() -> int:
 
 # ── London Scanner (GLA Datahub + Complete London & Green Belt Postcodes) ──────
 
-# Aug 30 2026: same-day dedup, same reasoning as _MESH_SCAN_DAY_CACHE above --
-# a single request per call, so the stakes are much lower than the mesh
-# scan, but there's no reason to hit a re-trigger's worth of extra calls
-# against someone else's free government API either.
-_GLA_DAY_CACHE: Optional[str] = None
+# Aug 30 2026: same-day dedup, same reasoning as the mesh scan above --
+# a single request per call, so the stakes are much lower, but there's no
+# reason to hit a re-trigger's worth of extra calls against someone else's
+# free government API either. Sep 1 2026: switched from an in-memory dict
+# to persistent_dedup_cache for the same reason as the other three day
+# caches in this file -- see the paid-API dedup comment further down for
+# the live-log evidence that "restarts are rare" doesn't hold on an active
+# development day.
+_GLA_DEDUP_KEY = "gla_datahub:london"
 
 
 def scan_gla_datahub_london() -> int:
@@ -365,18 +586,20 @@ def scan_gla_datahub_london() -> int:
     scan_city_planning_api("London") call -- exactly the "more free sources
     to spread the request load across" strategy this was built for.
     """
-    global _GLA_DAY_CACHE
     if not GLA_API_KEY:
         return 0
-    today_str = datetime.date.today().isoformat()
-    if _GLA_DAY_CACHE == today_str:
-        logger.debug("[London GLA] Already queried once today (this process) -- skipping re-trigger.")
-        return 0
-    _GLA_DAY_CACHE = today_str
 
     new_leads = []
     conn = database.get_db_conn()
     cur = conn.cursor()
+
+    dedup.ensure_table(conn)
+    if dedup.already_done_today(conn, _GLA_DEDUP_KEY):
+        logger.debug("[London GLA] Already queried once today (any process, including one that has since restarted) -- skipping re-trigger.")
+        cur.close()
+        conn.close()
+        return 0
+    dedup.mark_done_today(conn, _GLA_DEDUP_KEY)
     try:
         headers = {"Authorization": GLA_API_KEY, "Accept": "application/json"}
         import time
@@ -400,38 +623,52 @@ def scan_gla_datahub_london() -> int:
         elif res.status_code == 200:
             records = res.json().get("data", [])
             for item in records:
-                # Search across all possible GLA description fields to avoid placeholder names
-                summary = (
-                    item.get("description")
-                    or item.get("proposal")
-                    or item.get("development_description")
-                    or item.get("details")
-                    or item.get("proposal_summary")
-                    or item.get("title")
-                    or ""
-                ).strip()
+                try:
+                    # Search across all possible GLA description fields to avoid placeholder names.
+                    # Sep 2 2026: coerce with str(... or "") before .strip() -- a truthy
+                    # non-string value (int, nested dict) in any of these fields used to
+                    # raise AttributeError straight out of this loop for every remaining
+                    # item in this batch; see the per-item try/except added below for why
+                    # one bad record doing that is now bounded to just that one record.
+                    summary = str(
+                        item.get("description")
+                        or item.get("proposal")
+                        or item.get("development_description")
+                        or item.get("details")
+                        or item.get("proposal_summary")
+                        or item.get("title")
+                        or ""
+                    ).strip()
 
-                if not summary or not _is_tree_related(summary):
+                    vertical = _resolve_vertical(summary) if summary else None
+                    if vertical is None:
+                        continue
+
+                    # Extract nested or flat address
+                    addr = ""
+                    if isinstance(item.get("location"), dict):
+                        addr = item["location"].get("address", "")
+                    elif isinstance(item.get("site"), dict):
+                        addr = item["site"].get("address", "")
+                    if not addr:
+                        addr = item.get("site_address") or item.get("address") or item.get("address_text") or "London"
+
+                    ref = (
+                        item.get("reference")
+                        or item.get("application_reference")
+                        or item.get("lpa_app_no")
+                        or item.get("planning_reference")
+                        or f"LON-{int(time.time())}"
+                    )
+
+                    lead = _insert_lead(cur, ref, addr, summary, "London", vertical=vertical)
+                except Exception as e:
+                    # Sep 2 2026: one malformed GLA record must never cost the rest of
+                    # this batch (up to 100 records) -- caught here instead of only at
+                    # the outer `except Exception` below, which used to let a single bad
+                    # item stop the whole loop partway through.
+                    logger.warning(f"[London GLA] Skipping one malformed record: {e}")
                     continue
-
-                # Extract nested or flat address
-                addr = ""
-                if isinstance(item.get("location"), dict):
-                    addr = item["location"].get("address", "")
-                elif isinstance(item.get("site"), dict):
-                    addr = item["site"].get("address", "")
-                if not addr:
-                    addr = item.get("site_address") or item.get("address") or item.get("address_text") or "London"
-
-                ref = (
-                    item.get("reference")
-                    or item.get("application_reference")
-                    or item.get("lpa_app_no")
-                    or item.get("planning_reference")
-                    or f"LON-{int(time.time())}"
-                )
-
-                lead = _insert_lead(cur, ref, addr, summary, "London")
                 if lead:
                     new_leads.append(lead)
         else:
@@ -595,11 +832,29 @@ def _planit_real_value(value) -> Optional[str]:
     return value.strip()
 
 
-# Aug 30 2026: keyed by (city_name, ISO date) -- see scan_city_planning_api's
-# rotation/dedup comment. Marks a region's paid-API rotation bucket as
-# already attempted today so a same-day manual re-trigger doesn't burn
-# quota re-fetching it for zero new coverage.
-_PAID_API_DAY_CACHE: dict = {}
+# See scan_city_planning_api's rotation/dedup comment. Marks a region's
+# paid-API rotation bucket as already attempted today so a same-day manual
+# re-trigger doesn't burn quota re-fetching it for zero new coverage.
+#
+# Sep 1 2026: BUG FOUND SAME DAY -- this and _PLANIT_DAY_CACHE below were
+# in-memory dicts, on the stated assumption (Aug 30 comment, since removed)
+# that "Render restarts are rare compared to daily cron runs". A live log
+# from today caught the real-world failure mode directly: day 1 of the
+# month, a single region's rotation share was only 3 prefixes, yet the
+# cumulative monthly counter had already reached 31 and triggered a
+# predictive-pace alert projecting ~930 calls against the 500 cap -- nearly
+# double the ~460/month the rotation was deliberately sized for (see
+# scan_city_planning_api's Aug 30 comment: 178 prefixes / 12-day rotation).
+# The gap is explained by today's actual deploy pattern: this was an active
+# development day with several redeploys, each one silently wiping this
+# in-memory guard and re-enabling a full paid-API pass on the very next
+# trigger, for every region that re-ran. "Restarts are rare" is only true
+# in steady state -- it's false on exactly the days most likely to matter,
+# since active development IS frequent redeploys. Switched both this and
+# _PLANIT_DAY_CACHE to persistent_dedup_cache (backed by the same Postgres
+# DB the api_usage counter already lives in) so the guard survives a
+# redeploy instead of resetting with it.
+_PAID_API_DEDUP_PREFIX = "paid_api_rotation"
 
 # Same idea, applied to PlanIt. PlanIt has no monthly money quota to
 # protect (unlike ukplanningapi.co.uk above), but Nick's "these keep
@@ -609,7 +864,7 @@ _PAID_API_DAY_CACHE: dict = {}
 # Unlike the paid API there's no rotation, just a flat "once per region
 # per day" -- PlanIt isn't rationed by a monthly cap, only by its own
 # per-request rate limit (handled with backoff inside fetch_planit).
-_PLANIT_DAY_CACHE: dict = {}
+_PLANIT_DEDUP_PREFIX = "planit_region"
 
 # Aug 30 2026: root cause of PlanIt returning 429 for nearly every authority
 # in 7 of 8 regions in one production run, even with the earlier "wait 20s
@@ -752,16 +1007,20 @@ def scan_city_planning_api(city_name: str) -> int:
         # (a redeploy, a manual /scan-nationwide, testing) would otherwise
         # re-fetch this exact same rotated subset again for zero new
         # coverage -- the rotation bucket only changes when the date does.
-        # In-memory only (resets on a Render restart/redeploy, which is
-        # rare compared to daily cron runs) -- the worst case is one extra
-        # day's spend right after a redeploy, not a recurring problem.
-        today_key = (city_name, datetime.date.today().isoformat())
-        if todays_paid_prefixes and _PAID_API_DAY_CACHE.get(today_key):
+        # Persisted via persistent_dedup_cache (see _PAID_API_DEDUP_PREFIX
+        # comment above) so a redeploy mid-day doesn't silently re-enable a
+        # second full paid-API pass for this region on the next trigger.
+        paid_dedup_key = f"{_PAID_API_DEDUP_PREFIX}:{city_name}"
+        _dedup_conn = database.get_db_conn()
+        dedup.ensure_table(_dedup_conn)
+        if todays_paid_prefixes and dedup.already_done_today(_dedup_conn, paid_dedup_key):
             logger.debug(
-                f"[{city_name}] ukplanningapi.co.uk already queried once today (this process) -- "
-                f"skipping to conserve monthly quota; PlanIt and the free mesh still run below."
+                f"[{city_name}] ukplanningapi.co.uk already queried once today (any process, "
+                f"including one that has since restarted) -- skipping to conserve monthly "
+                f"quota; PlanIt and the free mesh still run below."
             )
             todays_paid_prefixes = []
+        _dedup_conn.close()
 
     headers = {"X-API-Key": UK_PLANNING_API_KEY} if UK_PLANNING_API_KEY else {}
     new_leads = []
@@ -933,8 +1192,11 @@ def scan_city_planning_api(city_name: str) -> int:
             # Mark today's rotation bucket attempted regardless of outcome --
             # a same-day retry wouldn't fix a real quota exhaustion or key
             # problem anyway, and the goal here is strictly "at most one
-            # paid-API pass per region per calendar day".
-            _PAID_API_DAY_CACHE[(city_name, datetime.date.today().isoformat())] = True
+            # paid-API pass per region per calendar day". Persisted so a
+            # redeploy doesn't undo this mark.
+            _mark_conn = database.get_db_conn()
+            dedup.mark_done_today(_mark_conn, f"{_PAID_API_DEDUP_PREFIX}:{city_name}")
+            _mark_conn.close()
 
         # Aug 30 2026: dropped from 6, then 2, down to 1 worker. With
         # _planit_wait_for_slot() now serializing every PlanIt request
@@ -948,11 +1210,16 @@ def scan_city_planning_api(city_name: str) -> int:
         # Same-day dedup (separate from the pacing gate): a manual
         # re-trigger later the same calendar day gains nothing by
         # re-querying the exact same authority names against PlanIt again.
-        planit_today_key = (city_name, datetime.date.today().isoformat())
+        # Persisted (see _PLANIT_DEDUP_PREFIX comment above) so it survives
+        # a redeploy instead of resetting with it.
+        planit_dedup_key = f"{_PLANIT_DEDUP_PREFIX}:{city_name}"
         todays_region_towns = region_towns
-        if region_towns and _PLANIT_DAY_CACHE.get(planit_today_key):
-            logger.debug(f"[{city_name}] PlanIt already queried once today (this process) -- skipping re-trigger.")
+        _planit_dedup_conn = database.get_db_conn()
+        dedup.ensure_table(_planit_dedup_conn)
+        if region_towns and dedup.already_done_today(_planit_dedup_conn, planit_dedup_key):
+            logger.debug(f"[{city_name}] PlanIt already queried once today (any process, including one that has since restarted) -- skipping re-trigger.")
             todays_region_towns = []
+        _planit_dedup_conn.close()
 
         # Sep 1 2026: Nick flagged that the pipeline "looks stuck" for the
         # ~100+ minutes this loop takes -- correctly diagnosed as an
@@ -980,7 +1247,9 @@ def scan_city_planning_api(city_name: str) -> int:
         with ThreadPoolExecutor(max_workers=1) as planit_executor:
             planit_results = list(planit_executor.map(_fetch_planit_with_heartbeat, todays_region_towns)) if todays_region_towns else []
         if todays_region_towns:
-            _PLANIT_DAY_CACHE[planit_today_key] = True
+            _mark_planit_conn = database.get_db_conn()
+            dedup.mark_done_today(_mark_planit_conn, planit_dedup_key)
+            _mark_planit_conn.close()
 
         if UK_PLANNING_API_KEY and todays_paid_prefixes and len(paid_failures) == len(todays_paid_prefixes):
             logger.warning(
@@ -1017,31 +1286,45 @@ def scan_city_planning_api(city_name: str) -> int:
         try:
             for prefix, records in paid_results:
                 for item in records:
-                    summary = item.get("description", "") or ""
-                    if not _is_tree_related(summary):
+                    try:
+                        # Sep 2 2026: str(... or "") instead of "x or ''" -- the latter
+                        # only substitutes when the field is missing/falsy, so a truthy
+                        # non-string value (int, nested dict) from this paid API used to
+                        # pass straight through into _resolve_vertical's .lower() call
+                        # and crash. The try/except around this whole item body is the
+                        # other half of the fix: this loop only conn.commit()s once, at
+                        # the very end, so an uncaught crash here used to roll back
+                        # every lead already inserted earlier in this same run, for this
+                        # entire region, not just skip the one bad record.
+                        summary = str(item.get("description") or "")
+                        vertical = _resolve_vertical(summary)
+                        if vertical is None:
+                            continue
+                        ref  = item.get("reference") or f"{prefix}-{int(time.time())}"
+                        addr = str(item.get("address") or city_name)
+                        # Aug 30 2026: ukplanningapi.co.uk was found (during the
+                        # PlanIt live-testing pass) to sometimes return results
+                        # whose address doesn't actually match the requested
+                        # postcode-prefix param -- e.g. a "Sheffield"-requested
+                        # scan returning a London/Home Counties address. Rather
+                        # than trust the paid API's own filtering and mislabel
+                        # council_source, verify the returned address's outcode
+                        # actually starts with the prefix we asked for; skip
+                        # (don't guess a relabel) if it clearly doesn't.
+                        outcode_match = re.search(r'\b([A-Z]{1,2})[0-9][A-Z0-9]?\s*[0-9][A-Z]{2}\b', addr.upper())
+                        if outcode_match and not outcode_match.group(1).startswith(prefix.upper()):
+                            logger.warning(
+                                f"[{city_name}] ukplanningapi.co.uk returned an address outcode "
+                                f"'{outcode_match.group(1)}' for requested prefix '{prefix}' -- "
+                                f"skipping to avoid mislabeling council_source ('{addr}')."
+                            )
+                            continue
+                        lead = _insert_lead(cur, ref, addr, summary, city_name, vertical=vertical)
+                        if lead:
+                            new_leads.append(lead)
+                    except Exception as e:
+                        logger.warning(f"[{city_name}] Skipping one malformed paid-API record ({prefix}): {e}")
                         continue
-                    ref  = item.get("reference") or f"{prefix}-{int(time.time())}"
-                    addr = item.get("address", city_name)
-                    # Aug 30 2026: ukplanningapi.co.uk was found (during the
-                    # PlanIt live-testing pass) to sometimes return results
-                    # whose address doesn't actually match the requested
-                    # postcode-prefix param -- e.g. a "Sheffield"-requested
-                    # scan returning a London/Home Counties address. Rather
-                    # than trust the paid API's own filtering and mislabel
-                    # council_source, verify the returned address's outcode
-                    # actually starts with the prefix we asked for; skip
-                    # (don't guess a relabel) if it clearly doesn't.
-                    outcode_match = re.search(r'\b([A-Z]{1,2})[0-9][A-Z0-9]?\s*[0-9][A-Z]{2}\b', addr.upper())
-                    if outcode_match and not outcode_match.group(1).startswith(prefix.upper()):
-                        logger.warning(
-                            f"[{city_name}] ukplanningapi.co.uk returned an address outcode "
-                            f"'{outcode_match.group(1)}' for requested prefix '{prefix}' -- "
-                            f"skipping to avoid mislabeling council_source ('{addr}')."
-                        )
-                        continue
-                    lead = _insert_lead(cur, ref, addr, summary, city_name)
-                    if lead:
-                        new_leads.append(lead)
 
             # Aug 30 2026: Nick's exact concern -- "I can't sell leads to
             # jobs that already have someone signed up for them" -- and
@@ -1075,122 +1358,137 @@ def scan_city_planning_api(city_name: str) -> int:
 
             for town, records in planit_results:
                 for item in records:
-                    summary = item.get("description", "") or ""
-                    if not summary or not _is_tree_related(summary):
-                        continue
-                    ref  = item.get("reference") or f"PLANIT-{town}-{int(time.time())}"
-                    addr = item.get("address") or f"{city_name} / {town}"
-                    applicant_name = item.get("applicant_name")
-                    agent_name = item.get("agent_name")
-                    agent_company = item.get("agent_company")
-                    has_agent = (True if (agent_name or agent_company) else None)
-                    agent_is_tree_surgeon = None
-                    if has_agent:
-                        import mesh_scrapers
-                        agent_is_tree_surgeon = mesh_scrapers.classify_agent_as_tree_surgeon(agent_name, agent_company)
+                    try:
+                        # Sep 2 2026: str(... or "") -- see the identical fix and its
+                        # comment in the paid-API loop just above; same crash, same
+                        # cause, same fix. The try/except wrapping this whole item body
+                        # is the other half: this loop only conn.commit()s once, at the
+                        # very end, so one malformed PlanIt record used to be able to
+                        # roll back every lead already inserted earlier in this run.
+                        summary = str(item.get("description") or "")
+                        vertical = _resolve_vertical(summary) if summary else None
+                        if vertical is None:
+                            continue
+                        ref  = item.get("reference") or f"PLANIT-{town}-{int(time.time())}"
+                        addr = item.get("address") or f"{city_name} / {town}"
+                        applicant_name = item.get("applicant_name")
+                        agent_name = item.get("agent_name")
+                        agent_company = item.get("agent_company")
+                        has_agent = (True if (agent_name or agent_company) else None)
+                        agent_is_tree_surgeon = None
+                        if has_agent:
+                            import mesh_scrapers
+                            agent_is_tree_surgeon = mesh_scrapers.classify_agent_as_tree_surgeon(agent_name, agent_company)
 
-                    if has_agent is None and item.get("source_url"):
-                        # Aug 30 2026: Nick's point -- re-confirming a
-                        # reference we already resolved on a PREVIOUS day
-                        # would spend a real HTTP request to that council's
-                        # server, forever, every single day PlanIt keeps
-                        # returning that still-live application (up to 45
-                        # days). PlanIt's own record never carries the
-                        # answer (it structurally never stores names), so
-                        # without this check we'd have re-confirmed the same
-                        # already-known lead again and again. This one cheap
-                        # DB lookup -- no network call -- is what makes it
-                        # safe to run this with a generous budget as a
-                        # PERMANENT setting, not just a one-off: once a
-                        # reference is resolved, every future day it costs a
-                        # SELECT, never another real request.
-                        #
-                        # Aug 31 2026 fix: found live in a production export
-                        # -- 187 leads sitting at has_agent=True with
-                        # agent_is_tree_surgeon still NULL, permanently
-                        # excluded from the marketplace by the has_agent/
-                        # agent_is_tree_surgeon filter in
-                        # get_marketplace_leads_with_freshness (NULL is
-                        # treated the same as "confirmed tree surgeon" --
-                        # excluded either way). Root cause: has_agent got
-                        # resolved (either before agent_is_tree_surgeon
-                        # existed, or via a path that only set has_agent)
-                        # and this same "already resolved, skip" check then
-                        # skipped it on every subsequent day forever, since
-                        # it only ever checked has_agent, never whether
-                        # agent_is_tree_surgeon specifically still needed
-                        # classifying. Fixed by pulling the agent name/
-                        # company already on file too and classifying from
-                        # them right here when needed -- classify_agent_as_
-                        # tree_surgeon is pure string matching, zero network
-                        # cost, so there's no reason this has to wait for
-                        # (or be gated by) a real confirm_budget-limited
-                        # HTTP request at all.
-                        cur.execute(
-                            "SELECT has_agent, applicant_name, agent_name, agent_company, agent_is_tree_surgeon "
-                            "FROM leads WHERE reference = %s", (ref,)
+                        if has_agent is None and item.get("source_url"):
+                            # Aug 30 2026: Nick's point -- re-confirming a
+                            # reference we already resolved on a PREVIOUS day
+                            # would spend a real HTTP request to that council's
+                            # server, forever, every single day PlanIt keeps
+                            # returning that still-live application (up to 45
+                            # days). PlanIt's own record never carries the
+                            # answer (it structurally never stores names), so
+                            # without this check we'd have re-confirmed the same
+                            # already-known lead again and again. This one cheap
+                            # DB lookup -- no network call -- is what makes it
+                            # safe to run this with a generous budget as a
+                            # PERMANENT setting, not just a one-off: once a
+                            # reference is resolved, every future day it costs a
+                            # SELECT, never another real request.
+                            #
+                            # Aug 31 2026 fix: found live in a production export
+                            # -- 187 leads sitting at has_agent=True with
+                            # agent_is_tree_surgeon still NULL, permanently
+                            # excluded from the marketplace by the has_agent/
+                            # agent_is_tree_surgeon filter in
+                            # get_marketplace_leads_with_freshness (NULL is
+                            # treated the same as "confirmed tree surgeon" --
+                            # excluded either way). Root cause: has_agent got
+                            # resolved (either before agent_is_tree_surgeon
+                            # existed, or via a path that only set has_agent)
+                            # and this same "already resolved, skip" check then
+                            # skipped it on every subsequent day forever, since
+                            # it only ever checked has_agent, never whether
+                            # agent_is_tree_surgeon specifically still needed
+                            # classifying. Fixed by pulling the agent name/
+                            # company already on file too and classifying from
+                            # them right here when needed -- classify_agent_as_
+                            # tree_surgeon is pure string matching, zero network
+                            # cost, so there's no reason this has to wait for
+                            # (or be gated by) a real confirm_budget-limited
+                            # HTTP request at all.
+                            cur.execute(
+                                "SELECT has_agent, applicant_name, agent_name, agent_company, agent_is_tree_surgeon "
+                                "FROM leads WHERE reference = %s", (ref,)
+                            )
+                            existing_row = cur.fetchone()
+                            if existing_row and existing_row[0] is not None:
+                                existing_has_agent, existing_applicant, existing_agent_name, existing_agent_company, existing_ats = existing_row
+                                has_agent = existing_has_agent
+                                applicant_name = applicant_name or existing_applicant
+                                agent_name = agent_name or existing_agent_name
+                                agent_company = agent_company or existing_agent_company
+                                if has_agent and existing_ats is None and (agent_name or agent_company):
+                                    import mesh_scrapers
+                                    agent_is_tree_surgeon = mesh_scrapers.classify_agent_as_tree_surgeon(agent_name, agent_company)
+                                else:
+                                    agent_is_tree_surgeon = existing_ats
+                            elif confirm_budget > 0:
+                                confirm_budget -= 1
+                                confirm_stats["attempted"] += 1
+                                try:
+                                    import mesh_scrapers
+                                    # Sep 1 2026: only sleep when we're actually
+                                    # about to hit the council's own server --
+                                    # live logs showed ~94% of these attempts are
+                                    # non-Idox authorities/unparseable URLs that
+                                    # confirm_agent_status_from_source rejects
+                                    # instantly with zero network activity (see
+                                    # is_confirmable_idox_url's docstring). The
+                                    # unconditional sleep before every attempt,
+                                    # Idox or not, was burning real minutes per
+                                    # run for nothing -- directly the "scans take
+                                    # hours" complaint, for zero benefit since
+                                    # there's no server to be polite to when no
+                                    # request is being made.
+                                    if mesh_scrapers.is_confirmable_idox_url(item["source_url"]):
+                                        time.sleep(1.0)  # polite -- this hits the council's own server, not PlanIt's
+                                    confirmed = mesh_scrapers.confirm_agent_status_from_source(item["source_url"])
+                                except Exception as e:
+                                    logger.debug(f"[{city_name}] Agent-status confirmation failed for '{ref}': {e}")
+                                    confirmed = {}
+                                if confirmed and "has_agent" in confirmed:
+                                    applicant_name = applicant_name or confirmed.get("applicant_name")
+                                    agent_name = agent_name or confirmed.get("agent_name")
+                                    agent_company = agent_company or confirmed.get("agent_company")
+                                    # confirmed["has_agent"] is a REAL True/False
+                                    # (the detail page was actually visited) --
+                                    # unlike PlanIt's own data, this can safely
+                                    # be trusted as a genuine "no agent" too, not
+                                    # just "yes".
+                                    has_agent = confirmed["has_agent"]
+                                    agent_is_tree_surgeon = confirmed.get("agent_is_tree_surgeon") if has_agent else None
+                                    confirm_stats["resolved_true" if has_agent else "resolved_false"] += 1
+                                else:
+                                    confirm_stats["inconclusive"] += 1
+
+                        lead = _insert_lead(
+                            cur, ref, addr, summary, city_name,
+                            applicant_name=applicant_name,
+                            agent_name=agent_name,
+                            agent_company=agent_company,
+                            has_agent=has_agent,
+                            agent_is_tree_surgeon=agent_is_tree_surgeon,
+                            vertical=vertical,
                         )
-                        existing_row = cur.fetchone()
-                        if existing_row and existing_row[0] is not None:
-                            existing_has_agent, existing_applicant, existing_agent_name, existing_agent_company, existing_ats = existing_row
-                            has_agent = existing_has_agent
-                            applicant_name = applicant_name or existing_applicant
-                            agent_name = agent_name or existing_agent_name
-                            agent_company = agent_company or existing_agent_company
-                            if has_agent and existing_ats is None and (agent_name or agent_company):
-                                import mesh_scrapers
-                                agent_is_tree_surgeon = mesh_scrapers.classify_agent_as_tree_surgeon(agent_name, agent_company)
-                            else:
-                                agent_is_tree_surgeon = existing_ats
-                        elif confirm_budget > 0:
-                            confirm_budget -= 1
-                            confirm_stats["attempted"] += 1
-                            try:
-                                import mesh_scrapers
-                                # Sep 1 2026: only sleep when we're actually
-                                # about to hit the council's own server --
-                                # live logs showed ~94% of these attempts are
-                                # non-Idox authorities/unparseable URLs that
-                                # confirm_agent_status_from_source rejects
-                                # instantly with zero network activity (see
-                                # is_confirmable_idox_url's docstring). The
-                                # unconditional sleep before every attempt,
-                                # Idox or not, was burning real minutes per
-                                # run for nothing -- directly the "scans take
-                                # hours" complaint, for zero benefit since
-                                # there's no server to be polite to when no
-                                # request is being made.
-                                if mesh_scrapers.is_confirmable_idox_url(item["source_url"]):
-                                    time.sleep(1.0)  # polite -- this hits the council's own server, not PlanIt's
-                                confirmed = mesh_scrapers.confirm_agent_status_from_source(item["source_url"])
-                            except Exception as e:
-                                logger.debug(f"[{city_name}] Agent-status confirmation failed for '{ref}': {e}")
-                                confirmed = {}
-                            if confirmed and "has_agent" in confirmed:
-                                applicant_name = applicant_name or confirmed.get("applicant_name")
-                                agent_name = agent_name or confirmed.get("agent_name")
-                                agent_company = agent_company or confirmed.get("agent_company")
-                                # confirmed["has_agent"] is a REAL True/False
-                                # (the detail page was actually visited) --
-                                # unlike PlanIt's own data, this can safely
-                                # be trusted as a genuine "no agent" too, not
-                                # just "yes".
-                                has_agent = confirmed["has_agent"]
-                                agent_is_tree_surgeon = confirmed.get("agent_is_tree_surgeon") if has_agent else None
-                                confirm_stats["resolved_true" if has_agent else "resolved_false"] += 1
-                            else:
-                                confirm_stats["inconclusive"] += 1
-
-                    lead = _insert_lead(
-                        cur, ref, addr, summary, city_name,
-                        applicant_name=applicant_name,
-                        agent_name=agent_name,
-                        agent_company=agent_company,
-                        has_agent=has_agent,
-                        agent_is_tree_surgeon=agent_is_tree_surgeon,
-                    )
-                    if lead:
-                        new_leads.append(lead)
+                        if lead:
+                            new_leads.append(lead)
+                    except Exception as e:
+                        # Sep 2 2026: one malformed PlanIt record must never cost the rest of
+                        # this town's batch, or roll back leads already inserted earlier in
+                        # this run -- see the paid-API loop's identical fix just above.
+                        logger.warning(f"[{city_name}] Skipping one malformed PlanIt record ({town}): {e}")
+                        continue
 
             conn.commit()
         finally:

@@ -4771,14 +4771,15 @@ async def privacy_policy():
 <body class="bg-slate-900 text-slate-300 font-sans p-8 md:p-16">
     <div class="max-w-3xl mx-auto bg-slate-800 p-8 rounded-lg shadow-xl border border-slate-700">
         <h1 class="text-3xl font-bold text-white mb-6">Privacy Policy</h1>
-        <p class="mb-4 text-sm text-slate-500">Last updated: August 2026</p>
-        
+        <p class="mb-4 text-sm text-slate-500">Last updated: September 2026</p>
+
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">1. Information We Collect</h2>
         <p class="mb-4">Tree Key ("we", "us", "our") collects basic contact information (name, email, phone number) when you register for an account or when your business information is retrieved from public registries such as Companies House and public local authority planning portals in the UK.</p>
-        
+
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">2. How We Use Your Information</h2>
-        <p class="mb-4">We use your information strictly to provide our commercial lead-generation service, notify you of relevant council planning applications, and for billing purposes. We do not sell your personal data to third parties.</p>
-        
+        <p class="mb-4">We use the account information you provide (name, email, phone number) strictly to operate your account, provide our lead-generation service, notify you of relevant council planning applications, and for billing purposes. We do not sell your account information to data brokers or advertisers.</p>
+        <p class="mb-4">Separately, our Service itself is built on Lead data &mdash; information such as planning-applicant and agent names sourced from public UK council planning registers, which subscribers pay to access as the core of what Tree Key provides. This is the licensed Service you are paying for, not a sale of your own personal data to a third party. Lead data is processed under UK GDPR legitimate interests; if you are an individual named in Lead data (for example, as a planning applicant) rather than a Tree Key account holder, see Sections 3 and 4 below for your rights.</p>
+
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">3. GDPR Rights</h2>
         <p class="mb-4">Under the UK General Data Protection Regulation (UK GDPR), you have the right to access, rectify, or erase your personal data. If you are receiving commercial outreach from us and wish to opt-out, you may do so at any time using the unsubscribe link provided in our communications.</p>
 

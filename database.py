@@ -285,6 +285,15 @@ def init_db():
             # it always meant ("an agent is on record") without losing that
             # distinction.
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS agent_is_tree_surgeon BOOLEAN;",
+            # Sep 2 2026: multi-vertical build, step 1 (master_expansion_plan_v2.md).
+            # Which VERTICALS config key (scanners.py) this lead was classified into
+            # -- 'tree' or 'hmo' today, more later. Defaults to 'tree' so every
+            # existing row and every scan call site written before this column
+            # existed is completely unaffected -- ON CONFLICT (reference) still
+            # only supports one row per application reference, not yet one row per
+            # matched vertical (see scanners._resolve_vertical's docstring for the
+            # interim tree-priority-wins rule this implies).
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS vertical TEXT DEFAULT 'tree';",
         ]
         for stmt in resilience_cols:
             cur.execute(stmt)
@@ -1248,6 +1257,39 @@ def _sort_key_discovered_at(lead: dict) -> float:
         return 0.0
 
 
+def _is_agent_already_handling_the_job(lead: dict) -> bool:
+    """Sep 2 2026: extracted out of get_marketplace_leads_with_freshness's
+    inline check below (kept verbatim, see its own history for the Aug 30/31
+    reasoning) and scoped to the tree vertical only.
+
+    Why: agent_is_tree_surgeon (mesh_scrapers.classify_agent_as_tree_surgeon)
+    is a tree-surgeon-NAME classifier -- it has no idea what an HMO
+    conversion contractor's name looks like, so for a real HMO agent it
+    returns None (indeterminate) almost every time. The original inline
+    check treated None the same as "confirmed tree surgeon, still
+    excluded" -- correct for tree (deliberately conservative given almost
+    the entire pool used to sit unconfirmed), but applied vertical-agnostic
+    it would have silently excluded essentially every HMO lead with any
+    agent on record at all from the marketplace, the moment HMO leads
+    started flowing, looking exactly like "the vertical just isn't
+    producing many leads" rather than an obvious bug.
+
+    Every non-tree vertical (hmo today, whatever comes next) is exempt from
+    this exclusion until a real vertical-specific "is this job already
+    taken" classifier exists -- deliberately the safe-default direction
+    (never wrongly excluding a sellable lead) over the risky one (never
+    wrongly reselling a taken job), a documented policy choice, not an
+    oversight. A missing `vertical` key (a row fetched without it, or from
+    before the column existed) defaults to "tree" to match the DB column's
+    own DEFAULT and keep every pre-existing call site's behaviour exactly
+    as it was before this function existed."""
+    if lead.get("vertical", "tree") != "tree":
+        return False
+    if not lead.get("has_agent"):
+        return False
+    return lead.get("agent_is_tree_surgeon") is not False
+
+
 def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 40) -> list:
     """
     Returns unallocated leads enriched with their dynamic statutory freshness calculation.
@@ -1274,14 +1316,14 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 SELECT id, reference, address, summary, council_source, lead_score, lead_price,
                        discovered_at, planning_status, registered_date,
                        COALESCE(lead_source_type, 'council_planning') as source_type,
-                       has_agent, agent_is_tree_surgeon
+                       has_agent, agent_is_tree_surgeon, COALESCE(vertical, 'tree') as vertical
                 FROM leads
                 WHERE status = 'new' OR status IS NULL
                 ORDER BY discovered_at DESC
                 LIMIT 150;
             """)
             rows = cur.fetchall()
-            cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date", "source_type", "has_agent", "agent_is_tree_surgeon"]
+            cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date", "source_type", "has_agent", "agent_is_tree_surgeon", "vertical"]
             raw_leads = [dict(zip(cols, r)) for r in rows]
 
             enriched = []
@@ -1318,7 +1360,12 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 # False (clearly NOT a tree company), keep the lead for sale,
                 # since we now have real evidence the job may still be open
                 # despite technically having "an agent" on record.
-                if l.get("has_agent") is True and l.get("agent_is_tree_surgeon") is not False:
+                #
+                # Sep 2 2026: scoped to tree only -- see
+                # _is_agent_already_handling_the_job's own docstring above
+                # for why applying this vertical-agnostic would have
+                # silently zeroed out HMO revenue.
+                if _is_agent_already_handling_the_job(l):
                     continue
 
                 # Custom source badges

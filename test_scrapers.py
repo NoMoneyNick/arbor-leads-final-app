@@ -66,6 +66,39 @@ import mesh_scrapers  # noqa: E402
 import research    # noqa: E402
 
 
+class _FakeDedupStore:
+    """Sep 1 2026: test double for persistent_dedup_cache, used in place of
+    the real module wherever a test needs to control/observe same-day-dedup
+    state. scanners.py's day-caches (mesh sweep, paid-API rotation, PlanIt,
+    GLA) moved from in-memory dicts to persistent_dedup_cache (backed by a
+    real DB connection) so the guard survives a Render redeploy instead of
+    silently resetting with it -- see scanners.py's Sep 1 comments for the
+    live-log evidence of why that mattered.
+
+    That real module does genuine SQL against whatever connection it's
+    given, which doesn't play well with these tests' MagicMock DB
+    connections (a MagicMock's default __eq__/__getitem__ behaviour makes
+    already_done_today's real SQL-round-trip logic behave unpredictably,
+    not because the code is wrong but because the mock has no real
+    storage). This fake mirrors the same three-function interface with a
+    plain in-memory set, scoped to one test via patch.object(scanners,
+    'dedup', new=_FakeDedupStore()) in setUp -- same isolation the old
+    `scanners._SOMETHING_DAY_CACHE.clear()` pattern gave directly against
+    the dict, just aimed at the new module instead."""
+
+    def __init__(self):
+        self.done_today: set = set()
+
+    def ensure_table(self, conn):
+        pass
+
+    def already_done_today(self, conn, key: str) -> bool:
+        return key in self.done_today
+
+    def mark_done_today(self, conn, key: str) -> None:
+        self.done_today.add(key)
+
+
 def _connection_error():
     return _requests.exceptions.ConnectionError("simulated connection drop")
 
@@ -109,6 +142,79 @@ class TestInsertLeadBackfill(unittest.TestCase):
         )
         self.assertIsNone(result)
 
+    def test_vertical_defaults_to_tree_for_every_call_site_written_before_it_existed(self):
+        """Sep 2 2026: `vertical` was added as an _insert_lead parameter for
+        the multi-vertical build, defaulting to "tree" specifically so the
+        pipeline's existing call sites (none of which pass it) keep
+        inserting tree leads with the correct vertical, unchanged."""
+        cur = self._mock_cursor(("some-uuid", True))
+        result = scanners._insert_lead(
+            cur, "23/08888/TPO", "1 Elm Street, Leeds", "Crown reduction of mature oak tree", "Leeds"
+        )
+        self.assertEqual(result["vertical"], "tree")
+        _, params = cur.execute.call_args[0]
+        self.assertEqual(params[-1], "tree")  # vertical is the last bound param
+
+    def test_vertical_param_is_passed_through_and_stored(self):
+        cur = self._mock_cursor(("some-uuid", True))
+        result = scanners._insert_lead(
+            cur, "26/01234/HMO", "9 Ivy Road, Bristol",
+            "Change of use to a house in multiple occupation (7 persons)", "Bristol",
+            vertical="hmo",
+        )
+        self.assertEqual(result["vertical"], "hmo")
+        _, params = cur.execute.call_args[0]
+        self.assertEqual(params[-1], "hmo")
+
+    def test_hmo_lead_never_stores_applicant_or_agent_identity_even_if_passed_in(self):
+        """Sep 2 2026, master_expansion_plan_v2.md build-order step 3 (the
+        GDPR-safe lead format): HMO is configured with capture_identity=False
+        in VERTICALS. This proves the enforcement happens at _insert_lead
+        itself, not just "current call sites happen not to pass these" --
+        even a caller that DOES pass a real name/agent must have it stripped
+        before it ever reaches the INSERT. This is what "built in from day
+        one" means: it's structurally impossible for an HMO row to end up
+        with a name in it, not merely unlikely given today's call sites."""
+        cur = self._mock_cursor(("some-uuid", True))
+        result = scanners._insert_lead(
+            cur, "26/05555/HMO", "12 Ivy Road, Bristol",
+            "Change of use to a house in multiple occupation (7 persons)", "Bristol",
+            applicant_name="Mrs Jane Smith",
+            agent_name="John Doe", agent_company="Doe Conversions Ltd",
+            has_agent=True, agent_is_tree_surgeon=False,
+            vertical="hmo",
+        )
+        self.assertIsNotNone(result)
+        for key in ("applicant_name", "agent_name", "agent_company", "has_agent", "agent_is_tree_surgeon"):
+            self.assertIsNone(result[key], f"{key} should have been stripped for an HMO lead")
+
+        _, params = cur.execute.call_args[0]
+        # INSERT param order: (reference, address, summary, source, lead_score,
+        # lead_price, applicant_name, agent_name, agent_company, has_agent,
+        # agent_is_tree_surgeon, vertical) -- indices 6-10 are the 5 identity fields.
+        self.assertEqual(params[6:11], (None, None, None, None, None))
+        self.assertEqual(params[-1], "hmo")
+
+    def test_tree_lead_identity_capture_is_completely_unaffected(self):
+        """The other half of the fix: capture_identity defaults to True and
+        tree is explicitly configured True, so this existing, live business
+        behaviour (has_agent exclusion filter, the /dashboard "Applicant:"
+        display) must be provably unchanged by adding the flag."""
+        cur = self._mock_cursor(("some-uuid", True))
+        result = scanners._insert_lead(
+            cur, "23/09999/TPO", "7 The Green, Birmingham",
+            "Felling of 2no. diseased ash trees", "Birmingham",
+            applicant_name="Mrs Jane Smith",
+            agent_name="John Doe", agent_company="Doe Tree Surgery Ltd",
+            has_agent=True, agent_is_tree_surgeon=True,
+            vertical="tree",
+        )
+        self.assertEqual(result["applicant_name"], "Mrs Jane Smith")
+        self.assertEqual(result["agent_name"], "John Doe")
+        self.assertEqual(result["agent_company"], "Doe Tree Surgery Ltd")
+        self.assertIs(result["has_agent"], True)
+        self.assertIs(result["agent_is_tree_surgeon"], True)
+
 
 class TestTreeGoldFiltering(unittest.TestCase):
     """The compound-phrase relevance filter deciding whether a planning
@@ -129,6 +235,29 @@ class TestTreeGoldFiltering(unittest.TestCase):
                 self.assertTrue(scanners._is_tree_related(text))
                 self.assertTrue(mesh_scrapers.is_tree_related(text))
 
+    def test_plain_english_fell_phrasing_from_real_live_data(self):
+        """Sep 2 2026: found by sampling real live PlanIt data for
+        Nottingham while sanity-checking HMO_GOLD against genuine
+        applications (not synthetic test text) -- "Fell a dead tree in
+        rear garden." is a real, currently-live application that matched
+        NONE of TREE_GOLD's phrasing at the time: not "felling"/"fell to
+        ground"/"fell 1/2/3", no species name, and "dead tree" is a
+        distinct phrase from "deadwood"/"dead wood"/"dead branches". A
+        genuine false negative, unrelated to the multi-vertical work this
+        session's sampling pass was actually checking -- fixed by adding
+        "dead tree" plus the "a"/"the" article variants of the existing
+        "fell ... tree" / "remove tree" phrasing, all essentially
+        unambiguous in real English."""
+        real = [
+            "Fell a dead tree in rear garden.",
+            "Please can you fell the tree at the front of my house, it is dying.",
+            "Request to remove a tree that is damaging the driveway.",
+            "Removal of a tree overhanging the neighbour's fence.",
+        ]
+        for text in real:
+            with self.subTest(text=text):
+                self.assertTrue(scanners._is_tree_related(text))
+
     def test_known_false_positives_are_excluded(self):
         """Mirrors the exact false-positive patterns PROJECT_STATE.md
         documents TREE_GOLD as having been built to avoid: street names,
@@ -144,6 +273,141 @@ class TestTreeGoldFiltering(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertFalse(scanners._is_tree_related(text))
                 self.assertFalse(mesh_scrapers.is_tree_related(text))
+
+
+class TestVerticalsClassifier(unittest.TestCase):
+    """Sep 2 2026: first piece of the multi-vertical build. _is_tree_related
+    became a thin wrapper over the generalized _matches_vertical/VERTICALS
+    config -- these tests exist specifically to prove that generalization
+    didn't change tree's own behaviour at all (TestTreeGoldFiltering above
+    covers _is_tree_related's black-box behaviour directly; these cover the
+    new generic layer underneath it, plus the new HMO vertical)."""
+
+    def test_is_tree_related_unchanged_via_generic_matcher(self):
+        self.assertTrue(scanners._matches_vertical("Felling of 2no. diseased ash trees", "tree"))
+        self.assertTrue(scanners._is_tree_related("Felling of 2no. diseased ash trees"))
+        self.assertFalse(scanners._matches_vertical("Erection of a two-storey rear extension", "tree"))
+
+    def test_hmo_gold_matches_real_hmo_applications(self):
+        real = [
+            "Change of use to a house in multiple occupation (7 persons).",
+            "Conversion to a small HMO for 4 unrelated sharers.",
+            "Application under Class C4 for use as a house in multiple occupation.",
+            "Sui generis HMO for 8 occupants with associated bin store.",
+        ]
+        for text in real:
+            with self.subTest(text=text):
+                self.assertTrue(scanners._matches_vertical(text, "hmo"))
+
+    def test_hmo_gold_excludes_unrelated_change_of_use(self):
+        """The precision check: bare "change of use" must NOT trigger the
+        HMO vertical on its own -- only HMO-qualified change-of-use phrasing
+        should. Mirrors TREE_GOLD's own bare-"fell" false-positive lesson."""
+        junk = [
+            "Change of use from retail (Class E) to restaurant (Class E).",
+            "Change of use of ground floor office to gymnasium.",
+            "Erection of a two-storey rear extension.",
+            "Felling of 2no. diseased ash trees.",
+        ]
+        for text in junk:
+            with self.subTest(text=text):
+                self.assertFalse(scanners._matches_vertical(text, "hmo"))
+
+    def test_bare_sui_generis_and_article_4_do_not_falsely_tag_unrelated_applications(self):
+        """Sep 2 2026: an adversarial review pass (run before this build ships)
+        caught that bare "sui generis" and bare "article 4 direction" used to
+        sit in HMO_GOLD unqualified -- both are general planning mechanisms
+        used for HMOs but also for many completely unrelated uses (sui generis
+        covers nightclubs, drive-throughs, casinos, scrapyards; Article 4
+        directions cover shopfronts, agricultural conversions, demolition
+        control, and more). The exact class of bug TREE_GOLD's bare-"fell"
+        false positive already taught this project to avoid."""
+        junk = [
+            "Change of use to sui generis (drive-through restaurant), no external alterations.",
+            "Erection of a sui generis nightclub with associated car parking.",
+            "Prior notification for removal of Article 4 Direction restricting "
+            "conversion of an agricultural building to residential use.",
+            "Application to vary conditions on an Article 4 Direction covering "
+            "shopfront alterations in the conservation area.",
+        ]
+        for text in junk:
+            with self.subTest(text=text):
+                self.assertFalse(scanners._matches_vertical(text, "hmo"))
+
+    def test_qualified_sui_generis_and_article_4_hmo_phrasing_still_matches(self):
+        """The other half of the fix above: real large-HMO/Article-4-for-HMO
+        applications, phrased the way they actually are in practice, must
+        still match -- the fix trades bare-keyword risk for required context,
+        not recall entirely."""
+        real = [
+            "Certificate of lawfulness for a large HMO (sui generis) for 9 persons.",
+            "Change of use to sui generis house in multiple occupation.",
+            "Article 4 Direction removing permitted development rights for a "
+            "house in multiple occupation at this address.",
+        ]
+        for text in real:
+            with self.subTest(text=text):
+                self.assertTrue(scanners._matches_vertical(text, "hmo"))
+
+    def test_unknown_vertical_key_returns_false_not_an_exception(self):
+        self.assertFalse(scanners._matches_vertical("anything at all", "not-a-real-vertical"))
+
+    def test_classify_verticals_returns_every_match(self):
+        self.assertEqual(scanners.classify_verticals("Felling of 2no. diseased ash trees"), ["tree"])
+        self.assertEqual(
+            scanners.classify_verticals("Change of use to a house in multiple occupation (7 persons)."),
+            ["hmo"],
+        )
+        self.assertEqual(scanners.classify_verticals("Erection of a two-storey rear extension."), [])
+
+    def test_classify_verticals_multi_label_for_an_application_matching_both(self):
+        """A single application can genuinely be both -- e.g. an HMO
+        conversion that also involves removing a protected tree. Multi-label
+        classification (not a single best-guess category) is what makes the
+        "sell into every matching vertical" monetization idea buildable."""
+        text = "Conversion to a house in multiple occupation including felling of 1no. protected oak tree."
+        result = scanners.classify_verticals(text)
+        self.assertCountEqual(result, ["tree", "hmo"])
+
+
+class TestResolveVertical(unittest.TestCase):
+    """Sep 2 2026: _resolve_vertical is what the four broad-fetching scan
+    call sites (Leeds, GLA Datahub, and the paid-API/PlanIt loops inside
+    scan_city_planning_api) use to decide which single vertical to tag a
+    lead with, given the `leads` table's ON CONFLICT (reference) constraint
+    only supports one row per application today (not yet one row per
+    matched vertical -- see TASKS.md)."""
+
+    def test_no_match_returns_none(self):
+        self.assertIsNone(scanners._resolve_vertical("Erection of a two-storey rear extension."))
+
+    def test_tree_only_match_resolves_to_tree(self):
+        self.assertEqual(
+            scanners._resolve_vertical("Felling of 2no. diseased ash trees"), "tree"
+        )
+
+    def test_hmo_only_match_resolves_to_hmo(self):
+        """This is the previously-discarded case: before this vertical
+        existed, an HMO-only application failed _is_tree_related and was
+        silently skipped by every call site -- never reached _insert_lead
+        at all. This is new, additive pipeline output, not a change to
+        anything that was already flowing."""
+        self.assertEqual(
+            scanners._resolve_vertical("Change of use to a house in multiple occupation (7 persons)."),
+            "hmo",
+        )
+
+    def test_matching_both_resolves_to_tree_not_hmo(self):
+        """Tree always wins on a dual match -- deliberate, so every existing
+        tree lead's behaviour/economics are provably unchanged by this
+        refactor. An application matching both verticals is real additional
+        upside (documented in master_expansion_plan_v2.md as "sell into
+        every matching vertical"), but realizing that upside needs a schema
+        change (composite unique constraint on (reference, vertical)) that
+        hasn't been built yet -- this is the safe interim choice, not the
+        final one."""
+        text = "Conversion to a house in multiple occupation including felling of 1no. protected oak tree."
+        self.assertEqual(scanners._resolve_vertical(text), "tree")
 
 
 class TestLeadScoring(unittest.TestCase):
@@ -578,6 +842,71 @@ class TestIdoxPathRouting(unittest.TestCase):
             leads = mesh_scrapers.scrape_mesh_council("TEST NORTHGATE")
         self.assertEqual(leads, [])
 
+    def test_confirmed_idox_exceptions_are_routed_despite_no_marker_match(self):
+        """Sep 1 2026: Fife (/online) and Derby (bare domain root) are both
+        real, live, working Idox portals confirmed via browser -- neither
+        URL contains any of _KNOWN_IDOX_PATH_MARKERS, so without this
+        explicit exception list they'd silently return [] forever despite
+        being perfectly good Idox instances, the exact bug this whole class
+        exists to catch for the other three markers. Uses the real
+        registry entries directly (not a patched fake) so this breaks
+        loudly if either URL is ever "cleaned up" back out of
+        _CONFIRMED_IDOX_EXCEPTIONS without updating the other."""
+        for council in ("FIFE", "DERBY"):
+            with self.subTest(council=council):
+                self.assertIn(mesh_scrapers.COUNCIL_REGISTRY[council], mesh_scrapers._CONFIRMED_IDOX_EXCEPTIONS)
+                with patch.object(mesh_scrapers.IdoxScraper, "search_tree_applications", self._fake_no_leads), \
+                     patch("time.sleep", return_value=None), \
+                     patch.object(mesh_scrapers, "logger") as mock_logger:
+                    mesh_scrapers.scrape_mesh_council(council)
+                    mock_logger.info.assert_any_call(f"[MESH] Routing {council} to free Idox Engine...")
+
+    def test_manchester_and_wiltshire_are_no_longer_in_the_registry(self):
+        """Sep 1 2026: both confirmed migrated to non-Idox platforms
+        (Manchester and Wiltshire both to Arcus BE) with no correct Idox
+        URL to swap in -- removed rather than left pointing at a URL that
+        can never work. A future re-add needs a real Arcus BE adapter, not
+        a registry entry."""
+        self.assertNotIn("MANCHESTER", mesh_scrapers.COUNCIL_REGISTRY)
+        self.assertNotIn("WILTSHIRE", mesh_scrapers.COUNCIL_REGISTRY)
+
+    def test_sutton_was_readded_after_being_wrongly_written_off(self):
+        """Sep 1 2026, second-pass audit: the Aug 30 removal of SUTTON gave
+        up after a web search only surfaced an unrelated Cambridgeshire
+        parish council of the same name. A proper search this time found
+        the real portal, and a live browser check confirmed it: title
+        "Applications Search | Sutton Council" (the same Idox title
+        pattern already confirmed for Gloucester and Fife), classic Idox
+        Simple/Advanced search tabs, and a search.do URL under
+        /online-applications -- the two strongest Idox tells this whole
+        audit has used, together, on the same URL. Uses the real registry
+        entry directly so this breaks loudly if it's ever removed again
+        without re-verifying."""
+        self.assertIn("SUTTON", mesh_scrapers.COUNCIL_REGISTRY)
+        self.assertIn("online-applications", mesh_scrapers.COUNCIL_REGISTRY["SUTTON"])
+        with patch.object(mesh_scrapers.IdoxScraper, "search_tree_applications", self._fake_no_leads), \
+             patch("time.sleep", return_value=None), \
+             patch.object(mesh_scrapers, "logger") as mock_logger:
+            mesh_scrapers.scrape_mesh_council("SUTTON")
+            mock_logger.info.assert_any_call("[MESH] Routing SUTTON to free Idox Engine...")
+
+    def test_every_registered_council_is_actually_routable(self):
+        """Sep 1 2026: the whole point of this audit -- every URL left in
+        COUNCIL_REGISTRY must be reachable via either a known path marker
+        or an explicit confirmed exception. A registry entry matching
+        neither is dead weight that silently produces zero leads forever,
+        exactly the bug this test suite exists to prevent from recurring
+        unnoticed (a plain DNS failure at least logs an error; this
+        category doesn't even do that, which is how it went unnoticed for
+        as long as it did)."""
+        for council, url in mesh_scrapers.COUNCIL_REGISTRY.items():
+            with self.subTest(council=council):
+                routable = (
+                    any(marker in url.lower() for marker in mesh_scrapers._KNOWN_IDOX_PATH_MARKERS)
+                    or url in mesh_scrapers._CONFIRMED_IDOX_EXCEPTIONS
+                )
+                self.assertTrue(routable, f"{council} ({url}) matches no Idox marker and isn't a confirmed exception")
+
 
 class TestNetUtilsResilience(unittest.TestCase):
     """net_utils.smart_get/smart_post -- the retry/backoff/TLS-fallback
@@ -736,13 +1065,14 @@ class TestPlanitFallback(unittest.TestCase):
         self.cur = MagicMock()
         self.conn = MagicMock()
         self.conn.cursor.return_value = self.cur
-        # Aug 30 2026: the same-day dedup caches are module-level and keyed
-        # by (city_name, today's date) -- without clearing them, running
-        # more than one "Sheffield"/"Bristol" test on the same real calendar
-        # day would make the second test see the first test's cache entry
-        # and wrongly skip the paid-API/PlanIt fetch entirely.
-        scanners._PAID_API_DAY_CACHE.clear()
-        scanners._PLANIT_DAY_CACHE.clear()
+        # Sep 1 2026: the same-day dedup caches now live in
+        # persistent_dedup_cache (see _FakeDedupStore docstring above) --
+        # a fresh fake store per test gives the same per-test isolation the
+        # old scanners._PAID_API_DAY_CACHE.clear() / _PLANIT_DAY_CACHE.clear()
+        # calls gave directly against the in-memory dicts.
+        dedup_patch = patch.object(scanners, "dedup", new=_FakeDedupStore())
+        dedup_patch.start()
+        self.addCleanup(dedup_patch.stop)
         # Aug 30 2026: the cross-region PlanIt pacing gate is also
         # module-level, tracking real wall-clock time (time.monotonic())
         # across the whole process -- reset it so one test's PlanIt calls
@@ -1208,8 +1538,9 @@ class TestPaidApiRotationAndDedup(unittest.TestCase):
         self.cur = MagicMock()
         self.conn = MagicMock()
         self.conn.cursor.return_value = self.cur
-        scanners._PAID_API_DAY_CACHE.clear()
-        scanners._PLANIT_DAY_CACHE.clear()
+        dedup_patch = patch.object(scanners, "dedup", new=_FakeDedupStore())
+        dedup_patch.start()
+        self.addCleanup(dedup_patch.stop)
 
     def _fake_response(self, status_code=200, json_data=None):
         resp = MagicMock(status_code=status_code)
@@ -1320,7 +1651,9 @@ class TestMeshScanSameDayDedup(unittest.TestCase):
         self.cur = MagicMock()
         self.conn = MagicMock()
         self.conn.cursor.return_value = self.cur
-        scanners._MESH_SCAN_DAY_CACHE = None
+        dedup_patch = patch.object(scanners, "dedup", new=_FakeDedupStore())
+        dedup_patch.start()
+        self.addCleanup(dedup_patch.stop)
 
     def test_first_call_today_runs_the_full_sweep(self):
         fake_registry = {"Testville": "https://example-council.gov.uk/online-applications"}
@@ -1361,9 +1694,10 @@ class TestGlaDatahubLondon(unittest.TestCase):
         self.cur = MagicMock()
         self.conn = MagicMock()
         self.conn.cursor.return_value = self.cur
-        # Module-level, keyed only by date (one call/day, no per-city key) --
-        # must reset between tests run on the same real calendar day.
-        scanners._GLA_DAY_CACHE = None
+        # Fresh fake dedup store per test -- see _FakeDedupStore docstring.
+        dedup_patch = patch.object(scanners, "dedup", new=_FakeDedupStore())
+        dedup_patch.start()
+        self.addCleanup(dedup_patch.stop)
 
     def test_returns_zero_without_crashing_when_key_not_configured(self):
         """If GLA_API_KEY isn't set in Render, this must be a harmless no-op
@@ -1399,6 +1733,67 @@ class TestGlaDatahubLondon(unittest.TestCase):
         self.assertEqual(count, 1)
         mock_insert.assert_called_once()
         self.conn.commit.assert_called_once()
+
+    def test_one_malformed_record_does_not_lose_the_rest_of_the_batch(self):
+        """Sep 2 2026: an adversarial review pass caught that a truthy
+        non-string value in any of the description fields (e.g. a nested
+        dict from a genuinely messy upstream API response) used to raise
+        AttributeError out of .strip() before this per-item try/except and
+        str() coercion existed -- which crashed the whole loop partway
+        through and, worse, this function's own dedup marker is set BEFORE
+        the fetch (see mark_done_today above), so the rest of that day's
+        London batch would have been lost until tomorrow. Proves: the bad
+        record is skipped, the good one right after it still gets inserted,
+        and the whole batch still commits."""
+        body = {
+            "data": [
+                {"reference": "GLA-BAD", "description": {"nested": "not a string"},
+                 "location": {"address": "Bad Record House, London"}},
+                {"reference": "GLA-GOOD", "description": "Crown reduction of protected oak tree, TPO.",
+                 "location": {"address": "1 Borough High St, London"}},
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = body
+
+        with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "GLA-GOOD"}) as mock_insert, \
+             patch("time.sleep", return_value=None):
+            count = scanners.scan_gla_datahub_london()
+
+        self.assertEqual(count, 1)
+        mock_insert.assert_called_once()
+        self.assertEqual(mock_insert.call_args.args[1], "GLA-GOOD")
+        self.conn.commit.assert_called_once()
+
+    def test_hmo_only_lead_is_inserted_with_hmo_vertical_not_discarded(self):
+        """Before _resolve_vertical existed, an HMO-only application failed
+        the bare _is_tree_related check here and was silently skipped --
+        never reached _insert_lead at all. This is new, additive pipeline
+        output, not a change to anything already flowing."""
+        body = {
+            "data": [
+                {"reference": "GLA-HMO-1",
+                 "description": "Change of use to a house in multiple occupation (7 persons).",
+                 "location": {"address": "3 Borough High St, London"}},
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = body
+
+        with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "GLA-HMO-1"}) as mock_insert, \
+             patch("time.sleep", return_value=None):
+            count = scanners.scan_gla_datahub_london()
+
+        self.assertEqual(count, 1)
+        mock_insert.assert_called_once()
+        _, kwargs = mock_insert.call_args
+        self.assertEqual(kwargs.get("vertical"), "hmo")
 
     def test_401_triggers_critical_alert_not_a_crash(self):
         resp = MagicMock(status_code=401)
@@ -1445,6 +1840,239 @@ class TestGlaDatahubLondon(unittest.TestCase):
         self.assertEqual(first_call_count, 1)
         self.assertEqual(mock_get.call_count, first_call_count)  # no second HTTP call
         self.assertEqual(result, 0)
+
+
+class TestVerticalWiringPaidApiAndPlanit(unittest.TestCase):
+    """Sep 2 2026: proves scan_city_planning_api's two data sources (the
+    paid ukplanningapi.co.uk loop and the free PlanIt loop) now tag each
+    inserted lead with _resolve_vertical's pick instead of the old bare
+    _is_tree_related gate, which silently discarded every HMO-only
+    application before this vertical existed -- these are genuinely new,
+    additive leads, not a change to anything already flowing. Per the Sep 1
+    traffic-scaling discussion: both sources already fetch broadly per
+    postcode-prefix/authority with no keyword filter sent to the API
+    itself, so this wiring costs zero additional API traffic -- it's a
+    second classification pass over data already being fetched for the
+    tree vertical."""
+
+    def setUp(self):
+        self.cur = MagicMock()
+        self.conn = MagicMock()
+        self.conn.cursor.return_value = self.cur
+        dedup_patch = patch.object(scanners, "dedup", new=_FakeDedupStore())
+        dedup_patch.start()
+        self.addCleanup(dedup_patch.stop)
+        scanners._PLANIT_LAST_REQUEST_AT = 0.0
+
+    def test_paid_api_hmo_only_lead_gets_hmo_vertical_not_discarded(self):
+        body = {
+            "data": [
+                {"reference": "24/HMO/1",
+                 "description": "Change of use to a house in multiple occupation (7 persons).",
+                 "address": "10 Example Road, Sheffield S1 2AB"},
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = body
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", "fake-key"), \
+             patch.object(scanners, "CITY_POSTCODE_PREFIX", {"Sheffield": ["S"]}), \
+             patch.object(scanners, "REGION_TOWNS", {}), \
+             patch.dict(os.environ, {"PAID_API_ROTATION_DAYS": "1"}), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "24/HMO/1"}) as mock_insert, \
+             patch("time.sleep", return_value=None):
+            count = scanners.scan_city_planning_api("Sheffield")
+
+        self.assertEqual(count, 1)
+        mock_insert.assert_called_once()
+        _, kwargs = mock_insert.call_args
+        self.assertEqual(kwargs.get("vertical"), "hmo")
+
+    def test_paid_api_tree_lead_still_gets_tree_vertical(self):
+        body = {
+            "data": [
+                {"reference": "24/TREE/1", "description": "Felling of 2no. ash trees, TPO protected.",
+                 "address": "10 Example Road, Sheffield S1 2AB"},
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = body
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", "fake-key"), \
+             patch.object(scanners, "CITY_POSTCODE_PREFIX", {"Sheffield": ["S"]}), \
+             patch.object(scanners, "REGION_TOWNS", {}), \
+             patch.dict(os.environ, {"PAID_API_ROTATION_DAYS": "1"}), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "24/TREE/1"}) as mock_insert, \
+             patch("time.sleep", return_value=None):
+            count = scanners.scan_city_planning_api("Sheffield")
+
+        self.assertEqual(count, 1)
+        _, kwargs = mock_insert.call_args
+        self.assertEqual(kwargs.get("vertical"), "tree")
+
+    def test_planit_hmo_only_lead_gets_hmo_vertical_not_discarded(self):
+        planit_body = {
+            "records": [
+                {
+                    "uid": "26/HMO/1",
+                    "description": "Conversion to a small HMO for 4 unrelated sharers.",
+                    "address": "9 Ivy Road, Bristol",
+                    "other_fields": {},
+                }
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = planit_body
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "26/HMO/1"}) as mock_insert, \
+             patch("mesh_scrapers.confirm_agent_status_from_source", return_value={}), \
+             patch("time.sleep", return_value=None):
+            count = scanners.scan_city_planning_api("Bristol")
+
+        self.assertEqual(count, 1)
+        mock_insert.assert_called_once()
+        _, kwargs = mock_insert.call_args
+        self.assertEqual(kwargs.get("vertical"), "hmo")
+
+    def test_paid_api_one_malformed_record_does_not_lose_the_rest_of_the_batch(self):
+        """Sep 2 2026: an adversarial review pass caught that a truthy
+        non-string "description" (e.g. a nested dict from a genuinely messy
+        upstream API response) used to raise AttributeError inside
+        _resolve_vertical's .lower() call, uncaught, which crashed this
+        whole loop partway through -- and since this loop only
+        conn.commit()s once, at the very end, every lead already inserted
+        earlier in the SAME run would have been implicitly rolled back too.
+        Proves: the bad record is skipped, the good one right after it
+        still gets inserted, and the whole batch still commits."""
+        body = {
+            "data": [
+                {"reference": "24/BAD/1", "description": {"nested": "not a string"},
+                 "address": "10 Example Road, Sheffield S1 2AB"},
+                {"reference": "24/GOOD/1", "description": "Felling of 2no. ash trees, TPO protected.",
+                 "address": "10 Example Road, Sheffield S1 2AB"},
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = body
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", "fake-key"), \
+             patch.object(scanners, "CITY_POSTCODE_PREFIX", {"Sheffield": ["S"]}), \
+             patch.object(scanners, "REGION_TOWNS", {}), \
+             patch.dict(os.environ, {"PAID_API_ROTATION_DAYS": "1"}), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "24/GOOD/1"}) as mock_insert, \
+             patch("time.sleep", return_value=None):
+            count = scanners.scan_city_planning_api("Sheffield")
+
+        self.assertEqual(count, 1)
+        mock_insert.assert_called_once()
+        self.assertEqual(mock_insert.call_args.args[1], "24/GOOD/1")
+        self.conn.commit.assert_called_once()
+
+    def test_planit_one_malformed_record_does_not_lose_the_rest_of_the_batch(self):
+        """Same fix, same reasoning as the paid-API version above, applied
+        to the PlanIt loop -- a distinct crash site (PlanIt has its own
+        `summary = item.get("description", "") or ""` extraction and its
+        own single conn.commit() at the very end of both loops combined)."""
+        planit_body = {
+            "records": [
+                {"uid": "26/BAD/1", "description": {"nested": "not a string"},
+                 "address": "9 Ivy Road, Bristol", "other_fields": {}},
+                {"uid": "26/GOOD/1", "description": "Conversion to a small HMO for 4 unrelated sharers.",
+                 "address": "9 Ivy Road, Bristol", "other_fields": {}},
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = planit_body
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "26/GOOD/1"}) as mock_insert, \
+             patch("mesh_scrapers.confirm_agent_status_from_source", return_value={}), \
+             patch("time.sleep", return_value=None):
+            count = scanners.scan_city_planning_api("Bristol")
+
+        self.assertEqual(count, 1)
+        mock_insert.assert_called_once()
+        self.assertEqual(mock_insert.call_args.args[1], "26/GOOD/1")
+        self.conn.commit.assert_called_once()
+
+    def test_planit_lead_matching_both_verticals_resolves_to_tree(self):
+        planit_body = {
+            "records": [
+                {
+                    "uid": "26/BOTH/1",
+                    "description": "Conversion to a house in multiple occupation including "
+                                    "felling of 1no. protected oak tree.",
+                    "address": "12 Ivy Road, Bristol",
+                    "other_fields": {},
+                }
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = planit_body
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "26/BOTH/1"}) as mock_insert, \
+             patch("mesh_scrapers.confirm_agent_status_from_source", return_value={}), \
+             patch("time.sleep", return_value=None):
+            count = scanners.scan_city_planning_api("Bristol")
+
+        self.assertEqual(count, 1)
+        _, kwargs = mock_insert.call_args
+        self.assertEqual(kwargs.get("vertical"), "tree")
+
+
+class TestVerticalWiringLeeds(unittest.TestCase):
+    """Sep 2 2026: proves the Leeds ArcGIS scan (part 1 of scan_leeds_leads,
+    separate from the delegated scan_city_planning_api part covered by
+    TestLeedsScanDelegation below) now tags each inserted lead with the
+    vertical _resolve_vertical picked, instead of silently discarding every
+    HMO-only application the way the old bare _is_tree_related check did."""
+
+    def setUp(self):
+        self.cur = MagicMock()
+        self.conn = MagicMock()
+        self.conn.cursor.return_value = self.cur
+
+    def test_hmo_only_feature_is_inserted_with_hmo_vertical_not_discarded(self):
+        arcgis_resp = MagicMock(status_code=200)
+        arcgis_resp.json.return_value = {"features": [
+            {"attributes": {
+                "DESCRIPTION": "Change of use to a house in multiple occupation (7 persons).",
+                "REFERENCE": "LDS/HMO/1", "ADDRESS": "1 Kirkgate, Leeds",
+            }},
+            {"attributes": {
+                "DESCRIPTION": "Felling of 2no. diseased ash trees",
+                "REFERENCE": "LDS/TREE/1", "ADDRESS": "2 Kirkgate, Leeds",
+            }},
+            {"attributes": {
+                "DESCRIPTION": "Erection of a two-storey rear extension.",
+                "REFERENCE": "LDS/JUNK/1", "ADDRESS": "3 Kirkgate, Leeds",
+            }},
+        ]}
+
+        with patch("net_utils.smart_get", return_value=arcgis_resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "scan_city_planning_api", return_value=0), \
+             patch.object(scanners, "_insert_lead", return_value=None) as mock_insert:
+            scanners.scan_leeds_leads()
+
+        self.assertEqual(mock_insert.call_count, 2)  # HMO + tree inserted, junk skipped entirely
+        by_ref = {c.args[1]: c.kwargs.get("vertical") for c in mock_insert.call_args_list}
+        self.assertEqual(by_ref["LDS/HMO/1"], "hmo")
+        self.assertEqual(by_ref["LDS/TREE/1"], "tree")
 
 
 class TestLeedsScanDelegation(unittest.TestCase):
