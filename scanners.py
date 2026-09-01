@@ -954,8 +954,31 @@ def scan_city_planning_api(city_name: str) -> int:
             logger.debug(f"[{city_name}] PlanIt already queried once today (this process) -- skipping re-trigger.")
             todays_region_towns = []
 
+        # Sep 1 2026: Nick flagged that the pipeline "looks stuck" for the
+        # ~100+ minutes this loop takes -- correctly diagnosed as an
+        # observability gap, not an actual hang. Every per-authority outcome
+        # here logs at DEBUG (deliberately, per the Aug 30 comment above --
+        # a WARNING per one-off timeout across ~100 authorities would flood
+        # the log), so between the initial "Paid API rotation" line and the
+        # final "Stage 1 Complete" line, production logs showed nothing at
+        # all while this was genuinely working through the 60s-per-request
+        # PlanIt pacing lock one authority at a time. This heartbeat is the
+        # fix: one INFO line every 10 authorities (and on the very last one)
+        # naming this region and a running count, so a live tail of the logs
+        # shows steady progress instead of looking abandoned.
+        _planit_total = len(todays_region_towns)
+        _planit_done = {"n": 0}
+
+        def _fetch_planit_with_heartbeat(town):
+            result = fetch_planit(town)
+            _planit_done["n"] += 1
+            n = _planit_done["n"]
+            if n == 1 or n % 10 == 0 or n == _planit_total:
+                logger.info(f"[{city_name}] PlanIt progress: {n}/{_planit_total} authorities queried so far.")
+            return result
+
         with ThreadPoolExecutor(max_workers=1) as planit_executor:
-            planit_results = list(planit_executor.map(fetch_planit, todays_region_towns)) if todays_region_towns else []
+            planit_results = list(planit_executor.map(_fetch_planit_with_heartbeat, todays_region_towns)) if todays_region_towns else []
         if todays_region_towns:
             _PLANIT_DAY_CACHE[planit_today_key] = True
 

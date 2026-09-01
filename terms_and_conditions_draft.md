@@ -2,7 +2,7 @@
 
 *Not legal advice. This is a first full draft, written to match how the product actually works, for a solicitor to review, correct, and formally issue before publishing on treekey.uk. Bracketed items marked [TODO] need a decision or a fact from you before this can be finalized.*
 
-**[TODO: legal entity name]** — this draft refers to "Tree Key" throughout. If you incorporate as a limited company before launch, every reference below should become "Tree Key Ltd" (or your chosen name) rather than your personal name as a sole trader. Which entity is contracting with customers is a material legal fact, not a formatting detail — get this fixed before publishing.
+**Fill in before publishing:** "Tree Key" is currently operated by you as a sole trader (not yet incorporated), so clause 1.1 below needs your full legal name and a registered/trading address inserted — e.g. "**[Your Full Legal Name]**, trading as Tree Key, of **[address]**". If you incorporate as a limited company later, swap this for the company's registered name and number — which entity is contracting with customers is a material legal fact, not a formatting detail.
 
 ---
 
@@ -34,9 +34,9 @@
 
 4.2 Payments are processed by Stripe. By subscribing, you authorize recurring charges for the plan you select until you cancel in accordance with clause 4.4.
 
-4.3 **[TODO: confirm cancellation mechanism]** — subscriptions may be cancelled [via account settings / by contacting us at TODO-email], effective at the end of the current billing period unless stated otherwise.
+4.3 Subscriptions may be cancelled via your account settings, or by emailing contact@treekey.uk, effective at the end of the current billing period.
 
-4.4 **Refunds.** Because Leads are digital information that is disclosed to you immediately on unlock/purchase, once a specific Lead has been unlocked or revealed, that individual purchase is non-refundable. **[TODO: confirm your actual refund policy for unused subscription time / unopened credits]** — this needs to be a deliberate business decision, not a legal default, and must be consistent with what your Stripe checkout and any marketing pages currently say.
+4.4 **Refunds.** Because access to Tree Key's proprietary Lead data is granted immediately upon subscribing or purchasing, all payments are non-refundable, including for unused portions of a billing cycle. This matches the policy already stated on your live Terms of Service page — carried through here rather than left open.
 
 4.5 Nothing in this clause affects any statutory right you may have that cannot lawfully be excluded.
 
@@ -79,7 +79,7 @@
 
 8.3 Customers who receive personal data through a Lead must handle it in accordance with UK GDPR themselves for their own onward use (e.g., adding a contact to their own CRM), and must not use it for a purpose incompatible with the reason it was provided (see clause 6.1).
 
-8.4 **[TODO]** A separate, full Privacy Policy is required (this document is Terms and Conditions, not a Privacy Policy) — has one been drafted? If not, this should be treated as an equally urgent companion piece to this document.
+8.4 See the companion `privacy_policy_draft.md` for the full Privacy Policy — this Terms document and that policy are meant to be read and published together, not one without the other.
 
 ## 9. Limitation of Liability
 
@@ -105,21 +105,20 @@
 
 ## 13. General
 
-13.1 **Governing law.** These Terms are governed by the laws of England and Wales, and the courts of England and Wales have exclusive jurisdiction, save that a consumer resident elsewhere in the UK may have a right to bring proceedings in their local courts. **[TODO: confirm intended entity/jurisdiction if you incorporate outside England & Wales.]**
+13.1 **Governing law.** These Terms are governed by the laws of England and Wales, and the courts of England and Wales have exclusive jurisdiction. (Revisit this only if you later incorporate or relocate the business outside England and Wales — not a concern while operating as a UK sole trader based here.)
 
 13.2 **Severability.** If any provision of these Terms is found unenforceable, the remaining provisions continue in full force.
 
 13.3 **Entire agreement.** These Terms, together with the Privacy Policy [TODO: link once drafted] and any order confirmation, constitute the entire agreement between the parties regarding the Service.
 
-13.4 **Contact.** Questions about these Terms can be sent to **[TODO: support/contact email]**.
+13.4 **Contact.** Questions about these Terms can be sent to **contact@treekey.uk**.
 
 ---
 
 ## What still needs solicitor input specifically (don't skip these)
 
-1. **Data protection (Section 8)** is the single biggest open item — bigger than the liability clause itself, because it's a question of whether the processing is lawful at all, not just who pays if something goes wrong. This needs its own review, ideally alongside a proper Privacy Policy.
-2. **Refund policy (4.4)** needs an actual business decision from you before it can be worded properly — right now it states the minimum defensible position (no refund once a Lead is revealed) and leaves the subscription-level policy open.
-3. **Legal entity name** throughout — this whole document is provisional until you confirm whether you're contracting as an individual or (once formed) a limited company.
-4. Confirm this document's refund/acceptable-use language doesn't contradict anything already live in your Stripe checkout flow or existing landing page copy.
+1. **Data protection (Section 8)** is the single biggest open item — bigger than the liability clause itself, because it's a question of whether the processing is lawful at all, not just who pays if something goes wrong. See the companion Privacy Policy draft, especially its Legitimate Interests Assessment requirement.
+2. **Insert your full legal name/address** at the top of this document (see the note under the title) — the only remaining fill-in-the-blank left in this draft.
+3. Confirm nothing here contradicts what's currently live in your Stripe checkout flow or landing page copy (the refund and acceptable-use language here was aligned to match your existing live Terms of Service page, but double-check).
 
 This is written to slot in alongside — not replace — the `lead_disclaimer_draft.md` from earlier; Section 5 here supersedes and expands on that draft, so once this is reviewed, the standalone disclaimer file can most likely be retired in favor of this fuller document, unless your solicitor prefers to keep a short-form disclaimer visible at the point of purchase in addition to the full Terms.

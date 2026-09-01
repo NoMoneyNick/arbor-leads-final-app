@@ -116,6 +116,23 @@ def _request(method: str, url: str, session=None, max_retries: int = 2, backoff_
     kwargs.pop("verify", None)  # this module owns the verify negotiation now
     caller = session.request if session is not None else requests.request
 
+    # Sep 1 2026: identify ourselves on every request through this module.
+    # PlanIt's own usage policy explicitly asks callers to self-identify via
+    # a User-Agent with a contact email -- confirmed via three independent
+    # research passes (see PROJECT_STATE.md) -- but every request in this
+    # project was going out with requests' bare default UA
+    # ("python-requests/x.y.z"), telling PlanIt (or any council portal)
+    # nothing about who's hitting them or how to reach us. Set here once,
+    # for every caller (PlanIt, ukplanningapi.co.uk, and every Idox council
+    # portal alike) rather than only the one site that asked -- there's no
+    # downside to any of them knowing who we are, and a caller-supplied
+    # User-Agent (mesh_scrapers.IdoxScraper sets its own browser-like one to
+    # match normal browser traffic on council portals) always wins; this
+    # only fills in the gap for callers that didn't set one.
+    headers = dict(kwargs.pop("headers", None) or {})
+    headers.setdefault("User-Agent", "TreeKeyBot/1.0 (+https://treekey.uk; contact@treekey.uk)")
+    kwargs["headers"] = headers
+
     verify_flag = True
     attempt = 0
     res = None
