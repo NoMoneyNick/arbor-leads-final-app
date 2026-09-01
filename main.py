@@ -4439,6 +4439,73 @@ def pipeline_status(secret: Optional[str] = Query(None)):
     return {"running": _pipeline_state["running"], "started_at": _pipeline_state.get("started_at")}
 
 
+@app.get("/reset-pipeline-lock")
+def reset_pipeline_lock(secret: Optional[str] = Query(None)):
+    """Sep 1 2026: manual escape hatch for a stuck lock, so restarting a
+    scan doesn't require a full redeploy every time. IMPORTANT: this does
+    NOT stop whatever scan is currently running -- Python can't force-kill
+    a background thread. It only clears the lock so a NEW trigger is
+    allowed to start. If the old scan is still genuinely working (just
+    slow, not hung), this starts a second scan on top of it, hitting the
+    same council portals/PlanIt authorities twice at once -- this is the
+    exact double-scan problem _PIPELINE_LOCK exists to prevent (see its
+    comment above), so only use this when a scan has clearly stalled
+    (no new log lines for a long stretch), not just because it's slow."""
+    verify_cron_secret(secret)
+    was_running = _pipeline_state.get("running", False)
+    try:
+        _PIPELINE_LOCK.release()
+    except RuntimeError:
+        pass  # lock was already free -- nothing to reset
+    _pipeline_state["running"] = False
+    _pipeline_state["started_at"] = None
+    return {
+        "status": "reset",
+        "was_running": was_running,
+        "warning": "This does not stop the old scan's background thread if it's still alive -- it only allows a new trigger to start. If the old scan wasn't actually hung, you may now have two scans running at once."
+    }
+
+
+@app.get("/test-mesh-council/{city_slug}")
+def test_mesh_council(city_slug: str, secret: Optional[str] = Query(None)):
+    """Sep 1 2026: the real fix for the 2-hour test loop -- testing a mesh
+    scraper fix (e.g. today's caseAddressType fix) previously meant running
+    the FULL nationwide pipeline (2+ hours) just to find out if one council
+    works now. This hits exactly one council directly and returns
+    immediately (seconds, not hours). Safe to call anytime, as often as
+    needed: mesh_scrapers.scrape_mesh_council() makes zero database writes
+    and doesn't touch the once-per-day mesh cache or the pipeline lock --
+    both of those live in scanners.run_mesh_network_scan(), not here -- so
+    this can never interfere with a real scan or duplicate a lead.
+    Example: /test-mesh-council/CORNWALL?secret=...
+    """
+    verify_cron_secret(secret)
+    import time
+    import mesh_scrapers
+    city_key = city_slug.strip().upper().replace("-", " ")
+    if city_key not in mesh_scrapers.COUNCIL_REGISTRY:
+        return {
+            "error": f"'{city_slug}' is not in COUNCIL_REGISTRY.",
+            "known_councils": sorted(mesh_scrapers.COUNCIL_REGISTRY.keys()),
+        }
+    start = time.time()
+    try:
+        leads = mesh_scrapers.scrape_mesh_council(city_key)
+        return {
+            "city": city_key,
+            "url": mesh_scrapers.COUNCIL_REGISTRY[city_key],
+            "leads_found": len(leads),
+            "sample_leads": leads[:3],
+            "elapsed_seconds": round(time.time() - start, 1),
+        }
+    except Exception as e:
+        return {
+            "city": city_key,
+            "error": str(e),
+            "elapsed_seconds": round(time.time() - start, 1),
+        }
+
+
 @app.get("/trigger-clean-partners")
 def trigger_clean_partners(secret: Optional[str] = Query(None)):
     verify_cron_secret(secret)
