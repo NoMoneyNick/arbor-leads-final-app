@@ -5224,11 +5224,11 @@ async def terms_of_service():
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">1. Service Description</h2>
         <p class="mb-4">Tree Key provides an online radar and notification platform that aggregates public statutory planning applications from UK local authorities. We are an independent commercial entity and are not affiliated with any government body.</p>
         
-        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">2. Subscriptions & Billing</h2>
-        <p class="mb-4">By subscribing to a Tree Key tier, you are paying for access to our proprietary software platform and notification systems. Subscriptions are billed monthly and can be cancelled at any time.</p>
-        
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">2. Subscriptions, Single Lead Purchases & Billing</h2>
+        <p class="mb-4">Tree Key offers two ways to pay: (a) a monthly subscription tier, billed monthly and cancellable at any time, giving ongoing access to leads matching your plan; and (b) one-off single lead purchases, where you pay a one-time price to unlock one specific lead, which is then permanently removed from sale to any other customer.</p>
+
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">3. No Guarantee of Lead Volume (Refund Policy)</h2>
-        <p class="mb-4 border-l-4 border-amber-500 pl-4 bg-amber-500/10 py-3 text-slate-200"><strong>Crucial Notice:</strong> The volume of leads you receive is entirely dependent on the organic activity of homeowners and local councils in your chosen radial territory. Tree Key does not guarantee a specific number of leads per month. <strong>Because you are granted immediate access to proprietary data upon subscribing, all subscription payments are non-refundable.</strong> We do not offer prorated refunds for mid-cycle cancellations.</p>
+        <p class="mb-4 border-l-4 border-amber-500 pl-4 bg-amber-500/10 py-3 text-slate-200"><strong>Crucial Notice:</strong> The volume of leads you receive is entirely dependent on the organic activity of homeowners and local councils in your chosen radial territory. Tree Key does not guarantee a specific number of leads per month. <strong>Because you are granted immediate access to proprietary data the moment you subscribe or purchase a single lead, all payments &mdash; subscription and one-off single lead purchases alike &mdash; are non-refundable.</strong> We do not offer prorated refunds for mid-cycle subscription cancellations.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">4. Acceptable Use</h2>
         <p class="mb-4">You agree not to scrape, redistribute, or resell the data provided by Tree Key. The platform is strictly for your own business's direct marketing and operational use.</p>

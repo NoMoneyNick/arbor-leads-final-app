@@ -119,6 +119,41 @@ def _run_ddl_statements_resiliently(conn, statements: list, phase_label: str,
                     f"[DB:{phase_label}] information_schema precheck failed for "
                     f"{table_name}.{column_name}, falling back to direct ALTER: {precheck_err}"
                 )
+
+        # Sep 2 2026: same precheck idea, applied to "ENABLE ROW LEVEL
+        # SECURITY" statements after this exact shape caused a live Phase 2
+        # failure -- one table's statement hit the 4s lock_timeout and,
+        # because Phase 2 used to run all 13 ALTERs in one shared
+        # transaction, took the other 12 (which may have already landed
+        # fine, or would have landed fine on retry) down with it. Routing
+        # Phase 2 through this same resilient runner fixes the all-or-
+        # nothing rollback; this precheck additionally skips the lock-
+        # needing ALTER entirely for a table where RLS is already on, same
+        # rationale as the ADD COLUMN case above -- a plain SELECT against
+        # pg_tables needs no exclusive lock.
+        m_rls = _re.match(
+            r"ALTER TABLE (\w+) ENABLE ROW LEVEL SECURITY",
+            stmt.strip(), _re.IGNORECASE
+        )
+        if m_rls:
+            table_name = m_rls.group(1)
+            try:
+                precheck_cur = conn.cursor()
+                precheck_cur.execute(
+                    "SELECT rowsecurity FROM pg_tables WHERE schemaname = 'public' AND tablename = %s;",
+                    (table_name,)
+                )
+                row = precheck_cur.fetchone()
+                precheck_cur.close()
+                conn.commit()
+                if row is not None and row[0]:
+                    continue
+            except Exception as precheck_err:
+                conn.rollback()
+                logger.warning(
+                    f"[DB:{phase_label}] pg_tables RLS precheck failed for "
+                    f"{table_name}, falling back to direct ALTER: {precheck_err}"
+                )
         last_err = None
         landed = False
         for attempt in range(1, max_attempts + 1):
@@ -541,8 +576,17 @@ def init_db():
 
     # Phase 2: Row-Level Security. Independent of Phase 1/3 -- a failure
     # here should not be able to block schema changes or hygiene cleanup.
+    #
+    # Sep 2 2026 fix: this used to run all 13 ALTERs in one shared
+    # transaction/commit, so a single statement hitting a lock timeout
+    # ("canceling statement due to statement timeout", seen live in
+    # production) rolled back all 13 -- including any that had already
+    # landed or would have landed fine on their own. Now routed through the
+    # same per-statement-transaction + precheck + retry runner already
+    # proven for Phase 1, so one stuck table can no longer take the other
+    # twelve down with it, and tables that already have RLS on are skipped
+    # without ever taking a lock.
     try:
-        cur = conn.cursor()
         rls_statements = [
             "ALTER TABLE potential_partners ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE leads ENABLE ROW LEVEL SECURITY;",
@@ -558,13 +602,25 @@ def init_db():
             "ALTER TABLE chip_drop_spots ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE storm_weather_alerts ENABLE ROW LEVEL SECURITY;"
         ]
-        for stmt in rls_statements:
-            cur.execute(stmt)
-        conn.commit()
-        cur.close()
-        logger.info("[DB] Phase 2 OK: RLS lockout applied.")
+        failed_rls = _run_ddl_statements_resiliently(conn, rls_statements, phase_label="Phase 2 (RLS)")
+        if failed_rls:
+            logger.error(f"[DB] Phase 2 (RLS): {len(failed_rls)}/{len(rls_statements)} statement(s) never landed after retries.")
+            try:
+                import notifications
+                notifications.send_system_incident_alert(
+                    category="DATABASE SECURITY",
+                    title="init_db() Phase 2 (RLS) failed to enable on one or more tables",
+                    description=f"RLS ALTER statement(s) did not land after retries: {[s[:80] for s, _ in failed_rls]}",
+                    impact="The affected table(s) may be running without Row-Level Security until this is fixed.",
+                    action_required="Check for long-running writers against the affected table(s) and retry, or run manually during a quiet period.",
+                    severity="CRITICAL",
+                    throttle_hours=1.0
+                )
+            except Exception:
+                pass
+        else:
+            logger.info("[DB] Phase 2 OK: RLS lockout applied (or already active) on all tables.")
     except Exception as e:
-        conn.rollback()
         logger.error(f"[DB] Phase 2 (RLS) FAILED -- schema changes from Phase 1 are unaffected: {e}")
 
     # Phase 3: hygiene cleanup (DELETE/UPDATE junk rows). The riskiest phase

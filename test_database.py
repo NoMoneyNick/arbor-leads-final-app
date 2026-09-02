@@ -264,6 +264,82 @@ class TestRunDdlStatementsResiliently(unittest.TestCase):
         self.assertEqual(failed, [])
         conn.commit.assert_called()
 
+    def _make_rls_conn(self, side_effects_by_substring, rowsecurity_already_on=False):
+        """Same shape as _make_conn but the precheck cursor answers the RLS
+        precheck's pg_tables.rowsecurity query instead of the ADD COLUMN
+        precheck's information_schema.columns query."""
+        conn = MagicMock()
+        call_counts = {}
+
+        def make_cursor():
+            cur = MagicMock()
+            cur.fetchone.return_value = (rowsecurity_already_on,)
+
+            def execute(sql, *args, **kwargs):
+                if sql.strip().upper().startswith("SET LOCAL"):
+                    return
+                for key, effects in side_effects_by_substring.items():
+                    if key in sql:
+                        idx = call_counts.get(key, 0)
+                        call_counts[key] = idx + 1
+                        effect = effects[min(idx, len(effects) - 1)]
+                        if isinstance(effect, Exception):
+                            raise effect
+                        return
+                return
+
+            cur.execute.side_effect = execute
+            return cur
+
+        conn.cursor.side_effect = make_cursor
+        return conn
+
+    @patch("time.sleep", return_value=None)
+    def test_rls_precheck_skips_the_alter_entirely_when_already_enabled(self, mock_sleep):
+        """Sep 2 2026 fix, RLS half: mirrors the ADD COLUMN precheck -- a
+        table that already has RLS on should never even attempt the
+        lock-needing ALTER, so a busy table can't fail retries for a no-op."""
+        stmt = "ALTER TABLE leads ENABLE ROW LEVEL SECURITY;"
+        conn = self._make_rls_conn(
+            {stmt: [Exception("canceling statement due to statement timeout")] * 10},
+            rowsecurity_already_on=True,
+        )
+        failed = database._run_ddl_statements_resiliently(conn, [stmt], "Phase 2 (RLS)", max_attempts=5)
+        self.assertEqual(failed, [])
+        mock_sleep.assert_not_called()
+
+    @patch("time.sleep", return_value=None)
+    def test_rls_precheck_falls_through_to_real_alter_when_not_yet_enabled(self, mock_sleep):
+        stmt = "ALTER TABLE leads ENABLE ROW LEVEL SECURITY;"
+        conn = self._make_rls_conn({}, rowsecurity_already_on=False)
+        failed = database._run_ddl_statements_resiliently(conn, [stmt], "Phase 2 (RLS)")
+        self.assertEqual(failed, [])
+        conn.commit.assert_called()
+
+    @patch("time.sleep", return_value=None)
+    def test_one_persistently_blocked_rls_statement_does_not_take_down_a_sibling(self, mock_sleep):
+        """The actual live incident this fixes: Phase 2 used to run all 13
+        ENABLE ROW LEVEL SECURITY statements in one shared transaction, so
+        one table's lock timeout rolled back all 13. Proves a good sibling
+        statement still lands independently of a persistently blocked one."""
+        bad = "ALTER TABLE leads ENABLE ROW LEVEL SECURITY;"
+        good = "ALTER TABLE payments ENABLE ROW LEVEL SECURITY;"
+        conn = self._make_rls_conn({
+            bad: [Exception("canceling statement due to statement timeout")] * 10,
+        }, rowsecurity_already_on=False)
+        failed = database._run_ddl_statements_resiliently(conn, [bad, good], "Phase 2 (RLS)", max_attempts=3)
+        self.assertEqual(len(failed), 1)
+        self.assertIn("leads", failed[0][0])
+        conn.commit.assert_called()  # the good statement's own commit happened
+
+    @patch("time.sleep", return_value=None)
+    def test_rls_precheck_error_falls_back_to_direct_alter_instead_of_crashing(self, mock_sleep):
+        stmt = "ALTER TABLE leads ENABLE ROW LEVEL SECURITY;"
+        conn = self._make_rls_conn({"pg_tables": [Exception("precheck boom")]})
+        failed = database._run_ddl_statements_resiliently(conn, [stmt], "Phase 2 (RLS)")
+        self.assertEqual(failed, [])
+        conn.commit.assert_called()
+
 
 class TestMarketplaceVerticalColumnFallback(unittest.TestCase):
     """get_marketplace_leads_with_freshness -- Sep 2 2026 production

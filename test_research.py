@@ -275,9 +275,12 @@ class TestGetGooglePlacesInfo(unittest.TestCase):
 
     def setUp(self):
         self._orig_key = research.GOOGLE_MAPS_KEY
+        self._orig_quota_reset_at = research._GOOGLE_PLACES_DAILY_QUOTA_RESET_AT[0]
+        research._GOOGLE_PLACES_DAILY_QUOTA_RESET_AT[0] = 0.0
 
     def tearDown(self):
         research.GOOGLE_MAPS_KEY = self._orig_key
+        research._GOOGLE_PLACES_DAILY_QUOTA_RESET_AT[0] = self._orig_quota_reset_at
 
     def _fake_response(self, status_code=200, json_data=None, text=""):
         class _Resp:
@@ -337,6 +340,67 @@ class TestGetGooglePlacesInfo(unittest.TestCase):
             research.get_google_places_info("Acme Tree Surgery Ltd", "London")
         mock_post.assert_not_called()
         mock_get.assert_called_once()
+
+    def test_daily_quota_429_falls_back_to_ddg_for_that_company(self):
+        """Sep 2 2026 live incident: once the project's daily SearchText
+        quota is exhausted, Google returns 429 with 'SearchTextRequest per
+        day' in the body. Before this fix that was treated like any other
+        non-200 and returned all-None -- silently reintroducing the exact
+        blank phone/email problem this whole API switch was meant to fix.
+        It must instead fall back to the free DDG scrape for that company,
+        not give up."""
+        research.GOOGLE_MAPS_KEY = "fake-test-key"
+        import unittest.mock as mock
+        quota_body = ('{"error": {"code": 429, "message": "Quota exceeded for quota metric '
+                      '\'SearchTextRequest\' and limit \'SearchTextRequest per day\' of service '
+                      '\'places.googleapis.com\'."}}')
+        with mock.patch.object(research.net_utils, "smart_post",
+                                return_value=self._fake_response(status_code=429, text=quota_body)) as mock_post, \
+             mock.patch.object(research.net_utils, "smart_get",
+                                return_value=self._fake_response(status_code=200, text="<html></html>")) as mock_get:
+            research.get_google_places_info("Acme Tree Surgery Ltd", "London")
+        mock_post.assert_called_once()  # the API was tried once for this company
+        mock_get.assert_called_once()   # then fell back to the free scrape, not a blank result
+
+    def test_daily_quota_429_trips_a_cooldown_so_later_calls_skip_the_api(self):
+        """The other half of the fix: hitting the daily cap once shouldn't
+        mean every remaining company that day still pays the cost of a
+        doomed API round-trip before falling back -- later calls should go
+        straight to DDG until the cooldown clears."""
+        research.GOOGLE_MAPS_KEY = "fake-test-key"
+        import unittest.mock as mock
+        quota_body = ('{"error": {"message": "Quota exceeded for quota metric '
+                      '\'SearchTextRequest\' and limit \'SearchTextRequest per day\'."}}')
+        with mock.patch.object(research.net_utils, "smart_post",
+                                return_value=self._fake_response(status_code=429, text=quota_body)) as mock_post, \
+             mock.patch.object(research.net_utils, "smart_get",
+                                return_value=self._fake_response(status_code=200, text="<html></html>")):
+            research.get_google_places_info("First Tree Company Ltd", "London")
+        self.assertEqual(mock_post.call_count, 1)
+        self.assertGreater(research._GOOGLE_PLACES_DAILY_QUOTA_RESET_AT[0], 0.0)
+
+        with mock.patch.object(research.net_utils, "smart_post") as mock_post_2, \
+             mock.patch.object(research.net_utils, "smart_get",
+                                return_value=self._fake_response(status_code=200, text="<html></html>")) as mock_get_2:
+            research.get_google_places_info("Second Tree Company Ltd", "London")
+        mock_post_2.assert_not_called()  # cooldown active -- API not even attempted
+        mock_get_2.assert_called_once()
+
+    def test_429_without_per_day_wording_still_falls_back_but_does_not_trip_cooldown(self):
+        """A 429 for a different reason (e.g. a per-minute burst limit)
+        should still fall back to DDG for that one call (better than a
+        blank result), but must NOT trip the daily-quota cooldown on a
+        guess -- only the specific confirmed 'per day' wording seen in the
+        real incident should skip the API for every later call today."""
+        research.GOOGLE_MAPS_KEY = "fake-test-key"
+        import unittest.mock as mock
+        with mock.patch.object(research.net_utils, "smart_post",
+                                return_value=self._fake_response(status_code=429, text="Too many requests per minute")), \
+             mock.patch.object(research.net_utils, "smart_get",
+                                return_value=self._fake_response(status_code=200, text="<html></html>")) as mock_get:
+            research.get_google_places_info("Acme Tree Surgery Ltd", "London")
+        mock_get.assert_called_once()
+        self.assertEqual(research._GOOGLE_PLACES_DAILY_QUOTA_RESET_AT[0], 0.0)
 
 
 if __name__ == "__main__":

@@ -431,9 +431,32 @@ def get_google_places_info(company_name: str, city_or_addr: str = ""):
 
     Returns: (rating: float|None, phone_number: str|None, website: str|None)
     """
-    if GOOGLE_MAPS_KEY:
+    if GOOGLE_MAPS_KEY and time.time() >= _GOOGLE_PLACES_DAILY_QUOTA_RESET_AT[0]:
         return _get_google_places_info_via_api(company_name, city_or_addr)
     return _get_google_places_info_via_ddg_scrape(company_name, city_or_addr)
+
+
+# Sep 2 2026: live production logs showed the Places API switch above
+# working correctly for a while, then every single call starting failing
+# with "429 ... Quota exceeded for quota metric 'SearchTextRequest' and
+# limit 'SearchTextRequest per day'" -- a project-level daily request cap
+# (self-service adjustable in Google Cloud Console under Google Maps
+# Platform > Quotas, separate from the monthly free-tier billing
+# allowance; confirmed against Google's own current documentation, not
+# assumed), most likely left at a low default from when this key sat
+# unused. Before this fix, `_get_google_places_info_via_api` treated a 429
+# exactly like any other non-200 and returned (None, None, None) -- so the
+# instant the daily cap was hit, EVERY remaining company that day silently
+# went back to blank phone/email again, the exact symptom this whole
+# switch was meant to fix, and every one of those doomed API calls still
+# cost a full network round-trip before giving up. Fix: detect this
+# specific "per day" quota message, fall back to the free DDG scrape for
+# that company (so today's run keeps producing real data instead of
+# blanks), and remember it for a cooldown window so later calls this run
+# skip the API entirely and go straight to the free path -- no point
+# retrying a quota that resets on Google's clock, not ours.
+_GOOGLE_PLACES_DAILY_QUOTA_RESET_AT = [0.0]  # epoch seconds; 0 = not currently tripped
+_GOOGLE_PLACES_QUOTA_COOLDOWN_SECONDS = 6 * 60 * 60  # conservative guess at "rest of today" -- cheap to re-check, so erring short is safe
 
 
 def _get_google_places_info_via_api(company_name: str, city_or_addr: str = ""):
@@ -452,6 +475,19 @@ def _get_google_places_info_via_api(company_name: str, city_or_addr: str = ""):
         }
         body = {"textQuery": query, "pageSize": 1}
         res = net_utils.smart_post(url, json=body, headers=headers, timeout=10)
+        if res.status_code == 429:
+            body_text = res.text[:300]
+            if "per day" in body_text.lower():
+                _GOOGLE_PLACES_DAILY_QUOTA_RESET_AT[0] = time.time() + _GOOGLE_PLACES_QUOTA_COOLDOWN_SECONDS
+                logger.warning(
+                    f"[Google Places] Daily SearchText quota exhausted (429 'per day') on '{company_name}' -- "
+                    f"falling back to the free DuckDuckGo scrape for roughly the next "
+                    f"{_GOOGLE_PLACES_QUOTA_COOLDOWN_SECONDS // 3600}h instead of sending more doomed API calls. "
+                    f"Fix the underlying cap in Google Cloud Console under Google Maps Platform > Quotas."
+                )
+            else:
+                logger.warning(f"[Google Places] Non-200 (429, not a daily-quota message) for '{company_name}': {body_text}")
+            return _get_google_places_info_via_ddg_scrape(company_name, city_or_addr)
         if res.status_code != 200:
             logger.warning(f"[Google Places] Non-200 ({res.status_code}) for '{company_name}': {res.text[:200]}")
             return None, None, None
