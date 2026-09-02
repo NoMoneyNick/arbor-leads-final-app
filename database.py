@@ -424,6 +424,14 @@ def init_db():
             # resilient-per-statement/retry path as every other DDL
             # statement in this list, not inside one shared transaction.
             "CREATE INDEX IF NOT EXISTS idx_leads_tags ON leads USING GIN (tags);",
+            # Sep 2 2026: same tagging pattern, applied to partners. Nick's
+            # call: a partner we have no way to actually contact is "dead to
+            # us" exactly like an unclassified lead, and that must be a
+            # queryable fact, not something only visible by eyeballing NULL
+            # columns. See research._generate_partner_tags for what's
+            # written and database.get_partner_tag_counts for the report.
+            "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}';",
+            "CREATE INDEX IF NOT EXISTS idx_partners_tags ON potential_partners USING GIN (tags);",
             # Add lat/lon columns for geographic radius matching (safe, idempotent)
             "ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS lat FLOAT;",
             "ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS lon FLOAT;",
@@ -873,6 +881,89 @@ def get_tag_counts() -> dict:
             conn.close()
     except Exception as e:
         logger.error(f"[LeadTags] get_tag_counts error: {e}")
+        return {"error": str(e)}
+
+
+def backfill_partner_tags(batch_size: int = 500) -> dict:
+    """Sep 2 2026: same 'only touch what's actually unresolved' backfill
+    pattern as backfill_lead_tags, for every partner inserted before the
+    tags column existed. See research._generate_partner_tags for what gets
+    written. Imports research lazily -- only when there's actually a row to
+    process -- for the same reason backfill_lead_tags imports scanners
+    lazily (avoids an unnecessary import, and keeps this importable in
+    isolation for tests that don't stub research.py's own dependencies)."""
+    if not SURL:
+        return {"error": "no database configured"}
+    updated = 0
+    errors = 0
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT id, sic_codes, md_name, phone_number, email
+                FROM potential_partners
+                WHERE tags IS NULL OR tags = '{}'
+                LIMIT %s;
+            """, (batch_size,))
+            rows = cur.fetchall()
+            if not rows:
+                conn.commit()
+                return {"updated": 0, "errors": 0, "batch_size": batch_size,
+                        "note": "no untagged partners found."}
+            import research as _research
+            for partner_id, sic_codes, md_name, phone_number, email in rows:
+                try:
+                    tags = _research._generate_partner_tags(sic_codes, md_name, phone_number, email)
+                    cur.execute("UPDATE potential_partners SET tags = %s WHERE id = %s;", (tags, partner_id))
+                    updated += 1
+                except Exception as row_err:
+                    errors += 1
+                    logger.warning(f"[PartnerTags] Backfill error on partner {partner_id}: {row_err}")
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[PartnerTags] Backfill error: {e}")
+        return {"error": str(e), "updated": updated, "errors": errors}
+    return {"updated": updated, "errors": errors, "batch_size": batch_size,
+            "note": "re-run if 'updated' == batch_size -- there may be more rows left untagged."}
+
+
+def get_partner_tag_counts() -> dict:
+    """Sep 2 2026: reporting side of the partner tagging system -- see
+    research._generate_partner_tags. 'dead' here (contact:dead) is Nick's
+    own word for a partner with no realistic phone AND no realistic email
+    -- reachable through neither channel, so worthless to the business
+    regardless of how complete anything else about the record is."""
+    if not SURL:
+        return {"error": "no database configured"}
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT COUNT(*) FROM potential_partners;")
+            total = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM potential_partners WHERE tags IS NULL OR tags = '{}';")
+            untagged = cur.fetchone()[0]
+            cur.execute("""
+                SELECT tag, COUNT(*) AS n
+                FROM potential_partners, unnest(tags) AS tag
+                GROUP BY tag
+                ORDER BY tag;
+            """)
+            rows = cur.fetchall()
+            grouped: dict = {}
+            for tag, n in rows:
+                prefix = tag.split(":", 1)[0] if ":" in tag else "other"
+                grouped.setdefault(prefix, {})[tag] = n
+            return {"total_partners": total, "untagged_partners": untagged, "categories": grouped}
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[PartnerTags] get_partner_tag_counts error: {e}")
         return {"error": str(e)}
 
 

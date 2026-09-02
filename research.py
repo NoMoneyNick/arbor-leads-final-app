@@ -813,14 +813,16 @@ def perform_research(city_name: str):
                 # company's own site is a much better source for both.
                 email, site_phone = scrape_contact_info_from_website(website) if website else (None, None)
                 phone = phone or site_phone
+                sic_codes = co.get("sic_codes", [])
+                tags = _generate_partner_tags(sic_codes, md_name, phone, email)
 
                 co_conn = database.get_db_conn()
                 co_cur = co_conn.cursor()
                 co_cur.execute("""
                     INSERT INTO potential_partners
                         (company_name, company_number, status, address, target_city,
-                         sic_codes, md_name, phone_number, google_rating, website, email)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         sic_codes, md_name, phone_number, google_rating, website, email, tags)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (company_number) DO UPDATE SET
                         company_name  = EXCLUDED.company_name,
                         target_city   = EXCLUDED.target_city,
@@ -828,12 +830,13 @@ def perform_research(city_name: str):
                         phone_number  = COALESCE(EXCLUDED.phone_number, potential_partners.phone_number),
                         google_rating = COALESCE(EXCLUDED.google_rating, potential_partners.google_rating),
                         website       = COALESCE(EXCLUDED.website, potential_partners.website),
-                        email         = COALESCE(EXCLUDED.email, potential_partners.email)
+                        email         = COALESCE(EXCLUDED.email, potential_partners.email),
+                        tags          = EXCLUDED.tags
                 """, (
                     name, company_number, co.get("company_status"),
                     addr, assigned_city,
-                    co.get("sic_codes", []), md_name, phone, rating,
-                    website, email
+                    sic_codes, md_name, phone, rating,
+                    website, email, tags
                 ))
                 co_conn.commit()
                 co_cur.close()
@@ -876,6 +879,109 @@ def research_all_cities():
 
 
 
+# Sep 2 2026: partner tagging system, same "total control of our data"
+# philosophy as the lead tagging system in scanners.py. Nick's call: a
+# partner we can't actually reach (no working phone, no email) is dead to
+# us exactly like an unclassified lead -- that has to be a queryable, tagged
+# fact, not just an absent column someone has to notice. "Has a phone
+# number" also isn't good enough on its own -- enrichment sources
+# occasionally hand back junk (a scraped placeholder, a malformed Google
+# Places result), so a phone tag means it passed a real sanity check, not
+# just "the column isn't NULL".
+_UK_PHONE_PLACEHOLDER_NUMBERS = {
+    "00000000000", "01111111111", "01234567890", "07000000000", "01212121212",
+}
+_EMAIL_SHAPE_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+_PLACEHOLDER_EMAIL_DOMAINS = {
+    "example.com", "test.com", "none.com", "domain.com", "email.com", "yourcompany.com",
+}
+# 2-digit SIC division -> the "kind of business" bucket Nick asked for.
+# Coarse on purpose -- this only needs to separate genuine tree-surgery/
+# arboriculture/forestry partners from the landscaping/construction/generic
+# businesses that occasionally survive clean_partner_database's name-based
+# filter, not reproduce the full ONS SIC hierarchy.
+SIC_DIVISION_TO_BUSINESS_KIND = {
+    "01": "forestry-agriculture", "02": "forestry-agriculture",
+    "81": "landscaping-grounds-maintenance",
+    "43": "construction-specialist-trade",
+    "77": "equipment-hire",
+    "96": "other-personal-service",
+}
+
+
+def _is_realistic_uk_phone(phone: Optional[str]) -> bool:
+    """Lightweight sanity check, not full validation -- rejects the
+    obviously-fake numbers enrichment sources occasionally hand back (a
+    scraped placeholder, a malformed listing) so a 'has phone' tag actually
+    means something. Not a substitute for calling it."""
+    if not phone:
+        return False
+    digits = re.sub(r'\D', '', str(phone))
+    if digits.startswith('44'):
+        digits = '0' + digits[2:]
+    elif digits.startswith('0044'):
+        digits = '0' + digits[4:]
+    if len(digits) != 11 or not digits.startswith('0'):
+        return False
+    if len(set(digits)) == 1:
+        return False
+    if digits in _UK_PHONE_PLACEHOLDER_NUMBERS:
+        return False
+    if digits[1] == '0':  # no real UK area/mobile code starts with a second 0
+        return False
+    return True
+
+
+def _is_realistic_email(email: Optional[str]) -> bool:
+    """Shape check plus a placeholder-domain denylist -- catches the
+    'info@example.com' style junk that occasionally comes back from a
+    scrape rather than a real inbox."""
+    if not email:
+        return False
+    e = str(email).strip().lower()
+    if not _EMAIL_SHAPE_RE.match(e):
+        return False
+    domain = e.rsplit("@", 1)[-1]
+    return domain not in _PLACEHOLDER_EMAIL_DOMAINS
+
+
+def _classify_business_kind(sic_codes: Optional[list]) -> str:
+    """Coarse 'kind of business' bucket from the SIC codes Companies House
+    already gave us at discovery time -- zero extra API cost, always
+    available for any partner that has sic_codes stored. Returns
+    'unclassified' (not a guess) if sic_codes is empty or none of its
+    divisions are in the table above."""
+    for code in (sic_codes or []):
+        division = str(code or "").strip()[:2]
+        kind = SIC_DIVISION_TO_BUSINESS_KIND.get(division)
+        if kind:
+            return kind
+    return "unclassified"
+
+
+def _generate_partner_tags(sic_codes: Optional[list], md_name: Optional[str],
+                            phone_number: Optional[str], email: Optional[str]) -> list:
+    """Builds the full tag list for one partner -- mirrors
+    scanners._generate_tags' 'floating bubble' design: every tag is an
+    independent fact, callers combine whichever ones they want."""
+    has_phone = _is_realistic_uk_phone(phone_number)
+    has_email = _is_realistic_email(email)
+    tags = [
+        f"business:{_classify_business_kind(sic_codes)}",
+        "director:yes" if md_name else "director:no",
+        "phone:yes" if has_phone else "phone:no",
+        "email:yes" if has_email else "email:no",
+    ]
+    if has_phone or has_email:
+        tags.append("contact:reachable")
+    else:
+        # Per Nick (Sep 2 2026): no working phone AND no working email
+        # means this partner is dead to us -- flag it as such rather than
+        # leaving it to be noticed only by the absence of a tag.
+        tags.append("contact:dead")
+    return tags
+
+
 def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -> int:
     """
     Enriches a bite-sized chunk of partners (default 50 or by specific region).
@@ -891,7 +997,7 @@ def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -
 
         query = """
             SELECT id, company_name, company_number, target_city, address,
-                   md_name, phone_number, google_rating, website, email
+                   md_name, phone_number, google_rating, website, email, sic_codes
             FROM potential_partners
             WHERE company_number IS NOT NULL
               AND enriched_at IS NULL
@@ -921,7 +1027,8 @@ def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -
         from psycopg2.extras import execute_batch
 
         def enrich_single_partner(row):
-            (pid, name, number, city, addr, existing_md, existing_phone, existing_rating, existing_website, existing_email) = row
+            (pid, name, number, city, addr, existing_md, existing_phone, existing_rating,
+             existing_website, existing_email, sic_codes) = row
             try:
                 md_name = existing_md or get_director_from_ch(number)
                 rating = existing_rating
@@ -941,11 +1048,13 @@ def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -
                     email = email or site_email
                     phone = phone or site_phone
 
-                return (md_name, phone, rating, website, email, pid)
+                tags = _generate_partner_tags(sic_codes, md_name, phone, email)
+                return (md_name, phone, rating, website, email, tags, pid)
             except Exception as e:
                 logger.debug(f"[Enrichment] Error on {name}: {e}")
                 # Still mark enriched_at so it doesn't loop infinitely on faulty records
-                return (existing_md, existing_phone, existing_rating, existing_website, existing_email, pid)
+                tags = _generate_partner_tags(sic_codes, existing_md, existing_phone, existing_email)
+                return (existing_md, existing_phone, existing_rating, existing_website, existing_email, tags, pid)
 
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=8) as executor:
@@ -958,7 +1067,7 @@ def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -
             execute_batch(p_cur, """
                 UPDATE potential_partners
                 SET md_name = %s, phone_number = %s, google_rating = %s,
-                    website = %s, email = %s, enriched_at = NOW()
+                    website = %s, email = %s, tags = %s, enriched_at = NOW()
                 WHERE id = %s
             """, valid_updates, page_size=25)
             p_conn.commit()
@@ -1221,11 +1330,13 @@ def sweep_100_random_contractors(target_count: int = 50) -> dict:
             # same bug fixed in process_single_candidate/enrich_single_partner.
             email, site_phone = scrape_contact_info_from_website(website) if website else (None, None)
             phone = phone or site_phone
+            sic_codes = co.get("sic_codes", [])
+            tags = _generate_partner_tags(sic_codes, md_name, phone, email)
             return (
                 name, company_number, co.get("company_status"),
                 addr, assigned_region,
-                co.get("sic_codes", []), md_name, phone, rating,
-                website, email
+                sic_codes, md_name, phone, rating,
+                website, email, tags
             )
 
         with ThreadPoolExecutor(max_workers=20) as enrich_executor:
@@ -1237,8 +1348,8 @@ def sweep_100_random_contractors(target_count: int = 50) -> dict:
         execute_batch(cur, """
             INSERT INTO potential_partners
                 (company_name, company_number, status, address, target_city,
-                 sic_codes, md_name, phone_number, google_rating, website, email)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 sic_codes, md_name, phone_number, google_rating, website, email, tags)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (company_number) DO UPDATE SET
                 company_name  = EXCLUDED.company_name,
                 target_city   = EXCLUDED.target_city,
@@ -1246,7 +1357,8 @@ def sweep_100_random_contractors(target_count: int = 50) -> dict:
                 phone_number  = COALESCE(EXCLUDED.phone_number, potential_partners.phone_number),
                 google_rating = COALESCE(EXCLUDED.google_rating, potential_partners.google_rating),
                 website       = COALESCE(EXCLUDED.website, potential_partners.website),
-                email         = COALESCE(EXCLUDED.email, potential_partners.email)
+                email         = COALESCE(EXCLUDED.email, potential_partners.email),
+                tags          = EXCLUDED.tags
         """, enriched_rows, page_size=100)
         conn.commit()
 
@@ -1358,11 +1470,13 @@ def populate_2000_partners_into_db() -> dict:
                 # to hardcode email=None and never attempt to scrape it.
                 email, site_phone = scrape_contact_info_from_website(website) if website else (None, None)
                 phone = phone or site_phone
+                sic_codes = co.get("sic_codes", [])
+                tags = _generate_partner_tags(sic_codes, md_name, phone, email)
                 return (
                     name, company_number, co.get("company_status"),
                     addr, assigned_region,
-                    co.get("sic_codes", []), md_name, phone, rating,
-                    website, email
+                    sic_codes, md_name, phone, rating,
+                    website, email, tags
                 )
 
             with ThreadPoolExecutor(max_workers=20) as enrich_exec:
@@ -1373,8 +1487,8 @@ def populate_2000_partners_into_db() -> dict:
             execute_batch(cur, """
                 INSERT INTO potential_partners
                     (company_name, company_number, status, address, target_city,
-                     sic_codes, md_name, phone_number, google_rating, website, email)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     sic_codes, md_name, phone_number, google_rating, website, email, tags)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (company_number) DO UPDATE SET
                     company_name  = EXCLUDED.company_name,
                     target_city   = EXCLUDED.target_city,
@@ -1382,7 +1496,8 @@ def populate_2000_partners_into_db() -> dict:
                     phone_number  = COALESCE(EXCLUDED.phone_number, potential_partners.phone_number),
                     google_rating = COALESCE(EXCLUDED.google_rating, potential_partners.google_rating),
                     website       = COALESCE(EXCLUDED.website, potential_partners.website),
-                    email         = COALESCE(EXCLUDED.email, potential_partners.email)
+                    email         = COALESCE(EXCLUDED.email, potential_partners.email),
+                    tags          = EXCLUDED.tags
             """, enriched_rows, page_size=100)
             conn.commit()
 

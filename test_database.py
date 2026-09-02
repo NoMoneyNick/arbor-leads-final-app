@@ -527,5 +527,80 @@ class TestLeadTagQuerying(unittest.TestCase):
         self.assertEqual(len(update_calls), 0)
 
 
+class TestPartnerTagQuerying(unittest.TestCase):
+    """Sep 2 2026: the backfill/report side of the partner tagging system --
+    see test_research.py for the tag-generation side (business kind,
+    phone/email sanity checks, contact:reachable vs contact:dead)."""
+
+    def _conn_with_cursor(self, fetchone_return=None, fetchall_return=None):
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.fetchone.return_value = fetchone_return
+        cur.fetchall.return_value = fetchall_return or []
+        conn.cursor.return_value = cur
+        return conn, cur
+
+    def test_backfill_partner_tags_only_touches_untagged_rows(self):
+        conn, cur = self._conn_with_cursor(fetchall_return=[])
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            result = database.backfill_partner_tags(batch_size=10)
+        sql = cur.execute.call_args[0][0]
+        self.assertIn("tags IS NULL OR tags = '{}'", sql)
+        self.assertEqual(result["updated"], 0)
+
+    def test_backfill_partner_tags_computes_and_writes_tags_per_row(self):
+        """Mirrors test_backfill_lead_tags_computes_and_writes_tags_per_row
+        -- fakes out `research` via sys.modules so this proves
+        backfill_partner_tags' own logic (SELECT filter, per-row call,
+        UPDATE, commit) without needing research.py's full dependency chain
+        importable in this process."""
+        select_row = ("partner-id-1", ["81300"], "Jane Smith", "020 7946 0958", "jane@realtreecompany.co.uk")
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.fetchall.return_value = [select_row]
+        conn.cursor.return_value = cur
+        fake_research = types.ModuleType("research")
+        fake_research._generate_partner_tags = MagicMock(
+            return_value=["business:landscaping-grounds-maintenance", "director:yes",
+                          "phone:yes", "email:yes", "contact:reachable"]
+        )
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"), \
+             patch.dict(sys.modules, {"research": fake_research}):
+            result = database.backfill_partner_tags(batch_size=10)
+        self.assertEqual(result["updated"], 1)
+        self.assertEqual(result["errors"], 0)
+        fake_research._generate_partner_tags.assert_called_once_with(
+            ["81300"], "Jane Smith", "020 7946 0958", "jane@realtreecompany.co.uk"
+        )
+        update_calls = [c for c in cur.execute.call_args_list if "UPDATE potential_partners SET tags" in c[0][0]]
+        self.assertEqual(len(update_calls), 1)
+        written_tags = update_calls[0][0][1][0]
+        self.assertIn("contact:reachable", written_tags)
+
+    def test_get_partner_tag_counts_groups_by_prefix(self):
+        conn, cur = self._conn_with_cursor()
+        cur.fetchone.side_effect = [(1994,), (91,)]
+        cur.fetchall.return_value = [
+            ("business:landscaping-grounds-maintenance", 800),
+            ("contact:dead", 300),
+            ("contact:reachable", 1694),
+            ("director:yes", 950),
+        ]
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            result = database.get_partner_tag_counts()
+        self.assertEqual(result["total_partners"], 1994)
+        self.assertEqual(result["untagged_partners"], 91)
+        self.assertEqual(result["categories"]["contact"]["contact:dead"], 300)
+        self.assertEqual(result["categories"]["business"]["business:landscaping-grounds-maintenance"], 800)
+
+    def test_get_partner_tag_counts_returns_error_with_no_db(self):
+        with patch.object(database, "SURL", ""):
+            result = database.get_partner_tag_counts()
+        self.assertIn("error", result)
+
+
 if __name__ == "__main__":
     unittest.main()

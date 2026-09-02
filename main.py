@@ -4633,6 +4633,24 @@ def view_tag_report(secret: Optional[str] = Query(None)):
     return database.get_tag_counts()
 
 
+@app.get("/trigger-backfill-partner-tags")
+def trigger_backfill_partner_tags(secret: Optional[str] = Query(None), batch_size: int = Query(500)):
+    """Sep 2 2026: same pattern as /trigger-backfill-lead-tags, for
+    potential_partners -- see database.backfill_partner_tags. Only touches
+    rows whose tags column is still empty, safe to call repeatedly."""
+    verify_cron_secret(secret)
+    result = database.backfill_partner_tags(batch_size=batch_size)
+    return {"status": "complete", **result}
+
+
+@app.get("/partner-tag-report")
+def view_partner_tag_report(secret: Optional[str] = Query(None)):
+    """Sep 2 2026: cron-secret-gated numbers report for the partner
+    tagging system -- see database.get_partner_tag_counts. Read-only."""
+    verify_cron_secret(secret)
+    return database.get_partner_tag_counts()
+
+
 @app.get("/trigger-backfill-lead-tags")
 def trigger_backfill_lead_tags(secret: Optional[str] = Query(None), batch_size: int = Query(500)):
     """Sep 2 2026: same pattern as /trigger-backfill-tree-surgeon -- runs
