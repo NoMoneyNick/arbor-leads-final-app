@@ -613,6 +613,18 @@ COUNCIL_TO_REGION = {
     "WILTSHIRE": "South West", "DORSET": "South West",
 }
 
+# Sep 2 2026: lets _resolve_region recognise council_source when it's
+# already a clean region name (MESH's region-town sources pass the region
+# itself through, e.g. council_source="South West") instead of a specific
+# council -- see _resolve_region's own comment for the incident this fixes.
+_CANONICAL_REGIONS_UPPER = {r.upper(): r for r in set(COUNCIL_TO_REGION.values())}
+_REGION_NAME_ALIASES = {
+    "YORKSHIRE": "Yorkshire and the Humber",
+    "YORKSHIRE AND HUMBER": "Yorkshire and the Humber",
+    "YORKSHIRE & HUMBER": "Yorkshire and the Humber",
+    "THE HUMBER": "Yorkshire and the Humber",
+}
+
 
 # Sep 2 2026: region resolution used to trust whatever string a scraper put
 # in council_source (COUNCIL_TO_REGION below is a fixed lookup table keyed
@@ -692,6 +704,20 @@ def _resolve_region(address: str, council_source: str) -> str:
     region = COUNCIL_TO_REGION.get(key)
     if region:
         return region
+    # Sep 2 2026 fix: live logs showed most of the remaining unclassified
+    # leads had NO postcode in the address (land-parcel/site descriptions
+    # like "Pine Walk Shaftesbury" rather than a building address) AND a
+    # council_source that's already a clean region name -- MESH's
+    # region-town sources pass the region itself straight through as
+    # council_source instead of a specific council. COUNCIL_TO_REGION never
+    # had those as keys (it maps councils/towns TO a region, not a region
+    # to itself), so every one of these fell through to unclassified even
+    # though the answer was sitting right there in council_source.
+    if key in _CANONICAL_REGIONS_UPPER:
+        return _CANONICAL_REGIONS_UPPER[key]
+    alias = _REGION_NAME_ALIASES.get(key)
+    if alias:
+        return alias
     logger.warning(
         f"[LeadTags] Could not resolve region for address={address!r} "
         f"council_source={council_source!r} -- tagged unclassified."

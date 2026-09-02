@@ -2962,6 +2962,22 @@ class TestLeadTagging(unittest.TestCase):
         self.assertEqual(scanners._resolve_region("", "SOME COUNCIL NOT IN THE LIST"), "unclassified")
         self.assertEqual(scanners._resolve_region("", ""), "unclassified")
 
+    def test_resolve_region_recognises_council_source_already_a_region_name(self):
+        """Sep 2 2026 fix: live production logs showed MESH's region-town
+        sources pass the region itself straight through as council_source
+        (e.g. 'South West', 'Scotland') for addresses with no postcode in
+        them (land-parcel descriptions) -- these must resolve directly,
+        not fall through to unclassified just because COUNCIL_TO_REGION's
+        keys are councils/towns, not the region names themselves."""
+        self.assertEqual(scanners._resolve_region("", "South West"), "South West")
+        self.assertEqual(scanners._resolve_region("", "scotland"), "Scotland")
+        self.assertEqual(scanners._resolve_region("Pine Walk Shaftesbury", "South West"), "South West")
+        self.assertEqual(scanners._resolve_region("", "East Midlands"), "East Midlands")
+        # A real production case: "Yorkshire" as council_source must map to
+        # the official ONS name, not itself (it isn't one of the 9 English
+        # regions' exact names).
+        self.assertEqual(scanners._resolve_region("", "Yorkshire"), "Yorkshire and the Humber")
+
     def test_generate_tags_always_includes_region_even_without_council_source(self):
         """Sep 2 2026: region tagging used to live inside `if council_source:`
         -- it's now resolved independently (postcode first), so a lead with

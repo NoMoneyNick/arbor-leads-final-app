@@ -1061,6 +1061,63 @@ def public_homepage():
 """
 
 
+def _render_tag_stat_section(categories: dict) -> str:
+    """Sep 2 2026: generic renderer for the tag-based stats grids on
+    /admin. Any category dict shaped like {"prefix": {"prefix:value": n}}
+    (see database.get_tag_counts / get_partner_tag_counts) renders
+    automatically as a card with a mini bar per value -- a brand new tag
+    category added to scanners.py or research.py later shows up here with
+    zero further admin-page changes, which is the whole point: Nick asked
+    for 'every metric you can think of' to be visible, not a fixed list
+    someone has to remember to update."""
+    if not categories:
+        return "<p style='color:#94a3b8; font-size:13px;'>No data yet.</p>"
+    cards = []
+    for prefix in sorted(categories.keys()):
+        tag_counts = categories[prefix]
+        rows = sorted(tag_counts.items(), key=lambda kv: -kv[1])
+        max_n = max((n for _, n in rows), default=1) or 1
+        row_html = ""
+        for tag, n in rows:
+            label = tag.split(":", 1)[1] if ":" in tag else tag
+            pct = int((n / max_n) * 100)
+            bar_color = "#dc2626" if prefix == "contact" and label == "dead" else \
+                        "#dc2626" if prefix == "region" and label == "unclassified" else "#059669"
+            row_html += f"""
+            <div style="display:flex; align-items:center; gap:8px; margin:5px 0; font-size:12.5px;">
+                <div style="width:140px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; color:#334155;" title="{html.escape(tag)}">{html.escape(label)}</div>
+                <div style="flex:1; background:#f1f5f9; border-radius:4px; height:13px;">
+                    <div style="background:{bar_color}; width:{pct}%; height:13px; border-radius:4px;"></div>
+                </div>
+                <div style="width:46px; text-align:right; font-weight:bold; color:#0f172a;">{n}</div>
+            </div>"""
+        cards.append(f"""
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px; min-width:230px; flex:1;">
+            <div style="font-weight:bold; color:#0f172a; margin-bottom:8px; text-transform:capitalize; font-size:13px;">{html.escape(prefix)}</div>
+            {row_html}
+        </div>""")
+    return f"<div style='display:flex; flex-wrap:wrap; gap:12px;'>{''.join(cards)}</div>"
+
+
+def _time_ago(iso_str: Optional[str]) -> str:
+    """Human-readable '3h ago' style string for a stored ISO timestamp, or
+    'never' -- used to show Nick when the autonomous cycle last actually
+    ran without him having to parse a raw timestamp."""
+    if not iso_str:
+        return "never yet"
+    try:
+        then = datetime.datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        delta = datetime.datetime.now(datetime.timezone.utc) - then
+        hours = delta.total_seconds() / 3600
+        if hours < 1:
+            return f"{int(delta.total_seconds() / 60)}m ago"
+        if hours < 48:
+            return f"{int(hours)}h ago"
+        return f"{int(hours / 24)}d ago"
+    except Exception:
+        return iso_str
+
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
     verify_admin_or_secret(request, secret)
@@ -1090,13 +1147,15 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
     except Exception as e:
         logger.error(f"[ADMIN] DB error: {e}")
 
-    import html
+    lead_tag_stats = database.get_tag_counts()
+    partner_tag_stats = database.get_partner_tag_counts()
+    last_cycle_at = database.get_system_state("last_autonomous_cycle_at")
+
     partner_rows = "".join([
         f"<li><b>{html.escape(str(p[0] or ''))}</b>  {html.escape(str(p[1] or 'Director on file'))} | <b>{html.escape(str(p[2] or ''))}</b> |  {html.escape(str(p[4] or ''))} |  {html.escape(str(p[5] or ''))} |  {p[3] or 'N/A'}</li>"
         for p in stats["partners"]
     ])
 
-    import datetime
     now = datetime.datetime.now(datetime.timezone.utc)
 
     def get_freshness_badge(discovered_at):
@@ -1121,19 +1180,6 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
         for l in stats["leads"]
     ])
 
-    # Aug 30 2026 simplification: this used to be 48 buttons (16 regions x
-    # Scan/Find New/Enrich) plus 7 batch-operation buttons -- 55 action
-    # links on one page, none of them showing whether a scan was already
-    # running, so it was easy to fire an overlapping trigger by hand. Now
-    # that every trigger shares _PIPELINE_LOCK (see _dispatch_locked_scan),
-    # the page reflects that: one status banner, one big "run everything"
-    # button, and a plain list of per-region "Scan" links for the one real
-    # troubleshooting case (re-checking a single council after a fix) --
-    # the per-region "Find New"/"Enrich" buttons are dropped since
-    # /research-all and /enrich-all already cover that nationwide, and
-    # nothing this session observed Nick using them city-by-city. The
-    # underlying /research/{city} and /enrich-region/{city} routes are
-    # untouched -- only the buttons here are removed.
     city_links = "".join([
         f"<a href='/scan/{city.lower().replace(' ', '-')}' "
         f"style='display:inline-block; margin:4px; padding:8px 14px; background:#f8fafc; "
@@ -1142,24 +1188,31 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
         for city in ALL_CITIES  # Display all UK regions including Scotland and Wales
     ])
 
+    # Sep 2 2026: Nick's call -- "I don't want to have to manually scan
+    # things, it should be autonomous." A background scheduler now fires
+    # run_full_autonomous_cycle (scan pipeline + every tag backfill +
+    # partner enrichment) roughly once every 20 hours on its own (see
+    # main.py's _autonomous_scheduler_loop) -- this banner reports that
+    # fact plainly instead of asking Nick to remember to click anything.
     if _pipeline_state.get("running"):
         pipeline_banner = f"""<div style='background:#fef3c7; border:1px solid #f59e0b; border-radius:10px;
             padding:12px 18px; margin-bottom:18px; font-size:14px;'>
-            &#9203; <b>A scan is running right now</b> (started {html.escape(str(_pipeline_state.get('started_at') or '?'))}).
-            Any trigger clicked below while this is running will just report "already running" and change nothing -- that's expected, not a bug.
+            &#9203; <b>Autonomous cycle running right now</b> (started {html.escape(str(_pipeline_state.get('started_at') or '?'))}) -- scanning, tagging, and enriching in the background.
         </div>"""
     else:
-        pipeline_banner = """<div style='background:#ecfdf5; border:1px solid #10b981; border-radius:10px;
+        pipeline_banner = f"""<div style='background:#ecfdf5; border:1px solid #10b981; border-radius:10px;
             padding:12px 18px; margin-bottom:18px; font-size:14px;'>
-            &#9989; No scan currently running -- safe to trigger one below.
+            &#129302; <b>Running autonomously</b> -- no manual scanning needed. Last full cycle: <b>{_time_ago(last_cycle_at)}</b>. Next one fires on its own in roughly 20 hours from then.
         </div>"""
 
     pct = int((stats['enriched'] / stats['p'] * 100)) if stats['p'] else 0
+    partner_dead = (partner_tag_stats.get("categories", {}).get("contact", {}) or {}).get("contact:dead", 0)
+    lead_unclassified_region = (lead_tag_stats.get("categories", {}).get("region", {}) or {}).get("region:unclassified", 0)
 
     return f"""
     <html><head><title>Vector Data Labs  Admin Command</title></head>
     <body style="font-family:sans-serif; background:#f4f4f9; padding:40px;">
-    <div style="max-width:920px; margin:auto; background:white; padding:40px;
+    <div style="max-width:1080px; margin:auto; background:white; padding:40px;
                 border-radius:20px; border-top:8px solid #064e3b; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
         <div style="display:flex; justify-content:space-between; align-items:center;">
             <h1>&#128188; Tree Key Admin Command</h1>
@@ -1168,53 +1221,57 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
 
         {pipeline_banner}
 
-        <p>Verified LTD Partners: <b>{stats['p']}</b> &nbsp;|&nbsp;
-           Enriched with Contacts: <b style="color:#059669;">{stats['enriched']} ({pct}%)</b>
-           <br><br>
-           <span style="background:#0f172a; color:white; padding:4px 8px; border-radius:4px;">Total Planning Council Leads: <b>{stats['l_council']}</b></span>
-           &nbsp;
-           <span style="background:#ea580c; color:white; padding:4px 8px; border-radius:4px;">Total Domestic Leads: <b>{stats['l_domestic']}</b></span>
-           <br><br>
+        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:20px;">
+            <span style="background:#0f172a; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Total Leads: <b>{stats['l']}</b> ({stats['l_council']} council / {stats['l_domestic']} domestic)</span>
+            <span style="background:#047857; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Total Partners: <b>{stats['p']}</b></span>
+            <span style="background:#059669; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Partners w/ Contacts: <b>{stats['enriched']} ({pct}%)</b></span>
+            <span style="background:{'#dc2626' if partner_dead else '#64748b'}; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Dead Partners (no phone/email): <b>{partner_dead}</b></span>
+            <span style="background:{'#dc2626' if lead_unclassified_region else '#64748b'}; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Leads w/ Unclassified Region: <b>{lead_unclassified_region}</b></span>
+        </div>
+        <p style="margin:0 0 20px 0;">
            <a href='/status'> System Status</a>
            &nbsp;|&nbsp; <a href='/pricing'> Pricing Table</a>
            &nbsp;|&nbsp; <a href='/export-directors'> View Contacts</a>
            &nbsp;|&nbsp; <a href='/export-directors.csv' style='color:#1b5e20; font-weight:bold;'>&#128190; Download CSV</a>
+           &nbsp;|&nbsp; <a href='/leads-by-tag?tags=vertical:tree&match=all'> Filter Leads by Tag</a>
         </p>
         <hr>
 
-        <h3>&#128640; Run Everything</h3>
-        <p style="color:#64748b; font-size:13px; margin-top:-5px;">One button runs the full nationwide pipeline (all council scans, PlanIt, partner discovery, and enrichment) in the background. It shares the same lock as every link on this page, so it can never double up with another trigger.</p>
-        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
-            <a href='/trigger-daily-pipeline' style="background:#064e3b; color:white; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; box-shadow:0 2px 6px rgba(6,78,59,0.35);">
-                &#9889; Run Full Daily Pipeline
-            </a>
-            <a href='/scan-domestic-jobs' style="background:#ea580c; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                &#127968; Sweep Domestic Homeowner Leads
-            </a>
-            <a href='/populate-2000-partners' style="background:#047857; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                Harvest Contractors (Nationwide)
-            </a>
-            <a href='/enrich-all' style="background:#1b5e20; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                &#10024; Enrich All Partners
-            </a>
-            <a href='/research-all' style="background:#0284c7; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                Discover All Regions
-            </a>
-            <a href='/clean-partners' style="background:#b71c1c; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
-                Clean Database
-            </a>
-        </div>
-        <hr>
+        <h3>&#127795; Leads, by Category</h3>
+        {_render_tag_stat_section(lead_tag_stats.get("categories", {}))}
 
-        <h3>&#128269; Scan One Region</h3>
-        <p style="color:#64748b; font-size:13px; margin-top:-5px;">For troubleshooting a single council only -- e.g. re-checking one region right after fixing its scraper. Same lock, same rotation, same once-per-day dedup as the full pipeline: clicking a region twice in one day is a safe no-op, not a second real scan.</p>
-        {city_links}
+        <hr>
+        <h3>&#127970; Partners, by Category</h3>
+        {_render_tag_stat_section(partner_tag_stats.get("categories", {}))}
 
         <hr>
         <h4>Recent Leads (Past 24-48 Hours)</h4>
         <ul>{lead_rows or "<li>No leads yet.</li>"}</ul>
         <h4>Recent Verified Partners</h4>
         <ul>{partner_rows or "<li>No partners yet.</li>"}</ul>
+
+        <hr>
+        <details>
+            <summary style="cursor:pointer; font-weight:bold; color:#334155; padding:8px 0;">&#9881; Manual override (not needed day-to-day -- the system runs itself)</summary>
+            <p style="color:#64748b; font-size:13px;">Use these only for troubleshooting, or to force a fresh cycle right now instead of waiting for the next automatic one. Every link below shares the same lock, so nothing can double-run.</p>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+                <a href='/trigger-autonomous-cycle' style="background:#064e3b; color:white; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">
+                    &#9889; Run Full Autonomous Cycle Now
+                </a>
+                <a href='/trigger-daily-pipeline' style="background:#0f172a; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
+                    Scan Pipeline Only
+                </a>
+                <a href='/enrich-all' style="background:#1b5e20; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
+                    Enrich All Partners
+                </a>
+                <a href='/clean-partners' style="background:#b71c1c; color:white; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px;">
+                    Clean Database
+                </a>
+            </div>
+            <h4>Scan One Region</h4>
+            <p style="color:#64748b; font-size:13px; margin-top:-5px;">For troubleshooting a single council only. Clicking a region twice in one day is a safe no-op, not a second real scan.</p>
+            {city_links}
+        </details>
     </div>
     </body></html>
     """
@@ -4379,6 +4436,89 @@ def run_master_daily_pipeline():
     logger.info("[PIPELINE] 🏁 Master Daily Pipeline finished successfully.")
 
 
+def run_full_autonomous_cycle():
+    """Sep 2 2026: Nick's call -- 'I don't want to have to manually scan
+    things, it should be autonomous.' This is the one function the
+    scheduler below calls once a day: the existing 4-stage scan pipeline,
+    followed by every maintenance job that used to require a manual button
+    click (lead tag backfill, region resync, partner tag backfill, partner
+    enrichment). Each maintenance step loops until it reports no more work
+    left, capped at 20 iterations as a safety valve (matching this
+    project's other 'never spin forever' guards), so a growing backlog gets
+    fully drained autonomously instead of only nibbled at once a day."""
+    run_master_daily_pipeline()
+
+    logger.info("[AUTO] Starting tag/enrichment maintenance pass...")
+    try:
+        for _ in range(20):
+            result = database.backfill_lead_tags(batch_size=1000)
+            if result.get("updated", 0) < 1000:
+                break
+    except Exception as e:
+        logger.error(f"[AUTO] backfill_lead_tags error: {e}")
+
+    try:
+        for _ in range(20):
+            result = database.resync_region_tags(batch_size=2000)
+            done = result.get("updated", 0) + result.get("unchanged", 0) + result.get("errors", 0)
+            if done < 2000:
+                break
+    except Exception as e:
+        logger.error(f"[AUTO] resync_region_tags error: {e}")
+
+    try:
+        for _ in range(20):
+            result = database.backfill_partner_tags(batch_size=1000)
+            if result.get("updated", 0) < 1000:
+                break
+    except Exception as e:
+        logger.error(f"[AUTO] backfill_partner_tags error: {e}")
+
+    try:
+        research.enrich_existing_partners(limit=0)
+    except Exception as e:
+        logger.error(f"[AUTO] enrich_existing_partners error: {e}")
+
+    database.set_system_state("last_autonomous_cycle_at", datetime.datetime.utcnow().isoformat() + "Z")
+    logger.info("[AUTO] Autonomous daily cycle fully complete.")
+
+
+def _autonomous_scheduler_loop():
+    """Sep 2 2026: makes the whole platform self-driving. Checks every 20
+    minutes whether it's been >=20 hours since the last full autonomous
+    cycle -- tracked in the system_state table, which survives Render
+    restarts, not an in-memory flag that would forget every redeploy. 20h
+    (not 24h) gives slack so the cycle drifts earlier over time rather than
+    ever silently skipping a day. Because the persisted DB timestamp is
+    what controls this (not process uptime), Nick redeploying five times in
+    an afternoon can't accidentally fire five scans -- each restart just
+    resumes the same countdown."""
+    time.sleep(120)  # let the app finish starting up before the first check
+    while True:
+        try:
+            last_run_iso = database.get_system_state("last_autonomous_cycle_at")
+            should_run = True
+            if last_run_iso:
+                try:
+                    last_run = datetime.datetime.fromisoformat(last_run_iso.replace("Z", "+00:00"))
+                    hours_since = (datetime.datetime.now(datetime.timezone.utc) - last_run).total_seconds() / 3600
+                    should_run = hours_since >= 20
+                except Exception:
+                    should_run = True
+            if should_run and not _pipeline_state.get("running"):
+                logger.info("[AUTO] Kicking off autonomous daily cycle.")
+                _dispatch_locked_scan(run_full_autonomous_cycle, "autonomous_daily_cycle")
+        except Exception as e:
+            logger.error(f"[AUTO] Scheduler check error: {e}")
+        time.sleep(20 * 60)
+
+
+@app.on_event("startup")
+def _start_autonomous_scheduler():
+    threading.Thread(target=_autonomous_scheduler_loop, daemon=True).start()
+    logger.info("[AUTO] Autonomous scheduler thread started -- no manual scanning/enriching needed going forward.")
+
+
 def _dispatch_locked_scan(target_fn, action_name: str) -> dict:
     """Shared concurrency guard for every 'scan everything' trigger endpoint.
 
@@ -4430,13 +4570,28 @@ def trigger_daily_pipeline(secret: Optional[str] = Query(None)):
     return _dispatch_locked_scan(run_master_daily_pipeline, "master_daily_pipeline")
 
 
+@app.get("/trigger-autonomous-cycle")
+def trigger_autonomous_cycle(secret: Optional[str] = Query(None)):
+    """Sep 2 2026: manual override for run_full_autonomous_cycle (the same
+    thing the scheduler fires automatically once a day) -- for forcing a
+    full run right now rather than waiting for the next scheduled check,
+    e.g. right after a redeploy that changed the tagging/enrichment logic.
+    Also resets the 'last run' timer, same as a scheduled firing would."""
+    verify_cron_secret(secret)
+    return _dispatch_locked_scan(run_full_autonomous_cycle, "autonomous_daily_cycle")
+
+
 @app.get("/pipeline-status")
 def pipeline_status(secret: Optional[str] = Query(None)):
     """Aug 30 2026: added alongside the concurrency lock above so there's a
     real way to check whether a scan is in progress, instead of only
     watching raw logs for the start/finish lines."""
     verify_cron_secret(secret)
-    return {"running": _pipeline_state["running"], "started_at": _pipeline_state.get("started_at")}
+    return {
+        "running": _pipeline_state["running"],
+        "started_at": _pipeline_state.get("started_at"),
+        "last_autonomous_cycle_at": database.get_system_state("last_autonomous_cycle_at"),
+    }
 
 
 @app.get("/reset-pipeline-lock")

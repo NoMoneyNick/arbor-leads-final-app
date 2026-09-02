@@ -879,6 +879,13 @@ def research_all_cities():
 
 
 
+# Sep 2 2026: enrich_existing_partners commits in chunks of this size
+# rather than one giant batch at the very end -- see that function's
+# docstring for the incident (progress invisible + a redeploy losing an
+# entire in-progress run) this fixes.
+COMMIT_CHUNK_SIZE = 50
+
+
 # Sep 2 2026: partner tagging system, same "total control of our data"
 # philosophy as the lead tagging system in scanners.py. Nick's call: a
 # partner we can't actually reach (no working phone, no email) is dead to
@@ -984,8 +991,24 @@ def _generate_partner_tags(sic_codes: Optional[list], md_name: Optional[str],
 
 def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -> int:
     """
-    Enriches a bite-sized chunk of partners (default 50 or by specific region).
-    Fast, reliable, never hangs. Completes in 5-10 seconds!
+    Enriches partners needing contact info (default 50, or every one still
+    unenriched if limit=0/None, optionally scoped to one city_name).
+
+    Sep 2 2026: this used to fetch the WHOLE batch, run all of it through
+    the Companies House/Google Places/website-scrape pipeline, and only
+    write to the database once, right at the end, in one big execute_batch.
+    Companies House calls are globally rate-limited to ~1 every 0.6s
+    (_CH_RATE_LOCK) regardless of thread count, so a limit=0 run against
+    Nick's real backlog (1195+ partners) takes well over 10 minutes, not
+    the "5-10 seconds" this docstring used to (wrongly) promise. Writing
+    only at the very end meant two real problems: (1) /api-stats showed
+    zero progress for the entire run, making a genuinely-still-working job
+    indistinguishable from a stuck/dead one, and (2) if the process got
+    killed mid-run (a Render redeploy -- which happened twice to this exact
+    job) EVERY partner already looked up was thrown away, not just the
+    ones still in flight. Now writes in COMMIT_CHUNK_SIZE-sized chunks as
+    it goes: progress is visible in real time, and a mid-run kill only
+    loses the current small chunk instead of the whole batch.
     """
     if not CH_KEY:
         logger.error("[Enrichment] COMPANIES_HOUSE_KEY not set. Aborting.")
@@ -1022,7 +1045,7 @@ def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -
             logger.info(f"[Enrichment] All partners {f'in {city_name}' if city_name else ''} are already enriched!")
             return 0
 
-        logger.info(f"[Enrichment] 🚀 Processing fresh batch of {len(partners)} partners {f'for {city_name}' if city_name else ''}...")
+        logger.info(f"[Enrichment] 🚀 Processing {len(partners)} partners {f'for {city_name}' if city_name else ''} in chunks of {COMMIT_CHUNK_SIZE}...")
 
         from psycopg2.extras import execute_batch
 
@@ -1057,26 +1080,34 @@ def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -
                 return (existing_md, existing_phone, existing_rating, existing_website, existing_email, tags, pid)
 
         from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            results = list(executor.map(enrich_single_partner, partners))
+        total_saved = 0
+        for chunk_start in range(0, len(partners), COMMIT_CHUNK_SIZE):
+            chunk = partners[chunk_start:chunk_start + COMMIT_CHUNK_SIZE]
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                chunk_results = list(executor.map(enrich_single_partner, chunk))
 
-        valid_updates = [r for r in results if r is not None]
-        if valid_updates:
-            p_conn = database.get_db_conn()
-            p_cur = p_conn.cursor()
-            execute_batch(p_cur, """
-                UPDATE potential_partners
-                SET md_name = %s, phone_number = %s, google_rating = %s,
-                    website = %s, email = %s, tags = %s, enriched_at = NOW()
-                WHERE id = %s
-            """, valid_updates, page_size=25)
-            p_conn.commit()
-            p_cur.close()
-            p_conn.close()
+            valid_updates = [r for r in chunk_results if r is not None]
+            if valid_updates:
+                p_conn = database.get_db_conn()
+                p_cur = p_conn.cursor()
+                execute_batch(p_cur, """
+                    UPDATE potential_partners
+                    SET md_name = %s, phone_number = %s, google_rating = %s,
+                        website = %s, email = %s, tags = %s, enriched_at = NOW()
+                    WHERE id = %s
+                """, valid_updates, page_size=25)
+                p_conn.commit()
+                p_cur.close()
+                p_conn.close()
+                total_saved += len(valid_updates)
 
+            logger.info(
+                f"[Enrichment] Progress: {chunk_start + len(chunk)}/{len(partners)} processed, "
+                f"{total_saved} saved so far {f'for {city_name}' if city_name else ''}."
+            )
 
-        logger.info(f"[Enrichment] 🎯 Complete! Enriched and saved {len(valid_updates)} partners in {city_name or 'batch'}.")
-        return len(valid_updates)
+        logger.info(f"[Enrichment] 🎯 Complete! Enriched and saved {total_saved} partners in {city_name or 'batch'}.")
+        return total_saved
 
     except Exception as e:
         logger.error(f"[Enrichment] Fatal error: {e}")

@@ -326,6 +326,20 @@ def init_db():
                 discovered_at TIMESTAMPTZ DEFAULT NOW(),
                 reviewed_at TIMESTAMPTZ
             );
+
+            -- Sep 2 2026: tiny durable key/value store for the autonomous
+            -- scheduler (see main.py's _autonomous_scheduler_loop) to
+            -- record when the daily cycle last actually ran. Needed
+            -- because Render restarts this process on every redeploy --
+            -- an in-memory "have I run today" flag would forget on every
+            -- restart and could re-fire the full pipeline (and hammer
+            -- every council portal again) minutes after Nick's last
+            -- redeploy. A persisted timestamp survives restarts.
+            CREATE TABLE IF NOT EXISTS system_state (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
         """)
 
         # Performance Indices for Instant High-Volume Queries
@@ -965,6 +979,49 @@ def get_partner_tag_counts() -> dict:
     except Exception as e:
         logger.error(f"[PartnerTags] get_partner_tag_counts error: {e}")
         return {"error": str(e)}
+
+
+def get_system_state(key: str) -> Optional[str]:
+    """Reads one value from the tiny durable key/value store (see
+    system_state's own comment for why this exists -- surviving Render
+    restarts is the entire point). Returns None if unset or on any error,
+    same 'never crash the caller over a non-critical read' posture as the
+    rest of this file's small helpers."""
+    if not SURL:
+        return None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM system_state WHERE key = %s;", (key,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return row[0] if row else None
+    except Exception as e:
+        logger.debug(f"[SystemState] get_system_state({key!r}) error: {e}")
+        return None
+
+
+def set_system_state(key: str, value: str) -> bool:
+    """Writes one value to the durable key/value store. Returns False (not
+    an exception) on failure -- callers (the autonomous scheduler) should
+    degrade to 'try again next check' rather than crash."""
+    if not SURL:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO system_state (key, value, updated_at) VALUES (%s, %s, NOW())
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();
+        """, (key, value))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.warning(f"[SystemState] set_system_state({key!r}) error: {e}")
+        return False
 
 
 def reset_monthly_quotas_if_needed() -> int:
