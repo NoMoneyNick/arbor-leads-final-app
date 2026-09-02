@@ -266,5 +266,78 @@ class TestGetDirectorFromChExcludesCorporateOfficers(unittest.TestCase):
         self.assertIsNone(name)
 
 
+class TestGetGooglePlacesInfo(unittest.TestCase):
+    """Sep 2 2026: covers the switch back to the real Places API (New) as
+    the primary path, with the old DuckDuckGo scrape kept only as a
+    fallback for when GOOGLE_MAPS_KEY isn't configured. Mocks
+    research.net_utils.smart_post/smart_get -- no real network call, no
+    live API key required to run this suite."""
+
+    def setUp(self):
+        self._orig_key = research.GOOGLE_MAPS_KEY
+
+    def tearDown(self):
+        research.GOOGLE_MAPS_KEY = self._orig_key
+
+    def _fake_response(self, status_code=200, json_data=None, text=""):
+        class _Resp:
+            pass
+        r = _Resp()
+        r.status_code = status_code
+        r.text = text
+        r.json = lambda: json_data or {}
+        return r
+
+    def test_uses_real_api_when_key_is_configured_and_parses_fields(self):
+        research.GOOGLE_MAPS_KEY = "fake-test-key"
+        fake_places = {"places": [{
+            "nationalPhoneNumber": "020 3143 6969",
+            "websiteUri": "https://acmetreesurgery.co.uk",
+            "rating": 4.6,
+        }]}
+        import unittest.mock as mock
+        with mock.patch.object(research.net_utils, "smart_post",
+                                return_value=self._fake_response(json_data=fake_places)) as mock_post:
+            rating, phone, website = research.get_google_places_info("Acme Tree Surgery Ltd", "London")
+        self.assertEqual(website, "https://acmetreesurgery.co.uk")
+        self.assertEqual(rating, 4.6)
+        self.assertTrue(phone and phone.replace(" ", "").endswith("31436969"))
+        # Confirms the real API endpoint is hit, not DuckDuckGo.
+        called_url = mock_post.call_args[0][0]
+        self.assertIn("places.googleapis.com", called_url)
+        called_headers = mock_post.call_args.kwargs.get("headers", {})
+        self.assertEqual(called_headers.get("X-Goog-Api-Key"), "fake-test-key")
+
+    def test_no_places_found_returns_all_none(self):
+        research.GOOGLE_MAPS_KEY = "fake-test-key"
+        import unittest.mock as mock
+        with mock.patch.object(research.net_utils, "smart_post",
+                                return_value=self._fake_response(json_data={"places": []})):
+            result = research.get_google_places_info("Nonexistent Company Ltd", "London")
+        self.assertEqual(result, (None, None, None))
+
+    def test_non_200_response_is_logged_and_returns_all_none_not_a_crash(self):
+        research.GOOGLE_MAPS_KEY = "fake-test-key"
+        import unittest.mock as mock
+        with mock.patch.object(research.net_utils, "smart_post",
+                                return_value=self._fake_response(status_code=403, text="API key invalid")):
+            result = research.get_google_places_info("Acme Tree Surgery Ltd", "London")
+        self.assertEqual(result, (None, None, None))
+
+    def test_falls_back_to_ddg_scrape_when_no_key_configured(self):
+        """Without a key, this must not attempt the real API at all --
+        confirms the DDG scrape path (not the API) is what actually runs,
+        by checking net_utils.smart_get (DDG's method) gets called instead
+        of smart_post (the API's method)."""
+        research.GOOGLE_MAPS_KEY = ""
+        import unittest.mock as mock
+        with mock.patch.object(research.net_utils, "smart_post") as mock_post, \
+             mock.patch.object(research.net_utils, "smart_get",
+                                return_value=self._fake_response(status_code=200, text="<html></html>")) as mock_get:
+            research.get_google_places_info("Acme Tree Surgery Ltd", "London")
+        mock_post.assert_not_called()
+        mock_get.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -402,9 +402,77 @@ def scrape_email_from_website(website_url: str) -> Optional[str]:
 
 def get_google_places_info(company_name: str, city_or_addr: str = ""):
     """
-    Pillar 3: Replaced paid Google Places API with DuckDuckGo HTML Web Scraping
+    Sep 2 2026: restored to the REAL Places API (New) when GOOGLE_MAPS_KEY
+    is configured -- and it already IS, sitting unused in this app's own
+    environment since "Pillar 3" switched this function over to scraping
+    DuckDuckGo's HTML search results instead, purely to dodge the API's
+    cost. That trade caught up with this project live: after fixing the
+    DDG cross-thread throttle bug (a real, separate issue), Nick reported
+    phone/email STILL blank for every single company in a 30+ row sample,
+    with no rate-limit error anywhere in the logs -- DuckDuckGo was
+    returning normal 200 responses that just weren't parsing into usable
+    results (a markup change, a soft block, or both -- impossible to tell
+    for certain from this environment, which has no way to fetch
+    DuckDuckGo directly to inspect what it's actually sending back). Every
+    further DDG-side patch would have been another guess against a search
+    engine that has no obligation to keep working for a scraper. The real
+    fix is to stop guessing and use the documented, supported API this
+    project already pays for.
+
+    Also restores a REAL rating: the Sep 2 2026 audit fix earlier today
+    correctly nulled out the old rating field because DDG-scraped HTML
+    never had one (it was a hardcoded fake 4.8) -- but Places API (New)
+    returns an actual aggregate customer rating, so populating it here is
+    now honest, not a regression back to fabricating it.
+
+    Falls back to the old DuckDuckGo scrape ONLY when GOOGLE_MAPS_KEY isn't
+    configured at all (local dev/test without the key set), so nothing
+    breaks where the key genuinely isn't available.
+
     Returns: (rating: float|None, phone_number: str|None, website: str|None)
     """
+    if GOOGLE_MAPS_KEY:
+        return _get_google_places_info_via_api(company_name, city_or_addr)
+    return _get_google_places_info_via_ddg_scrape(company_name, city_or_addr)
+
+
+def _get_google_places_info_via_api(company_name: str, city_or_addr: str = ""):
+    """Places API (New) Text Search, requesting phone/website/rating
+    directly in the field mask -- one call gets everything this project
+    needs, no separate Place Details call required. See
+    get_google_places_info's docstring for why this replaced the DDG
+    scrape as the primary path."""
+    try:
+        query = f"{company_name} {city_or_addr} tree surgery UK".strip()
+        url = "https://places.googleapis.com/v1/places:searchText"
+        headers = {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": GOOGLE_MAPS_KEY,
+            "X-Goog-FieldMask": "places.nationalPhoneNumber,places.websiteUri,places.rating",
+        }
+        body = {"textQuery": query, "pageSize": 1}
+        res = net_utils.smart_post(url, json=body, headers=headers, timeout=10)
+        if res.status_code != 200:
+            logger.warning(f"[Google Places] Non-200 ({res.status_code}) for '{company_name}': {res.text[:200]}")
+            return None, None, None
+        places = (res.json() or {}).get("places") or []
+        if not places:
+            return None, None, None
+        place = places[0]
+        rating = place.get("rating")
+        website = place.get("websiteUri")
+        raw_phone = place.get("nationalPhoneNumber")
+        phone = _is_valid_uk_phone(raw_phone) if raw_phone else None
+        return rating, phone, website
+    except Exception as e:
+        logger.debug(f"[Google Places] Error fetching info for {company_name}: {e}")
+        return None, None, None
+
+
+def _get_google_places_info_via_ddg_scrape(company_name: str, city_or_addr: str = ""):
+    """The original DuckDuckGo HTML scrape -- kept as a fallback for when
+    GOOGLE_MAPS_KEY isn't configured (e.g. local dev/test), not as the
+    primary path anymore. See get_google_places_info's docstring."""
     try:
         import time
         import urllib.parse
