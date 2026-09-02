@@ -3151,6 +3151,53 @@ class TestLeadTagging(unittest.TestCase):
         self.assertIn("agent:no", scanners._generate_tags(*base, False))
         self.assertIn("agent:unconfirmed", scanners._generate_tags(*base, None))
 
+    def test_generate_tags_agent_type_breakdown_nicks_none_agent_tree_surgeon_ask(self):
+        """Nick's own words: 'not only agent yes/no but rather
+        none/agent/tree surgeon as the agent ones who are not tree surgeons
+        are potentially viable leads'. agent_type is additive alongside the
+        original agent:yes/no/unconfirmed tag, not a replacement."""
+        base = ("1 Elm St", "Fell a tree", "LEEDS", "tree", "small")
+        self.assertIn("agent_type:none", scanners._generate_tags(*base, False, None))
+        self.assertIn("agent_type:confirmed-tree-surgeon", scanners._generate_tags(*base, True, True))
+        self.assertIn("agent_type:confirmed-other", scanners._generate_tags(*base, True, False))
+        self.assertIn("agent_type:type-unconfirmed", scanners._generate_tags(*base, True, None))
+        self.assertIn("agent_type:unconfirmed", scanners._generate_tags(*base, None, None))
+
+    def test_generate_tags_skips_agent_type_for_hmo(self):
+        """agent_is_tree_surgeon has no equivalent concept for HMO -- an
+        HMO lead should never get a meaningless agent_type:type-unconfirmed
+        tag just because it happens to have some agent on record."""
+        tags = scanners._generate_tags(
+            "9 Ivy Road, Bristol", "Change of use to a house in multiple occupation",
+            "BRISTOL", "hmo", "medium", True, None
+        )
+        self.assertIn("agent:yes", tags)
+        self.assertFalse(any(t.startswith("agent_type:") for t in tags))
+
+    def test_generate_tags_agent_guess_only_fires_on_an_actual_company_mention(self):
+        """First implementation ran the tree-keyword classifier over the
+        whole description and guessed 'tree-surgeon' on almost every tree
+        lead, since the description of a TREE lead obviously mentions tree
+        words -- caught by testing before shipping. The fixed version only
+        guesses when the text actually names a company (a capitalised
+        phrase ending Ltd/Limited/LLP/Plc), and must guess nothing at all
+        for an ordinary description with no company mentioned."""
+        generic = scanners._generate_tags("1 Elm St", "General tree works, crown reduction", "LEEDS", "tree", "small", None, None)
+        self.assertFalse(any(t.startswith("agent_guess:") for t in generic))
+        names_tree_co = scanners._generate_tags(
+            "1 Elm St", "Works agreed with Acme Tree Surgeons Ltd on site", "LEEDS", "tree", "small", None, None
+        )
+        self.assertIn("agent_guess:tree-surgeon", names_tree_co)
+        names_other_co = scanners._generate_tags(
+            "1 Elm St", "Drawings prepared by Smith Architects Ltd", "LEEDS", "tree", "small", None, None
+        )
+        self.assertIn("agent_guess:non-tree-surgeon", names_other_co)
+
+    def test_guess_agent_type_from_text_returns_none_for_no_text_or_no_company(self):
+        self.assertIsNone(scanners._guess_agent_type_from_text(None))
+        self.assertIsNone(scanners._guess_agent_type_from_text(""))
+        self.assertIsNone(scanners._guess_agent_type_from_text("Fell one oak tree in the rear garden"))
+
     def test_generate_tags_skips_job_type_tags_for_hmo(self):
         """The job-type sub-classifier is tree-specific (felling/crown/hedge/
         stump/tpo/disease are tree-vertical concepts) -- an HMO lead should

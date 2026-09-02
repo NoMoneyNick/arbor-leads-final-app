@@ -843,6 +843,60 @@ def backfill_lead_tags(batch_size: int = 500) -> dict:
             "note": "re-run if 'updated' == batch_size -- there may be more rows left untagged."}
 
 
+def resync_all_lead_tags(commit_every: int = 500) -> dict:
+    """Sep 2 2026: same 'recompute every row, not just untagged ones'
+    pattern as resync_all_partner_tags -- added for the agent_type/
+    agent_guess tag split (see scanners._generate_tags), which only NEW
+    lookups pick up on their own; this is what makes it reach every lead
+    tagged before that split existed. Pure local recompute from columns
+    already in the row (has_agent, agent_is_tree_surgeon, summary, etc.),
+    no external API calls, so it's safe and cheap to process the whole
+    table in one call. Commits every `commit_every` rows so a mid-run
+    interruption only costs the current chunk."""
+    if not SURL:
+        return {"error": "no database configured"}
+    updated = 0
+    unchanged = 0
+    errors = 0
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT id, address, summary, council_source, vertical, lead_score,
+                       has_agent, agent_is_tree_surgeon, tags
+                FROM leads;
+            """)
+            rows = cur.fetchall()
+            import scanners as _scanners
+            for i, (lead_id, address, summary, council_source, vertical, lead_score,
+                    has_agent, agent_is_tree_surgeon, old_tags) in enumerate(rows, 1):
+                try:
+                    new_tags = _scanners._generate_tags(
+                        address, summary, council_source, vertical or "tree",
+                        lead_score or "small", has_agent, agent_is_tree_surgeon
+                    )
+                    if sorted(new_tags) != sorted(old_tags or []):
+                        cur.execute("UPDATE leads SET tags = %s WHERE id = %s;", (new_tags, lead_id))
+                        updated += 1
+                    else:
+                        unchanged += 1
+                except Exception as row_err:
+                    errors += 1
+                    logger.warning(f"[LeadTags] Resync-all error on lead {lead_id}: {row_err}")
+                if i % commit_every == 0:
+                    conn.commit()
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[LeadTags] Resync-all error: {e}")
+        return {"error": str(e), "updated": updated, "unchanged": unchanged, "errors": errors}
+    return {"updated": updated, "unchanged": unchanged, "errors": errors,
+            "note": "full resync complete -- every lead's tags recomputed from current column values."}
+
+
 def resync_region_tags(batch_size: int = 2000) -> dict:
     """Sep 2 2026: one-time correction pass for every lead already carrying
     region:unclassified from before region resolution was made
@@ -960,7 +1014,7 @@ def backfill_partner_tags(batch_size: int = 500) -> dict:
         cur = conn.cursor()
         try:
             cur.execute("""
-                SELECT id, sic_codes, md_name, phone_number, email
+                SELECT id, sic_codes, md_name, phone_number, email, company_name
                 FROM potential_partners
                 WHERE tags IS NULL OR tags = '{}'
                 LIMIT %s;
@@ -971,9 +1025,9 @@ def backfill_partner_tags(batch_size: int = 500) -> dict:
                 return {"updated": 0, "errors": 0, "batch_size": batch_size,
                         "note": "no untagged partners found."}
             import research as _research
-            for partner_id, sic_codes, md_name, phone_number, email in rows:
+            for partner_id, sic_codes, md_name, phone_number, email, company_name in rows:
                 try:
-                    tags = _research._generate_partner_tags(sic_codes, md_name, phone_number, email)
+                    tags = _research._generate_partner_tags(sic_codes, md_name, phone_number, email, company_name=company_name)
                     cur.execute("UPDATE potential_partners SET tags = %s WHERE id = %s;", (tags, partner_id))
                     updated += 1
                 except Exception as row_err:
@@ -1014,12 +1068,12 @@ def resync_all_partner_tags(commit_every: int = 500) -> dict:
         conn = get_db_conn()
         cur = conn.cursor()
         try:
-            cur.execute("SELECT id, sic_codes, md_name, phone_number, email, tags FROM potential_partners;")
+            cur.execute("SELECT id, sic_codes, md_name, phone_number, email, tags, company_name FROM potential_partners;")
             rows = cur.fetchall()
             import research as _research
-            for i, (partner_id, sic_codes, md_name, phone_number, email, old_tags) in enumerate(rows, 1):
+            for i, (partner_id, sic_codes, md_name, phone_number, email, old_tags, company_name) in enumerate(rows, 1):
                 try:
-                    new_tags = _research._generate_partner_tags(sic_codes, md_name, phone_number, email)
+                    new_tags = _research._generate_partner_tags(sic_codes, md_name, phone_number, email, company_name=company_name)
                     if sorted(new_tags) != sorted(old_tags or []):
                         cur.execute("UPDATE potential_partners SET tags = %s WHERE id = %s;", (new_tags, partner_id))
                         updated += 1
@@ -1039,6 +1093,66 @@ def resync_all_partner_tags(commit_every: int = 500) -> dict:
         return {"error": str(e), "updated": updated, "unchanged": unchanged, "errors": errors}
     return {"updated": updated, "unchanged": unchanged, "errors": errors,
             "note": "full resync complete -- every partner's tags recomputed from current column values."}
+
+
+def requeue_dead_contact_enrichment() -> dict:
+    """Sep 2 2026: clears enriched_at for partners that were processed but
+    found NEITHER a phone nor an email (contact:dead), so the next
+    autonomous cycle's enrich_existing_partners(limit=0) call gives them a
+    genuine second attempt instead of skipping them forever.
+
+    Why this is needed, not just theoretical: enrich_existing_partners only
+    ever selects rows WHERE enriched_at IS NULL -- once a partner has been
+    processed even once, it is never looked at again regardless of whether
+    the attempt actually succeeded. Meanwhile every phone/website lookup in
+    this file went through get_google_places_info(), which scraped DDG's
+    html.duckduckgo.com with a `time.sleep(1.2)` INSIDE the function body --
+    but every call site runs that function inside a ThreadPoolExecutor with
+    8-20 worker threads, so the sleep only throttled each thread against
+    itself, not the group. That let bursts of up to 20 simultaneous
+    requests hit DDG together, well within range of getting rate-limited or
+    served a block page -- which fails silently (a non-200 response just
+    falls through to 'no website found', identical in the data to a
+    company that genuinely has no discoverable web presence). Nick caught
+    this directly: pasted production logs showing "Phone: N/A | Email: N/A"
+    for essentially every single company in a row, including established
+    real businesses that almost certainly have a findable number --
+    inconsistent with "no data available" and consistent with the DDG
+    throttle being ineffective. That throttle is now a shared cross-thread
+    lock (_DDG_MIN_INTERVAL in research.py), but every partner already
+    marked enriched_at under the OLD broken throttle is permanently stuck
+    with whatever it found (often nothing) and will never be retried by
+    enrich_existing_partners on its own. This function is the one-time
+    catch-up: only partners with zero contact info found (phone_number IS
+    NULL AND email IS NULL) are re-queued -- anything that already has a
+    phone or email is left alone, since those already worked and don't
+    need re-checking.
+    """
+    if not SURL:
+        return {"error": "no database configured"}
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                UPDATE potential_partners
+                SET enriched_at = NULL
+                WHERE enriched_at IS NOT NULL
+                  AND phone_number IS NULL
+                  AND email IS NULL;
+                """
+            )
+            requeued = cur.rowcount
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Enrichment] Requeue-dead-contacts error: {e}")
+        return {"error": str(e)}
+    return {"requeued": requeued,
+            "note": "these partners will be re-attempted on the next enrich_existing_partners run, now under the fixed cross-thread DDG throttle."}
 
 
 def get_partner_tag_counts() -> dict:

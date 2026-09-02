@@ -801,21 +801,97 @@ def _slugify_tag(value: str) -> str:
     return v or "unknown"
 
 
+_COMPANY_NAME_IN_TEXT_RE = re.compile(
+    r"\b([A-Z][A-Za-z0-9&'.\-]*(?:\s+[A-Z][A-Za-z0-9&'.\-]*){0,5}\s+"
+    r"(?:Ltd|Limited|LLP|Plc|PLC))\b"
+)
+
+
+def _guess_agent_type_from_text(text: Optional[str]) -> Optional[bool]:
+    """Sep 2 2026, Nick's 'third round' idea for leads: when agent status
+    has no hard confirmation at all, make a best-effort guess from whatever
+    text we DO have (the application's own description) rather than just
+    giving up.
+
+    First attempt was to run mesh_scrapers.classify_agent_as_tree_surgeon
+    straight over the whole description -- wrong, caught by testing this
+    before shipping it: virtually every tree-vertical lead's description
+    mentions tree-related words somewhere (that's *why* it's a tree lead),
+    so that produced a near-100%-hit-rate 'guess' regardless of whether any
+    company was actually mentioned at all -- noise dressed up as signal,
+    exactly the kind of thing this whole project has been auditing out.
+
+    Fixed by only guessing when the text actually names a company: extract
+    a capitalised-words-plus-Ltd/Limited/LLP/Plc phrase (the same shape a
+    real agent_company value has) and classify THAT narrow substring, not
+    the surrounding prose. A description with no such phrase at all (the
+    common case) returns None -- no guess -- exactly Nick's rule: 'if there
+    is really nothing to go on they are placed as totally unconfirmed.'
+    Lazily imports mesh_scrapers (it imports FROM scanners, so a
+    module-level import here would be circular) and is defensively
+    wrapped -- a guess that fails to import or throws is just no guess,
+    never a crash."""
+    if not text or not text.strip():
+        return None
+    match = _COMPANY_NAME_IN_TEXT_RE.search(text)
+    if not match:
+        return None
+    candidate_name = match.group(1)
+    try:
+        import mesh_scrapers as _mesh_scrapers
+        return _mesh_scrapers.classify_agent_as_tree_surgeon(candidate_name, None)
+    except Exception:
+        return None
+
+
 def _generate_tags(address: str, summary: str, council_source: str, vertical: str,
-                    lead_score: str, has_agent: Optional[bool]) -> list:
+                    lead_score: str, has_agent: Optional[bool],
+                    agent_is_tree_surgeon: Optional[bool] = None) -> list:
     """Builds the full 'floating bubble' tag list for one lead. Every tag is
     an independent fact about the lead -- callers filter by combining
     whichever ones they want (database.get_leads_by_tags), they aren't a
-    single mutually-exclusive category."""
+    single mutually-exclusive category.
+
+    agent_is_tree_surgeon (Sep 2 2026, optional/keyword so every existing
+    positional call site keeps working unchanged): drives the agent_type
+    breakdown Nick asked for -- "not only agent yes/no but rather
+    none/agent/tree surgeon" -- kept as a separate prefix from the original
+    agent:yes/no/unconfirmed tag (additive, not a replacement). Only
+    meaningful for the tree vertical: agent_is_tree_surgeon has no
+    equivalent concept for HMO (see _is_agent_already_handling_the_job's
+    own docstring in database.py), so this is skipped entirely for
+    non-tree leads rather than tagging every one of them a meaningless
+    'type-unconfirmed'."""
     tags = [f"vertical:{vertical}"]
     if lead_score:
         tags.append(f"size:{_slugify_tag(lead_score)}")
     if has_agent is True:
         tags.append("agent:yes")
+        if vertical == "tree":
+            if agent_is_tree_surgeon is True:
+                tags.append("agent_type:confirmed-tree-surgeon")
+            elif agent_is_tree_surgeon is False:
+                tags.append("agent_type:confirmed-other")
+            else:
+                tags.append("agent_type:type-unconfirmed")
+                guess = _guess_agent_type_from_text(summary)
+                if guess is True:
+                    tags.append("agent_guess:tree-surgeon")
+                elif guess is False:
+                    tags.append("agent_guess:non-tree-surgeon")
     elif has_agent is False:
         tags.append("agent:no")
+        if vertical == "tree":
+            tags.append("agent_type:none")
     else:
         tags.append("agent:unconfirmed")
+        if vertical == "tree":
+            tags.append("agent_type:unconfirmed")
+            guess = _guess_agent_type_from_text(summary)
+            if guess is True:
+                tags.append("agent_guess:tree-surgeon")
+            elif guess is False:
+                tags.append("agent_guess:non-tree-surgeon")
     if council_source:
         tags.append(f"locale:{_slugify_tag(council_source)}")
     tags.append(f"region:{_slugify_tag(_resolve_region(address, council_source))}")
@@ -905,7 +981,7 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
         agent_is_tree_surgeon = None
 
     lead_score, lead_price = score_lead(summary)
-    tags = _generate_tags(address, summary, source, vertical, lead_score, has_agent)
+    tags = _generate_tags(address, summary, source, vertical, lead_score, has_agent, agent_is_tree_surgeon)
     try:
         cur.execute(
             """

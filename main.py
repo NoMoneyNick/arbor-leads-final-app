@@ -1074,9 +1074,41 @@ KNOWN_TAG_VALUES = {
     "job": sorted(set(scanners.JOB_TYPE_KEYWORDS.keys()) | {"other"}),
     "size": ["small", "medium", "large"],
     "agent": ["yes", "no", "unconfirmed"],
+    # Sep 2 2026: Nick's ask -- "not only agent yes/no but rather
+    # none/agent/tree surgeon as the agent ones who are not tree surgeons
+    # are potentially viable leads". Kept as its own prefix alongside
+    # 'agent' above (rather than replacing it) so nothing that already
+    # filters on agent:yes/no/unconfirmed breaks -- this is additive detail,
+    # not a replacement. Only emitted for the tree vertical (see
+    # scanners._generate_tags -- agent_is_tree_surgeon has no equivalent
+    # concept for HMO, so tagging every HMO lead 'type-unconfirmed' would
+    # just be noise, not information).
+    "agent_type": ["none", "confirmed-tree-surgeon", "confirmed-other", "type-unconfirmed", "unconfirmed"],
+    # Sep 2 2026: the "third round" educated guess for leads where the
+    # agent status has no hard confirmation at all -- a best-effort read of
+    # the application's own description text (see
+    # mesh_scrapers.classify_agent_as_tree_surgeon). Deliberately has no
+    # 'no signal' value of its own: a lead with nothing to go on simply gets
+    # no agent_guess tag at all and the generic renderer's own gap row
+    # ("no agent_guess tag") shows that honestly, rather than this list
+    # claiming a fixed set of guessable outcomes that don't include "none".
+    "agent_guess": ["tree-surgeon", "non-tree-surgeon"],
     "vertical": ["tree", "hmo"],
-    "region": sorted(set(scanners.COUNCIL_TO_REGION.values())) + ["unclassified"],
-    "business": sorted(set(research.SIC_DIVISION_TO_BUSINESS_KIND.values())) + ["unclassified"],
+    # Sep 2 2026 audit fix: this used to be the raw pretty-printed region
+    # names ("East Midlands", "South East", ...) while every REAL stored
+    # region tag is slugified (region:east-midlands) by
+    # scanners._slugify_tag -- so every one of these known-value rows never
+    # matched a real row and always rendered as a duplicate, permanently-
+    # zero entry next to the real (slugified) one carrying the actual
+    # count. Caught by Nick looking straight at the admin page and asking
+    # "why are the regions empty?" -- they weren't empty, they were just
+    # the wrong (unslugified) rows sitting at zero next to the real ones.
+    "region": sorted({scanners._slugify_tag(v) for v in scanners.COUNCIL_TO_REGION.values()}) + ["unclassified"],
+    "business": sorted(set(research.SIC_DIVISION_TO_BUSINESS_KIND.values()) | {research.BUSINESS_KIND_NAME_OVERRIDE}) + ["unclassified"],
+    # Sep 2 2026: the partner-side third-round guess -- see
+    # research._guess_business_kind. Same "no guess tag at all, not a
+    # 'none' value" rule as agent_guess above.
+    "business_guess": sorted(set(research._BUSINESS_GUESS_KEYWORDS.keys())),
     "director": ["yes", "no"],
     "phone": ["yes", "no"],
     "email": ["yes", "no"],
@@ -4893,6 +4925,38 @@ def trigger_resync_partner_tags(secret: Optional[str] = Query(None)):
     not just newly-discovered ones."""
     verify_cron_secret(secret)
     result = database.resync_all_partner_tags()
+    return {"status": "complete", **result}
+
+
+@app.get("/trigger-resync-lead-tags")
+def trigger_resync_lead_tags(secret: Optional[str] = Query(None)):
+    """Sep 2 2026: recomputes EVERY lead's tags from current column values
+    (not just untagged rows) -- see database.resync_all_lead_tags. Run this
+    once after deploying the agent_type/agent_guess tag split (Nick's ask:
+    'not only agent yes/no but rather none/agent/tree surgeon') so leads
+    tagged before the split existed get the new breakdown too, not just
+    newly-scanned ones."""
+    verify_cron_secret(secret)
+    result = database.resync_all_lead_tags()
+    return {"status": "complete", **result}
+
+
+@app.get("/trigger-requeue-dead-enrichment")
+def trigger_requeue_dead_enrichment(secret: Optional[str] = Query(None)):
+    """Sep 2 2026: one-time catch-up after fixing the DDG cross-thread
+    throttle bug in research.py (get_google_places_info's `time.sleep(1.2)`
+    was per-thread, not global, so up to 20 concurrent scrape requests could
+    hit DDG together and get silently rate-limited -- indistinguishable in
+    the data from 'this company genuinely has no phone/email'). Every
+    partner already marked enriched_at with zero contact info found is
+    permanently skipped by enrich_existing_partners's `WHERE enriched_at IS
+    NULL` filter on its own -- this re-queues just that subset (phone AND
+    email both still NULL) for a genuine retry under the fixed throttle,
+    without disturbing partners that already found real contact info. Run
+    this once after deploying the throttle fix; see
+    database.requeue_dead_contact_enrichment."""
+    verify_cron_secret(secret)
+    result = database.requeue_dead_contact_enrichment()
     return {"status": "complete", **result}
 
 

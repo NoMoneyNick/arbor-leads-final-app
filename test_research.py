@@ -92,6 +92,74 @@ class TestClassifyBusinessKind(unittest.TestCase):
         self.assertEqual(research._classify_business_kind(None), "unclassified")
         self.assertEqual(research._classify_business_kind(["99999"]), "unclassified")
 
+    def test_decisive_company_name_overrides_sic_nicks_real_example(self):
+        """Nick's own live example: AA GARDENING TREE SURGEONS LTD, company
+        12026615, sits under SIC 91040 (Botanical and zoological gardens and
+        nature reserves activities) -- nowhere near any SIC division this
+        file maps. His rule: 'if a company has the words tree surgeon in
+        their name they are always tree surgeons regardless of sic'. Name
+        must win outright, not just break a tie."""
+        self.assertEqual(
+            research._classify_business_kind(["91040"], "AA GARDENING TREE SURGEONS LTD"),
+            "tree-surgery"
+        )
+        # A decisive name with NO sic_codes at all must still win.
+        self.assertEqual(
+            research._classify_business_kind(None, "Acorn Tree Surgery Ltd"),
+            "tree-surgery"
+        )
+
+    def test_non_decisive_name_still_falls_back_to_sic(self):
+        """A name that doesn't clear is_tree_trade_company_name's bar
+        (no REQUIRED_PHRASES match) must not spuriously trigger the
+        override -- ordinary SIC-based classification still applies."""
+        self.assertEqual(
+            research._classify_business_kind(["81300"], "Sunnydale Grounds Ltd"),
+            "landscaping-grounds-maintenance"
+        )
+
+    def test_guess_business_kind_soft_keywords_and_priority_order(self):
+        """The 'third round' educated guess for a name that cleared neither
+        the decisive name check nor any SIC division -- lower confidence,
+        a separate tag from the confirmed classification."""
+        self.assertEqual(research._guess_business_kind("Random Nature Reserve Ltd"), None)
+        self.assertEqual(research._guess_business_kind("Sunnydale Landscaping Ltd"), "landscaping-grounds-maintenance")
+        self.assertEqual(research._guess_business_kind("Oakwood Forestry Services Ltd"), "forestry-agriculture")
+        # "Tree" keyword takes priority over a co-occurring landscaping word
+        # -- resolves to the more tree-specific bucket, not an arbitrary one.
+        self.assertEqual(research._guess_business_kind("Tree & Garden Services Ltd"), "tree-surgery")
+        self.assertEqual(research._guess_business_kind(None), None)
+        self.assertEqual(research._guess_business_kind(""), None)
+
+    def test_generate_partner_tags_adds_business_guess_only_when_unclassified(self):
+        """business_guess: must never appear alongside a CONFIRMED
+        business:* classification -- it's strictly the fallback for the
+        unclassified bucket, per _guess_business_kind's docstring."""
+        confirmed_tags = research._generate_partner_tags(
+            ["91040"], "Jane Smith", "020 7946 0958", None, company_name="AA GARDENING TREE SURGEONS LTD"
+        )
+        self.assertIn("business:tree-surgery", confirmed_tags)
+        self.assertFalse(any(t.startswith("business_guess:") for t in confirmed_tags))
+
+        guessed_tags = research._generate_partner_tags(
+            ["99999"], "Jane Smith", "020 7946 0958", None, company_name="Sunnydale Landscaping Ltd"
+        )
+        self.assertIn("business:unclassified", guessed_tags)
+        self.assertIn("business_guess:landscaping-grounds-maintenance", guessed_tags)
+
+        no_signal_tags = research._generate_partner_tags(
+            ["99999"], "Jane Smith", "020 7946 0958", None, company_name="Blueberry Holdings Ltd"
+        )
+        self.assertIn("business:unclassified", no_signal_tags)
+        self.assertFalse(any(t.startswith("business_guess:") for t in no_signal_tags))
+
+    def test_generate_partner_tags_without_company_name_keeps_old_behaviour(self):
+        """company_name is optional/keyword specifically so every existing
+        positional call site (and every pre-existing caller in this
+        codebase before this fix) keeps working unchanged."""
+        tags = research._generate_partner_tags(["99999"], "Jane Smith", "020 7946 0958", None)
+        self.assertIn("business:unclassified", tags)
+
 
 class TestGeneratePartnerTags(unittest.TestCase):
     def test_full_example_with_all_contact_details_present(self):

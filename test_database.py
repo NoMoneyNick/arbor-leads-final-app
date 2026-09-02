@@ -605,7 +605,7 @@ class TestPartnerTagQuerying(unittest.TestCase):
         backfill_partner_tags' own logic (SELECT filter, per-row call,
         UPDATE, commit) without needing research.py's full dependency chain
         importable in this process."""
-        select_row = ("partner-id-1", ["81300"], "Jane Smith", "020 7946 0958", "jane@realtreecompany.co.uk")
+        select_row = ("partner-id-1", ["81300"], "Jane Smith", "020 7946 0958", "jane@realtreecompany.co.uk", "Acme Landscaping Ltd")
         conn = MagicMock()
         cur = MagicMock()
         cur.fetchall.return_value = [select_row]
@@ -622,7 +622,7 @@ class TestPartnerTagQuerying(unittest.TestCase):
         self.assertEqual(result["updated"], 1)
         self.assertEqual(result["errors"], 0)
         fake_research._generate_partner_tags.assert_called_once_with(
-            ["81300"], "Jane Smith", "020 7946 0958", "jane@realtreecompany.co.uk"
+            ["81300"], "Jane Smith", "020 7946 0958", "jane@realtreecompany.co.uk", company_name="Acme Landscaping Ltd"
         )
         update_calls = [c for c in cur.execute.call_args_list if "UPDATE potential_partners SET tags" in c[0][0]]
         self.assertEqual(len(update_calls), 1)
@@ -657,8 +657,8 @@ class TestPartnerTagQuerying(unittest.TestCase):
         (corporate/nominee CH officers no longer count as director:yes),
         which only new lookups pick up on their own."""
         rows = [
-            ("p1", ["81300"], "Acme Trustees Limited", "020 7946 0958", None, ["business:landscaping-grounds-maintenance", "director:yes", "phone:yes", "email:no", "contact:reachable"]),
-            ("p2", ["81300"], "Jane Smith", "020 7946 0958", None, ["business:landscaping-grounds-maintenance", "director:yes", "phone:yes", "email:no", "contact:reachable"]),
+            ("p1", ["81300"], "Acme Trustees Limited", "020 7946 0958", None, ["business:landscaping-grounds-maintenance", "director:yes", "phone:yes", "email:no", "contact:reachable"], "Acme Trustees Limited"),
+            ("p2", ["81300"], "Jane Smith", "020 7946 0958", None, ["business:landscaping-grounds-maintenance", "director:yes", "phone:yes", "email:no", "contact:reachable"], "Some Landscaping Ltd"),
         ]
         conn = MagicMock()
         cur = MagicMock()
@@ -666,7 +666,7 @@ class TestPartnerTagQuerying(unittest.TestCase):
         conn.cursor.return_value = cur
         fake_research = types.ModuleType("research")
 
-        def _fake_generate(sic_codes, md_name, phone, email):
+        def _fake_generate(sic_codes, md_name, phone, email, company_name=None):
             is_person = md_name == "Jane Smith"
             return ["business:landscaping-grounds-maintenance",
                     "director:yes" if is_person else "director:no",
@@ -686,6 +686,67 @@ class TestPartnerTagQuerying(unittest.TestCase):
     def test_resync_all_partner_tags_returns_error_with_no_db(self):
         with patch.object(database, "SURL", ""):
             result = database.resync_all_partner_tags()
+        self.assertIn("error", result)
+
+    def test_requeue_dead_contact_enrichment_issues_correct_update(self):
+        """Only rows with zero contact info found (phone AND email both
+        NULL) should be re-queued -- partners that already have a phone or
+        email must be left alone since they don't need re-checking."""
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.rowcount = 7
+        conn.cursor.return_value = cur
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            result = database.requeue_dead_contact_enrichment()
+        self.assertEqual(result["requeued"], 7)
+        self.assertNotIn("error", result)
+        update_sql = cur.execute.call_args_list[0][0][0]
+        self.assertIn("SET enriched_at = NULL", update_sql)
+        self.assertIn("phone_number IS NULL", update_sql)
+        self.assertIn("email IS NULL", update_sql)
+        conn.commit.assert_called_once()
+
+    def test_requeue_dead_contact_enrichment_returns_error_with_no_db(self):
+        with patch.object(database, "SURL", ""):
+            result = database.requeue_dead_contact_enrichment()
+        self.assertIn("error", result)
+
+    def test_resync_all_lead_tags_recomputes_every_row_not_just_untagged(self):
+        """Same 'full recompute, not just untagged rows' pattern as
+        resync_all_partner_tags -- added for the agent_type/agent_guess tag
+        split, which only NEW lookups pick up on their own."""
+        rows = [
+            ("l1", "3 Oak Ave, Bromley", "Fell a tree", "BROMLEY", "tree", "small", True, None,
+             ["vertical:tree", "agent:yes", "region:london"]),
+            ("l2", "9 Ivy Rd, Leeds", "Crown reduction", "LEEDS", "tree", "small", False, None,
+             ["vertical:tree", "agent:no", "agent_type:none", "region:leeds"]),
+        ]
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.fetchall.return_value = rows
+        conn.cursor.return_value = cur
+        fake_scanners = types.ModuleType("scanners")
+
+        def _fake_generate(address, summary, council_source, vertical, lead_score, has_agent, agent_is_tree_surgeon=None):
+            if has_agent is True:
+                return ["vertical:tree", "agent:yes", "agent_type:type-unconfirmed", "region:london"]
+            return ["vertical:tree", "agent:no", "agent_type:none", "region:leeds"]
+        fake_scanners._generate_tags = _fake_generate
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"), \
+             patch.dict(sys.modules, {"scanners": fake_scanners}):
+            result = database.resync_all_lead_tags(commit_every=500)
+        self.assertEqual(result["updated"], 1)    # l1 gained agent_type:type-unconfirmed
+        self.assertEqual(result["unchanged"], 1)  # l2 already matches
+        self.assertEqual(result["errors"], 0)
+        update_calls = [c for c in cur.execute.call_args_list if "UPDATE leads SET tags" in c[0][0]]
+        self.assertEqual(len(update_calls), 1)
+        self.assertEqual(update_calls[0][0][1][1], "l1")
+
+    def test_resync_all_lead_tags_returns_error_with_no_db(self):
+        with patch.object(database, "SURL", ""):
+            result = database.resync_all_lead_tags()
         self.assertIn("error", result)
 
 

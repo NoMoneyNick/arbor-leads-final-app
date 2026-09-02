@@ -27,6 +27,37 @@ _CH_RATE_LOCK = _threading.Lock()
 _CH_LAST_CALL = [0.0]
 _CH_MIN_INTERVAL = 0.6  # seconds between Companies House calls
 
+# Sep 2 2026: same shared-lock pattern as the Companies House throttle above,
+# applied to DuckDuckGo. get_google_places_info() used to just do
+# `time.sleep(1.2)` inside the function body -- but every call site that
+# calls it runs that function inside a ThreadPoolExecutor with anywhere from
+# 8 to 20 workers (see call sites in this file), so a sleep local to one
+# thread does nothing to slow down the OTHER 7-19 threads hitting DDG's
+# html.duckduckgo.com endpoint at the same moment. That means real request
+# bursts of up to 20 simultaneous scrapes against an anti-bot-hardened
+# search endpoint every ~1.2s -- exactly the kind of load that gets a
+# scraper rate-limited or served a block/CAPTCHA page instead of results.
+# This was caught by Nick directly, live in production: pasted logs showed
+# "Phone: N/A | Email: N/A" for essentially every single company being
+# enriched in a row, including long-established real businesses that
+# almost certainly have a findable phone number -- a pattern consistent
+# with DDG silently blocking/rate-limiting the batch rather than those
+# specific ~40 companies coincidentally having no discoverable contact
+# info. A single shared lock/timestamp (like _CH_RATE_LOCK) makes the
+# throttle apply across ALL worker threads at once, not per-thread.
+_DDG_RATE_LOCK = _threading.Lock()
+_DDG_LAST_CALL = [0.0]
+_DDG_MIN_INTERVAL = 2.0  # seconds between DDG HTML-scrape requests, globally
+
+
+def _ddg_throttle():
+    with _DDG_RATE_LOCK:
+        now = time.time()
+        wait = _DDG_MIN_INTERVAL - (now - _DDG_LAST_CALL[0])
+        if wait > 0:
+            time.sleep(wait)
+        _DDG_LAST_CALL[0] = time.time()
+
 def _ch_headers():
     """
     Builds the auth header for Companies House API. The throttle is a shared lock/
@@ -380,13 +411,23 @@ def get_google_places_info(company_name: str, city_or_addr: str = ""):
         from bs4 import BeautifulSoup
         import re
         import requests
-        
-        time.sleep(1.2) # Throttle DDG
+
+        _ddg_throttle()  # global cross-thread throttle -- see _DDG_MIN_INTERVAL comment above
         query = f"{company_name} {city_or_addr} tree surgery UK".strip()
         url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         res = net_utils.smart_get(url, headers=headers, timeout=10)
-        
+
+        if res.status_code != 200:
+            # Previously silent: a non-200 (DDG rate-limit/block page, etc.)
+            # just fell through to the code below, found no result__url
+            # links, and returned (None, None, None) with zero trace of
+            # WHY -- indistinguishable in the logs from "this company
+            # genuinely has no findable website/phone". Logging it means a
+            # future spike in blocked/rate-limited requests is visible
+            # instead of silently masquerading as bad enrichment data.
+            logger.warning(f"[DDG Scrape] Non-200 ({res.status_code}) for '{company_name}' -- treating as no result, not an error.")
+
         phone = None
         website = None
         
@@ -846,7 +887,7 @@ def perform_research(city_name: str):
                 email, site_phone = scrape_contact_info_from_website(website) if website else (None, None)
                 phone = phone or site_phone
                 sic_codes = co.get("sic_codes", [])
-                tags = _generate_partner_tags(sic_codes, md_name, phone, email)
+                tags = _generate_partner_tags(sic_codes, md_name, phone, email, company_name=name)
 
                 co_conn = database.get_db_conn()
                 co_cur = co_conn.cursor()
@@ -986,6 +1027,24 @@ SIC_DIVISION_TO_BUSINESS_KIND = {
     "96": "other-personal-service",
 }
 
+# Sep 2 2026 -- Nick, looking at real data, found AA GARDENING TREE SURGEONS
+# LTD (company 12026615) sitting at business:unclassified because its SIC
+# code is 91040 (Botanical and zoological gardens and nature reserves
+# activities). That's not a fluke of one weird company: ONS's SIC taxonomy
+# has no code dedicated to "tree surgery" at all -- everyone in the trade
+# registers under whatever adjacent code fits (81300 landscaping, 91040
+# botanical/nature reserves, 02 forestry, etc.), so SIC alone can never
+# reliably separate a tree surgeon from a general landscaper or a park
+# maintenance company. Nick's rule: "if a company has the words 'tree
+# surgeon' in their name they are always tree surgeons regardless of sic" --
+# the name is a stronger, more specific signal than the SIC code ever can be
+# here, so it must be checked FIRST and win outright, not just break a tie.
+# is_tree_trade_company_name() already has exactly this decisive phrase list
+# (REQUIRED_PHRASES: "tree surgery", "tree surgeon(s)", "arborist", etc.) --
+# built for the discovery filter, reused here unchanged rather than keeping
+# a second copy of the same judgement call that could drift out of sync.
+BUSINESS_KIND_NAME_OVERRIDE = "tree-surgery"
+
 
 def _is_realistic_uk_phone(phone: Optional[str]) -> bool:
     """Lightweight sanity check, not full validation -- rejects the
@@ -1023,12 +1082,19 @@ def _is_realistic_email(email: Optional[str]) -> bool:
     return domain not in _PLACEHOLDER_EMAIL_DOMAINS
 
 
-def _classify_business_kind(sic_codes: Optional[list]) -> str:
-    """Coarse 'kind of business' bucket from the SIC codes Companies House
-    already gave us at discovery time -- zero extra API cost, always
-    available for any partner that has sic_codes stored. Returns
-    'unclassified' (not a guess) if sic_codes is empty or none of its
-    divisions are in the table above."""
+def _classify_business_kind(sic_codes: Optional[list], company_name: Optional[str] = None) -> str:
+    """Coarse 'kind of business' bucket. Company name is checked FIRST and
+    wins outright when it's decisive (see BUSINESS_KIND_NAME_OVERRIDE's
+    comment above -- SIC has no dedicated tree-surgery code at all, so it
+    can never be trusted to override a name that plainly says otherwise).
+    Only when the name isn't decisive does this fall back to the SIC codes
+    Companies House already gave us at discovery time -- zero extra API
+    cost, always available for any partner that has sic_codes stored.
+    Returns 'unclassified' (not a guess -- see _guess_business_kind for
+    the separate lower-confidence pass over that bucket) if neither the
+    name nor any SIC division matches."""
+    if company_name and is_tree_trade_company_name(company_name):
+        return BUSINESS_KIND_NAME_OVERRIDE
     for code in (sic_codes or []):
         division = str(code or "").strip()[:2]
         kind = SIC_DIVISION_TO_BUSINESS_KIND.get(division)
@@ -1037,19 +1103,69 @@ def _classify_business_kind(sic_codes: Optional[list]) -> str:
     return "unclassified"
 
 
+# Sep 2 2026: Nick's "third round" idea -- for a partner that comes out of
+# _classify_business_kind still 'unclassified' (name wasn't decisive enough
+# for is_tree_trade_company_name, and no SIC division matched either),
+# make an explicitly-labelled EDUCATED GUESS from the same company name
+# using softer, non-decisive keywords, rather than just leaving it as a
+# dead end. This is deliberately a SEPARATE, lower-confidence tag
+# (business_guess:*, not business:*) -- never silently upgraded to a
+# confirmed classification -- so a human glancing at the tags can always
+# tell "we know this" from "we suspect this". A name with genuinely no
+# signal at all (neither trade-specific nor these softer hints) gets no
+# guess tag and stays plainly unclassified, per Nick's own rule: "if there
+# is really nothing to go on they are placed as totally unconfirmed."
+_BUSINESS_GUESS_KEYWORDS = {
+    "tree-surgery": ("tree", "arb", "timber"),
+    "landscaping-grounds-maintenance": ("landscap", "garden", "grounds", "lawn", "turf"),
+    "forestry-agriculture": ("forest", "woodland", "farm", "agri"),
+}
+
+
+def _guess_business_kind(company_name: Optional[str]) -> Optional[str]:
+    """Softer, best-effort guess for a company name that didn't clear
+    is_tree_trade_company_name's decisive bar and has no matching SIC
+    division. Checked in a fixed order so a name matching more than one
+    bucket's keywords (rare, but "Tree & Garden Services" is a real naming
+    pattern) resolves to the most tree-specific bucket first rather than
+    an arbitrary dict-iteration order. Returns None -- no guess -- when
+    nothing matches at all."""
+    if not company_name:
+        return None
+    name_lower = company_name.lower()
+    for kind in ("tree-surgery", "landscaping-grounds-maintenance", "forestry-agriculture"):
+        if any(kw in name_lower for kw in _BUSINESS_GUESS_KEYWORDS[kind]):
+            return kind
+    return None
+
+
 def _generate_partner_tags(sic_codes: Optional[list], md_name: Optional[str],
-                            phone_number: Optional[str], email: Optional[str]) -> list:
+                            phone_number: Optional[str], email: Optional[str],
+                            company_name: Optional[str] = None) -> list:
     """Builds the full tag list for one partner -- mirrors
     scanners._generate_tags' 'floating bubble' design: every tag is an
-    independent fact, callers combine whichever ones they want."""
+    independent fact, callers combine whichever ones they want.
+
+    company_name (Sep 2 2026, optional/keyword so every existing positional
+    call site keeps working unchanged): lets _classify_business_kind apply
+    Nick's name-overrides-SIC rule, and adds a separate, lower-confidence
+    business_guess:* tag when the confirmed classification comes out
+    unclassified but the name still hints at a trade -- see
+    _guess_business_kind's docstring for why that's a distinct tag, not a
+    silent upgrade."""
     has_phone = _is_realistic_uk_phone(phone_number)
     has_email = _is_realistic_email(email)
+    business_kind = _classify_business_kind(sic_codes, company_name)
     tags = [
-        f"business:{_classify_business_kind(sic_codes)}",
+        f"business:{business_kind}",
         "director:yes" if _is_realistic_person_name(md_name) else "director:no",
         "phone:yes" if has_phone else "phone:no",
         "email:yes" if has_email else "email:no",
     ]
+    if business_kind == "unclassified":
+        guess = _guess_business_kind(company_name)
+        if guess:
+            tags.append(f"business_guess:{guess}")
     if has_phone or has_email:
         tags.append("contact:reachable")
     else:
@@ -1142,12 +1258,12 @@ def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -
                     email = email or site_email
                     phone = phone or site_phone
 
-                tags = _generate_partner_tags(sic_codes, md_name, phone, email)
+                tags = _generate_partner_tags(sic_codes, md_name, phone, email, company_name=name)
                 return (md_name, phone, rating, website, email, tags, pid)
             except Exception as e:
                 logger.debug(f"[Enrichment] Error on {name}: {e}")
                 # Still mark enriched_at so it doesn't loop infinitely on faulty records
-                tags = _generate_partner_tags(sic_codes, existing_md, existing_phone, existing_email)
+                tags = _generate_partner_tags(sic_codes, existing_md, existing_phone, existing_email, company_name=name)
                 return (existing_md, existing_phone, existing_rating, existing_website, existing_email, tags, pid)
 
         from concurrent.futures import ThreadPoolExecutor
@@ -1445,7 +1561,7 @@ def sweep_100_random_contractors(target_count: int = 50) -> dict:
             email, site_phone = scrape_contact_info_from_website(website) if website else (None, None)
             phone = phone or site_phone
             sic_codes = co.get("sic_codes", [])
-            tags = _generate_partner_tags(sic_codes, md_name, phone, email)
+            tags = _generate_partner_tags(sic_codes, md_name, phone, email, company_name=name)
             return (
                 name, company_number, co.get("company_status"),
                 addr, assigned_region,
@@ -1587,7 +1703,7 @@ def populate_2000_partners_into_db() -> dict:
                 email, site_phone = scrape_contact_info_from_website(website) if website else (None, None)
                 phone = phone or site_phone
                 sic_codes = co.get("sic_codes", [])
-                tags = _generate_partner_tags(sic_codes, md_name, phone, email)
+                tags = _generate_partner_tags(sic_codes, md_name, phone, email, company_name=name)
                 return (
                     name, company_number, co.get("company_status"),
                     addr, assigned_region,
