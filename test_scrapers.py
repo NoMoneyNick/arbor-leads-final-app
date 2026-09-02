@@ -2902,11 +2902,73 @@ class TestLeadTagging(unittest.TestCase):
         self.assertEqual(scanners._classify_job_types(""), ["other"])
 
     def test_resolve_region_known_and_unclassified_councils(self):
-        self.assertEqual(scanners._resolve_region("BROMLEY"), "London")
-        self.assertEqual(scanners._resolve_region("bromley"), "London")  # case-insensitive
-        self.assertEqual(scanners._resolve_region("EDINBURGH"), "Scotland")
-        self.assertEqual(scanners._resolve_region("SOME COUNCIL NOT IN THE LIST"), "unclassified")
-        self.assertEqual(scanners._resolve_region(""), "unclassified")
+        """No postcode in the address in any of these -- exercises the
+        COUNCIL_TO_REGION fallback path only (see the postcode-priority
+        tests below for the primary path)."""
+        self.assertEqual(scanners._resolve_region("", "BROMLEY"), "London")
+        self.assertEqual(scanners._resolve_region("", "bromley"), "London")  # case-insensitive
+        self.assertEqual(scanners._resolve_region("", "EDINBURGH"), "Scotland")
+        self.assertEqual(scanners._resolve_region("", "SOME COUNCIL NOT IN THE LIST"), "unclassified")
+        self.assertEqual(scanners._resolve_region("", ""), "unclassified")
+
+    def test_extract_postcode_finds_real_and_missing_cases(self):
+        self.assertEqual(scanners._extract_postcode("12 Elm Rd, Bromley BR1 3AB"), "BR1 3AB")
+        self.assertEqual(scanners._extract_postcode("no postcode here at all"), None)
+        self.assertIsNone(scanners._extract_postcode(None))
+
+    def test_lookup_region_via_postcode_uses_postcodes_io_and_caches_by_outcode(self):
+        scanners._REGION_BY_OUTCODE_CACHE.clear()
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {"result": {"region": "South East", "country": "England"}}
+        with patch("scanners.requests.get", return_value=fake_resp) as mock_get:
+            region = scanners._lookup_region_via_postcode("1 Test Rd, Guildford GU1 1AA")
+            self.assertEqual(region, "South East")
+            self.assertEqual(mock_get.call_count, 1)
+            # A second lookup in the same outcode must hit the cache, not the network again.
+            region2 = scanners._lookup_region_via_postcode("2 Other Rd, Guildford GU1 2BB")
+            self.assertEqual(region2, "South East")
+            self.assertEqual(mock_get.call_count, 1)
+
+    def test_lookup_region_via_postcode_uses_country_for_wales_and_scotland(self):
+        scanners._REGION_BY_OUTCODE_CACHE.clear()
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {"result": {"region": None, "country": "Wales"}}
+        with patch("scanners.requests.get", return_value=fake_resp):
+            self.assertEqual(scanners._lookup_region_via_postcode("1 Bridge St, Cardiff CF10 1AA"), "Wales")
+
+    def test_lookup_region_via_postcode_returns_none_on_no_postcode_or_network_failure(self):
+        self.assertIsNone(scanners._lookup_region_via_postcode("no postcode in this address"))
+        scanners._REGION_BY_OUTCODE_CACHE.clear()
+        with patch("scanners.requests.get", side_effect=Exception("timeout")):
+            self.assertIsNone(scanners._lookup_region_via_postcode("1 Test Rd, Guildford GU9 9ZZ"))
+
+    def test_resolve_region_prefers_postcode_over_council_source(self):
+        """Nick's standing rule (Sep 2 2026): never trust the source's own
+        label when we can verify it ourselves -- a real postcode must win
+        even when council_source itself looks like a (wrong or coarse)
+        region name, e.g. MESH's region-town sources passing 'London'
+        straight through as council_source."""
+        scanners._REGION_BY_OUTCODE_CACHE.clear()
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {"result": {"region": "West Midlands", "country": "England"}}
+        with patch("scanners.requests.get", return_value=fake_resp):
+            region = scanners._resolve_region("14 Corporation St, Birmingham B2 4LP", "London")
+            self.assertEqual(region, "West Midlands")
+
+    def test_resolve_region_unclassified_only_when_both_signals_fail(self):
+        self.assertEqual(scanners._resolve_region("", "SOME COUNCIL NOT IN THE LIST"), "unclassified")
+        self.assertEqual(scanners._resolve_region("", ""), "unclassified")
+
+    def test_generate_tags_always_includes_region_even_without_council_source(self):
+        """Sep 2 2026: region tagging used to live inside `if council_source:`
+        -- it's now resolved independently (postcode first), so a lead with
+        no council_source at all must still get a real region tag attempt
+        rather than silently skipping the category."""
+        tags = scanners._generate_tags("1 Elm St, Nowhere", "Fell a tree", "", "tree", "small", None)
+        self.assertTrue(any(t.startswith("region:") for t in tags))
 
     def test_slugify_tag_produces_clean_lowercase_hyphenated_values(self):
         self.assertEqual(scanners._slugify_tag("Hammersmith & Fulham"), "hammersmith-fulham")

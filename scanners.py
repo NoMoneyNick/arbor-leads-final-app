@@ -614,11 +614,89 @@ COUNCIL_TO_REGION = {
 }
 
 
-def _resolve_region(council_source: str) -> str:
-    """Returns the ONS region for a known council, or 'unclassified' if this
-    council isn't in COUNCIL_TO_REGION yet -- deliberately not a guess."""
+# Sep 2 2026: region resolution used to trust whatever string a scraper put
+# in council_source (COUNCIL_TO_REGION below is a fixed lookup table keyed
+# on that string) -- but scrapers don't agree on what that string looks
+# like (an official council name for some, a bare region name like "London"
+# for MESH's region-town sources, a plain town name for others), so ~79% of
+# real leads landed in region:unclassified even though the true answer was
+# knowable. Nick's call (Sep 2 2026): never trust the source's own
+# labelling for something this load-bearing -- verify it ourselves from
+# data we already have. Every lead's `address` should carry a real UK
+# postcode, and postcodes.io (the free ONS-backed postcode API already
+# used elsewhere in this codebase -- see database.lookup_outcode_centroid,
+# main.py's postcode-radius lookup) gives the authoritative region for any
+# postcode, no key required. That's the primary path now; the old
+# council-name table only catches the rare address with no postcode in it.
+_POSTCODE_RE = re.compile(r'\b([A-Z]{1,2}\d[A-Z0-9]?)\s*(\d[A-Z]{2})\b', re.IGNORECASE)
+_REGION_BY_OUTCODE_CACHE: Dict[str, str] = {}
+
+
+def _extract_postcode(address: str) -> Optional[str]:
+    """Pulls the first UK postcode-shaped substring out of a free-text
+    address, e.g. '12 Elm Rd, Bromley BR1 3AB' -> 'BR1 3AB'. Returns None if
+    nothing postcode-shaped is present -- never a guess."""
+    m = _POSTCODE_RE.search(str(address or ""))
+    if not m:
+        return None
+    return f"{m.group(1).upper()} {m.group(2).upper()}"
+
+
+def _lookup_region_via_postcode(address: str) -> Optional[str]:
+    """Resolves a real ONS region straight from the address's own postcode
+    via postcodes.io -- authoritative, free, no key, and immune to whatever
+    inconsistent label a scraper attached to council_source. Caches by
+    outcode (the part before the space) since region is effectively
+    constant within one outcode, which also means a cluster of leads in the
+    same town costs one real HTTP call, not one per lead. Returns None
+    (never a guess) if the address has no postcode or the lookup fails --
+    caller falls back to COUNCIL_TO_REGION in that case."""
+    postcode = _extract_postcode(address)
+    if not postcode:
+        return None
+    outcode = postcode.split(" ")[0]
+    if outcode in _REGION_BY_OUTCODE_CACHE:
+        return _REGION_BY_OUTCODE_CACHE[outcode]
+    try:
+        resp = requests.get(
+            f"https://api.postcodes.io/postcodes/{postcode.replace(' ', '')}",
+            timeout=3,
+        )
+        if resp.status_code == 200:
+            result = resp.json().get("result") or {}
+            # England postcodes carry `region` (e.g. "South East"); Wales/
+            # Scotland/NI don't -- `country` is the correct region-level
+            # answer for those instead (e.g. "Wales", "Scotland").
+            region = result.get("region") or result.get("country")
+            if region:
+                _REGION_BY_OUTCODE_CACHE[outcode] = region
+                return region
+    except Exception as e:
+        logger.debug(f"[LeadTags] postcodes.io region lookup failed for {postcode}: {e}")
+    return None
+
+
+def _resolve_region(address: str, council_source: str) -> str:
+    """Real ONS region for a lead, resolved in order of trust: (1) the
+    address's own postcode via postcodes.io -- ground truth, independent of
+    the scraper's own labelling; (2) COUNCIL_TO_REGION, for the rare
+    address with no extractable postcode; (3) 'unclassified', logged as a
+    warning so it gets reviewed rather than silently swallowed. Per Nick
+    (Sep 2 2026): a lead we can't confidently place is effectively a dead
+    lead, so this path should stay vanishingly rare, not the common case it
+    was before postcode lookup existed."""
+    region = _lookup_region_via_postcode(address)
+    if region:
+        return region
     key = str(council_source or "").strip().upper()
-    return COUNCIL_TO_REGION.get(key, "unclassified")
+    region = COUNCIL_TO_REGION.get(key)
+    if region:
+        return region
+    logger.warning(
+        f"[LeadTags] Could not resolve region for address={address!r} "
+        f"council_source={council_source!r} -- tagged unclassified."
+    )
+    return "unclassified"
 
 
 def _slugify_tag(value: str) -> str:
@@ -648,7 +726,7 @@ def _generate_tags(address: str, summary: str, council_source: str, vertical: st
         tags.append("agent:unconfirmed")
     if council_source:
         tags.append(f"locale:{_slugify_tag(council_source)}")
-        tags.append(f"region:{_slugify_tag(_resolve_region(council_source))}")
+    tags.append(f"region:{_slugify_tag(_resolve_region(address, council_source))}")
     if vertical == "tree":
         combined_text = f"{summary or ''} {address or ''}"
         for job_type in _classify_job_types(combined_text):

@@ -776,6 +776,70 @@ def backfill_lead_tags(batch_size: int = 500) -> dict:
             "note": "re-run if 'updated' == batch_size -- there may be more rows left untagged."}
 
 
+def resync_region_tags(batch_size: int = 2000) -> dict:
+    """Sep 2 2026: one-time correction pass for every lead already carrying
+    region:unclassified from before region resolution was made
+    postcode-based (see scanners._resolve_region's docstring for why the
+    old council_source-trusting method left ~79% of leads unclassified).
+    Recomputes just the region tag per row and swaps it in, leaving every
+    other tag alone. Safe to re-run repeatedly -- only ever touches rows
+    still carrying region:unclassified, same 'only touch what's actually
+    unresolved' pattern as backfill_lead_tags."""
+    if not SURL:
+        return {"error": "no database configured"}
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT id, address, council_source, tags FROM leads
+                WHERE 'region:unclassified' = ANY(tags)
+                LIMIT %s;
+            """, (batch_size,))
+            rows = cur.fetchall()
+            if not rows:
+                conn.commit()
+                return {"updated": 0, "unchanged": 0, "errors": 0, "batch_size": batch_size,
+                        "note": "no region:unclassified rows found."}
+            import scanners as _scanners  # only imported when there's actually work to do
+            from concurrent.futures import ThreadPoolExecutor
+
+            def resolve_one(row):
+                lead_id, address, council_source, tags = row
+                try:
+                    region = _scanners._resolve_region(address, council_source)
+                    return (lead_id, tags, f"region:{_scanners._slugify_tag(region)}")
+                except Exception as e:
+                    logger.warning(f"[LeadTags] resync_region_tags resolve error on lead {lead_id}: {e}")
+                    return (lead_id, tags, None)
+
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                results = list(executor.map(resolve_one, rows))
+
+            updated = 0
+            unchanged = 0
+            errors = 0
+            for lead_id, old_tags, new_region_tag in results:
+                if new_region_tag is None:
+                    errors += 1
+                    continue
+                if new_region_tag == "region:unclassified":
+                    unchanged += 1
+                    continue
+                new_tags = [t for t in (old_tags or []) if not t.startswith("region:")] + [new_region_tag]
+                cur.execute("UPDATE leads SET tags = %s WHERE id = %s;", (new_tags, lead_id))
+                updated += 1
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[LeadTags] resync_region_tags error: {e}")
+        return {"error": str(e)}
+    return {"updated": updated, "unchanged": unchanged, "errors": errors, "batch_size": batch_size,
+            "note": "re-run if updated+unchanged+errors == batch_size -- there may be more unclassified rows left."}
+
+
 def get_tag_counts() -> dict:
     """Sep 2 2026: reporting side of the tagging system -- counts leads per
     tag (unnest + GROUP BY, accelerated by the same GIN index) plus overall

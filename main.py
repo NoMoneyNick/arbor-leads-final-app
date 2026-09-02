@@ -4612,6 +4612,18 @@ def view_leads_by_tag(
     return {"tags_queried": tag_list, "match": match, "count": len(results), "leads": results}
 
 
+@app.get("/trigger-resync-region-tags")
+def trigger_resync_region_tags(secret: Optional[str] = Query(None), batch_size: int = Query(2000)):
+    """Sep 2 2026: one-off correction pass now that region is resolved from
+    the lead's own postcode (see scanners._resolve_region) instead of
+    trusting council_source labelling -- fixes every lead currently stuck
+    at region:unclassified. Safe to re-run; call repeatedly until 'updated'
+    + 'unchanged' + 'errors' comes back below batch_size."""
+    verify_cron_secret(secret)
+    result = database.resync_region_tags(batch_size=batch_size)
+    return {"status": "complete", **result}
+
+
 @app.get("/tag-report")
 def view_tag_report(secret: Optional[str] = Query(None)):
     """Sep 2 2026: cron-secret-gated (not dashboard auth) so this can be

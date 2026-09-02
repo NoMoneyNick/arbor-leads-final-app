@@ -460,6 +460,72 @@ class TestLeadTagQuerying(unittest.TestCase):
         self.assertIn("locale:bromley", written_tags)
         self.assertTrue(any(t.startswith("job:") for t in written_tags))
 
+    def test_resync_region_tags_only_touches_region_unclassified_rows(self):
+        """Sep 2 2026: the correction pass for leads stuck at
+        region:unclassified before region resolution became postcode-based
+        (see scanners._resolve_region). The SELECT must filter to that
+        exact tag -- a lead with a real region already resolved must never
+        be touched by this pass."""
+        conn, cur = self._conn_with_cursor(fetchall_return=[])
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            result = database.resync_region_tags(batch_size=10)
+        sql = cur.execute.call_args[0][0]
+        self.assertIn("region:unclassified", sql)
+        self.assertEqual(result["updated"], 0)
+
+    def test_resync_region_tags_recomputes_and_swaps_only_the_region_tag(self):
+        """Every other tag on the row must survive untouched -- only the
+        stale region:unclassified entry gets removed and replaced."""
+        select_row = ("lead-id-1", "14 Corporation St, Birmingham B2 4LP", "London",
+                       ["vertical:tree", "locale:birmingham", "region:unclassified", "size:large"])
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.fetchall.return_value = [select_row]
+        conn.cursor.return_value = cur
+        fake_scanners = types.ModuleType("scanners")
+        fake_scanners._resolve_region = MagicMock(return_value="West Midlands")
+        fake_scanners._slugify_tag = MagicMock(return_value="west-midlands")
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"), \
+             patch.dict(sys.modules, {"scanners": fake_scanners}):
+            result = database.resync_region_tags(batch_size=10)
+        self.assertEqual(result["updated"], 1)
+        self.assertEqual(result["errors"], 0)
+        fake_scanners._resolve_region.assert_called_once_with(
+            "14 Corporation St, Birmingham B2 4LP", "London"
+        )
+        update_calls = [c for c in cur.execute.call_args_list if "UPDATE leads SET tags" in c[0][0]]
+        self.assertEqual(len(update_calls), 1)
+        written_tags = update_calls[0][0][1][0]
+        self.assertIn("region:west-midlands", written_tags)
+        self.assertNotIn("region:unclassified", written_tags)
+        self.assertIn("vertical:tree", written_tags)
+        self.assertIn("locale:birmingham", written_tags)
+        self.assertIn("size:large", written_tags)
+
+    def test_resync_region_tags_leaves_row_unchanged_if_still_unclassified(self):
+        """If postcode lookup and the council table both still fail, the
+        row must not be pointlessly UPDATEd -- counted as 'unchanged', not
+        'updated', and no UPDATE statement issued for it."""
+        select_row = ("lead-id-1", "no postcode here", "SOME COUNCIL NOT IN THE LIST",
+                       ["vertical:tree", "region:unclassified"])
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.fetchall.return_value = [select_row]
+        conn.cursor.return_value = cur
+        fake_scanners = types.ModuleType("scanners")
+        fake_scanners._resolve_region = MagicMock(return_value="unclassified")
+        fake_scanners._slugify_tag = MagicMock(return_value="unclassified")
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"), \
+             patch.dict(sys.modules, {"scanners": fake_scanners}):
+            result = database.resync_region_tags(batch_size=10)
+        self.assertEqual(result["updated"], 0)
+        self.assertEqual(result["unchanged"], 1)
+        update_calls = [c for c in cur.execute.call_args_list if "UPDATE leads SET tags" in c[0][0]]
+        self.assertEqual(len(update_calls), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
