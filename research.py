@@ -1,5 +1,6 @@
 import os
 import time
+import datetime
 import base64
 import requests
 import logging
@@ -400,6 +401,30 @@ def scrape_email_from_website(website_url: str) -> Optional[str]:
     return email
 
 
+# Sep 2 2026: hoisted to a single module-level constant. This used to be
+# defined separately, inline, in two different functions (the DDG scrape
+# below, and the partner-hygiene cleanup pass) -- and when the Places API
+# path was added as a third source of website/phone/email data, it never
+# got this same filter at all. Confirmed live the same night: several
+# genuinely different UK tree surgery companies all got matched to the
+# exact same US "10 Summers Heating and Cooling" listing by Google's Text
+# Search -- a known pattern with spammy/keyword-stuffed Google Business
+# Profile listings returned when no strong real match exists. Accepting
+# that at face value would have written a wrong phone/email/website into
+# the database as if verified, which is worse than leaving the company
+# unconfirmed: a customer would end up calling or emailing a completely
+# unrelated business. One shared list now, used everywhere a
+# website/phone/email gets accepted from any source.
+SPAM_WEBSITE_DOMAINS = [
+    "10summersheatingandcoolingllc.pro", "airflexheatingandcoolinginc.xyz",
+    "alabamaurbanforestryservice.com", "companiesmadesimple.com",
+    "facebook.com", "yell.com", "checkatrade.com", "trustatrader.com",
+    "linkedin.com", "instagram.com", "cylex-uk.co.uk", "freeindex.co.uk",
+    "thomsonlocal.com", "192.com", "thephonebook.bt.com", "webador.com",
+    "mysite.com", "wix.com", "squarespace.com", "wordpress.com"
+]
+
+
 def get_google_places_info(company_name: str, city_or_addr: str = ""):
     """
     Sep 2 2026: restored to the REAL Places API (New) when GOOGLE_MAPS_KEY
@@ -432,8 +457,97 @@ def get_google_places_info(company_name: str, city_or_addr: str = ""):
     Returns: (rating: float|None, phone_number: str|None, website: str|None)
     """
     if GOOGLE_MAPS_KEY and time.time() >= _GOOGLE_PLACES_DAILY_QUOTA_RESET_AT[0]:
-        return _get_google_places_info_via_api(company_name, city_or_addr)
+        if _google_places_paid_call_budget_available():
+            return _get_google_places_info_via_api(company_name, city_or_addr)
+        _warn_monthly_cap_exhausted_throttled()
     return _get_google_places_info_via_ddg_scrape(company_name, city_or_addr)
+
+
+# Sep 2 2026, same evening as the API switch above -- a real incident, not
+# a hypothetical: Nick manually triggered a full nationwide autonomous
+# cycle to backfill months of "dead" (no phone/email) contacts. That cycle
+# calls get_google_places_info once per company -- potentially thousands
+# of times in one run -- and every one of those calls bills at Google's
+# "Enterprise" SKU rate. Corrected against Google's live pricing table
+# this same evening: it's $35 per 1,000 calls after the first 1,000 free
+# EACH MONTH, not the $5-per-1,000-after-10,000 this project's own earlier
+# research had assumed (a real mistake, caught and fixed the same night by
+# checking Google's actual current pricing page rather than trusting the
+# earlier assumption). Nick does not have room in his budget to absorb a
+# surprise bill, and Google's own daily quota (self-service raised to 75k
+# earlier tonight, entirely to fix a DIFFERENT throttling problem) is
+# nowhere near tight enough to act as a cost guardrail -- it protects
+# Google's infrastructure from abuse, not Nick's wallet.
+#
+# Fix: a hard, code-level monthly cap on paid Places API calls, enforced
+# BEFORE a single call is made, independent of anything configured on
+# Google's side. Stored in the `system_state` table (the same durable
+# key/value store the autonomous scheduler already uses for
+# `last_autonomous_cycle_at`) rather than an in-memory counter -- Render
+# restarted TWICE within about ten minutes during tonight's incident, and
+# an in-memory counter would have silently reset to zero each time,
+# providing zero protection across exactly the failure mode that just
+# happened. Once the cap is hit for the current calendar month, every
+# further call automatically falls back to the free DuckDuckGo scrape
+# (same fallback already used above for Google's own daily quota) instead
+# of failing outright -- enrichment keeps producing *some* data, it just
+# stops costing money for the rest of the month.
+#
+# 900 is a deliberately conservative default: comfortably under the 1,000
+# free Enterprise-tier calls Google grants each month, leaving headroom
+# for any counting slop, so the out-of-the-box behaviour costs
+# approximately nothing unless Nick explicitly raises this number here.
+GOOGLE_PLACES_MONTHLY_PAID_CALL_CAP = 900
+_GOOGLE_PLACES_CAP_WARNING_LAST_LOGGED = [0.0]
+
+
+def _google_places_paid_call_budget_available() -> bool:
+    """Checks AND reserves one slot against the persistent monthly cap in
+    one step. This function runs inside a ThreadPoolExecutor across many
+    concurrent workers -- the same concurrency shape that caused the DDG
+    cross-thread throttle bug earlier this session -- so a plain
+    read-then-write here is not perfectly atomic against a genuine
+    simultaneous race between threads. Accepted tradeoff: the failure mode
+    of that small race is 'a handful of calls over the cap in the worst
+    case,' not 'the cap does nothing' -- fine for a cost guardrail, and a
+    real database-level atomic increment isn't worth the extra complexity
+    for a limit this coarse (hundreds, not a handful).
+
+    Fails CLOSED (assumes no budget) on any error -- including a database
+    read failure -- rather than failing open, because for this specific
+    guardrail, wrongly skipping a paid call costs nothing, while wrongly
+    allowing one when the count can't even be verified is the exact
+    mistake this fix exists to prevent."""
+    try:
+        current_month = datetime.datetime.utcnow().strftime("%Y-%m")
+        stored_month = database.get_system_state("google_places_paid_calls_month")
+        stored_count_raw = database.get_system_state("google_places_paid_calls_count")
+        stored_count = int(stored_count_raw) if (stored_count_raw or "").isdigit() else 0
+        if stored_month != current_month:
+            stored_count = 0
+        if stored_count >= GOOGLE_PLACES_MONTHLY_PAID_CALL_CAP:
+            return False
+        database.set_system_state("google_places_paid_calls_month", current_month)
+        database.set_system_state("google_places_paid_calls_count", str(stored_count + 1))
+        return True
+    except Exception as e:
+        logger.warning(f"[Google Places] Monthly cost-cap check failed ({e}) -- defaulting to NOT spending, safety-first.")
+        return False
+
+
+def _warn_monthly_cap_exhausted_throttled():
+    """A big backfill run can call get_google_places_info thousands of
+    times in a row -- once the monthly cap is hit, logging every single
+    one of those would spam the logs uselessly. Logs at most once per hour
+    while the cap stays exhausted."""
+    now = time.time()
+    if now - _GOOGLE_PLACES_CAP_WARNING_LAST_LOGGED[0] > 3600:
+        _GOOGLE_PLACES_CAP_WARNING_LAST_LOGGED[0] = now
+        logger.warning(
+            f"[Google Places] Monthly paid-call cap ({GOOGLE_PLACES_MONTHLY_PAID_CALL_CAP}) reached for "
+            f"{datetime.datetime.utcnow().strftime('%Y-%m')} -- falling back to the free DuckDuckGo scrape "
+            f"for the rest of the month. Raise GOOGLE_PLACES_MONTHLY_PAID_CALL_CAP in research.py to spend more."
+        )
 
 
 # Sep 2 2026: live production logs showed the Places API switch above
@@ -499,6 +613,24 @@ def _get_google_places_info_via_api(company_name: str, city_or_addr: str = ""):
         website = place.get("websiteUri")
         raw_phone = place.get("nationalPhoneNumber")
         phone = _is_valid_uk_phone(raw_phone) if raw_phone else None
+        # Sep 2 2026: confirmed live the same night this API switch shipped
+        # -- Google's Text Search occasionally returns a completely
+        # unrelated business (several different UK tree surgery companies
+        # all matched to the same US "10 Summers Heating and Cooling"
+        # listing, a known spammy-Google-Business-Profile pattern) rather
+        # than genuinely finding nothing. The DDG scrape below already had
+        # this exact SPAM_WEBSITE_DOMAINS filter; this path never got it
+        # when it was built earlier today. If the returned website matches
+        # a known-bad domain, the whole result is untrustworthy -- not just
+        # the website field -- since the phone/email came from the same
+        # wrong listing, so all three are discarded together rather than
+        # writing a wrong phone/email into the database as if verified.
+        if website and any(spam in website.lower() for spam in SPAM_WEBSITE_DOMAINS):
+            logger.warning(
+                f"[Google Places] Rejected a known-spam listing for '{company_name}': {website} -- "
+                f"treating as no confident match rather than storing a wrong phone/email/website."
+            )
+            return None, None, None
         return rating, phone, website
     except Exception as e:
         logger.debug(f"[Google Places] Error fetching info for {company_name}: {e}")
@@ -534,15 +666,7 @@ def _get_google_places_info_via_ddg_scrape(company_name: str, city_or_addr: str 
 
         phone = None
         website = None
-        
-        SPAM_DOMAINS = [
-            "10summersheatingandcoolingllc.pro", "airflexheatingandcoolinginc.xyz",
-            "alabamaurbanforestryservice.com", "companiesmadesimple.com",
-            "facebook.com", "yell.com", "checkatrade.com", "trustatrader.com",
-            "linkedin.com", "instagram.com", "cylex-uk.co.uk", "freeindex.co.uk",
-            "thomsonlocal.com", "192.com", "thephonebook.bt.com", "webador.com",
-            "mysite.com", "wix.com", "squarespace.com", "wordpress.com"
-        ]
+        SPAM_DOMAINS = SPAM_WEBSITE_DOMAINS  # Sep 2 2026: now one shared module-level list, see its definition
 
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
@@ -1500,14 +1624,7 @@ def clean_partner_database():
         update_rows = []
         updated_cities = 0
         
-        SPAM_DOMAINS = [
-            "10summersheatingandcoolingllc.pro", "airflexheatingandcoolinginc.xyz",
-            "alabamaurbanforestryservice.com", "companiesmadesimple.com",
-            "facebook.com", "yell.com", "checkatrade.com", "trustatrader.com",
-            "linkedin.com", "instagram.com", "cylex-uk.co.uk", "freeindex.co.uk",
-            "thomsonlocal.com", "192.com", "thephonebook.bt.com", "webador.com",
-            "mysite.com", "wix.com", "squarespace.com", "wordpress.com"
-        ]
+        SPAM_DOMAINS = SPAM_WEBSITE_DOMAINS  # Sep 2 2026: now one shared module-level list, see its definition
 
         for (pid, name, addr, current_city, raw_phone, raw_website, raw_email) in all_partners:
             # Sep 2 2026 audit: this was calling the OLDER, narrower

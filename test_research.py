@@ -28,6 +28,24 @@ if "database" not in sys.modules:
     _fake_database.get_db_conn = lambda *a, **k: None
     sys.modules["database"] = _fake_database
 
+# Sep 2 2026: another test file imported earlier in the same run (e.g.
+# test_scrapers.py) may have already stubbed `database` into sys.modules
+# WITHOUT get_system_state/set_system_state, since the `if "database" not
+# in sys.modules` guard above only fires for whichever file runs first --
+# a pre-existing cross-file stub-sharing quirk in this test suite. Add
+# these idempotently to whatever `database` module is already there
+# (real or fake) instead of assuming this file's own stub won it, so the
+# monthly-cap tests work regardless of import order / which files are run
+# together.
+if not hasattr(sys.modules["database"], "_fake_state_store"):
+    _fake_state_store = {}
+    sys.modules["database"].get_system_state = lambda key: _fake_state_store.get(key)
+    def _fake_set_system_state(key, value):
+        _fake_state_store[key] = value
+        return True
+    sys.modules["database"].set_system_state = _fake_set_system_state
+    sys.modules["database"]._fake_state_store = _fake_state_store
+
 if "notifications" not in sys.modules:
     _fake_notifications = types.ModuleType("notifications")
     sys.modules["notifications"] = _fake_notifications
@@ -277,10 +295,18 @@ class TestGetGooglePlacesInfo(unittest.TestCase):
         self._orig_key = research.GOOGLE_MAPS_KEY
         self._orig_quota_reset_at = research._GOOGLE_PLACES_DAILY_QUOTA_RESET_AT[0]
         research._GOOGLE_PLACES_DAILY_QUOTA_RESET_AT[0] = 0.0
+        import database as _db
+        self._orig_state_store = dict(_db._fake_state_store)
+        _db._fake_state_store.clear()
+        self._orig_cap = research.GOOGLE_PLACES_MONTHLY_PAID_CALL_CAP
 
     def tearDown(self):
         research.GOOGLE_MAPS_KEY = self._orig_key
         research._GOOGLE_PLACES_DAILY_QUOTA_RESET_AT[0] = self._orig_quota_reset_at
+        import database as _db
+        _db._fake_state_store.clear()
+        _db._fake_state_store.update(self._orig_state_store)
+        research.GOOGLE_PLACES_MONTHLY_PAID_CALL_CAP = self._orig_cap
 
     def _fake_response(self, status_code=200, json_data=None, text=""):
         class _Resp:
@@ -401,6 +427,79 @@ class TestGetGooglePlacesInfo(unittest.TestCase):
             research.get_google_places_info("Acme Tree Surgery Ltd", "London")
         mock_get.assert_called_once()
         self.assertEqual(research._GOOGLE_PLACES_DAILY_QUOTA_RESET_AT[0], 0.0)
+
+    def test_monthly_cap_reached_falls_back_to_ddg_without_calling_the_paid_api(self):
+        """Sep 2 2026 real incident: Nick manually triggered a full backfill
+        that could have made thousands of paid calls with no cost ceiling.
+        Once the persistent monthly counter reaches the cap, the paid API
+        must not be called at all -- confirmed here by asserting
+        smart_post (the paid path) is never invoked once the cap is hit."""
+        research.GOOGLE_MAPS_KEY = "fake-test-key"
+        research.GOOGLE_PLACES_MONTHLY_PAID_CALL_CAP = 2
+        import unittest.mock as mock
+        with mock.patch.object(research.net_utils, "smart_post",
+                                return_value=self._fake_response(json_data={"places": []})) as mock_post, \
+             mock.patch.object(research.net_utils, "smart_get",
+                                return_value=self._fake_response(status_code=200, text="<html></html>")) as mock_get:
+            research.get_google_places_info("Company One Ltd", "London")
+            research.get_google_places_info("Company Two Ltd", "London")
+            self.assertEqual(mock_post.call_count, 2)
+            # Cap (2) now reached -- this third call must skip the paid API entirely.
+            research.get_google_places_info("Company Three Ltd", "London")
+        self.assertEqual(mock_post.call_count, 2)
+        mock_get.assert_called_once()
+
+    def test_monthly_cap_persists_across_a_fresh_check_simulating_a_restart(self):
+        """The whole point of storing this in system_state instead of an
+        in-memory counter: a Render restart must not reset it back to zero.
+        Simulated here by reading the counter fresh via database.get_system_state
+        after the 'process' already recorded calls -- exactly what a new
+        process would see after restarting mid-run."""
+        research.GOOGLE_MAPS_KEY = "fake-test-key"
+        research.GOOGLE_PLACES_MONTHLY_PAID_CALL_CAP = 1
+        import unittest.mock as mock
+        with mock.patch.object(research.net_utils, "smart_post",
+                                return_value=self._fake_response(json_data={"places": []})) as mock_post:
+            research.get_google_places_info("Company One Ltd", "London")
+        self.assertEqual(mock_post.call_count, 1)
+        # Cap of 1 already used -- a brand new call (as if after a restart)
+        # must see the persisted count and refuse to spend again this month.
+        self.assertFalse(research._google_places_paid_call_budget_available())
+
+    def test_monthly_cap_resets_on_a_new_calendar_month(self):
+        research.GOOGLE_MAPS_KEY = "fake-test-key"
+        research.GOOGLE_PLACES_MONTHLY_PAID_CALL_CAP = 1
+        import database as _db
+        _db.set_system_state("google_places_paid_calls_month", "2020-01")  # a long-past month
+        _db.set_system_state("google_places_paid_calls_count", "1")
+        self.assertTrue(research._google_places_paid_call_budget_available())
+
+    def test_known_spam_listing_is_rejected_not_stored(self):
+        """Sep 2 2026 real incident: several genuinely different UK tree
+        surgery companies got matched by Google's Text Search to the exact
+        same unrelated US business. Confirmed live the same night. Must be
+        rejected entirely (not just the website field) since the phone and
+        email in the same result came from the same wrong match."""
+        research.GOOGLE_MAPS_KEY = "fake-test-key"
+        import unittest.mock as mock
+        fake_places = {"places": [{
+            "nationalPhoneNumber": "555-0100",
+            "websiteUri": "https://10summersheatingandcoolingllc.pro/",
+            "rating": 4.9,
+        }]}
+        with mock.patch.object(research.net_utils, "smart_post",
+                                return_value=self._fake_response(json_data=fake_places)):
+            result = research.get_google_places_info("Oakmont Arborist & Ground Works Ltd", "Manchester")
+        self.assertEqual(result, (None, None, None))
+
+    def test_budget_check_failure_fails_closed_not_open(self):
+        """If the persistent counter can't even be read, this must refuse
+        to spend rather than silently allow it -- a wrongly-skipped paid
+        call costs nothing; a wrongly-allowed one when we can't verify the
+        count is the exact mistake this whole cap exists to prevent."""
+        import unittest.mock as mock
+        with mock.patch.object(research.database, "get_system_state", side_effect=Exception("db down")):
+            self.assertFalse(research._google_places_paid_call_budget_available())
 
 
 if __name__ == "__main__":
