@@ -776,6 +776,42 @@ def backfill_lead_tags(batch_size: int = 500) -> dict:
             "note": "re-run if 'updated' == batch_size -- there may be more rows left untagged."}
 
 
+def get_tag_counts() -> dict:
+    """Sep 2 2026: reporting side of the tagging system -- counts leads per
+    tag (unnest + GROUP BY, accelerated by the same GIN index) plus overall
+    totals, so a plain-numbers report doesn't require a one-off manual query.
+    Returns tags grouped by their prefix (locale/region/job/size/vertical/
+    agent) since that's how Nick actually thinks about them."""
+    if not SURL:
+        return {"error": "no database configured"}
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT COUNT(*) FROM leads;")
+            total = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM leads WHERE tags IS NULL OR tags = '{}';")
+            untagged = cur.fetchone()[0]
+            cur.execute("""
+                SELECT tag, COUNT(*) AS n
+                FROM leads, unnest(tags) AS tag
+                GROUP BY tag
+                ORDER BY tag;
+            """)
+            rows = cur.fetchall()
+            grouped: dict = {}
+            for tag, n in rows:
+                prefix = tag.split(":", 1)[0] if ":" in tag else "other"
+                grouped.setdefault(prefix, {})[tag] = n
+            return {"total_leads": total, "untagged_leads": untagged, "categories": grouped}
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[LeadTags] get_tag_counts error: {e}")
+        return {"error": str(e)}
+
+
 def reset_monthly_quotas_if_needed() -> int:
     """
     Resets delivered_this_month to 0 for all active subscribers at the start of each new month.

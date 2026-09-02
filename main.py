@@ -4612,6 +4612,15 @@ def view_leads_by_tag(
     return {"tags_queried": tag_list, "match": match, "count": len(results), "leads": results}
 
 
+@app.get("/tag-report")
+def view_tag_report(secret: Optional[str] = Query(None)):
+    """Sep 2 2026: cron-secret-gated (not dashboard auth) so this can be
+    pulled programmatically for a plain numbers report -- see
+    database.get_tag_counts. Read-only, no side effects."""
+    verify_cron_secret(secret)
+    return database.get_tag_counts()
+
+
 @app.get("/trigger-backfill-lead-tags")
 def trigger_backfill_lead_tags(secret: Optional[str] = Query(None), batch_size: int = Query(500)):
     """Sep 2 2026: same pattern as /trigger-backfill-tree-surgeon -- runs
