@@ -915,8 +915,25 @@ def perform_research(city_name: str):
                 co_cur.close()
                 co_conn.close()
 
+                # Sep 2 2026: added Website to this line specifically to debug
+                # the DDG throttle fix's real-world effect -- after fixing the
+                # cross-thread rate-limit bug, Nick reported EVERY company in a
+                # 30+ row live sample still coming back Phone: N/A | Email: N/A,
+                # with no "[DDG Scrape] Non-200" warning anywhere in the same
+                # logs (that warning is the other thing this same fix added).
+                # 200-but-empty and non-200-and-logged are two different
+                # failure modes needing two different fixes, and this one line
+                # is what tells them apart on the next live run: "Website:
+                # NONE" every time means get_google_places_info itself never
+                # finds a result link (DDG search/parsing problem -- markup
+                # changed, or DDG serves a 200 OK soft-block/consent page
+                # instead of real results, which a bare status-code check
+                # can't detect); a real URL there with Phone/Email still N/A
+                # means the website WAS found but scrape_contact_info_from_
+                # website can't extract anything from that specific page.
                 logger.info(f"[Investigator] ✅ {name} ({assigned_city}) → "
-                            f"Director: {md_name or 'N/A'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'}")
+                            f"Director: {md_name or 'N/A'} | Website: {website or 'NONE'} | "
+                            f"Phone: {phone or 'N/A'} | Email: {email or 'N/A'}")
                 return name
             except Exception as pe:
                 logger.error(f"[Investigator] Error on company {name}: {pe}")
