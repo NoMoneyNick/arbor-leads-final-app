@@ -96,6 +96,19 @@ except ImportError:
     TREE_GOLD = ["tree surgery", "tree work", "tpo", "tree preservation order",
                  "felling", "pollard", "crown reduction", "hedge trimming"]
 
+# Sep 2 2026, master_expansion_plan_v2.md build-order step 2's flagged gap:
+# "building an actual HMO-priority mesh scraper (new search terms, new
+# council list) is separate future work, not a wiring gap." This is that
+# work. Reuses scanners.py's own multi-vertical resolver instead of a second,
+# locally-duplicated classifier -- same defensive fallback pattern as
+# TREE_GOLD above (tree-only behaviour, unchanged) if scanners.py isn't
+# importable.
+try:
+    from scanners import _resolve_vertical
+except ImportError:
+    def _resolve_vertical(text):
+        return "tree" if is_tree_related(text) else None
+
 # Idox's basic advanced-search "description" field only takes one plain-text
 # term (no boolean OR), so a single search for "tree" misses genuine tree-work
 # applications worded around a species/operation without the literal word
@@ -107,6 +120,39 @@ except ImportError:
 # run once and watch for 429s/bans before trusting it at full national scale,
 # same caveat as the SIC-code pass.
 IDOX_SEARCH_TERMS = ["tree", "tpo", "hedge"]
+
+# Sep 2 2026: HMO-specific search terms, run ONLY against councils confirmed
+# below to actually have HMO application volume worth searching for (running
+# these against every registered council would triple/quadruple this file's
+# already-throttled request volume for near-zero yield at councils with no
+# Article 4 HMO direction in force, since most HMO conversions there are
+# permitted development and never generate a planning application at all).
+IDOX_HMO_SEARCH_TERMS = ["hmo", "house in multiple occupation", "multiple occupation"]
+
+# Real, government-sourced list (NOT the AI-research-derived list flagged as
+# error-prone in TASKS.md) -- pulled live from planning.data.gov.uk's
+# "article-4-direction" dataset (3,234 records, paginated in full via its
+# entity.json API, keyword-matched on name/notes/description for HMO/C4/
+# "multiple occupation" phrasing, organisation-entity IDs resolved to real
+# council names) on Sep 2 2026. That pull found 35 councils nationally with a
+# confirmed HMO-related Article 4 direction; this set is the intersection of
+# those 35 with COUNCIL_REGISTRY's already-live-verified Idox portals, i.e.
+# zero new portal-verification risk to enable HMO search on. The other ~22
+# confirmed-HMO councils not yet in COUNCIL_REGISTRY (Crawley, Newcastle,
+# Sefton, Harlow, Salford, Fenland, Tower Hamlets, Barking & Dagenham,
+# Rother, Rossendale, Tendring, Hillingdon, Halton, North Warwickshire,
+# Ipswich, Burnley, Newcastle-under-Lyme, Basingstoke & Deane, Bury -- plus
+# Hounslow, which IS HMO-confirmed but was already removed from this registry
+# as a confirmed Northgate/NEC portal, not Idox) are real future-work
+# candidates, each needing the same live-browser portal verification every
+# other entry in this file already went through before being added -- not
+# done here. Stevenage was deliberately excluded even though it appeared in
+# the raw 35: its one matching direction has an end-date of 2017-09-20 with
+# no confirmed live replacement, so it's very likely lapsed.
+COUNCILS_WITH_CONFIRMED_HMO_ARTICLE_4 = {
+    "BRISTOL", "EXETER", "MILTON KEYNES", "SOUTHWARK", "LEICESTER", "BARNET",
+    "PLYMOUTH", "DARTFORD", "OXFORD", "BRENT", "COVENTRY", "YORK", "SOUTHAMPTON",
+}
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger("vector-data-labs")
@@ -496,6 +542,12 @@ class IdoxScraper:
         return out
 
     def search_tree_applications(self, days_back: int = 30, search_term: str = "tree") -> List[Dict]:
+        # Sep 2 2026: name kept as-is (only internal caller is scrape_mesh_council
+        # below, plus test_scrapers.py references it by this name) but the filter
+        # inside is no longer tree-only -- it now tags each lead with whichever
+        # vertical _resolve_vertical resolves (tree, hmo, or nothing at all),
+        # so a real HMO application found via an HMO search term isn't silently
+        # discarded by a hardcoded tree-only gate.
         if not BeautifulSoup:
             logger.error("[MESH] BeautifulSoup not installed. Cannot run Idox Scraper.")
             return []
@@ -572,8 +624,9 @@ class IdoxScraper:
                         ref = ref_tag.find_next_sibling('td').text.strip()
                         addr = addr_tag.find_next_sibling('td').text.strip() if addr_tag else "Unknown Address"
                         desc = desc_tag.find_next_sibling('td').text.strip()
-                        if is_tree_related(desc):
-                            lead = {"reference": ref, "address": addr, "description": desc}
+                        vertical = _resolve_vertical(desc)
+                        if vertical:
+                            lead = {"reference": ref, "address": addr, "description": desc, "vertical": vertical}
                             key_match = re.search(r'keyVal=([^&]+)', res_post.url)
                             if key_match:
                                 lead.update(self._fetch_applicant_and_agent(key_match.group(1)))
@@ -647,11 +700,13 @@ class IdoxScraper:
                 address_p = li.find('p', class_='address')
                 addr = address_p.text.strip() if address_p else "Unknown Address"
 
-                if is_tree_related(desc):
+                vertical = _resolve_vertical(desc)
+                if vertical:
                     lead = {
                         "reference": ref,
                         "address": addr,
-                        "description": desc
+                        "description": desc,
+                        "vertical": vertical,
                     }
                     # One extra request per real lead to read its Applicant/Agent
                     # fields (see _fetch_applicant_and_agent) -- small delay to
@@ -819,10 +874,17 @@ def scrape_mesh_council(city_name: str) -> List[Dict]:
         # Multi-pass search: Idox's basic description field only accepts one
         # plain-text term, so run it once per high-signal term and dedupe by
         # reference (mirrors the SIC-code multi-pass pattern used for item 5's
-        # Companies House expansion).
+        # Companies House expansion). Sep 2 2026: HMO terms are added to this
+        # same pass -- but ONLY for councils in COUNCILS_WITH_CONFIRMED_HMO_
+        # ARTICLE_4, so every other registered council's request volume is
+        # completely unaffected by this change.
+        search_terms = list(IDOX_SEARCH_TERMS)
+        if city_upper in COUNCILS_WITH_CONFIRMED_HMO_ARTICLE_4:
+            search_terms += IDOX_HMO_SEARCH_TERMS
+
         seen_refs = set()
         merged_leads = []
-        for term in IDOX_SEARCH_TERMS:
+        for term in search_terms:
             try:
                 term_leads = scraper.search_tree_applications(days_back=7, search_term=term)
             except Exception as e:

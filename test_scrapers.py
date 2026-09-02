@@ -2265,6 +2265,115 @@ class TestVerticalWiringLeeds(unittest.TestCase):
         self.assertEqual(by_ref["LDS/TREE/1"], "tree")
 
 
+class TestMeshScraperHmoGeneralization(unittest.TestCase):
+    """Sep 2 2026, master_expansion_plan_v2.md build-order step 2's flagged
+    gap ("building an actual HMO-priority mesh scraper... is separate future
+    work, not a wiring gap"): mesh_scrapers.py's Idox scraper used to filter
+    every result through a hardcoded tree-only is_tree_related() check no
+    matter what search term found it -- these prove the generalized version
+    tags each lead with its real resolved vertical, that HMO search terms
+    only run against the government-confirmed council list (not every
+    registered council), and that the one call site consuming this
+    (scanners.run_mesh_network_scan) passes that vertical through to
+    _insert_lead instead of the old implicit tree-only default."""
+
+    LISTING_HTML_HMO_AND_JUNK = """
+    <html><body>
+    <ul id="searchresults">
+        <li class="searchresult">
+            <a href="/online-applications/applicationDetails.do?id=1">23/HMO/1 | Change of use to a house in multiple occupation (6 persons)</a>
+            <p class="address">1 High Street, Bristol, BS1 1AA</p>
+        </li>
+        <li class="searchresult">
+            <a href="/online-applications/applicationDetails.do?id=2">23/FUL/1 | Erection of a two-storey rear extension</a>
+            <p class="address">2 High Street, Bristol, BS1 1BB</p>
+        </li>
+    </ul>
+    </body></html>
+    """
+
+    def setUp(self):
+        self.cur = MagicMock()
+        self.conn = MagicMock()
+        self.conn.cursor.return_value = self.cur
+
+    def test_search_tree_applications_tags_an_hmo_result_with_hmo_vertical(self):
+        """The core fix: an HMO application returned by an HMO search term
+        must not be silently discarded by a leftover tree-only filter."""
+        scraper = mesh_scrapers.IdoxScraper("https://example-council.gov.uk/online-applications")
+        get_resp = MagicMock(status_code=200, text="<html></html>")
+        post_resp = MagicMock(status_code=200, text=self.LISTING_HTML_HMO_AND_JUNK,
+                               url="https://example-council.gov.uk/online-applications/advancedSearchResults.do")
+        with patch("net_utils.smart_get", return_value=get_resp), \
+             patch("net_utils.smart_post", return_value=post_resp):
+            leads = scraper.search_tree_applications(search_term="hmo")
+
+        by_ref = {l["reference"]: l for l in leads}
+        self.assertEqual(len(leads), 1)  # extension junk still correctly excluded
+        self.assertEqual(by_ref["23/HMO/1"]["vertical"], "hmo")
+
+    def test_hmo_search_terms_only_run_against_confirmed_hmo_councils(self):
+        """Bristol is in COUNCILS_WITH_CONFIRMED_HMO_ARTICLE_4 -- Cornwall is
+        not. Cornwall's request volume must be completely unaffected by this
+        change (only the original 3 tree terms), while Bristol gets the 3
+        tree terms plus the 3 HMO terms."""
+        with patch.object(mesh_scrapers, "COUNCIL_REGISTRY", {
+                "BRISTOL": "https://planningonline.bristol.gov.uk/online-applications",
+                "CORNWALL": "https://planning.cornwall.gov.uk/online-applications",
+             }), \
+             patch.object(mesh_scrapers.IdoxScraper, "search_tree_applications", return_value=[]) as mock_search, \
+             patch("time.sleep", return_value=None):
+            mesh_scrapers.scrape_mesh_council("BRISTOL")
+            bristol_terms = {c.kwargs.get("search_term") for c in mock_search.call_args_list}
+            mock_search.reset_mock()
+            mesh_scrapers.scrape_mesh_council("CORNWALL")
+            cornwall_terms = {c.kwargs.get("search_term") for c in mock_search.call_args_list}
+
+        self.assertEqual(cornwall_terms, set(mesh_scrapers.IDOX_SEARCH_TERMS))
+        self.assertEqual(bristol_terms, set(mesh_scrapers.IDOX_SEARCH_TERMS) | set(mesh_scrapers.IDOX_HMO_SEARCH_TERMS))
+
+    def test_run_mesh_network_scan_passes_leads_own_vertical_through_to_insert(self):
+        fake_registry = {"Bristol": "https://planningonline.bristol.gov.uk/online-applications"}
+        mesh_leads = [
+            {"reference": "23/HMO/1", "address": "1 High Street, Bristol", "description": "HMO change of use", "vertical": "hmo"},
+            {"reference": "23/TREE/1", "address": "2 High Street, Bristol", "description": "Felling of oak tree", "vertical": "tree"},
+        ]
+        with patch.object(mesh_scrapers, "COUNCIL_REGISTRY", fake_registry), \
+             patch.object(mesh_scrapers, "scrape_mesh_council", return_value=mesh_leads), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value=None) as mock_insert, \
+             patch("time.sleep", return_value=None):
+            scanners.run_mesh_network_scan()
+
+        by_ref = {c.args[1]: c.kwargs.get("vertical") for c in mock_insert.call_args_list}
+        self.assertEqual(by_ref["23/HMO/1"], "hmo")
+        self.assertEqual(by_ref["23/TREE/1"], "tree")
+
+    def test_run_mesh_network_scan_defaults_to_tree_when_a_lead_has_no_vertical_key(self):
+        """Backward compatibility: a lead dict with no "vertical" key at all
+        (e.g. from a code path this generalization didn't touch) must still
+        default to tree, exactly matching this call site's behaviour before
+        this change."""
+        fake_registry = {"Cornwall": "https://planning.cornwall.gov.uk/online-applications"}
+        mesh_leads = [{"reference": "23/OLD/1", "address": "1 Fore Street, Truro", "description": "Felling of oak tree"}]
+        with patch.object(mesh_scrapers, "COUNCIL_REGISTRY", fake_registry), \
+             patch.object(mesh_scrapers, "scrape_mesh_council", return_value=mesh_leads), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value=None) as mock_insert, \
+             patch("time.sleep", return_value=None):
+            scanners.run_mesh_network_scan()
+
+        self.assertEqual(mock_insert.call_args.kwargs.get("vertical"), "tree")
+
+    def test_confirmed_hmo_council_set_is_a_subset_of_the_live_registry(self):
+        """Every council flagged as HMO-confirmed must actually exist in
+        COUNCIL_REGISTRY -- a typo'd council name here would silently never
+        enable HMO search for the council it was supposed to."""
+        for council in mesh_scrapers.COUNCILS_WITH_CONFIRMED_HMO_ARTICLE_4:
+            with self.subTest(council=council):
+                self.assertIn(council, mesh_scrapers.COUNCIL_REGISTRY)
+
+
 class TestLeedsScanDelegation(unittest.TestCase):
     """scan_leeds_leads() -- same Aug 30 2026 gap as scan_london_leads()
     (found while checking "will that cover it though?"): part 2 used to

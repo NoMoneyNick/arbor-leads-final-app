@@ -478,3 +478,34 @@
     DNS/email deliverability (item 2 below) and the cold email copy (item 3) are
     what's actually gating the first paying contractor and matter more right now.
     Good candidate for right after launch, or folded into a later polish pass.
+
+14. **Multi-vertical expansion build + a real production incident (Sep 1-2 2026)** —
+    a full work segment happened between this entry and item 13 that this file's
+    changelog never captured; full detail lives in `AI_HANDOFF.md` (rewritten Sep 2
+    2026) and `master_expansion_plan_v2.md`, not repeated here in full. Headline
+    points only:
+    - **Multi-vertical architecture actually built**: a generalized `VERTICALS`
+      config, tiered classifier (keyword → structured-field → Gemini LLM → manual
+      review queue), GDPR-safe-by-construction lead format for HMO (no identity
+      capture, enforced structurally in `_insert_lead`), the HMO vertical wired
+      into all 4 live scan sources plus a dedicated HMO mesh scraper (13 councils
+      enabled via a real government-data council list, ~22 more found but not yet
+      live-verified), and `bulk_contractor_extractor.py` generalized for HMO too.
+      188/188 tests passing.
+    - **A real revenue-impacting production incident happened and was resolved**:
+      a schema migration failure on Sep 1 took lead-capture AND the public
+      marketplace to zero for ~18 minutes. Root-caused, fixed, and self-healing
+      fallbacks added so the same failure mode can't recur silently. Full timeline
+      in `AI_HANDOFF.md` §4.
+    - **Real risk items still open, not resolved**: Gemini's council/portal
+      research came back with a confirmed ~17% error rate and needs
+      live-verification before trusting the rest of it; the LIA's core GDPR
+      argument rests on an ICO citation I couldn't verify against the live ICO
+      site; Privacy Policy/Terms still need a solicitor pass; `GLA_API_KEY` needs
+      renewal. Full list in `AI_HANDOFF.md` §7.
+    - Tier 3 (Gemini classification) is code-complete and on disk but not yet live
+      — needs a Render redeploy plus a `GEMINI_API_KEY` env var to activate, and is
+      fully inert (never errors, never blocks anything) until that's set.
+    See `AI_HANDOFF.md` for the full writeup, including what's been learned about
+    how Nick and this AI work together — worth reading at the start of any future
+    session, not just this one.

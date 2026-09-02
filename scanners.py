@@ -683,6 +683,14 @@ def run_mesh_network_scan() -> int:
                     agent_company=lead.get("agent_company"),
                     has_agent=lead.get("has_agent"),
                     agent_is_tree_surgeon=lead.get("agent_is_tree_surgeon"),
+                    # Sep 2 2026: mesh_scrapers now tags each lead with its
+                    # resolved vertical (tree or hmo) once a council has HMO
+                    # search terms enabled -- defaults to "tree" only for
+                    # leads from councils/paths that never ran an HMO search
+                    # at all, matching this call site's original behaviour
+                    # exactly for every council not in
+                    # COUNCILS_WITH_CONFIRMED_HMO_ARTICLE_4.
+                    vertical=lead.get("vertical", "tree"),
                 )
                 if inserted:
                     new_leads.append(inserted)
