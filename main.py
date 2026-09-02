@@ -4554,7 +4554,17 @@ def run_full_autonomous_cycle():
     enrichment). Each maintenance step loops until it reports no more work
     left, capped at 20 iterations as a safety valve (matching this
     project's other 'never spin forever' guards), so a growing backlog gets
-    fully drained autonomously instead of only nibbled at once a day."""
+    fully drained autonomously instead of only nibbled at once a day.
+
+    Sep 2 2026: also stamps last_autonomous_cycle_started_at immediately,
+    before any work happens. This exists because a real incident showed
+    the gap in only stamping completion: if Render restarts mid-cycle
+    (whether from a deploy or someone hitting restart to stop a runaway
+    cost), the completion stamp never gets written, so the scheduler saw
+    no recent run and fired the whole expensive cycle again ~2 minutes
+    after every subsequent restart. Stamping the start means the 20-hour
+    cooldown holds even when a cycle never finishes."""
+    database.set_system_state("last_autonomous_cycle_started_at", datetime.datetime.utcnow().isoformat() + "Z")
     run_master_daily_pipeline()
 
     logger.info("[AUTO] Starting tag/enrichment maintenance pass...")
@@ -4601,15 +4611,31 @@ def _autonomous_scheduler_loop():
     ever silently skipping a day. Because the persisted DB timestamp is
     what controls this (not process uptime), Nick redeploying five times in
     an afternoon can't accidentally fire five scans -- each restart just
-    resumes the same countdown."""
+    resumes the same countdown.
+
+    Sep 2 2026 fix: the cooldown check now keys off whichever is MORE
+    RECENT of last_autonomous_cycle_started_at (stamped the instant a
+    cycle begins) and last_autonomous_cycle_at (stamped only on a clean
+    finish) -- not completion alone. A real incident showed why: a cycle
+    interrupted by a restart before it could finish left the completion
+    stamp unwritten, so this loop saw 'no recent run' and re-fired the
+    entire cycle again ~2 minutes after every subsequent restart, with no
+    way to stop it short of waiting it out. Keying off the start time
+    means one attempt -- finished or not -- blocks re-firing for a full
+    20 hours, matching how a human operator would expect 'try again
+    later, not again immediately' to behave."""
     time.sleep(120)  # let the app finish starting up before the first check
     while True:
         try:
-            last_run_iso = database.get_system_state("last_autonomous_cycle_at")
+            last_started_iso = database.get_system_state("last_autonomous_cycle_started_at")
+            last_finished_iso = database.get_system_state("last_autonomous_cycle_at")
+            most_recent_iso = max(
+                [iso for iso in (last_started_iso, last_finished_iso) if iso]
+            ) if (last_started_iso or last_finished_iso) else None
             should_run = True
-            if last_run_iso:
+            if most_recent_iso:
                 try:
-                    last_run = datetime.datetime.fromisoformat(last_run_iso.replace("Z", "+00:00"))
+                    last_run = datetime.datetime.fromisoformat(most_recent_iso.replace("Z", "+00:00"))
                     hours_since = (datetime.datetime.now(datetime.timezone.utc) - last_run).total_seconds() / 3600
                     should_run = hours_since >= 20
                 except Exception:
