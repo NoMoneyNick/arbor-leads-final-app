@@ -161,7 +161,11 @@ class TestInsertLeadBackfill(unittest.TestCase):
         )
         self.assertEqual(result["vertical"], "tree")
         _, params = cur.execute.call_args[0]
-        self.assertEqual(params[-1], "tree")  # vertical is the last bound param
+        # Sep 2 2026: `tags` was added as a new final bound param after
+        # `vertical` for the lead tagging system -- vertical moved from
+        # last to second-to-last.
+        self.assertEqual(params[-2], "tree")
+        self.assertIn("vertical:tree", params[-1])
 
     def test_vertical_param_is_passed_through_and_stored(self):
         cur = self._mock_cursor(("some-uuid", True))
@@ -172,7 +176,8 @@ class TestInsertLeadBackfill(unittest.TestCase):
         )
         self.assertEqual(result["vertical"], "hmo")
         _, params = cur.execute.call_args[0]
-        self.assertEqual(params[-1], "hmo")
+        self.assertEqual(params[-2], "hmo")
+        self.assertIn("vertical:hmo", params[-1])
 
     def test_hmo_lead_never_stores_applicant_or_agent_identity_even_if_passed_in(self):
         """Sep 2 2026, master_expansion_plan_v2.md build-order step 3 (the
@@ -199,9 +204,14 @@ class TestInsertLeadBackfill(unittest.TestCase):
         _, params = cur.execute.call_args[0]
         # INSERT param order: (reference, address, summary, source, lead_score,
         # lead_price, applicant_name, agent_name, agent_company, has_agent,
-        # agent_is_tree_surgeon, vertical) -- indices 6-10 are the 5 identity fields.
+        # agent_is_tree_surgeon, vertical, tags) -- indices 6-10 are the 5
+        # identity fields; tags is now the new final param (Sep 2 2026).
         self.assertEqual(params[6:11], (None, None, None, None, None))
-        self.assertEqual(params[-1], "hmo")
+        self.assertEqual(params[-2], "hmo")
+        self.assertIn("vertical:hmo", params[-1])
+        # HMO's own identity-stripping must not leak into the tags either --
+        # no applicant/agent name should ever end up embedded in a tag string.
+        self.assertFalse(any("jane smith" in t.lower() or "john doe" in t.lower() for t in params[-1]))
 
     def test_tree_lead_identity_capture_is_completely_unaffected(self):
         """The other half of the fix: capture_identity defaults to True and
@@ -248,6 +258,24 @@ class TestInsertLeadBackfill(unittest.TestCase):
         cur.connection.rollback.assert_called_once()
         second_call_sql = cur.execute.call_args_list[1][0][0]
         self.assertNotIn("vertical", second_call_sql)
+
+    def test_falls_back_to_legacy_insert_when_tags_column_is_missing(self):
+        """Same production-incident-shaped protection as the vertical
+        fallback above, extended Sep 2 2026 to cover the new `tags` column's
+        own migration being delayed the same way."""
+        cur = self._mock_cursor(None)
+        cur.execute.side_effect = [
+            Exception('column "tags" of relation "leads" does not exist'),
+            None,
+        ]
+        cur.fetchone.return_value = ("some-uuid", True)
+        result = scanners._insert_lead(
+            cur, "23/07778/TPO", "3 Oak Ave, Leeds", "Felling of 1no. diseased oak tree", "Leeds"
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(cur.execute.call_count, 2)
+        second_call_sql = cur.execute.call_args_list[1][0][0]
+        self.assertNotIn("tags", second_call_sql)
 
     def test_unrelated_insert_error_is_not_swallowed_by_the_vertical_fallback(self):
         """Only the specific 'vertical column missing' failure mode should be
@@ -2839,6 +2867,100 @@ class TestProcessReviewQueueWithLlm(unittest.TestCase):
             scanners.process_review_queue_with_llm(batch_size=10, max_llm_attempts=3)
 
         mock_get_queue.assert_called_once_with(limit=10, max_llm_attempts=3)
+
+
+class TestLeadTagging(unittest.TestCase):
+    """Sep 2 2026: the 'floating bubble' lead tagging system Nick asked for
+    -- see scanners._generate_tags' own module comment for the full design
+    rationale. This class covers pure tag-generation logic; the query/
+    backfill side lives in test_database.py's TestLeadTagQuerying."""
+
+    def test_classify_job_types_matches_multiple_overlapping_categories(self):
+        """A crown reduction that's also covered by a TPO must get BOTH
+        tags -- job type and legal status are independent facts, not a
+        single mutually-exclusive category (this is the whole point of the
+        'floating bubble' design over a single rigid column)."""
+        types = scanners._classify_job_types(
+            "Crown reduction of protected oak tree covered by a Tree Preservation Order"
+        )
+        self.assertIn("crown-work", types)
+        self.assertIn("tpo", types)
+
+    def test_classify_job_types_single_category_examples(self):
+        self.assertIn("felling", scanners._classify_job_types("Fell a dead tree in rear garden."))
+        self.assertIn("hedge-work", scanners._classify_job_types("Reduce hedge height along boundary."))
+        self.assertIn("stump-work", scanners._classify_job_types("Stump grinding of removed sycamore."))
+        self.assertIn("disease-hazard", scanners._classify_job_types("Ash dieback - dangerous tree near footpath."))
+
+    def test_classify_job_types_returns_other_when_nothing_matches(self):
+        """Never silently untagged -- same 'always visible somewhere'
+        principle as Tier 4's manual review queue."""
+        self.assertEqual(scanners._classify_job_types("General garden maintenance enquiry."), ["other"])
+
+    def test_classify_job_types_handles_none_and_empty(self):
+        self.assertEqual(scanners._classify_job_types(None), ["other"])
+        self.assertEqual(scanners._classify_job_types(""), ["other"])
+
+    def test_resolve_region_known_and_unclassified_councils(self):
+        self.assertEqual(scanners._resolve_region("BROMLEY"), "London")
+        self.assertEqual(scanners._resolve_region("bromley"), "London")  # case-insensitive
+        self.assertEqual(scanners._resolve_region("EDINBURGH"), "Scotland")
+        self.assertEqual(scanners._resolve_region("SOME COUNCIL NOT IN THE LIST"), "unclassified")
+        self.assertEqual(scanners._resolve_region(""), "unclassified")
+
+    def test_slugify_tag_produces_clean_lowercase_hyphenated_values(self):
+        self.assertEqual(scanners._slugify_tag("Hammersmith & Fulham"), "hammersmith-fulham")
+        self.assertEqual(scanners._slugify_tag("South East"), "south-east")
+        self.assertEqual(scanners._slugify_tag(""), "unknown")
+        self.assertEqual(scanners._slugify_tag(None), "unknown")
+
+    def test_generate_tags_full_example_matches_nicks_own_bromley_example(self):
+        """Directly checks the exact scenario Nick used to explain what he
+        wanted: 'a crown work in Bromley large job fits into: bromley,
+        london, south east, crown job, large job'. This pipeline uses ONS's
+        actual London/South East split (they're two separate official
+        regions, not one) rather than his looser example grouping -- locale
+        and region tags below prove the council + its real region both
+        land correctly; a broader 'south east including London' macro-tag
+        would be a separate, later addition if he wants that specific
+        non-standard grouping."""
+        tags = scanners._generate_tags(
+            "12 High St, Bromley", "Crown reduction of large oak tree", "BROMLEY",
+            "tree", "large", None
+        )
+        self.assertIn("locale:bromley", tags)
+        self.assertIn("region:london", tags)
+        self.assertIn("job:crown-work", tags)
+        self.assertIn("size:large", tags)
+        self.assertIn("agent:unconfirmed", tags)
+        self.assertIn("vertical:tree", tags)
+
+    def test_generate_tags_agent_status_all_three_states(self):
+        base = ("1 Elm St", "Fell a tree", "LEEDS", "tree", "small")
+        self.assertIn("agent:yes", scanners._generate_tags(*base, True))
+        self.assertIn("agent:no", scanners._generate_tags(*base, False))
+        self.assertIn("agent:unconfirmed", scanners._generate_tags(*base, None))
+
+    def test_generate_tags_skips_job_type_tags_for_hmo(self):
+        """The job-type sub-classifier is tree-specific (felling/crown/hedge/
+        stump/tpo/disease are tree-vertical concepts) -- an HMO lead should
+        get no job: tags at all rather than a nonsensical tree-shaped one."""
+        tags = scanners._generate_tags(
+            "9 Ivy Road, Bristol", "Change of use to a house in multiple occupation (7 persons)",
+            "BRISTOL", "hmo", "medium", None
+        )
+        self.assertFalse(any(t.startswith("job:") for t in tags))
+        self.assertIn("vertical:hmo", tags)
+
+    def test_council_to_region_covers_every_registered_mesh_council(self):
+        """Guards against a future council being added to
+        mesh_scrapers.COUNCIL_REGISTRY without a matching region entry here
+        -- silently falling back to 'unclassified' for a real, live council
+        would be a real regression, not a hypothetical one, so this test
+        fails loudly instead of that gap going unnoticed."""
+        import mesh_scrapers
+        missing = [c for c in mesh_scrapers.COUNCIL_REGISTRY if c not in scanners.COUNCIL_TO_REGION]
+        self.assertEqual(missing, [], f"Councils missing a region mapping: {missing}")
 
 
 if __name__ == "__main__":

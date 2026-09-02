@@ -364,5 +364,102 @@ class TestReviewQueueFunctions(unittest.TestCase):
             self.assertFalse(database.resolve_unclassified_application("23/07777/TPO", ""))
 
 
+class TestLeadTagQuerying(unittest.TestCase):
+    """Sep 2 2026: the query/backfill side of the lead tagging system --
+    see scanners.py's TestLeadTagging for the tag-generation side."""
+
+    def _conn_with_cursor(self, fetchone_return=None, fetchall_return=None):
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.fetchone.return_value = fetchone_return
+        cur.fetchall.return_value = fetchall_return or []
+        conn.cursor.return_value = cur
+        return conn, cur
+
+    def test_get_leads_by_tags_returns_empty_with_no_tags_or_no_db(self):
+        with patch.object(database, "SURL", "postgres://fake-for-test"):
+            self.assertEqual(database.get_leads_by_tags([]), [])
+        with patch.object(database, "SURL", ""):
+            self.assertEqual(database.get_leads_by_tags(["locale:bromley"]), [])
+
+    def test_get_leads_by_tags_match_all_uses_contains_operator(self):
+        conn, cur = self._conn_with_cursor(fetchall_return=[])
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            database.get_leads_by_tags(["locale:bromley", "job:crown-work"], match_all=True)
+        sql, params = cur.execute.call_args[0]
+        self.assertIn("@>", sql)
+        self.assertNotIn("&&", sql)
+        self.assertEqual(params[0], ["locale:bromley", "job:crown-work"])
+
+    def test_get_leads_by_tags_match_any_uses_overlap_operator(self):
+        conn, cur = self._conn_with_cursor(fetchall_return=[])
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            database.get_leads_by_tags(["region:london", "region:scotland"], match_all=False)
+        sql, params = cur.execute.call_args[0]
+        self.assertIn("&&", sql)
+
+    def test_get_leads_by_tags_maps_rows_to_dicts(self):
+        row = ("id1", "23/07777/TPO", "3 Oak Ave, Bromley", "Crown reduction of oak tree.",
+                "large", 75, "BROMLEY", "tree", False,
+                ["vertical:tree", "locale:bromley", "region:london"], "2026-09-02T00:00:00Z", "new")
+        conn, cur = self._conn_with_cursor(fetchall_return=[row])
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            results = database.get_leads_by_tags(["locale:bromley"])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["reference"], "23/07777/TPO")
+        self.assertIn("region:london", results[0]["tags"])
+
+    def test_backfill_lead_tags_only_touches_untagged_rows(self):
+        """The SELECT must filter to tags IS NULL OR tags = '{}' -- a lead
+        already tagged should never be silently recomputed/overwritten by a
+        routine backfill re-run."""
+        conn, cur = self._conn_with_cursor(fetchall_return=[])
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            result = database.backfill_lead_tags(batch_size=10)
+        sql = cur.execute.call_args[0][0]
+        self.assertIn("tags IS NULL OR tags = '{}'", sql)
+        self.assertEqual(result["updated"], 0)
+
+    def test_backfill_lead_tags_computes_and_writes_tags_per_row(self):
+        """backfill_lead_tags only imports the real `scanners` module when
+        there's actually a row to process (see its Sep 2 2026 comment) --
+        that import is faked out here with sys.modules so this test proves
+        backfill_lead_tags' OWN logic (SELECT filter, per-row call, UPDATE,
+        commit) in isolation, without depending on scanners.py's full
+        dependency chain (psycopg2/dotenv/etc, not all stubbed in this
+        file) being importable in whatever process runs this file alone.
+        scanners._generate_tags' own real behaviour is covered separately
+        by test_scrapers.py's TestLeadTagging."""
+        select_row = ("lead-id-1", "3 Oak Ave, Bromley", "Fell a tree in rear garden.",
+                       "BROMLEY", "tree", "small", None)
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.fetchall.return_value = [select_row]
+        conn.cursor.return_value = cur
+        fake_scanners = types.ModuleType("scanners")
+        fake_scanners._generate_tags = MagicMock(
+            return_value=["vertical:tree", "locale:bromley", "region:london", "job:felling"]
+        )
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"), \
+             patch.dict(sys.modules, {"scanners": fake_scanners}):
+            result = database.backfill_lead_tags(batch_size=10)
+        self.assertEqual(result["updated"], 1)
+        self.assertEqual(result["errors"], 0)
+        fake_scanners._generate_tags.assert_called_once_with(
+            "3 Oak Ave, Bromley", "Fell a tree in rear garden.", "BROMLEY", "tree", "small", None
+        )
+        update_calls = [c for c in cur.execute.call_args_list if "UPDATE leads SET tags" in c[0][0]]
+        self.assertEqual(len(update_calls), 1)
+        written_tags = update_calls[0][0][1][0]
+        self.assertIn("vertical:tree", written_tags)
+        self.assertIn("locale:bromley", written_tags)
+        self.assertTrue(any(t.startswith("job:") for t in written_tags))
+
+
 if __name__ == "__main__":
     unittest.main()

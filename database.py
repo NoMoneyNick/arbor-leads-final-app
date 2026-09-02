@@ -406,6 +406,24 @@ def init_db():
             # matched vertical (see scanners._resolve_vertical's docstring for the
             # interim tree-priority-wins rule this implies).
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS vertical TEXT DEFAULT 'tree';",
+            # Sep 2 2026: lead tagging system (Nick's "total control of our
+            # data" request) -- a Postgres native array column so one lead
+            # can carry many independent, overlapping tags (locale, region,
+            # job size, job type, agent status) at once. See
+            # scanners._generate_tags for what gets written in here and
+            # get_leads_by_tags below for how it's queried. Each existing
+            # row defaults to an empty array (not NULL, so array operators
+            # like @> and && behave predictably without extra NULL checks
+            # at every call site) until backfill_lead_tags() populates it.
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}';",
+            # GIN index is what makes @>/&& array queries fast at scale --
+            # without it, get_leads_by_tags would do a full table scan on
+            # every filter. IF NOT EXISTS makes this idempotent same as
+            # every other statement in this list; CREATE INDEX (not
+            # CONCURRENTLY) is fine here since it runs through the same
+            # resilient-per-statement/retry path as every other DDL
+            # statement in this list, not inside one shared transaction.
+            "CREATE INDEX IF NOT EXISTS idx_leads_tags ON leads USING GIN (tags);",
             # Add lat/lon columns for geographic radius matching (safe, idempotent)
             "ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS lat FLOAT;",
             "ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS lon FLOAT;",
@@ -659,6 +677,103 @@ def resolve_unclassified_application(reference: str, resolved_vertical: str) -> 
     except Exception as e:
         logger.error(f"[ReviewQueue] Error resolving application {reference}: {e}")
         return False
+
+
+def get_leads_by_tags(tags: list, match_all: bool = True, limit: int = 200) -> list:
+    """Sep 2 2026: the query side of the lead tagging system (see
+    scanners._generate_tags for how tags are built at insert time). Pass a
+    list of tag strings like ["locale:bromley", "job:crown-work", "size:large"]
+    and get back every lead carrying all of them (match_all=True, Postgres
+    '@>' contains-all) or any of them (match_all=False, '&&' overlap). Both
+    operators are what the GIN index on leads.tags actually accelerates --
+    without it, this degrades to a full table scan at real data volume, not
+    a slow query at small scale only.
+
+    Deliberately does NOT accept a date range here -- that's a direct query
+    against discovered_at/registered_date/statutory_deadline instead (see
+    that column's own comment where it's added: a baked-in "recent" tag
+    would go stale the moment it's no longer true, which nothing would ever
+    notice or fix). Callers wanting both a tag filter and a date range
+    should combine this function's tag list with their own WHERE clause, or
+    ask for that to be built as a real combined query once there's an actual
+    caller (admin dashboard, marketplace filter) that needs it -- not
+    speculatively here.
+    """
+    if not SURL or not tags:
+        return []
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            op = "@>" if match_all else "&&"
+            cur.execute(f"""
+                SELECT id, reference, address, summary, lead_score, lead_price,
+                       council_source, vertical, has_agent, tags, discovered_at, status
+                FROM leads
+                WHERE tags {op} %s
+                ORDER BY discovered_at DESC
+                LIMIT %s;
+            """, (tags, limit))
+            cols = ["id", "reference", "address", "summary", "lead_score", "lead_price",
+                    "council_source", "vertical", "has_agent", "tags", "discovered_at", "status"]
+            rows = cur.fetchall()
+            return [dict(zip(cols, r)) for r in rows]
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[LeadTags] Error querying by tags {tags}: {e}")
+        return []
+
+
+def backfill_lead_tags(batch_size: int = 500) -> dict:
+    """Sep 2 2026: recomputes scanners._generate_tags for every lead whose
+    `tags` column is still empty -- covers every row inserted before this
+    column existed, and is safe to re-run any time the job-type/region
+    keyword lists improve later (only ever touches rows still sitting at
+    '{}', same 'only touch what's actually unresolved' pattern as
+    trigger_backfill_tree_surgeon). Imports scanners lazily to avoid a
+    circular import (scanners.py imports database.py at module level)."""
+    if not SURL:
+        return {"error": "no database configured"}
+    updated = 0
+    errors = 0
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT id, address, summary, council_source, vertical, lead_score, has_agent
+                FROM leads
+                WHERE tags IS NULL OR tags = '{}'
+                LIMIT %s;
+            """, (batch_size,))
+            rows = cur.fetchall()
+            if not rows:
+                conn.commit()
+                return {"updated": 0, "errors": 0, "batch_size": batch_size,
+                        "note": "no untagged rows found."}
+            import scanners as _scanners  # only imported when there's actually work to do
+            for lead_id, address, summary, council_source, vertical, lead_score, has_agent in rows:
+                try:
+                    tags = _scanners._generate_tags(
+                        address, summary, council_source, vertical or "tree",
+                        lead_score or "small", has_agent
+                    )
+                    cur.execute("UPDATE leads SET tags = %s WHERE id = %s;", (tags, lead_id))
+                    updated += 1
+                except Exception as row_err:
+                    errors += 1
+                    logger.warning(f"[LeadTags] Backfill error on lead {lead_id}: {row_err}")
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[LeadTags] Backfill error: {e}")
+        return {"error": str(e), "updated": updated, "errors": errors}
+    return {"updated": updated, "errors": errors, "batch_size": batch_size,
+            "note": "re-run if 'updated' == batch_size -- there may be more rows left untagged."}
 
 
 def reset_monthly_quotas_if_needed() -> int:

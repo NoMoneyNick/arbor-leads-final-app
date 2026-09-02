@@ -470,6 +470,192 @@ def process_review_queue_with_llm(batch_size: int = 25, max_llm_attempts: int = 
     return result
 
 
+# ── Lead tagging system (Sep 2 2026, Nick's request: "total control of all our
+# data, nice and neat") ──────────────────────────────────────────────────────
+# A "floating bubble" model, not a single rigid category column: each lead
+# gets a bag of independent, overlapping tags (locale, region, job size,
+# job type, agent status, vertical) stored in one Postgres TEXT[] column,
+# so a single Bromley crown-work large job can be found by filtering on
+# ANY of "locale:bromley", "region:london", "size:large", "job:crown-work",
+# "agent:no", "vertical:tree" at once -- see database.get_leads_by_tags().
+# Deliberately NOT included as a tag: date. A tag baked in at insert time
+# ("recent") would silently go stale the moment it isn't true anymore --
+# date/deadline filtering stays a direct query against the existing
+# discovered_at/registered_date/statutory_deadline columns instead, so it's
+# never wrong in a way nobody notices (same "never silently wrong" standard
+# as everything else in this pipeline).
+
+# Multi-label, qualified-phrase job-type keywords -- same false-positive
+# discipline as TREE_GOLD/HMO_GOLD (no bare "fell", no bare "reduce").
+# "tpo" is deliberately allowed to co-occur with any other job-type tag,
+# since a TPO is a legal status on top of the actual work, not a work type
+# itself -- e.g. a crown reduction covered by a TPO gets both job:crown-work
+# and job:tpo.
+JOB_TYPE_KEYWORDS = {
+    # "felling" combines this phrase list (handles "tree removal" phrasing,
+    # which doesn't contain the word "fell" at all) with a separate
+    # whole-word regex check in _classify_job_types for fell/felled/felling/
+    # fells -- see that function's docstring for why the regex is needed on
+    # top of a fixed phrase list.
+    "felling": [
+        "tree removal", "removal of tree", "remove tree", "removal of a tree",
+        "removal of the tree",
+    ],
+    "crown-work": [
+        "crown reduction", "crown reduce", "crown thin", "crown lift",
+        "crown raise", "crown clean", "pollard", "reduce height", "reduce crown",
+    ],
+    "hedge-work": [
+        "hedge removal", "remove hedge", "reduce hedge", "hedge reduction",
+        "trim hedge", "cut hedge back",
+    ],
+    "stump-work": [
+        "stump grind", "stump removal", "remove stump", "grind stump",
+        "stump grinding",
+    ],
+    "tpo": [
+        "tree preservation order", "tpo ", "(tpo)", "protected tree",
+        "tpo application",
+    ],
+    "disease-hazard": [
+        "ash dieback", "diseased tree", "dangerous tree", "dead tree",
+        "storm damage", "hazardous tree", "dying tree",
+    ],
+}
+
+
+def _classify_job_types(text: str) -> list:
+    """Multi-label job-type tagging for the tree vertical. Returns every
+    matching category (a lead can be e.g. both crown-work AND tpo at once).
+    Returns ["other"] if nothing matched, so every tree lead is visible in
+    at least one job-type bucket -- never silently untagged, same principle
+    as Tier 4's manual review queue.
+
+    "felling" uses a whole-word regex (\\bfell\\w*\\b) rather than a fixed
+    phrase list -- real descriptions vary too much ("fell a dead tree",
+    "fell an oak", "felled", "fells") for a phrase list to keep up with.
+    This is deliberately looser than TREE_GOLD's own bare-"fell" ban:
+    TREE_GOLD's job is deciding whether text is about a tree AT ALL (where
+    "the applicant fell ill" is a real, damaging false positive), while this
+    function only ever runs on text ALREADY confirmed to be a genuine tree
+    lead by Tier 1/2 -- mistagging a rare "fell ill" mention as job-type
+    "felling" inside an already-real tree lead is a minor filtering
+    inconvenience, not a false lead, so the tradeoff runs the other way."""
+    import re as _re
+    t = str(text or "").lower()
+    matched = [key for key, phrases in JOB_TYPE_KEYWORDS.items() if any(p in t for p in phrases)]
+    if "felling" not in matched and _re.search(r"\bfell\w*\b", t):
+        matched.append("felling")
+    return matched if matched else ["other"]
+
+
+# Council -> official ONS region mapping. Covers every council currently in
+# mesh_scrapers.COUNCIL_REGISTRY plus every town in REGION_TOWNS (the two
+# sources of council_source values this pipeline actually produces today).
+# Deliberately NOT extended to guess at councils outside these two lists --
+# an unrecognised council gets "region:unclassified" rather than a guessed
+# region, so a gap is visible rather than silently wrong (see
+# _resolve_region below).
+COUNCIL_TO_REGION = {
+    # London boroughs (COUNCIL_REGISTRY)
+    "WESTMINSTER": "London", "BROMLEY": "London", "CROYDON": "London",
+    "SOUTHWARK": "London", "LAMBETH": "London", "BARNET": "London",
+    "BRENT": "London", "EALING": "London", "KINGSTON": "London",
+    "GREENWICH": "London", "BEXLEY": "London",
+    "HAMMERSMITH & FULHAM": "London", "SUTTON": "London",
+    # Scotland (COUNCIL_REGISTRY)
+    "EDINBURGH": "Scotland", "GLASGOW": "Scotland", "FIFE": "Scotland",
+    # South West (COUNCIL_REGISTRY)
+    "CORNWALL": "South West", "BRISTOL": "South West", "EXETER": "South West",
+    "PLYMOUTH": "South West", "CHELTENHAM": "South West",
+    "GLOUCESTER": "South West",
+    # Yorkshire and the Humber (COUNCIL_REGISTRY)
+    "LEEDS": "Yorkshire and the Humber", "SHEFFIELD": "Yorkshire and the Humber",
+    "YORK": "Yorkshire and the Humber",
+    # South East (COUNCIL_REGISTRY)
+    "OXFORD": "South East", "SOUTHAMPTON": "South East",
+    "PORTSMOUTH": "South East", "BRIGHTON": "South East",
+    "SURREY HEATH": "South East", "GUILDFORD": "South East",
+    "SEVENOAKS": "South East", "DARTFORD": "South East",
+    "MAIDSTONE": "South East", "TUNBRIDGE WELLS": "South East",
+    "WINCHESTER": "South East", "NEW FOREST": "South East",
+    "MILTON KEYNES": "South East",
+    # East Midlands (COUNCIL_REGISTRY)
+    "NOTTINGHAM": "East Midlands", "DERBY": "East Midlands",
+    "LEICESTER": "East Midlands", "NORTH NORTHAMPTONSHIRE": "East Midlands",
+    # West Midlands (COUNCIL_REGISTRY)
+    "COVENTRY": "West Midlands", "WARWICK": "West Midlands",
+    # North West (COUNCIL_REGISTRY)
+    "CHESHIRE EAST": "North West", "CHESHIRE WEST": "North West",
+    # East of England (COUNCIL_REGISTRY)
+    "NORWICH": "East of England", "DACORUM": "East of England",
+    # From REGION_TOWNS (paid-API/PlanIT authority names) -- towns not
+    # already covered above.
+    "READING": "South East", "GRIMSBY": "Yorkshire and the Humber",
+    "WOLVERHAMPTON": "West Midlands", "SOLIHULL": "West Midlands",
+    "DUDLEY": "West Midlands", "WALSALL": "West Midlands",
+    "STOKE-ON-TRENT": "West Midlands", "NORTHAMPTON": "East Midlands",
+    "LINCOLN": "East Midlands", "BRADFORD": "Yorkshire and the Humber",
+    "WAKEFIELD": "Yorkshire and the Humber", "MANCHESTER": "North West",
+    "LIVERPOOL": "North West", "PRESTON": "North West",
+    "BLACKPOOL": "North West", "CHESHIRE EAST AND CHESTER": "North West",
+    "CHESHIRE WEST AND CHESTER": "North West",
+    "NEWCASTLE UPON TYNE": "North East", "SUNDERLAND": "North East",
+    "DURHAM": "North East", "MIDDLESBROUGH": "North East",
+    "DARLINGTON": "North East", "CAMBRIDGE": "East of England",
+    "PETERBOROUGH": "East of England", "COLCHESTER": "East of England",
+    "BIRMINGHAM": "West Midlands",
+    "ABERDEEN CITY": "Scotland", "DUNDEE CITY": "Scotland",
+    "STIRLING": "Scotland", "PERTH AND KINROSS": "Scotland",
+    "CARDIFF": "Wales", "SWANSEA": "Wales", "NEWPORT": "Wales",
+    "WREXHAM": "Wales", "BRIDGEND": "Wales",
+    "BATH AND NORTH EAST SOMERSET": "South West", "SWINDON": "South West",
+    "WILTSHIRE": "South West", "DORSET": "South West",
+}
+
+
+def _resolve_region(council_source: str) -> str:
+    """Returns the ONS region for a known council, or 'unclassified' if this
+    council isn't in COUNCIL_TO_REGION yet -- deliberately not a guess."""
+    key = str(council_source or "").strip().upper()
+    return COUNCIL_TO_REGION.get(key, "unclassified")
+
+
+def _slugify_tag(value: str) -> str:
+    """'Hammersmith & Fulham' -> 'hammersmith-fulham'. Used for locale/region
+    tag values so they're consistent, lowercase, and safe to use in a URL
+    query string."""
+    import re as _re
+    v = str(value or "").strip().lower()
+    v = _re.sub(r"[^a-z0-9]+", "-", v).strip("-")
+    return v or "unknown"
+
+
+def _generate_tags(address: str, summary: str, council_source: str, vertical: str,
+                    lead_score: str, has_agent: Optional[bool]) -> list:
+    """Builds the full 'floating bubble' tag list for one lead. Every tag is
+    an independent fact about the lead -- callers filter by combining
+    whichever ones they want (database.get_leads_by_tags), they aren't a
+    single mutually-exclusive category."""
+    tags = [f"vertical:{vertical}"]
+    if lead_score:
+        tags.append(f"size:{_slugify_tag(lead_score)}")
+    if has_agent is True:
+        tags.append("agent:yes")
+    elif has_agent is False:
+        tags.append("agent:no")
+    else:
+        tags.append("agent:unconfirmed")
+    if council_source:
+        tags.append(f"locale:{_slugify_tag(council_source)}")
+        tags.append(f"region:{_slugify_tag(_resolve_region(council_source))}")
+    if vertical == "tree":
+        combined_text = f"{summary or ''} {address or ''}"
+        for job_type in _classify_job_types(combined_text):
+            tags.append(f"job:{job_type}")
+    return tags
+
+
 def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
                   applicant_name: Optional[str] = None, agent_name: Optional[str] = None,
                   agent_company: Optional[str] = None, has_agent: Optional[bool] = None,
@@ -540,43 +726,46 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
         agent_is_tree_surgeon = None
 
     lead_score, lead_price = score_lead(summary)
+    tags = _generate_tags(address, summary, source, vertical, lead_score, has_agent)
     try:
         cur.execute(
             """
             INSERT INTO leads (reference, address, summary, council_source, lead_score, lead_price,
                                 applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon,
-                                vertical)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                vertical, tags)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (reference) DO UPDATE SET
                 applicant_name = COALESCE(leads.applicant_name, EXCLUDED.applicant_name),
                 agent_name     = COALESCE(leads.agent_name, EXCLUDED.agent_name),
                 agent_company  = COALESCE(leads.agent_company, EXCLUDED.agent_company),
                 has_agent      = COALESCE(leads.has_agent, EXCLUDED.has_agent),
-                agent_is_tree_surgeon = COALESCE(leads.agent_is_tree_surgeon, EXCLUDED.agent_is_tree_surgeon)
+                agent_is_tree_surgeon = COALESCE(leads.agent_is_tree_surgeon, EXCLUDED.agent_is_tree_surgeon),
+                tags = CASE WHEN leads.tags IS NULL OR leads.tags = '{}' THEN EXCLUDED.tags ELSE leads.tags END
             RETURNING id, (xmax = 0) AS was_inserted;
             """,
             (reference, address, summary[:350], source, lead_score, lead_price,
-             applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon, vertical)
+             applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon, vertical, tags)
         )
     except Exception as e:
-        # Sep 2 2026 (production incident fix): the `vertical` column's own
+        # Sep 2 2026 (production incident fix, extended for the new `tags`
+        # column the same day): either the `vertical` or `tags` column's own
         # migration can be delayed by lock contention (see
         # database._run_ddl_statements_resiliently's docstring for the exact
         # incident this guards against) -- without this fallback, EVERY lead
-        # insert across BOTH verticals fails with "column vertical does not
+        # insert across BOTH verticals fails with "column ... does not
         # exist" until that migration lands, taking lead capture to zero.
         # Detect specifically that failure mode and fall back to the
-        # pre-Sep-2 11-column INSERT (vertical defaults to 'tree' at the
-        # column level once it does exist, so no data is misrepresented in
-        # the meantime -- an HMO lead inserted this way just isn't
-        # distinguishable as HMO until the column lands and a rescan backfills
-        # it). Any OTHER error still propagates unchanged.
-        if "vertical" not in str(e).lower():
+        # pre-Sep-2 11-column INSERT (both columns default correctly once
+        # they exist, so no data is misrepresented in the meantime -- a lead
+        # inserted this way just isn't tagged/vertical-classified until the
+        # column lands and a rescan or backfill fixes it). Any OTHER error
+        # still propagates unchanged.
+        if "vertical" not in str(e).lower() and "tags" not in str(e).lower():
             raise
         cur.connection.rollback()
         logger.warning(
-            f"[_insert_lead] 'vertical' column not available yet ({e}) -- "
-            f"falling back to legacy INSERT without it for reference={reference!r}."
+            f"[_insert_lead] 'vertical'/'tags' column not available yet ({e}) -- "
+            f"falling back to legacy INSERT without them for reference={reference!r}."
         )
         cur.execute(
             """
@@ -597,7 +786,7 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
     row = cur.fetchone()
     if row and row[1]:  # was_inserted -- a genuinely new lead, not a backfill of an existing one
         return {"ref": reference, "addr": address, "summary": summary,
-                "lead_score": lead_score, "lead_price": lead_price,
+                "lead_score": lead_score, "lead_price": lead_price, "tags": tags,
                 "applicant_name": applicant_name, "agent_name": agent_name,
                 "agent_company": agent_company, "has_agent": has_agent,
                 "agent_is_tree_surgeon": agent_is_tree_surgeon, "vertical": vertical}

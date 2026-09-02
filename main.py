@@ -4591,6 +4591,39 @@ def process_review_queue(secret: Optional[str] = Query(None), batch_size: int = 
     return {"status": "complete", **result}
 
 
+@app.get("/leads-by-tag")
+def view_leads_by_tag(
+    user: str = Depends(verify_dashboard_auth),
+    tags: str = Query(..., description="Comma-separated tags, e.g. locale:bromley,job:crown-work,size:large"),
+    match: str = Query("all", description="'all' = must have every tag, 'any' = must have at least one"),
+    limit: int = Query(200),
+):
+    """Sep 2 2026: read-only filter view over the new lead tagging system
+    (see scanners._generate_tags / database.get_leads_by_tags). Same
+    dashboard login as /review-queue -- this is for Nick to look at, not a
+    scheduled job. Example: /leads-by-tag?tags=region:london,job:crown-work&match=all
+    finds every crown-work job in London specifically. This is deliberately
+    a plain JSON endpoint, not a styled page yet -- a real filter UI is a
+    separate, later pass once the tag data itself is confirmed useful."""
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+    if not tag_list:
+        return {"error": "pass at least one tag, e.g. ?tags=locale:bromley"}
+    results = database.get_leads_by_tags(tag_list, match_all=(match != "any"), limit=limit)
+    return {"tags_queried": tag_list, "match": match, "count": len(results), "leads": results}
+
+
+@app.get("/trigger-backfill-lead-tags")
+def trigger_backfill_lead_tags(secret: Optional[str] = Query(None), batch_size: int = Query(500)):
+    """Sep 2 2026: same pattern as /trigger-backfill-tree-surgeon -- runs
+    database.backfill_lead_tags() against the app's own live DB connection.
+    Only touches rows whose tags column is still empty, so it's safe to
+    call repeatedly (once per batch) until 'updated' comes back below
+    batch_size, meaning everything's tagged."""
+    verify_cron_secret(secret)
+    result = database.backfill_lead_tags(batch_size=batch_size)
+    return {"status": "complete", **result}
+
+
 @app.get("/trigger-enrich-batch")
 def trigger_enrich_batch(limit: int = 50, secret: Optional[str] = Query(None)):
     verify_cron_secret(secret)
