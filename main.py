@@ -4562,6 +4562,35 @@ def trigger_clean_partners(secret: Optional[str] = Query(None)):
     return {"status": "success", "result": result}
 
 
+@app.get("/review-queue")
+def view_review_queue(user: str = Depends(verify_dashboard_auth), limit: int = Query(100)):
+    """Sep 2 2026, master_expansion_plan_v2.md build-order step 4, Tier 4:
+    read-only visibility into unclassified_applications -- every application
+    that cleared neither Tier 1 (keyword) nor Tier 2 (structured field),
+    regardless of how many Tier 3 LLM attempts it's had (deliberately no
+    max_llm_attempts filter here, unlike process_review_queue_with_llm's own
+    fetch -- Nick must be able to see a genuinely stuck item too, not just
+    ones Tier 3 hasn't tried yet). Same dashboard login as everything else
+    behind verify_dashboard_auth, not the cron secret -- this is a page for
+    Nick to look at, not a scheduled job."""
+    queue = database.get_pending_review_queue(limit=limit)
+    return {"count": len(queue), "items": queue}
+
+
+@app.get("/process-review-queue")
+def process_review_queue(secret: Optional[str] = Query(None), batch_size: int = Query(25)):
+    """Sep 2 2026, master_expansion_plan_v2.md build-order step 4, Tier 3:
+    manually runs one batch of the Gemini classification pass against the
+    review queue (see scanners.process_review_queue_with_llm's own docstring
+    for why this is a manual/on-demand batch, not wired into the automatic
+    daily pipeline yet). Requires GEMINI_API_KEY to be set in Render --
+    returns a clear zero-processed result rather than an error if it isn't,
+    so this is safe to call to check whether it's configured."""
+    verify_cron_secret(secret)
+    result = scanners.process_review_queue_with_llm(batch_size=batch_size)
+    return {"status": "complete", **result}
+
+
 @app.get("/trigger-enrich-batch")
 def trigger_enrich_batch(limit: int = 50, secret: Optional[str] = Query(None)):
     verify_cron_secret(secret)

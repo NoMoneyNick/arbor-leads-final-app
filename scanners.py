@@ -269,6 +269,207 @@ def _resolve_vertical(text: str) -> Optional[str]:
     return matches[0]
 
 
+# Sep 2 2026, master_expansion_plan_v2.md build-order step 4 (the tiered
+# classifier): Tier 2, structured fields. Before writing this, sampled 500
+# real, currently-live PlanIt records across 5 authorities (Nottingham,
+# Leicester, Sheffield, Bristol, Cambridge) via the live API to check what
+# the plan's candidate fields ("application type code, use class, agent SIC
+# code") actually look like in practice, rather than assuming:
+#
+#   - PlanIt's own `app_type` field IS a real, independent, high-precision
+#     signal for tree work: of 137 real "Trees"-app_type records sampled, 12
+#     (~9%) had NO obvious tree keyword anywhere in their free-text
+#     description -- bare arborist shorthand like "T1 - Cherry - Reduce
+#     height by 4m." or "Removal of deadwood", which no keyword list (this
+#     one included) can ever fully anticipate. That's genuine new recall,
+#     not redundant with Tier 1.
+#   - `app_type` does NOT help HMO at all: real HMO applications sampled had
+#     app_type scattered across Full/Amendment/Outline/Heritage/Advertising
+#     with no dedicated category of its own -- gating on any single value
+#     (e.g. "Amendment", the closest thing to a pattern) would trade a small
+#     amount of unproven recall for real false positives (the same
+#     "Amendment" value also matched "Use of retail unit (Use Class E) as a
+#     gaming lounge (Sui Generis)", nothing to do with HMO).
+#   - The plan's other two candidate fields don't exist as usable structured
+#     data today: "use class" (C3/C4/Sui Generis) only ever appears inside
+#     the free-text description itself, which Tier 1 already reads; a real
+#     agent SIC code needs a live Companies House lookup per agent name,
+#     only possible when a genuine (non-"See source") name exists -- rare
+#     via PlanIt specifically. Worth revisiting via the mesh scanner (which
+#     DOES capture real agent names from each council's own page) once HMO
+#     needs it -- not built here, and not worth blocking this tier on.
+#
+# Net result: this tier is tree-only and PlanIt-only for now, both
+# deliberately -- built around fields actually confirmed to exist and help,
+# not the plan's full candidate list assumed sight-unseen.
+_STRUCTURED_TREE_APP_TYPES = {"trees"}
+
+
+def _resolve_vertical_with_structured_fields(text: str, app_type: Optional[str] = None) -> Optional[str]:
+    """Tier 1 (keyword, via _resolve_vertical) + Tier 2 (structured field)
+    vertical resolution. Falls back to Tier 1 alone whenever no app_type is
+    supplied, so every call site without one (paid-API loop, GLA, Leeds --
+    none of which have a confirmed equivalent field, see the module comment
+    above _STRUCTURED_TREE_APP_TYPES) is completely unaffected."""
+    tier1 = _resolve_vertical(text)
+    if tier1 is not None:
+        return tier1
+    if app_type and str(app_type).strip().lower() in _STRUCTURED_TREE_APP_TYPES:
+        return "tree"
+    return None
+
+
+def _queue_for_manual_review(reference: str, address: str, description: str, source: str, app_type: str = None) -> None:
+    """Sep 2 2026, master_expansion_plan_v2.md build-order step 4, Tier 4:
+    "manual review queue for anything that fails all three [tiers] --
+    visible, never silently dropped." Called from every scan call site's
+    `if vertical is None:` branch, in place of the old bare `continue` that
+    discarded the application completely and permanently with no trace.
+
+    Applies the same minimal quality bar _insert_lead itself uses (a
+    description under 12 chars is placeholder noise, not a real application
+    worth a human's time or a future Tier 3 LLM call) so the queue holds
+    real candidates, not blank junk. Best-effort and silent on failure by
+    design -- a DB hiccup here must never interrupt the scan loop that's
+    still working through the rest of its batch; this is a nice-to-have
+    safety net, not the primary lead pipeline."""
+    if not reference or not description or len(description.strip()) < 12:
+        return
+    try:
+        database.insert_unclassified_application(reference, address, description, source, app_type=app_type)
+    except Exception as e:
+        logger.debug(f"[ReviewQueue] Could not queue {reference} for review: {e}")
+
+
+# ── Tier 3: cheap LLM classification (master_expansion_plan_v2.md build- ──
+# order step 4) ─────────────────────────────────────────────────────────────
+#
+# Runs as its OWN batch pass against the Tier 4 review queue
+# (unclassified_applications), never inline in the live scan loops above.
+# Why: the vast majority of planning applications nationwide match NEITHER
+# vertical at all (rear extensions, adverts, telecoms, and so on) -- calling
+# an LLM inline for every single one of those would mean thousands of real
+# paid API calls a day for close to zero genuine yield, on top of real added
+# latency to a pipeline that's already slow by design (PlanIt alone paces at
+# one request per PLANIT_MIN_INTERVAL_SECONDS). Routing everything Tier 1+2
+# can't place into the queue first, then classifying that queue in its own
+# rate-limited batch (see process_review_queue_with_llm), reaches the
+# identical end result with none of that cost or latency risk, and can never
+# break the live scan pipeline itself even if Gemini is slow, down, or
+# misconfigured.
+#
+# Library choice: Google's newer `google-genai` package exists and
+# `google.generativeai` is officially marked deprecated upstream, but this
+# session could not confirm the new package's exact current call shape with
+# confidence -- documentation fetched while researching this gave two
+# different, inconsistent method signatures for it. Rather than gamble on an
+# unverified surface for code that can't be end-to-end tested without a live
+# key, this deliberately reuses the OLDER library already proven working in
+# production in Nick's own CRAWLER PROJECT
+# (outreach_engine/services/reply_classifier.py -- identical
+# configure/GenerativeModel/generate_content pattern). Worth migrating both
+# together to google-genai if/when Nick wants to modernize -- not done here.
+#
+# Model default: "gemini-flash-latest" -- Google's own version-agnostic
+# alias that gets hot-swapped to the newest Flash model automatically, so
+# this doesn't need manual updates as models are superseded. Override via
+# GEMINI_MODEL if a pinned, deterministic version is ever preferred instead.
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest").strip()
+
+_gemini_model = None
+if GEMINI_API_KEY:
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=GEMINI_API_KEY)
+        _gemini_model = genai.GenerativeModel(GEMINI_MODEL)
+    except Exception as e:
+        logger.error(f"[Tier3 LLM] Could not initialize Gemini client -- Tier 3 classification stays disabled until this is fixed: {e}")
+        _gemini_model = None
+
+
+def _classify_via_llm(description: str) -> Optional[str]:
+    """Asks Gemini to pick a configured vertical for one queued
+    application's description, or say it's genuinely neither. Returns the
+    vertical key on a confident match, or None on an unavailable model, a
+    genuinely uncertain answer, or any error -- callers must treat None as
+    "still needs a human", never as "definitely not a lead"."""
+    if not _gemini_model or not description:
+        return None
+    vertical_keys = list(VERTICALS.keys())
+    prompt = f"""You are classifying a UK council planning application description for a lead-generation service. The service currently buys/sells leads for exactly these categories: {", ".join(vertical_keys)}.
+
+"tree" means any tree surgery/arboriculture work: felling, pruning, crown reduction, pollarding, hedge work, anything covered by a Tree Preservation Order -- including terse professional shorthand with no obvious keyword, e.g. "T1 - Cherry - Reduce height by 4m."
+
+"hmo" means a house in multiple occupation: change of use to an HMO, a Certificate of Lawfulness for existing HMO use, an HMO-specific Article 4 direction.
+
+Application description:
+"{description}"
+
+Reply with EXACTLY ONE WORD: one of {vertical_keys}, or NONE if it is genuinely neither. No explanation."""
+    try:
+        response = _gemini_model.generate_content(prompt)
+        answer = (getattr(response, "text", "") or "").strip().lower()
+        return answer if answer in vertical_keys else None
+    except Exception as e:
+        logger.warning(f"[Tier3 LLM] Gemini classification failed, leaving item queued for review: {e}")
+        return None
+
+
+def process_review_queue_with_llm(batch_size: int = 25, max_llm_attempts: int = 2) -> dict:
+    """Tier 3 entry point: pulls up to `batch_size` still-open review-queue
+    rows (excluding ones that already exhausted max_llm_attempts, so a
+    genuinely ambiguous item doesn't keep re-spending a real API call
+    forever), asks Gemini to classify each, and for a confident answer
+    inserts a real lead exactly as Tier 1/2 would have and closes the queue
+    row. An uncertain or failed answer just increments the row's attempt
+    count and leaves it queued -- never guesses, never silently drops.
+
+    Deliberately NOT wired into the automatic daily pipeline -- exposed only
+    via a manual-trigger endpoint (see main.py's /process-review-queue)
+    until Nick has seen real cost/accuracy numbers and decides whether to
+    schedule it."""
+    result = {"processed": 0, "classified": 0, "still_uncertain": 0, "errors": 0}
+    if not _gemini_model:
+        logger.warning("[Tier3 LLM] GEMINI_API_KEY not configured (or client init failed) -- nothing to process.")
+        return result
+
+    queue = database.get_pending_review_queue(limit=batch_size, max_llm_attempts=max_llm_attempts)
+    if not queue:
+        return result
+
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        for row in queue:
+            result["processed"] += 1
+            try:
+                vertical = _classify_via_llm(row["description"])
+                if vertical:
+                    _insert_lead(cur, row["reference"], row["address"], row["description"],
+                                  row["source"], vertical=vertical)
+                    conn.commit()
+                    database.resolve_unclassified_application(row["reference"], vertical)
+                    result["classified"] += 1
+                else:
+                    database.increment_review_queue_llm_attempts(row["reference"])
+                    result["still_uncertain"] += 1
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"[Tier3 LLM] Error processing queued item {row.get('reference')}: {e}")
+                result["errors"] += 1
+    finally:
+        cur.close()
+        conn.close()
+
+    logger.info(
+        f"[Tier3 LLM] Processed {result['processed']} queued items: "
+        f"{result['classified']} classified, {result['still_uncertain']} still uncertain, "
+        f"{result['errors']} errors."
+    )
+    return result
+
+
 def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
                   applicant_name: Optional[str] = None, agent_name: Optional[str] = None,
                   agent_company: Optional[str] = None, has_agent: Optional[bool] = None,
@@ -553,10 +754,16 @@ def scan_leeds_leads() -> int:
             for feature in features:
                 rec = feature.get("attributes", {})
                 summary = str(rec.get("DESCRIPTION") or "")
+                real_ref = str(rec.get("REFERENCE") or rec.get("OBJECTID") or "").strip()
                 vertical = _resolve_vertical(summary)
                 if vertical is None:
+                    # Sep 2 2026, Tier 4: same reasoning as the GLA loop below --
+                    # only queue with a real, stable reference, never a fabricated
+                    # one that would flood the queue with duplicates every run.
+                    if real_ref:
+                        _queue_for_manual_review(real_ref, rec.get("ADDRESS") or "Leeds", summary, "Leeds")
                     continue
-                ref = str(rec.get("REFERENCE") or rec.get("OBJECTID") or f"LDS-{int(time.time())}")
+                ref = real_ref or f"LDS-{int(time.time())}"
                 addr = rec.get("ADDRESS") or "Leeds"
                 lead = _insert_lead(cur, ref, addr, summary, "Leeds", vertical=vertical)
                 if lead:
@@ -677,10 +884,6 @@ def scan_gla_datahub_london() -> int:
                         or ""
                     ).strip()
 
-                    vertical = _resolve_vertical(summary) if summary else None
-                    if vertical is None:
-                        continue
-
                     # Extract nested or flat address
                     addr = ""
                     if isinstance(item.get("location"), dict):
@@ -690,14 +893,27 @@ def scan_gla_datahub_london() -> int:
                     if not addr:
                         addr = item.get("site_address") or item.get("address") or item.get("address_text") or "London"
 
-                    ref = (
+                    real_ref = (
                         item.get("reference")
                         or item.get("application_reference")
                         or item.get("lpa_app_no")
                         or item.get("planning_reference")
-                        or f"LON-{int(time.time())}"
+                        or ""
                     )
 
+                    vertical = _resolve_vertical(summary) if summary else None
+                    if vertical is None:
+                        # Sep 2 2026, Tier 4 (manual review queue): only queue when a
+                        # real, stable reference exists -- a fabricated one (the
+                        # f"LON-{time.time()}" fallback used for the actual lead
+                        # insert below) would never dedupe day to day and would
+                        # flood the queue with a fresh duplicate row for the same
+                        # still-live application every single scan run.
+                        if real_ref:
+                            _queue_for_manual_review(real_ref, addr, summary, "London")
+                        continue
+
+                    ref = real_ref or f"LON-{int(time.time())}"
                     lead = _insert_lead(cur, ref, addr, summary, "London", vertical=vertical)
                 except Exception as e:
                     # Sep 2 2026: one malformed GLA record must never cost the rest of
@@ -1201,6 +1417,14 @@ def scan_city_planning_api(city_name: str) -> int:
                         "description": rec.get("description", ""),
                         "address": rec.get("address", ""),
                         "url": rec.get("link", ""),
+                        # Sep 2 2026, master_expansion_plan_v2.md build-order step 4
+                        # (tiered classifier, Tier 2 -- structured fields): PlanIt's
+                        # own categorisation of the application, e.g. "Trees",
+                        # "Full", "Outline", "Amendment". See
+                        # _resolve_vertical_with_structured_fields' module comment
+                        # for the real live-data evidence behind why only this one
+                        # field, and only for tree, turned out to be usable here.
+                        "app_type": rec.get("app_type"),
                         "applicant_name": _planit_real_value(other.get("applicant_name")),
                         "agent_name": _planit_real_value(other.get("agent_name")),
                         "agent_company": _planit_real_value(other.get("agent_company")),
@@ -1334,10 +1558,15 @@ def scan_city_planning_api(city_name: str) -> int:
                         # every lead already inserted earlier in this same run, for this
                         # entire region, not just skip the one bad record.
                         summary = str(item.get("description") or "")
+                        real_ref = str(item.get("reference") or "").strip()
                         vertical = _resolve_vertical(summary)
                         if vertical is None:
+                            # Sep 2 2026, Tier 4: only queue with a real, stable
+                            # reference -- see the GLA loop's identical comment for why.
+                            if real_ref:
+                                _queue_for_manual_review(real_ref, str(item.get("address") or city_name), summary, city_name)
                             continue
-                        ref  = item.get("reference") or f"{prefix}-{int(time.time())}"
+                        ref  = real_ref or f"{prefix}-{int(time.time())}"
                         addr = str(item.get("address") or city_name)
                         # Aug 30 2026: ukplanningapi.co.uk was found (during the
                         # PlanIt live-testing pass) to sometimes return results
@@ -1403,10 +1632,21 @@ def scan_city_planning_api(city_name: str) -> int:
                         # very end, so one malformed PlanIt record used to be able to
                         # roll back every lead already inserted earlier in this run.
                         summary = str(item.get("description") or "")
-                        vertical = _resolve_vertical(summary) if summary else None
+                        real_ref = str(item.get("reference") or "").strip()
+                        # Sep 2 2026: Tier 2 addition -- see
+                        # _resolve_vertical_with_structured_fields' module comment
+                        # for why PlanIt's app_type is used here specifically.
+                        vertical = _resolve_vertical_with_structured_fields(summary, item.get("app_type")) if summary else None
                         if vertical is None:
+                            # Sep 2 2026, Tier 4: only queue with a real, stable
+                            # reference -- see the GLA loop's identical comment for why.
+                            if real_ref:
+                                _queue_for_manual_review(
+                                    real_ref, item.get("address") or f"{city_name} / {town}",
+                                    summary, city_name, app_type=item.get("app_type"),
+                                )
                             continue
-                        ref  = item.get("reference") or f"PLANIT-{town}-{int(time.time())}"
+                        ref  = real_ref or f"PLANIT-{town}-{int(time.time())}"
                         addr = item.get("address") or f"{city_name} / {town}"
                         applicant_name = item.get("applicant_name")
                         agent_name = item.get("agent_name")

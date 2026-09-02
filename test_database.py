@@ -273,5 +273,96 @@ class TestMarketplaceVerticalColumnFallback(unittest.TestCase):
         self.assertEqual(cur.execute.call_count, 1)  # no fallback retry attempted
 
 
+class TestReviewQueueFunctions(unittest.TestCase):
+    """Sep 2 2026, master_expansion_plan_v2.md build-order step 4, Tier 4:
+    the manual review queue's DB layer. Before this existed, every scan
+    call site's `if vertical is None: continue` discarded an application
+    that matched neither Tier 1 nor Tier 2 completely and permanently, with
+    no trace anywhere -- these functions are what makes it "visible, never
+    silently dropped" instead, per the plan's own wording."""
+
+    def _conn_with_cursor(self, fetchone_return=None, fetchall_return=None):
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.fetchone.return_value = fetchone_return
+        cur.fetchall.return_value = fetchall_return or []
+        conn.cursor.return_value = cur
+        return conn, cur
+
+    def test_insert_unclassified_application_returns_true_on_genuine_insert(self):
+        conn, cur = self._conn_with_cursor(fetchone_return=("some-uuid",))
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            result = database.insert_unclassified_application(
+                "23/07777/TPO", "3 Oak Ave, Leeds", "T1 - Cherry - Reduce height by 4m.", "Leeds", app_type="Trees"
+            )
+        self.assertTrue(result)
+
+    def test_insert_unclassified_application_returns_false_on_duplicate(self):
+        """ON CONFLICT (reference) DO NOTHING -- a still-open application
+        reappearing in tomorrow's scan of the same source must not re-queue
+        (or reset the review state of) an already-queued row."""
+        conn, cur = self._conn_with_cursor(fetchone_return=None)  # DO NOTHING -> no RETURNING row
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            result = database.insert_unclassified_application(
+                "23/07777/TPO", "3 Oak Ave, Leeds", "T1 - Cherry - Reduce height by 4m.", "Leeds"
+            )
+        self.assertFalse(result)
+
+    def test_get_pending_review_queue_without_attempt_filter_for_human_visibility(self):
+        """The default (max_llm_attempts=None) must return every pending row
+        regardless of attempt count -- this is what main.py's /review-queue
+        endpoint uses, and Nick must be able to see a genuinely stuck item,
+        not just fresh ones."""
+        row = ("id1", "23/07777/TPO", "3 Oak Ave, Leeds", "T1 - Cherry - Reduce height by 4m.", "Leeds", "Trees", 5, "2026-09-02T00:00:00Z")
+        conn, cur = self._conn_with_cursor(fetchall_return=[row])
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            items = database.get_pending_review_queue(limit=100)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["llm_attempts"], 5)
+        sql = cur.execute.call_args[0][0]
+        self.assertNotIn("llm_attempts <", sql)
+
+    def test_get_pending_review_queue_with_attempt_filter_for_tier_3(self):
+        """process_review_queue_with_llm's own fetch passes max_llm_attempts
+        so a stuck item stops being retried -- proves the WHERE clause
+        actually changes shape when it's supplied."""
+        conn, cur = self._conn_with_cursor(fetchall_return=[])
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            database.get_pending_review_queue(limit=25, max_llm_attempts=2)
+        sql, params = cur.execute.call_args[0]
+        self.assertIn("llm_attempts <", sql)
+        self.assertIn(2, params)
+
+    def test_increment_review_queue_llm_attempts(self):
+        conn, cur = self._conn_with_cursor(fetchone_return=("some-uuid",))
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            result = database.increment_review_queue_llm_attempts("23/07777/TPO")
+        self.assertTrue(result)
+        conn.commit.assert_called_once()
+
+    def test_resolve_unclassified_application_sets_llm_classified_status(self):
+        conn, cur = self._conn_with_cursor(fetchone_return=("some-uuid",))
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            result = database.resolve_unclassified_application("23/07777/TPO", "tree")
+        self.assertTrue(result)
+        sql, params = cur.execute.call_args[0]
+        self.assertIn("llm_classified", sql)
+        self.assertIn("tree", params)
+
+    def test_resolve_unclassified_application_requires_a_vertical(self):
+        """Guards against accidentally closing out a queue row with no
+        actual classification -- that would silently drop it just as surely
+        as the old bare `continue` did."""
+        with patch.object(database, "SURL", "postgres://fake-for-test"):
+            self.assertFalse(database.resolve_unclassified_application("23/07777/TPO", None))
+            self.assertFalse(database.resolve_unclassified_application("23/07777/TPO", ""))
+
+
 if __name__ == "__main__":
     unittest.main()

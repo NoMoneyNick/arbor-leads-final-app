@@ -45,6 +45,13 @@ if "database" not in sys.modules:
     _fake_database = types.ModuleType("database")
     _fake_database.get_db_conn = MagicMock()
     _fake_database.increment_api_usage = MagicMock(return_value={"warning_needed": False})
+    # Sep 2 2026, Tier 4 (manual review queue): stub attributes so
+    # patch.object(database, "...") works in the wiring/Tier-3/Tier-4 tests
+    # below without needing a real psycopg2 install in this environment.
+    _fake_database.insert_unclassified_application = MagicMock(return_value=True)
+    _fake_database.get_pending_review_queue = MagicMock(return_value=[])
+    _fake_database.increment_review_queue_llm_attempts = MagicMock(return_value=True)
+    _fake_database.resolve_unclassified_application = MagicMock(return_value=True)
     sys.modules["database"] = _fake_database
 
 if "notifications" not in sys.modules:
@@ -64,6 +71,7 @@ import net_utils   # noqa: E402
 import scanners    # noqa: E402
 import mesh_scrapers  # noqa: E402
 import research    # noqa: E402
+import database    # noqa: E402  (real module if psycopg2 is installed, else the stub above)
 
 
 class _FakeDedupStore:
@@ -446,6 +454,87 @@ class TestResolveVertical(unittest.TestCase):
         final one."""
         text = "Conversion to a house in multiple occupation including felling of 1no. protected oak tree."
         self.assertEqual(scanners._resolve_vertical(text), "tree")
+
+
+class TestResolveVerticalWithStructuredFields(unittest.TestCase):
+    """Sep 2 2026, master_expansion_plan_v2.md build-order step 4, Tier 2:
+    _resolve_vertical_with_structured_fields layers PlanIt's own `app_type`
+    field on top of Tier 1 keyword matching. Built around real live PlanIt
+    data (500 records sampled across 5 authorities) -- see the function's
+    own module comment for the full evidence -- not assumed sight-unseen
+    from master_expansion_plan_v2.md's candidate field list."""
+
+    def test_falls_back_to_tier_1_when_no_app_type_given(self):
+        """Every existing call site without an app_type (paid-API, GLA,
+        Leeds) must be completely unaffected."""
+        self.assertEqual(
+            scanners._resolve_vertical_with_structured_fields("Felling of 2no. diseased ash trees"),
+            "tree",
+        )
+        self.assertIsNone(
+            scanners._resolve_vertical_with_structured_fields("Erection of a two-storey rear extension.")
+        )
+
+    def test_tier_1_match_wins_regardless_of_app_type(self):
+        """A description that already matches a keyword doesn't need Tier 2
+        at all -- app_type is irrelevant once Tier 1 already resolved it."""
+        self.assertEqual(
+            scanners._resolve_vertical_with_structured_fields(
+                "Change of use to a house in multiple occupation (7 persons).", app_type="Full"
+            ),
+            "hmo",
+        )
+
+    def test_trees_app_type_catches_a_real_bare_shorthand_description(self):
+        """The actual real-data finding this tier exists for: genuine live
+        PlanIt records like this ("T1 - Cherry - Reduce height by 4m.") have
+        app_type=="Trees" but contain no keyword TREE_GOLD (or any
+        reasonable keyword list) would ever recognise -- species name plus a
+        bare dimension, no "tree"/"fell"/"crown"/etc. Before this tier
+        existed, Tier 1 alone returned None here and the application was
+        silently discarded, never reaching _insert_lead at all."""
+        self.assertEqual(
+            scanners._resolve_vertical_with_structured_fields(
+                "T1 - Cherry - Reduce height by 4m.", app_type="Trees"
+            ),
+            "tree",
+        )
+        self.assertEqual(
+            scanners._resolve_vertical_with_structured_fields(
+                "T1 - Bay - Reduce by 3-4m.", app_type="Trees"
+            ),
+            "tree",
+        )
+
+    def test_app_type_is_case_insensitive(self):
+        self.assertEqual(
+            scanners._resolve_vertical_with_structured_fields("T1 - Bay - Reduce by 3-4m.", app_type="TREES"),
+            "tree",
+        )
+
+    def test_non_trees_app_type_does_not_falsely_resolve_unrelated_text(self):
+        """The other half of the fix: app_type is only ever a positive signal
+        for "trees" specifically -- an unrelated app_type must never cause a
+        false match on text that matches nothing."""
+        self.assertIsNone(
+            scanners._resolve_vertical_with_structured_fields(
+                "Erection of a two-storey rear extension.", app_type="Full"
+            )
+        )
+        self.assertIsNone(
+            scanners._resolve_vertical_with_structured_fields(
+                "Use of retail unit (Use Class E) as a gaming lounge (Sui Generis).", app_type="Amendment"
+            )
+        )
+
+    def test_missing_or_none_app_type_is_handled_gracefully(self):
+        """A PlanIt record with app_type missing/null entirely (a real,
+        observed case -- 9 of 500 sampled records had no app_type at all)
+        must not raise, just fall through to Tier 1's own answer -- which is
+        None for this real bare-shorthand description, since without a
+        confirmed app_type there's no Tier 2 signal to catch it."""
+        self.assertIsNone(scanners._resolve_vertical_with_structured_fields("T1 - Bay - Reduce by 3-4m.", app_type=None))
+        self.assertIsNone(scanners._resolve_vertical_with_structured_fields("T1 - Bay - Reduce by 3-4m.", app_type=""))
 
 
 class TestLeadScoring(unittest.TestCase):
@@ -1979,6 +2068,69 @@ class TestVerticalWiringPaidApiAndPlanit(unittest.TestCase):
         _, kwargs = mock_insert.call_args
         self.assertEqual(kwargs.get("vertical"), "hmo")
 
+    def test_planit_tier_2_app_type_catches_bare_shorthand_tree_description(self):
+        """Sep 2 2026, Tier 2 (structured fields): a real PlanIt application
+        shape found while sampling live data -- app_type=="Trees" but a
+        description with no keyword any list would recognise. Before Tier 2
+        existed this was silently discarded (Tier 1 alone returns None);
+        proves the full scan_city_planning_api PlanIt path now reads
+        app_type off the real record and inserts it as vertical="tree"."""
+        planit_body = {
+            "records": [
+                {
+                    "uid": "26/TREETIER2/1",
+                    "description": "T1 - Cherry - Reduce height by 4m.",
+                    "address": "5 Orchard Close, Bristol",
+                    "app_type": "Trees",
+                    "other_fields": {},
+                }
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = planit_body
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "26/TREETIER2/1"}) as mock_insert, \
+             patch("mesh_scrapers.confirm_agent_status_from_source", return_value={}), \
+             patch("time.sleep", return_value=None):
+            count = scanners.scan_city_planning_api("Bristol")
+
+        self.assertEqual(count, 1)
+        mock_insert.assert_called_once()
+        _, kwargs = mock_insert.call_args
+        self.assertEqual(kwargs.get("vertical"), "tree")
+
+    def test_planit_non_trees_app_type_does_not_rescue_unrelated_applications(self):
+        """The precision half: an application matching no vertical keyword
+        AND carrying an unrelated app_type must still be discarded, not
+        swept in by Tier 2."""
+        planit_body = {
+            "records": [
+                {
+                    "uid": "26/UNRELATED/1",
+                    "description": "Erection of a two-storey rear extension.",
+                    "address": "5 Orchard Close, Bristol",
+                    "app_type": "Full",
+                    "other_fields": {},
+                }
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = planit_body
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead") as mock_insert, \
+             patch("mesh_scrapers.confirm_agent_status_from_source", return_value={}), \
+             patch("time.sleep", return_value=None):
+            count = scanners.scan_city_planning_api("Bristol")
+
+        self.assertEqual(count, 0)
+        mock_insert.assert_not_called()
+
     def test_paid_api_one_malformed_record_does_not_lose_the_rest_of_the_batch(self):
         """Sep 2 2026: an adversarial review pass caught that a truthy
         non-string "description" (e.g. a nested dict from a genuinely messy
@@ -2202,6 +2354,382 @@ class TestIsTreeTradeCompanyName(unittest.TestCase):
 
     def test_no_tree_word_at_all_is_excluded(self):
         self.assertFalse(research.is_tree_trade_company_name("BLOGGS PLUMBING AND HEATING LTD"))
+
+
+class TestQueueForManualReview(unittest.TestCase):
+    """Sep 2 2026, Tier 4: _queue_for_manual_review is the helper every scan
+    call site now uses in place of the old bare `continue` when no vertical
+    resolves. Proves its own quality gate and its delegation to
+    database.insert_unclassified_application, independent of any one call
+    site's wiring (covered separately below)."""
+
+    def test_queues_a_real_looking_unmatched_application(self):
+        with patch.object(database, "insert_unclassified_application", return_value=True) as mock_insert:
+            scanners._queue_for_manual_review("24/REAL/1", "1 Example Road", "A perfectly plausible description.", "Leeds", app_type="Full")
+
+        mock_insert.assert_called_once_with("24/REAL/1", "1 Example Road", "A perfectly plausible description.", "Leeds", app_type="Full")
+
+    def test_short_placeholder_description_is_not_queued(self):
+        """Same 12-char quality bar _insert_lead itself uses -- a blank or
+        near-blank description is placeholder noise, not a real application
+        worth a human's time or a future Tier 3 LLM call."""
+        with patch.object(database, "insert_unclassified_application") as mock_insert:
+            scanners._queue_for_manual_review("24/JUNK/1", "1 Example Road", "N/A", "Leeds")
+
+        mock_insert.assert_not_called()
+
+    def test_missing_reference_is_not_queued(self):
+        with patch.object(database, "insert_unclassified_application") as mock_insert:
+            scanners._queue_for_manual_review("", "1 Example Road", "A perfectly plausible description.", "Leeds")
+
+        mock_insert.assert_not_called()
+
+    def test_a_db_failure_is_swallowed_silently(self):
+        """Best-effort by design -- a DB hiccup here must never interrupt
+        the scan loop that's still working through the rest of its batch."""
+        with patch.object(database, "insert_unclassified_application", side_effect=Exception("connection lost")):
+            try:
+                scanners._queue_for_manual_review("24/REAL/1", "1 Example Road", "A perfectly plausible description.", "Leeds")
+            except Exception:
+                self.fail("_queue_for_manual_review must never raise, even on a DB error")
+
+
+class TestReviewQueueWiringAtAllFourCallSites(unittest.TestCase):
+    """Sep 2 2026, Tier 4: proves each of the 4 scan call sites (Leeds
+    ArcGIS, GLA London, the paid ukplanningapi.co.uk loop, and the free
+    PlanIt loop) now routes an unresolved-vertical application into
+    _queue_for_manual_review instead of a bare `continue` that discarded it
+    with no trace -- and, separately, that none of them will queue with a
+    fabricated fallback reference, since that would flood the queue with a
+    fresh duplicate row for the same still-live application on every scan
+    run (the fallback references -- LDS-<timestamp>, LON-<timestamp>,
+    etc -- change every single run)."""
+
+    def setUp(self):
+        self.cur = MagicMock()
+        self.conn = MagicMock()
+        self.conn.cursor.return_value = self.cur
+        dedup_patch = patch.object(scanners, "dedup", new=_FakeDedupStore())
+        dedup_patch.start()
+        self.addCleanup(dedup_patch.stop)
+        scanners._PLANIT_LAST_REQUEST_AT = 0.0
+
+    def test_leeds_arcgis_queues_unmatched_record_with_a_real_reference(self):
+        arcgis_resp = MagicMock(status_code=200)
+        arcgis_resp.json.return_value = {"features": [
+            {"attributes": {
+                "DESCRIPTION": "Erection of a two-storey rear extension.",
+                "REFERENCE": "LDS/JUNK/1", "ADDRESS": "3 Kirkgate, Leeds",
+            }},
+        ]}
+
+        with patch("net_utils.smart_get", return_value=arcgis_resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "scan_city_planning_api", return_value=0), \
+             patch.object(scanners, "_queue_for_manual_review") as mock_queue, \
+             patch.object(scanners, "_insert_lead") as mock_insert:
+            scanners.scan_leeds_leads()
+
+        mock_insert.assert_not_called()
+        mock_queue.assert_called_once_with("LDS/JUNK/1", "3 Kirkgate, Leeds", "Erection of a two-storey rear extension.", "Leeds")
+
+    def test_leeds_arcgis_does_not_queue_a_record_with_no_real_reference(self):
+        arcgis_resp = MagicMock(status_code=200)
+        arcgis_resp.json.return_value = {"features": [
+            {"attributes": {
+                "DESCRIPTION": "Erection of a two-storey rear extension.",
+                "REFERENCE": "", "ADDRESS": "3 Kirkgate, Leeds",
+            }},
+        ]}
+
+        with patch("net_utils.smart_get", return_value=arcgis_resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "scan_city_planning_api", return_value=0), \
+             patch.object(scanners, "_queue_for_manual_review") as mock_queue:
+            scanners.scan_leeds_leads()
+
+        mock_queue.assert_not_called()
+
+    def test_gla_london_queues_unmatched_record_with_a_real_reference(self):
+        body = {
+            "data": [
+                {"reference": "GLA-JUNK", "description": "Change of use to former bank branch.",
+                 "location": {"address": "2 Borough High St, London"}},
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = body
+
+        with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_queue_for_manual_review") as mock_queue, \
+             patch.object(scanners, "_insert_lead") as mock_insert, \
+             patch("time.sleep", return_value=None):
+            scanners.scan_gla_datahub_london()
+
+        mock_insert.assert_not_called()
+        mock_queue.assert_called_once_with("GLA-JUNK", "2 Borough High St, London", "Change of use to former bank branch.", "London")
+
+    def test_gla_london_does_not_queue_a_record_with_no_real_reference(self):
+        body = {
+            "data": [
+                {"reference": "", "description": "Change of use to former bank branch.",
+                 "location": {"address": "2 Borough High St, London"}},
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = body
+
+        with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_queue_for_manual_review") as mock_queue, \
+             patch("time.sleep", return_value=None):
+            scanners.scan_gla_datahub_london()
+
+        mock_queue.assert_not_called()
+
+    def test_paid_api_loop_queues_unmatched_record_with_a_real_reference(self):
+        body = {
+            "data": [
+                {"reference": "24/JUNK/1", "description": "Erection of a two-storey rear extension.",
+                 "address": "10 Example Road, Sheffield S1 2AB"},
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = body
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", "fake-key"), \
+             patch.object(scanners, "CITY_POSTCODE_PREFIX", {"Sheffield": ["S"]}), \
+             patch.object(scanners, "REGION_TOWNS", {}), \
+             patch.dict(os.environ, {"PAID_API_ROTATION_DAYS": "1"}), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_queue_for_manual_review") as mock_queue, \
+             patch.object(scanners, "_insert_lead") as mock_insert, \
+             patch("time.sleep", return_value=None):
+            scanners.scan_city_planning_api("Sheffield")
+
+        mock_insert.assert_not_called()
+        mock_queue.assert_called_once_with("24/JUNK/1", "10 Example Road, Sheffield S1 2AB", "Erection of a two-storey rear extension.", "Sheffield")
+
+    def test_paid_api_loop_does_not_queue_a_record_with_no_real_reference(self):
+        body = {
+            "data": [
+                {"reference": "", "description": "Erection of a two-storey rear extension.",
+                 "address": "10 Example Road, Sheffield S1 2AB"},
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = body
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", "fake-key"), \
+             patch.object(scanners, "CITY_POSTCODE_PREFIX", {"Sheffield": ["S"]}), \
+             patch.object(scanners, "REGION_TOWNS", {}), \
+             patch.dict(os.environ, {"PAID_API_ROTATION_DAYS": "1"}), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_queue_for_manual_review") as mock_queue, \
+             patch("time.sleep", return_value=None):
+            scanners.scan_city_planning_api("Sheffield")
+
+        mock_queue.assert_not_called()
+
+    def test_planit_loop_queues_unmatched_record_with_a_real_reference(self):
+        planit_body = {
+            "records": [
+                {"uid": "26/JUNK/1", "description": "Erection of a two-storey rear extension.",
+                 "address": "5 Orchard Close, Bristol", "app_type": "Full", "other_fields": {}},
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = planit_body
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_queue_for_manual_review") as mock_queue, \
+             patch.object(scanners, "_insert_lead") as mock_insert, \
+             patch("mesh_scrapers.confirm_agent_status_from_source", return_value={}), \
+             patch("time.sleep", return_value=None):
+            scanners.scan_city_planning_api("Bristol")
+
+        mock_insert.assert_not_called()
+        mock_queue.assert_called_once()
+        args, kwargs = mock_queue.call_args
+        self.assertEqual(args[0], "26/JUNK/1")
+        self.assertEqual(args[2], "Erection of a two-storey rear extension.")
+        self.assertEqual(kwargs.get("app_type") or (args[4] if len(args) > 4 else None), "Full")
+
+    def test_planit_loop_does_not_queue_a_record_with_no_real_reference(self):
+        planit_body = {
+            "records": [
+                {"uid": "", "description": "Erection of a two-storey rear extension.",
+                 "address": "5 Orchard Close, Bristol", "app_type": "Full", "other_fields": {}},
+            ]
+        }
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = planit_body
+
+        with patch.object(scanners, "UK_PLANNING_API_KEY", ""), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_queue_for_manual_review") as mock_queue, \
+             patch("mesh_scrapers.confirm_agent_status_from_source", return_value={}), \
+             patch("time.sleep", return_value=None):
+            scanners.scan_city_planning_api("Bristol")
+
+        mock_queue.assert_not_called()
+
+
+class TestClassifyViaLlm(unittest.TestCase):
+    """Sep 2 2026, Tier 3: _classify_via_llm's own contract, independent of
+    the batch runner around it -- a confident, recognised answer returns
+    that vertical key; anything else (no configured model, no description,
+    an unrecognised/NONE answer, or an outright API error) returns None,
+    which every caller must treat as "still needs a human", never as
+    "definitely not a lead" (see the function's own docstring)."""
+
+    def test_returns_none_when_no_model_is_configured(self):
+        with patch.object(scanners, "_gemini_model", None):
+            self.assertIsNone(scanners._classify_via_llm("Felling of one oak tree."))
+
+    def test_returns_none_for_empty_description(self):
+        fake_model = MagicMock()
+        with patch.object(scanners, "_gemini_model", fake_model):
+            self.assertIsNone(scanners._classify_via_llm(""))
+        fake_model.generate_content.assert_not_called()
+
+    def test_confident_tree_answer_is_returned(self):
+        fake_model = MagicMock()
+        fake_model.generate_content.return_value = MagicMock(text="tree")
+        with patch.object(scanners, "_gemini_model", fake_model):
+            result = scanners._classify_via_llm("T1 - Cherry - Reduce height by 4m.")
+        self.assertEqual(result, "tree")
+
+    def test_confident_hmo_answer_is_returned_case_insensitively(self):
+        fake_model = MagicMock()
+        fake_model.generate_content.return_value = MagicMock(text="  HMO\n")
+        with patch.object(scanners, "_gemini_model", fake_model):
+            result = scanners._classify_via_llm("Conversion of a dwelling into bedsits.")
+        self.assertEqual(result, "hmo")
+
+    def test_none_answer_from_the_model_returns_none(self):
+        fake_model = MagicMock()
+        fake_model.generate_content.return_value = MagicMock(text="NONE")
+        with patch.object(scanners, "_gemini_model", fake_model):
+            self.assertIsNone(scanners._classify_via_llm("Erection of a two-storey rear extension."))
+
+    def test_an_unrecognised_answer_is_treated_as_uncertain_not_trusted(self):
+        """Guards against a hallucinated or malformed answer (e.g. a full
+        sentence instead of one word) ever being trusted as a vertical."""
+        fake_model = MagicMock()
+        fake_model.generate_content.return_value = MagicMock(text="I think this might be tree-related")
+        with patch.object(scanners, "_gemini_model", fake_model):
+            self.assertIsNone(scanners._classify_via_llm("Some ambiguous description."))
+
+    def test_an_api_error_is_caught_and_returns_none(self):
+        fake_model = MagicMock()
+        fake_model.generate_content.side_effect = Exception("rate limited")
+        with patch.object(scanners, "_gemini_model", fake_model):
+            self.assertIsNone(scanners._classify_via_llm("Felling of one oak tree."))
+
+
+class TestProcessReviewQueueWithLlm(unittest.TestCase):
+    """Sep 2 2026, Tier 3 batch runner: process_review_queue_with_llm pulls
+    the Tier 4 queue and either promotes a confidently-classified row to a
+    real lead (mirroring what Tier 1/2 would have done) or leaves it
+    queued with an incremented attempt count -- exercised against a mocked
+    Gemini client and mocked database layer, since this can't be
+    end-to-end tested without a live API key."""
+
+    def setUp(self):
+        self.cur = MagicMock()
+        self.conn = MagicMock()
+        self.conn.cursor.return_value = self.cur
+
+    def test_no_gemini_model_configured_returns_zero_result_without_touching_the_queue(self):
+        with patch.object(scanners, "_gemini_model", None), \
+             patch.object(database, "get_pending_review_queue") as mock_get_queue:
+            result = scanners.process_review_queue_with_llm()
+
+        mock_get_queue.assert_not_called()
+        self.assertEqual(result, {"processed": 0, "classified": 0, "still_uncertain": 0, "errors": 0})
+
+    def test_empty_queue_returns_zero_result(self):
+        fake_model = MagicMock()
+        with patch.object(scanners, "_gemini_model", fake_model), \
+             patch.object(database, "get_pending_review_queue", return_value=[]), \
+             patch("database.get_db_conn") as mock_get_conn:
+            result = scanners.process_review_queue_with_llm()
+
+        mock_get_conn.assert_not_called()
+        self.assertEqual(result["processed"], 0)
+
+    def test_confidently_classified_row_is_inserted_as_a_lead_and_resolved(self):
+        fake_model = MagicMock()
+        queue = [{"reference": "24/QUEUED/1", "address": "1 Example Road", "description": "T1 - Cherry - Reduce height by 4m.", "source": "Bristol"}]
+
+        with patch.object(scanners, "_gemini_model", fake_model), \
+             patch.object(database, "get_pending_review_queue", return_value=queue), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_classify_via_llm", return_value="tree") as mock_classify, \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "24/QUEUED/1"}) as mock_insert, \
+             patch.object(database, "resolve_unclassified_application", return_value=True) as mock_resolve, \
+             patch.object(database, "increment_review_queue_llm_attempts") as mock_increment:
+            result = scanners.process_review_queue_with_llm()
+
+        mock_classify.assert_called_once_with("T1 - Cherry - Reduce height by 4m.")
+        mock_insert.assert_called_once()
+        self.assertEqual(mock_insert.call_args.kwargs.get("vertical"), "tree")
+        mock_resolve.assert_called_once_with("24/QUEUED/1", "tree")
+        mock_increment.assert_not_called()
+        self.assertEqual(result, {"processed": 1, "classified": 1, "still_uncertain": 0, "errors": 0})
+
+    def test_still_uncertain_row_increments_attempts_and_is_left_queued(self):
+        fake_model = MagicMock()
+        queue = [{"reference": "24/QUEUED/2", "address": "1 Example Road", "description": "Some ambiguous description.", "source": "Bristol"}]
+
+        with patch.object(scanners, "_gemini_model", fake_model), \
+             patch.object(database, "get_pending_review_queue", return_value=queue), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_classify_via_llm", return_value=None), \
+             patch.object(scanners, "_insert_lead") as mock_insert, \
+             patch.object(database, "resolve_unclassified_application") as mock_resolve, \
+             patch.object(database, "increment_review_queue_llm_attempts") as mock_increment:
+            result = scanners.process_review_queue_with_llm()
+
+        mock_insert.assert_not_called()
+        mock_resolve.assert_not_called()
+        mock_increment.assert_called_once_with("24/QUEUED/2")
+        self.assertEqual(result, {"processed": 1, "classified": 0, "still_uncertain": 1, "errors": 0})
+
+    def test_an_error_partway_through_one_row_is_isolated_and_rolled_back(self):
+        """One queued row's DB error must not crash the batch or corrupt
+        the running counts for rows around it."""
+        fake_model = MagicMock()
+        queue = [{"reference": "24/QUEUED/3", "address": "1 Example Road", "description": "T1 - Cherry - Reduce height by 4m.", "source": "Bristol"}]
+
+        with patch.object(scanners, "_gemini_model", fake_model), \
+             patch.object(database, "get_pending_review_queue", return_value=queue), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_classify_via_llm", return_value="tree"), \
+             patch.object(scanners, "_insert_lead", side_effect=Exception("connection lost")), \
+             patch.object(database, "resolve_unclassified_application") as mock_resolve:
+            result = scanners.process_review_queue_with_llm()
+
+        mock_resolve.assert_not_called()
+        self.conn.rollback.assert_called_once()
+        self.assertEqual(result, {"processed": 1, "classified": 0, "still_uncertain": 0, "errors": 1})
+
+    def test_respects_custom_batch_size_and_max_attempts(self):
+        fake_model = MagicMock()
+        with patch.object(scanners, "_gemini_model", fake_model), \
+             patch.object(database, "get_pending_review_queue", return_value=[]) as mock_get_queue:
+            scanners.process_review_queue_with_llm(batch_size=10, max_llm_attempts=3)
+
+        mock_get_queue.assert_called_once_with(limit=10, max_llm_attempts=3)
 
 
 if __name__ == "__main__":

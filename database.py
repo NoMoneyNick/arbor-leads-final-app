@@ -294,6 +294,38 @@ def init_db():
                 dispatched BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
+
+            -- Sep 2 2026, master_expansion_plan_v2.md build-order step 4
+            -- (the tiered classifier), Tier 4: "manual review queue for
+            -- anything that fails all three [tiers] -- visible, never
+            -- silently dropped." Before this table existed, every scan call
+            -- site's `if vertical is None: continue` meant an application
+            -- matching no vertical's keywords or structured fields was
+            -- discarded completely and permanently -- not wrong for the
+            -- ~majority of genuinely irrelevant applications (rear
+            -- extensions, adverts, telecoms), but it also meant a real
+            -- tree/HMO application phrased in a way none of the first two
+            -- tiers anticipated vanished with zero trace, not even a log
+            -- line, and could never be found again once the source API's
+            -- own lookback window passed. This table is the landing zone
+            -- Tier 3 (a cheap LLM classification pass, run separately/
+            -- rate-limited against this queue, not inline in the scan loop)
+            -- reads from and writes back to -- see scanners.process_
+            -- review_queue_with_llm's docstring for why Tier 3 runs here
+            -- rather than per-item during the live scan.
+            CREATE TABLE IF NOT EXISTS unclassified_applications (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                reference TEXT UNIQUE,
+                address TEXT,
+                description TEXT,
+                source TEXT,
+                app_type TEXT,
+                status TEXT DEFAULT 'pending_review',
+                resolved_vertical TEXT,
+                llm_attempts INT DEFAULT 0,
+                discovered_at TIMESTAMPTZ DEFAULT NOW(),
+                reviewed_at TIMESTAMPTZ
+            );
         """)
 
         # Performance Indices for Instant High-Volume Queries
@@ -315,6 +347,7 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_partners_company_number ON potential_partners(company_number);",
             "CREATE INDEX IF NOT EXISTS idx_leads_source_type ON leads(lead_source_type);",
             "CREATE INDEX IF NOT EXISTS idx_territory_outcode ON territory_claims(outcode);",
+            "CREATE INDEX IF NOT EXISTS idx_unclassified_status ON unclassified_applications(status, discovered_at ASC);",
         ]
         for idx in indices:
             cur.execute(idx)
@@ -492,6 +525,140 @@ def init_db():
 
     conn.close()
 
+
+# ── Manual review queue (Tier 4) -- master_expansion_plan_v2.md build-order
+# step 4. See unclassified_applications' own CREATE TABLE comment in init_db
+# for why this table exists at all: an application matching neither Tier 1
+# (keyword) nor Tier 2 (structured field) used to be silently discarded by
+# every scan call site with no trace left anywhere.
+
+def insert_unclassified_application(reference: str, address: str, description: str,
+                                     source: str, app_type: str = None) -> bool:
+    """Queues an application that cleared neither Tier 1 nor Tier 2 for
+    later review (Tier 3's LLM pass, or Nick looking at it directly).
+    ON CONFLICT (reference) DO NOTHING -- the same still-open application
+    reappears in a source's "recent" search every day it stays live, and
+    this must not re-queue (or reset an already-reviewed) row every single
+    day. Returns False (not an error) for a duplicate -- callers shouldn't
+    treat "already queued" as a failure."""
+    if not SURL or not reference or not description:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                INSERT INTO unclassified_applications (reference, address, description, source, app_type)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (reference) DO NOTHING
+                RETURNING id;
+            """, (reference, address, description[:500] if description else description, source, app_type))
+            row = cur.fetchone()
+            conn.commit()
+            return bool(row)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[ReviewQueue] Error queuing application {reference}: {e}")
+        return False
+
+
+def get_pending_review_queue(limit: int = 50, max_llm_attempts: int = None) -> list:
+    """Returns the oldest `limit` still-pending review-queue rows, oldest
+    first -- so a backlog gets worked down in the order applications first
+    appeared, not newest-first (which could let old ones age past their
+    source's own lookback window before ever being looked at).
+
+    max_llm_attempts (Tier 3's own use, not the default): excludes rows
+    whose llm_attempts already meets/exceeds this cap. Genuinely ambiguous
+    text can come back uncertain from Gemini every time it's asked -- without
+    a cap, Tier 3 would keep re-spending a real API call on the exact same
+    stuck row forever. Left None (the default) for anything reading the
+    queue for a human to look at -- Nick must still be able to see every
+    still-open row regardless of how many LLM attempts it's had; 'never
+    silently dropped' means visible to a person too, not just to Tier 3."""
+    if not SURL:
+        return []
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            sql = """
+                SELECT id, reference, address, description, source, app_type, llm_attempts, discovered_at
+                FROM unclassified_applications
+                WHERE status = 'pending_review'
+            """
+            params = []
+            if max_llm_attempts is not None:
+                sql += " AND llm_attempts < %s"
+                params.append(max_llm_attempts)
+            sql += " ORDER BY discovered_at ASC LIMIT %s;"
+            params.append(limit)
+            cur.execute(sql, tuple(params))
+            cols = ["id", "reference", "address", "description", "source", "app_type", "llm_attempts", "discovered_at"]
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[ReviewQueue] Error fetching pending queue: {e}")
+        return []
+
+
+def increment_review_queue_llm_attempts(reference: str) -> bool:
+    """Records that Tier 3 looked at this row and could NOT confidently
+    classify it -- the row stays 'pending_review' (still visible to a human,
+    still in the queue) but counts toward max_llm_attempts so a future Tier 3
+    run doesn't keep re-spending a call on the same stuck item forever."""
+    if not SURL or not reference:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE unclassified_applications SET llm_attempts = llm_attempts + 1
+                WHERE reference = %s RETURNING id;
+            """, (reference,))
+            row = cur.fetchone()
+            conn.commit()
+            return bool(row)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[ReviewQueue] Error incrementing llm_attempts for {reference}: {e}")
+        return False
+
+
+def resolve_unclassified_application(reference: str, resolved_vertical: str) -> bool:
+    """Marks a review-queue row as confidently classified by Tier 3 -- the
+    ONLY way a row leaves 'pending_review' status (an uncertain Tier 3 pass
+    uses increment_review_queue_llm_attempts instead and leaves it queued).
+    Caller is responsible for actually inserting the real lead via
+    scanners._insert_lead first; this just closes out the queue row."""
+    if not SURL or not reference or not resolved_vertical:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE unclassified_applications
+                SET status = 'llm_classified', resolved_vertical = %s, reviewed_at = NOW()
+                WHERE reference = %s
+                RETURNING id;
+            """, (resolved_vertical, reference))
+            row = cur.fetchone()
+            conn.commit()
+            return bool(row)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[ReviewQueue] Error resolving application {reference}: {e}")
+        return False
 
 
 def reset_monthly_quotas_if_needed() -> int:
