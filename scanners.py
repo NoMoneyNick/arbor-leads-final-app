@@ -5,6 +5,8 @@ import time
 import datetime
 import threading
 import logging
+import functools
+import secrets
 from typing import Optional, List, Tuple, Dict, Any
 import database
 import notifications
@@ -31,12 +33,24 @@ LARGE_KEYWORDS = [
 MEDIUM_KEYWORDS = [
     "crown reduction", "crown lift", "crown thin", "crown raising", "crown clean",
     "crown thinning", "crown lifting", "crown cleaning", "lateral branches",
-    "fell", "felling", "tree felling", "felling of",
-    "removal of tree", "remove tree", "tree removal", "sectional dismantle", "dismantle",
+    # Sep 2 2026 audit: bare "fell" and bare "dismantle" removed -- both are
+    # ordinary standalone English words ("the applicant fell ill", "dismantle
+    # a garden shed") with no tree-work meaning on their own. This is the
+    # exact same false-positive shape TREE_GOLD's own Aug 29 2026 comment
+    # already documents removing bare "fell" for; it was never applied here
+    # too. "felling"/"tree felling"/"felling of" and "sectional dismantle"
+    # already cover the genuine tree-work phrasing without the bare forms.
+    "felling", "tree felling", "felling of",
+    "removal of tree", "remove tree", "tree removal", "sectional dismantle",
     "pollarding", "pollard", "re-pollard",
     "overhanging", "storm damage", "hanging branch", "decayed tree",
     "deadwood", "dead wood", "dead branches", "works to trees", "work to trees",
-    "urgent", "diseased tree", "ash dieback", "coppice", "coppicing", "monolith"
+    "urgent", "diseased tree", "ash dieback", "coppice", "coppicing",
+    # Sep 2 2026 audit: bare "monolith" replaced with the actual qualified
+    # arboricultural phrasing (BS3998 "habitat monolith" work) -- bare
+    # "monolith" also matches things like a stone monolith art installation,
+    # which has nothing to do with tree work.
+    "habitat monolith", "monolith the tree", "reduce to a monolith", "retained as a monolith",
 ]
 SMALL_KEYWORDS = [
     "tree pruning", "tree trimming", "tree maintenance", "pruning of",
@@ -52,7 +66,19 @@ TREE_GOLD = [
     "tree surgery", "tree surgeon", "tree work", "tree works", "works to tree", "work to tree",
     "tree felling", "tree removal", "tree pruning", "tree trimming", "tree maintenance",
     "tree preservation", "tree protection", "tree survey", "tree assessment", "tree report",
-    "arboricultural", "arborist", "arboriculture", "arbor",
+    # Sep 2 2026 audit: bare "arbor" removed. "arbor" is itself a real
+    # standalone English word -- a garden arbor/pergola structure -- so
+    # "erection of a garden arbor and trellis" (ordinary landscaping, zero
+    # tree-surgery content) matched this list even with the new word-
+    # boundary matching (_keyword_hit) that now protects every keyword here
+    # from matching INSIDE an unrelated word (e.g. it stops "arbor" from
+    # ever matching inside the real place name "Harborne" -- that specific
+    # collision is fixed by the boundary check alone, but a keyword that is
+    # ALSO its own valid, unrelated English word still has to be removed or
+    # qualified directly, same as bare "fell"/"dismantle"/"monolith"
+    # elsewhere in this list). "arboricultural"/"arborist"/"arboriculture"
+    # already cover every genuine use of the "arbor-" root.
+    "arboricultural", "arborist", "arboriculture",
     "tpo", "tree preservation order", "protected tree", "mature tree", "specimen tree",
     "section 211", "s211", "notice of intent",
     # Specific arboricultural operations
@@ -64,7 +90,11 @@ TREE_GOLD = [
     # before it shipped further. Removed; "felling", "fell to ground", and
     # "fell 1/2/3" (the numbered-tree-list phrasing councils actually use in
     # application descriptions) already cover genuine tree-work mentions.
-    "felling", "fell to ground", "fell 1", "fell 2", "fell 3", "sectional dismantle", "dismantle",
+    "felling", "fell to ground", "fell 1", "fell 2", "fell 3", "sectional dismantle",
+    # Sep 2 2026 audit: bare "dismantle" removed -- a real standalone word
+    # ("dismantle a garden shed", "dismantle scaffolding") with no tree
+    # meaning on its own; "sectional dismantle" already covers the genuine
+    # tree-work phrasing.
     # Sep 2 2026: sanity-checking HMO_GOLD against real live PlanIt data
     # (Nottingham, during the multi-vertical wiring verification pass) also
     # surfaced a genuine, currently-live TREE_GOLD false NEGATIVE -- a real
@@ -88,7 +118,11 @@ TREE_GOLD = [
     "crown reduction", "crown lift", "crown thin", "crown raising", "crown clean",
     "crown thinning", "crown lifting", "crown cleaning", "lateral branch", "lateral branches",
     "deadwood", "dead wood", "dead branches", "ash dieback", "diseased tree", "decayed tree",
-    "woodland management", "woodland clearance", "coppice", "coppicing", "monolith",
+    "woodland management", "woodland clearance", "coppice", "coppicing",
+    # Sep 2 2026 audit: bare "monolith" replaced with the actual qualified
+    # arboricultural phrasing -- bare "monolith" also matches an unrelated
+    # stone/art monolith installation, which has zero tree-work content.
+    "habitat monolith", "monolith the tree", "reduce to a monolith", "retained as a monolith",
     "hedge trimming", "hedge cutting", "hedge removal", "hedge reduction",
     "bs5837", "bs 5837", "root protection area", "root severance",
     # Specific species with tree/work indicators
@@ -99,16 +133,49 @@ TREE_GOLD = [
 
 
 
+@functools.lru_cache(maxsize=32)
+def _compile_keyword_pattern(keywords_tuple: tuple):
+    """Compiles a whole-word/whole-phrase regex for a keyword list, cached
+    per distinct list so repeated calls (thousands of leads through the
+    same TREE_GOLD/HMO_GOLD/LARGE_KEYWORDS list) don't recompile it every
+    time. Sorted longest-first purely so overlapping alternatives (there
+    aren't any here, but it's a cheap safety habit) prefer the longer
+    match."""
+    escaped = sorted((re.escape(k.lower()) for k in keywords_tuple), key=len, reverse=True)
+    return re.compile(r'\b(?:' + '|'.join(escaped) + r')\b')
+
+
+def _keyword_hit(text: str, keywords) -> bool:
+    """Whole-word/whole-phrase match, NOT a bare substring check. Added
+    Sep 2 2026 during the 'don't trust anything inherited, verify it'
+    audit Nick asked for. Every keyword list in this file used to be
+    checked with plain `keyword in text` substring matching, which lets a
+    short keyword match INSIDE an unrelated word -- e.g. bare 'arbor' (a
+    genuine tree-surgery term, TREE_GOLD) is also a substring of the real
+    Birmingham place name 'Harborne' ('h-ARBOR-ne'), so an ordinary house
+    extension at a Harborne address could be silently classified and sold
+    as a tree lead. `\\b` word boundaries close this off for every keyword
+    list at once instead of patching one false-positive substring at a
+    time. This does NOT fix a keyword that is itself a real standalone
+    English word with an innocent meaning (e.g. bare 'fell' as in 'the
+    applicant fell ill') -- those still have to be removed or qualified
+    from the list directly, which is done at the TREE_GOLD/MEDIUM_KEYWORDS
+    definitions themselves, not here."""
+    s = str(text or "").lower()
+    pattern = _compile_keyword_pattern(tuple(keywords))
+    return bool(pattern.search(s))
+
+
 def score_lead(summary: str) -> tuple:
     """
     Classifies a planning application as small / medium / large
     and returns the corresponding price.
     Returns: (lead_score: str, lead_price: int)
     """
-    s = summary.lower()
-    if any(k in s for k in LARGE_KEYWORDS):
+    s = summary or ""
+    if _keyword_hit(s, LARGE_KEYWORDS):
         return "large", 75
-    elif any(k in s for k in MEDIUM_KEYWORDS):
+    elif _keyword_hit(s, MEDIUM_KEYWORDS):
         return "medium", 50
     return "small", 25
 
@@ -214,8 +281,7 @@ def _matches_vertical(text: str, vertical_key: str) -> bool:
     vertical = VERTICALS.get(vertical_key)
     if not vertical:
         return False
-    s = str(text or "").lower()
-    return any(word in s for word in vertical["keywords"])
+    return _keyword_hit(text, vertical["keywords"])
 
 
 def classify_verticals(text: str) -> List[str]:
@@ -808,9 +874,18 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
 
     addr_clean = address.strip() if address else ""
     if not addr_clean or addr_clean.lower() in ["greater london", "london", "uk", "england"]:
-        # If address is completely generic, require higher description detail to avoid useless leads
-        if len(s_clean) < 20:
-            return None
+        # Sep 2 2026 audit: this used to only reject a generic placeholder
+        # address ("London" -- scan_gla_datahub_london's own fallback when
+        # a GLA record has no real address field at all) when the
+        # description was ALSO short, on the theory that a long, detailed
+        # description made up for the missing address. It doesn't: a buyer
+        # cannot visit, letter-drop, or flyer a property called "London" no
+        # matter how detailed the job description is -- exactly Nick's
+        # "if we cannot get the info we need then that lead is dead to us"
+        # rule. Rejecting unconditionally here means a GLA record with no
+        # real address never becomes a non-actionable lead sold as if it
+        # were a real one.
+        return None
 
     # Sep 2 2026, master_expansion_plan_v2.md build-order step 3 (the
     # GDPR-safe lead format): a vertical with capture_identity=False never
@@ -1064,7 +1139,17 @@ def scan_leeds_leads() -> int:
                     if real_ref:
                         _queue_for_manual_review(real_ref, rec.get("ADDRESS") or "Leeds", summary, "Leeds")
                     continue
-                ref = real_ref or f"LDS-{int(time.time())}"
+                # Sep 2 2026 audit: added a random suffix -- a fabricated
+                # reference used to be just the current second, and two
+                # records processed in the same wall-clock second within a
+                # batch (no network I/O between them) would collide on the
+                # SAME fallback reference. Since `reference` is the leads
+                # table's only uniqueness key, the second insert's own
+                # ON CONFLICT silently overwrote/merged into the first,
+                # discarding its real address/summary rather than becoming
+                # its own lead. The random suffix makes that collision
+                # astronomically unlikely without touching the DB schema.
+                ref = real_ref or f"LDS-{int(time.time())}-{secrets.token_hex(3)}"
                 addr = rec.get("ADDRESS") or "Leeds"
                 lead = _insert_lead(cur, ref, addr, summary, "Leeds", vertical=vertical)
                 if lead:
@@ -1214,7 +1299,10 @@ def scan_gla_datahub_london() -> int:
                             _queue_for_manual_review(real_ref, addr, summary, "London")
                         continue
 
-                    ref = real_ref or f"LON-{int(time.time())}"
+                    # Sep 2 2026 audit: see the identical fix/comment on the
+                    # Leeds loop above -- a same-second fallback reference
+                    # collision here silently discards a second GLA record.
+                    ref = real_ref or f"LON-{int(time.time())}-{secrets.token_hex(3)}"
                     lead = _insert_lead(cur, ref, addr, summary, "London", vertical=vertical)
                 except Exception as e:
                     # Sep 2 2026: one malformed GLA record must never cost the rest of
@@ -1867,7 +1955,11 @@ def scan_city_planning_api(city_name: str) -> int:
                             if real_ref:
                                 _queue_for_manual_review(real_ref, str(item.get("address") or city_name), summary, city_name)
                             continue
-                        ref  = real_ref or f"{prefix}-{int(time.time())}"
+                        # Sep 2 2026 audit: see the Leeds-loop comment above for
+                        # why the random suffix matters -- a same-second
+                        # fallback-reference collision across this batch would
+                        # otherwise silently drop a real record.
+                        ref  = real_ref or f"{prefix}-{int(time.time())}-{secrets.token_hex(3)}"
                         addr = str(item.get("address") or city_name)
                         # Aug 30 2026: ukplanningapi.co.uk was found (during the
                         # PlanIt live-testing pass) to sometimes return results

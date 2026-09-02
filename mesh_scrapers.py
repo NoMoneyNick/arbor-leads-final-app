@@ -398,9 +398,28 @@ def is_tree_related(description: str) -> bool:
     """Checks if a planning description is relevant to tree surgeons.
     Uses the same compound-phrase TREE_GOLD list as scanners.py to avoid
     false positives from bare single words (street names, bank "branches",
-    "fell down", etc.)."""
-    desc = description.lower()
-    return any(phrase in desc for phrase in TREE_GOLD)
+    "fell down", etc.).
+
+    Sep 2 2026 audit: this is only ever reached via _resolve_vertical's own
+    ImportError fallback above (in normal operation scanners.py imports
+    fine and this whole function is dead code) -- but a defensive fallback
+    that's silently wrong the one time it's actually needed is still a real
+    bug, so it gets the same fix as the live path. It used to do its own
+    plain `phrase in desc` substring check independently of scanners.py's
+    _matches_vertical, which is exactly the "two independently maintained
+    gates for the same rule" shape: scanners.py's word-boundary fix
+    (_keyword_hit, added this same audit pass -- see its docstring for why
+    bare "arbor" matching inside the place name "Harborne" was a real
+    false-positive) would NOT have automatically reached this second,
+    separate check. Reusing _keyword_hit directly (with the same
+    ImportError-safe fallback pattern as _resolve_vertical above) instead
+    of a third reimplementation keeps this one gate instead of two."""
+    try:
+        from scanners import _keyword_hit
+        return _keyword_hit(description, TREE_GOLD)
+    except ImportError:
+        desc = str(description or "").lower()
+        return any(phrase in desc for phrase in TREE_GOLD)
 
 class IdoxScraper:
     def __init__(self, base_url: str):

@@ -188,25 +188,20 @@ TRADE_QUALIFIERS = [
 ]
 
 def _is_valid_tree_company_name(name: str) -> bool:
-    if not name:
-        return False
-    name_lower = name.lower()
-    
-    # 1. Reject if any excluded non-trade word is present
-    if any(w in name_lower for w in EXCLUDED_TREE_WORDS):
-        return False
-
-    # 2. Check for explicit core arboricultural phrases
-    has_trade_phrase = any(w in name_lower for w in REQUIRED_TREE_PHRASES)
-    if has_trade_phrase:
-        return True
-
-    # 3. If only generic 'tree' is present, require a qualifying trade term
-    has_isolated_tree = bool(re.search(r'\btree\b', name_lower))
-    if has_isolated_tree:
-        return any(q in name_lower for q in TRADE_QUALIFIERS)
-        
-    return False
+    """Deprecated Sep 2 2026 audit: this was an OLDER, narrower name filter
+    (EXCLUDED_TREE_WORDS) that three call sites (clean_partner_database,
+    sweep_100_random_contractors, populate_2000_partners_into_db) kept
+    calling even after is_tree_trade_company_name (EXCLUDED_NAME_WORDS)
+    was fixed on Aug 31 2026 to also catch construction/property/
+    insurance/conservation/recruitment/web-design company names -- see
+    is_tree_trade_company_name's own docstring for the real production
+    junk that fix was written for. Two independently-maintained gates for
+    the same rule meant that fix only ever reached ONE of four call
+    sites. All four now call is_tree_trade_company_name directly; this
+    function is kept as a thin forwarding alias only in case anything
+    else still imports the old name, so it can never silently drift back
+    out of sync again."""
+    return is_tree_trade_company_name(name)
 
 
 
@@ -224,9 +219,24 @@ def _is_valid_uk_phone(phone_str: Optional[str]) -> Optional[str]:
         clean = "0" + clean[3:]
     elif clean.startswith("0044"):
         clean = "0" + clean[4:]
-    
+
     # Must start with 01, 02, 03, 07, 08 and be 10 or 11 digits
     if clean.startswith(("01", "02", "03", "07", "08")) and len(clean) in (10, 11):
+        # Sep 2 2026 audit: this shape check alone used to be the ONLY
+        # gate for what gets written into the phone_number COLUMN itself
+        # (scrape_contact_info_from_website / get_google_places_info both
+        # call this, not the stricter check). _is_realistic_uk_phone's
+        # placeholder-denylist/repeated-digit/second-digit-zero checks were
+        # only ever applied later, for the phone:yes/no TAG -- so a
+        # placeholder like "01234567890" (right shape, obviously fake)
+        # could pass here and sit in the column as if it were the
+        # partner's real number, even though the tag correctly says
+        # phone:no/contact:dead. Anything reading phone_number directly
+        # instead of filtering by tag would still get handed the fake
+        # number. Gating on the same realism check here closes that gap at
+        # the one place new numbers actually enter the database.
+        if not _is_realistic_uk_phone(phone_str):
+            return None
         return phone_str.strip()
     return None
 
@@ -418,8 +428,20 @@ def get_google_places_info(company_name: str, city_or_addr: str = ""):
                             website = href
                             break
         
-        rating = 4.8 if (phone or website) else None
-        return rating, phone, website
+        # Sep 2 2026 audit: this used to be `rating = 4.8 if (phone or
+        # website) else None` -- a hardcoded, entirely fabricated number
+        # with zero connection to any real review data, written straight
+        # into potential_partners.google_rating and presented as if it
+        # were a genuine third-party rating. This function only ever
+        # scrapes DuckDuckGo HTML search results (see its own docstring --
+        # the "Google Places" name is legacy from before that swap), which
+        # never carries a real rating at all, so there is no honest value
+        # to put here. Returning None is the correct "we don't have this"
+        # answer, not a regression -- every partner already stored with
+        # google_rating exactly 4.8 is this same fabricated value, not a
+        # coincidence, and is a known cleanup item (not fixed here to keep
+        # this change to stopping the fabrication at the source first).
+        return None, phone, website
     except Exception as e:
         logger.debug(f"[DDG Scrape] Error fetching info for {company_name}: {e}")
         return None, None, None
@@ -1251,8 +1273,18 @@ def clean_partner_database():
         ]
 
         for (pid, name, addr, current_city, raw_phone, raw_website, raw_email) in all_partners:
-            # 1. Use the unified, bulletproof validation gate
-            if not _is_valid_tree_company_name(name):
+            # Sep 2 2026 audit: this was calling the OLDER, narrower
+            # _is_valid_tree_company_name (EXCLUDED_TREE_WORDS) despite its
+            # own comment here claiming it was "the unified, bulletproof
+            # validation gate" -- it was never updated when
+            # is_tree_trade_company_name (EXCLUDED_NAME_WORDS) was fixed on
+            # Aug 31 2026 to also catch construction/property/insurance/
+            # conservation/recruitment/web-design company names. That meant
+            # a row like "OAK TREE INSURANCE BROKERS LTD" already sitting
+            # in the table would survive a /clean-partners run untouched.
+            # Now calls the same, current, single gate every discovery path
+            # uses.
+            if not is_tree_trade_company_name(name):
                 delete_ids.append((pid,))
                 continue
 
@@ -1378,7 +1410,9 @@ def sweep_100_random_contractors(target_count: int = 50) -> dict:
                 if co.get("company_status") != "active":
                     continue
                 cname = co.get("title", "")
-                if not _is_valid_tree_company_name(cname):
+                # Sep 2 2026 audit: was the stale _is_valid_tree_company_name
+                # -- see the identical fix/comment in clean_partner_database.
+                if not is_tree_trade_company_name(cname):
                     continue
                 addr = co.get("address_snippet", "")
                 assigned = resolve_uk_city(addr, cname, default_city="UK")
@@ -1522,7 +1556,9 @@ def populate_2000_partners_into_db() -> dict:
                     if co.get("company_status") != "active":
                         continue
                     cname = co.get("title", "")
-                    if not _is_valid_tree_company_name(cname):
+                    # Sep 2 2026 audit: was the stale _is_valid_tree_company_name
+                    # -- see the identical fix/comment in clean_partner_database.
+                    if not is_tree_trade_company_name(cname):
                         continue
                     addr = co.get("address_snippet", "")
                     assigned = resolve_uk_city(addr, cname, default_city="UK")

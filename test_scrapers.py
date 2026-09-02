@@ -209,9 +209,44 @@ class TestInsertLeadBackfill(unittest.TestCase):
         self.assertEqual(params[6:11], (None, None, None, None, None))
         self.assertEqual(params[-2], "hmo")
         self.assertIn("vertical:hmo", params[-1])
+
         # HMO's own identity-stripping must not leak into the tags either --
         # no applicant/agent name should ever end up embedded in a tag string.
         self.assertFalse(any("jane smith" in t.lower() or "john doe" in t.lower() for t in params[-1]))
+
+    def test_generic_placeholder_address_is_rejected_even_with_a_long_description(self):
+        """Sep 2 2026 audit: this used to only reject a bare "London"/
+        "UK"/"England" placeholder address (scan_gla_datahub_london's own
+        fallback when a GLA record has no real address field) when the
+        description was ALSO short -- a long description was treated as
+        making up for the missing address. It can't: a buyer cannot visit,
+        letter-drop, or flyer a property whose address is literally the
+        word "London", no matter how detailed the job description is. Every
+        one of these must be rejected regardless of description length."""
+        cur = self._mock_cursor(("some-uuid", True))
+        long_detailed_summary = (
+            "Crown reduction and deadwood removal of a mature protected oak "
+            "tree overhanging the highway, TPO application required before works."
+        )
+        for junk_address in ["London", "Greater London", "UK", "England", "", "   "]:
+            with self.subTest(address=junk_address):
+                result = scanners._insert_lead(
+                    cur, "24/07777/TPO", junk_address, long_detailed_summary, "London"
+                )
+                self.assertIsNone(result)
+
+    def test_real_address_with_a_long_description_still_inserts_normally(self):
+        """Companion to the rejection test above -- proves the fix didn't
+        also start rejecting genuinely real addresses."""
+        cur = self._mock_cursor(("some-uuid", True))
+        long_detailed_summary = (
+            "Crown reduction and deadwood removal of a mature protected oak "
+            "tree overhanging the highway, TPO application required before works."
+        )
+        result = scanners._insert_lead(
+            cur, "24/07778/TPO", "42 Elm Grove, Croydon", long_detailed_summary, "Croydon"
+        )
+        self.assertIsNotNone(result)
 
     def test_tree_lead_identity_capture_is_completely_unaffected(self):
         """The other half of the fix: capture_identity defaults to True and
@@ -347,6 +382,103 @@ class TestTreeGoldFiltering(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertFalse(scanners._is_tree_related(text))
                 self.assertFalse(mesh_scrapers.is_tree_related(text))
+
+    def test_word_boundary_matching_prevents_substring_false_positives(self):
+        """Sep 2 2026 audit: plain `keyword in text` substring matching let
+        a short TREE_GOLD keyword match INSIDE an unrelated word. Bare
+        "arbor" is a substring of the real Birmingham place name "Harborne"
+        ("h-ARBOR-ne") -- an ordinary house extension at a Harborne address
+        used to be classified and sold as a tree lead with zero real tree
+        content. _keyword_hit's word-boundary regex fixes this for every
+        keyword at once; this test proves it on the exact real-world case
+        that was found."""
+        junk = [
+            "Erection of a single-storey rear extension at 24 Harborne Road, Birmingham.",
+            "Two-storey side extension, Harborne, Birmingham B17.",
+        ]
+        for text in junk:
+            with self.subTest(text=text):
+                self.assertFalse(scanners._is_tree_related(text))
+                self.assertFalse(mesh_scrapers.is_tree_related(text))
+
+    def test_bare_arbor_dismantle_monolith_removed_as_standalone_words(self):
+        """Sep 2 2026 audit: word-boundary matching alone doesn't help when
+        the keyword IS a genuine standalone English word with an unrelated
+        meaning -- "arbor" (a garden pergola structure), "dismantle" (any
+        structure), and "monolith" (a stone/art installation) all needed
+        removing or qualifying directly, the same fix TREE_GOLD's own Aug
+        29 2026 comment already applied to bare "fell"."""
+        junk = [
+            "Erection of a garden arbor and pergola to rear garden.",
+            "Application to dismantle and remove a dilapidated garden shed.",
+            "Erection of a stone monolith sculpture as a public art installation.",
+        ]
+        for text in junk:
+            with self.subTest(text=text):
+                self.assertFalse(scanners._is_tree_related(text))
+
+    def test_qualified_monolith_and_dismantle_phrasing_still_matches(self):
+        """Companion to the removal above -- proves the genuine
+        arboricultural phrasing (BS3998 'habitat monolith' work, sectional
+        dismantling of a tree) still matches after the bare forms were
+        removed."""
+        real = [
+            "Reduce mature oak to a habitat monolith to preserve habitat value.",
+            "Sectional dismantle of a dangerous leaning specimen due to storm damage.",
+        ]
+        for text in real:
+            with self.subTest(text=text):
+                self.assertTrue(scanners._is_tree_related(text))
+
+
+class TestScoreLeadKeywordMatching(unittest.TestCase):
+    """score_lead's LARGE/MEDIUM/SMALL keyword lists -- Sep 2 2026 audit.
+    Mirrors the exact bare-"fell" false-positive shape already fixed in
+    TREE_GOLD, which had never been applied to this sibling list."""
+
+    def test_bare_fell_no_longer_inflates_a_small_job_to_medium(self):
+        summary = ("Tree survey and root protection plan requested; site visit "
+                   "fell through last month due to weather.")
+        score, price = scanners.score_lead(summary)
+        self.assertEqual(score, "small")
+        self.assertEqual(price, 25)
+
+    def test_genuine_felling_phrasing_still_scores_medium(self):
+        score, price = scanners.score_lead("Felling of one diseased ash tree.")
+        self.assertEqual(score, "medium")
+        self.assertEqual(price, 50)
+
+    def test_bare_dismantle_no_longer_inflates_score(self):
+        score, price = scanners.score_lead("Tree inspection; dismantle old bird box first.")
+        self.assertEqual(score, "small")
+
+    def test_qualified_monolith_phrasing_scores_medium(self):
+        score, price = scanners.score_lead("Reduce mature oak to a habitat monolith to preserve habitat value.")
+        self.assertEqual(score, "medium")
+
+
+class TestKeywordHitWordBoundary(unittest.TestCase):
+    """_keyword_hit directly -- the shared word-boundary matcher used by
+    both _matches_vertical and score_lead."""
+
+    def test_matches_whole_word_not_substring(self):
+        self.assertTrue(scanners._keyword_hit("Fell 1no. oak tree", ["fell"]))
+        self.assertFalse(scanners._keyword_hit("The bell tolled at noon", ["fell"]))
+
+    def test_matches_multi_word_phrase(self):
+        self.assertTrue(scanners._keyword_hit("Crown reduction of oak", ["crown reduction"]))
+        self.assertFalse(scanners._keyword_hit("Crownfield reduction works", ["crown reduction"]))
+
+    def test_numbered_list_does_not_false_positive_on_longer_number(self):
+        """"fell 1" must not match inside "fell 10"/"fell 12" -- a real risk
+        with plain substring matching that word-boundary matching removes
+        as a side effect."""
+        self.assertFalse(scanners._keyword_hit("Fell 10 trees on site", ["fell 1"]))
+        self.assertTrue(scanners._keyword_hit("Fell 1: Ash (diseased)", ["fell 1"]))
+
+    def test_empty_or_none_text_never_matches(self):
+        self.assertFalse(scanners._keyword_hit(None, ["fell"]))
+        self.assertFalse(scanners._keyword_hit("", ["fell"]))
 
 
 class TestVerticalsClassifier(unittest.TestCase):

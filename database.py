@@ -72,8 +72,53 @@ def _run_ddl_statements_resiliently(conn, statements: list, phase_label: str,
     one opaque "Phase 1 failed" catch-all.
     """
     import time
+    import re as _re
     failed = []
     for stmt in statements:
+        # Sep 2 2026 audit: a real production incident (Sep 2, this same
+        # day) showed every single "ADD COLUMN IF NOT EXISTS" statement
+        # against potential_partners fail all 5 retries at once, because a
+        # 90+ minute-long autonomous enrichment run on the OLD instance was
+        # still hammering that exact table with writes while this deploy's
+        # migration tried to start up alongside it (Render keeps the old
+        # instance live until the new one passes its health check). Every
+        # one of those 7 columns already existed from a much earlier
+        # deploy -- the ALTER was a no-op that couldn't even acquire the
+        # ACCESS EXCLUSIVE lock needed to confirm that, not a real missing-
+        # column problem -- but there's no way to tell the two cases apart
+        # from the alert alone, and it fired a CRITICAL incident email for
+        # what turned out to be nothing. Fix: for the extremely common
+        # "ADD COLUMN IF NOT EXISTS" shape, check information_schema first
+        # -- a plain SELECT needs no exclusive lock at all -- and skip the
+        # ALTER entirely when the column is already there. This removes the
+        # lock-contention risk for the 99% case (nothing new to add) and
+        # only ever attempts the real, lock-needing ALTER for a column
+        # that's genuinely missing for the first time, which is rare enough
+        # that the existing retry/backoff below is still the right
+        # fallback for it.
+        m = _re.match(
+            r"ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+)",
+            stmt.strip(), _re.IGNORECASE
+        )
+        if m:
+            table_name, column_name = m.group(1), m.group(2)
+            try:
+                precheck_cur = conn.cursor()
+                precheck_cur.execute(
+                    "SELECT 1 FROM information_schema.columns WHERE table_name = %s AND column_name = %s;",
+                    (table_name, column_name)
+                )
+                already_exists = precheck_cur.fetchone() is not None
+                precheck_cur.close()
+                conn.commit()
+                if already_exists:
+                    continue
+            except Exception as precheck_err:
+                conn.rollback()
+                logger.warning(
+                    f"[DB:{phase_label}] information_schema precheck failed for "
+                    f"{table_name}.{column_name}, falling back to direct ALTER: {precheck_err}"
+                )
         last_err = None
         landed = False
         for attempt in range(1, max_attempts + 1):

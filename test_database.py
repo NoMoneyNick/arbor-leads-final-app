@@ -132,16 +132,23 @@ class TestRunDdlStatementsResiliently(unittest.TestCase):
     too). These tests use a fake connection/cursor -- no real Postgres --
     and stub out time.sleep so retry-with-backoff doesn't slow the suite."""
 
-    def _make_conn(self, side_effects_by_substring):
+    def _make_conn(self, side_effects_by_substring, column_already_exists=False):
         """side_effects_by_substring: {sql_substring: [effect, effect, ...]}
         consumed in order per matching statement across attempts. An effect
         that's an Exception instance is raised; anything else is a no-op
-        success. A substring with no entry always succeeds immediately."""
+        success. A substring with no entry always succeeds immediately.
+
+        column_already_exists controls the information_schema precheck
+        (Sep 2 2026 audit fix) added ahead of the retry loop: False (the
+        default) makes every precheck report "not found," so every
+        existing test here -- written before the precheck existed -- still
+        exercises the real ALTER/retry path unchanged."""
         conn = MagicMock()
         call_counts = {}
 
         def make_cursor():
             cur = MagicMock()
+            cur.fetchone.return_value = ("column_name",) if column_already_exists else None
 
             def execute(sql, *args, **kwargs):
                 if sql.strip().upper().startswith("SET LOCAL"):
@@ -213,6 +220,49 @@ class TestRunDdlStatementsResiliently(unittest.TestCase):
         self.assertIn("vertical", failed_stmt)
         self.assertIn("statement timeout", failed_err)
         self.assertEqual(mock_sleep.call_count, 2)  # retried between attempts 1-2 and 2-3, gave up after 3
+
+    @patch("time.sleep", return_value=None)
+    def test_precheck_skips_the_alter_entirely_when_column_already_exists(self, mock_sleep):
+        """Sep 2 2026 audit fix: the real incident this same day showed
+        every ADD-COLUMN statement against a busy table fail all 5 retries
+        even though the columns already existed -- a CRITICAL alert fired
+        for what was actually a no-op that just couldn't get its lock. The
+        information_schema precheck needs no exclusive lock, so it should
+        report the column present and skip the contention-prone ALTER
+        (and therefore never sleep/retry) entirely."""
+        stmt = "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}';"
+        # If the precheck didn't skip it, this configured effect would make
+        # every attempt fail -- proves the ALTER itself is never reached.
+        conn = self._make_conn(
+            {stmt: [Exception("canceling statement due to lock timeout")] * 10},
+            column_already_exists=True,
+        )
+        failed = database._run_ddl_statements_resiliently(conn, [stmt], "test-phase", max_attempts=5)
+        self.assertEqual(failed, [])
+        mock_sleep.assert_not_called()
+
+    @patch("time.sleep", return_value=None)
+    def test_precheck_falls_through_to_real_alter_when_column_is_genuinely_missing(self, mock_sleep):
+        """The other half of the fix: a genuinely new column (not found by
+        the precheck) must still go through the real ALTER/retry path --
+        the precheck is an optimization for the common case, not a way to
+        skip real, needed migrations."""
+        stmt = "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS brand_new_col TEXT;"
+        conn = self._make_conn({}, column_already_exists=False)
+        failed = database._run_ddl_statements_resiliently(conn, [stmt], "test-phase")
+        self.assertEqual(failed, [])
+        conn.commit.assert_called()
+
+    @patch("time.sleep", return_value=None)
+    def test_precheck_error_falls_back_to_direct_alter_instead_of_crashing(self, mock_sleep):
+        """A broken/unreadable information_schema precheck must never take
+        the whole migration down with it -- fall back to attempting the
+        real ALTER, same as if the precheck had reported 'not found'."""
+        stmt = "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}';"
+        conn = self._make_conn({"information_schema.columns": [Exception("precheck boom")]})
+        failed = database._run_ddl_statements_resiliently(conn, [stmt], "test-phase")
+        self.assertEqual(failed, [])
+        conn.commit.assert_called()
 
 
 class TestMarketplaceVerticalColumnFallback(unittest.TestCase):

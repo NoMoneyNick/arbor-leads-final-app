@@ -1753,7 +1753,17 @@ def generate_street_flyer(lead_id: str, company: str = "Your Local Tree Surgery 
         conn = database.get_db_conn()
         cur = conn.cursor()
         try:
-            cur.execute("SELECT reference, address, summary FROM leads WHERE id::text = %s OR reference = %s;", (lead_id, lead_id))
+            # Sep 2 2026 audit: this SELECT used to omit `status` and never
+            # checked it -- unlike generate_homeowner_letter just above,
+            # which correctly gates on status == 'claimed'. The `id` used
+            # here is the same one already visible, unauthenticated, in
+            # /marketplace's page HTML (the "Unlock" button's own href).
+            # That meant anyone could copy an unpurchased lead's id straight
+            # from view-source and hit this endpoint directly to get the
+            # real street name/address for free, before anyone had paid for
+            # it -- defeating the entire "pay to unlock the exclusive
+            # address" business model in one unauthenticated GET.
+            cur.execute("SELECT reference, address, summary, status FROM leads WHERE id::text = %s OR reference = %s;", (lead_id, lead_id))
             row = cur.fetchone()
         finally:
             cur.close()
@@ -1765,7 +1775,12 @@ def generate_street_flyer(lead_id: str, company: str = "Your Local Tree Surgery 
     if not row:
         return HTMLResponse("<h3>Lead not found.</h3>", status_code=404)
 
-    ref, addr, summary = row
+    ref, addr, summary, status = row
+    if status != 'claimed':
+        return HTMLResponse(
+            "<h3>Lead Not Unlocked</h3><p>This lead has not been purchased yet. Please unlock it in the marketplace to view the full details and generate flyers.</p>",
+            status_code=403
+        )
     
     # Extract street name from address
     parts = [p.strip() for p in addr.split(",") if p.strip()]
