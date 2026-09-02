@@ -83,9 +83,19 @@ def get_director_from_ch(company_number: str):
             return None
         if res.status_code == 200:
             officers = res.json().get("items", [])
+            # Sep 2 2026: Companies House officer_role also includes
+            # corporate officers -- another company acting as director/
+            # secretary/LLP member, not a person -- plus judicial/receiver
+            # roles that aren't "the boss" either. Skip these outright so
+            # neither loop below can ever hand back a company name dressed
+            # up as a director's name. See _is_realistic_person_name for
+            # the second, independent check on the name text itself.
+            def _is_individual_officer(o: dict) -> bool:
+                role = str(o.get("officer_role", "")).lower()
+                return not role.startswith(("corporate-", "judicial-", "receiver"))
             # Prefer active directors — skip anyone with a resignation date
             for officer in officers:
-                if officer.get("resigned_on"):
+                if officer.get("resigned_on") or not _is_individual_officer(officer):
                     continue
                 role = officer.get("officer_role", "").lower()
                 if role in ("director", "secretary", "managing-director", "ceo", "chief executive officer"):
@@ -95,9 +105,9 @@ def get_director_from_ch(company_number: str):
                         parts = name.split(",", 1)
                         name = f"{parts[1].strip()} {parts[0].strip()}"
                     return name.title()
-            # Fallback: return the first active officer regardless of role
+            # Fallback: return the first active individual officer regardless of role
             for officer in officers:
-                if not officer.get("resigned_on"):
+                if not officer.get("resigned_on") and _is_individual_officer(officer):
                     name = officer.get("name", "")
                     if "," in name:
                         parts = name.split(",", 1)
@@ -902,6 +912,45 @@ _EMAIL_SHAPE_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 _PLACEHOLDER_EMAIL_DOMAINS = {
     "example.com", "test.com", "none.com", "domain.com", "email.com", "yourcompany.com",
 }
+# Sep 2 2026: caught during the "don't trust anything inherited, verify it"
+# audit Nick asked for after the region-tag issue -- get_director_from_ch's
+# fallback loop returns the first active officer REGARDLESS of role when no
+# individual director/secretary is found, which includes Companies House
+# officer roles that are themselves companies, not people ("corporate-
+# director", "corporate-nominee-director", "corporate-secretary", etc). A
+# corporate officer's "name" field is just the other company's registered
+# name -- title-cased, it looks exactly like a real person's name, so
+# without this check director:yes was firing on things like "Acme Trustees
+# Limited" and presenting it to Nick as "the boss's name."
+_CORPORATE_NAME_MARKERS = {
+    "LTD", "LIMITED", "LLP", "PLC", "LLC", "INC", "TRUSTEES", "TRUST",
+    "NOMINEES", "NOMINEE", "HOLDINGS", "GROUP", "COMPANY", "CORP",
+    "CORPORATION", "SERVICES", "MANAGEMENT", "SECRETARIES", "SECRETARIAL",
+}
+
+
+def _is_realistic_person_name(name: Optional[str]) -> bool:
+    """Sanity check for a Companies House officer name that's supposed to
+    be a real human being (a 'boss's name', per Nick) rather than another
+    company acting as a corporate officer, or a blank/placeholder value
+    that happened to survive as a truthy string. Not full validation --
+    mirrors the same 'reject the obviously-fake, don't try to prove the
+    positive' approach as _is_realistic_uk_phone/_is_realistic_email."""
+    if not name:
+        return False
+    cleaned = str(name).strip()
+    if not cleaned:
+        return False
+    words = cleaned.split()
+    # A real full name needs at least a first and last part -- a single
+    # token is more often a placeholder ("Unknown", "N/A", "Vacant") than
+    # a genuine mononym in this dataset.
+    if len(words) < 2:
+        return False
+    upper_words = {w.strip(".,").upper() for w in words}
+    if upper_words & _CORPORATE_NAME_MARKERS:
+        return False
+    return True
 # 2-digit SIC division -> the "kind of business" bucket Nick asked for.
 # Coarse on purpose -- this only needs to separate genuine tree-surgery/
 # arboriculture/forestry partners from the landscaping/construction/generic
@@ -975,7 +1024,7 @@ def _generate_partner_tags(sic_codes: Optional[list], md_name: Optional[str],
     has_email = _is_realistic_email(email)
     tags = [
         f"business:{_classify_business_kind(sic_codes)}",
-        "director:yes" if md_name else "director:no",
+        "director:yes" if _is_realistic_person_name(md_name) else "director:no",
         "phone:yes" if has_phone else "phone:no",
         "email:yes" if has_email else "email:no",
     ]

@@ -945,6 +945,57 @@ def backfill_partner_tags(batch_size: int = 500) -> dict:
             "note": "re-run if 'updated' == batch_size -- there may be more rows left untagged."}
 
 
+def resync_all_partner_tags(commit_every: int = 500) -> dict:
+    """Sep 2 2026: recomputes tags for EVERY partner row from its current
+    sic_codes/md_name/phone_number/email columns -- unlike
+    backfill_partner_tags, this isn't limited to rows that are still
+    untagged. Added specifically for the director-name-quality audit fix
+    (get_director_from_ch no longer returns corporate/nominee officers as
+    'the boss', and _is_realistic_person_name rejects blank/single-word/
+    corporate-looking values) -- that fix only changes what NEW lookups
+    write, so this is what makes it reach every partner tagged before the
+    fix existed. Pure local recompute from columns already in the row, no
+    external API calls, so (unlike resync_region_tags) it's safe and cheap
+    to process the whole table in one call rather than only a stuck
+    subset. Commits every `commit_every` rows so a mid-run interruption
+    (e.g. a redeploy) only costs the current chunk, not the whole run --
+    same lesson as the enrich_existing_partners chunking fix."""
+    if not SURL:
+        return {"error": "no database configured"}
+    updated = 0
+    unchanged = 0
+    errors = 0
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT id, sic_codes, md_name, phone_number, email, tags FROM potential_partners;")
+            rows = cur.fetchall()
+            import research as _research
+            for i, (partner_id, sic_codes, md_name, phone_number, email, old_tags) in enumerate(rows, 1):
+                try:
+                    new_tags = _research._generate_partner_tags(sic_codes, md_name, phone_number, email)
+                    if sorted(new_tags) != sorted(old_tags or []):
+                        cur.execute("UPDATE potential_partners SET tags = %s WHERE id = %s;", (new_tags, partner_id))
+                        updated += 1
+                    else:
+                        unchanged += 1
+                except Exception as row_err:
+                    errors += 1
+                    logger.warning(f"[PartnerTags] Resync-all error on partner {partner_id}: {row_err}")
+                if i % commit_every == 0:
+                    conn.commit()
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[PartnerTags] Resync-all error: {e}")
+        return {"error": str(e), "updated": updated, "unchanged": unchanged, "errors": errors}
+    return {"updated": updated, "unchanged": unchanged, "errors": errors,
+            "note": "full resync complete -- every partner's tags recomputed from current column values."}
+
+
 def get_partner_tag_counts() -> dict:
     """Sep 2 2026: reporting side of the partner tagging system -- see
     research._generate_partner_tags. 'dead' here (contact:dead) is Nick's

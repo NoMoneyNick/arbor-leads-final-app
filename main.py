@@ -1061,42 +1061,104 @@ def public_homepage():
 """
 
 
-def _render_tag_stat_section(categories: dict) -> str:
-    """Sep 2 2026: generic renderer for the tag-based stats grids on
-    /admin. Any category dict shaped like {"prefix": {"prefix:value": n}}
-    (see database.get_tag_counts / get_partner_tag_counts) renders
-    automatically as a card with a mini bar per value -- a brand new tag
-    category added to scanners.py or research.py later shows up here with
-    zero further admin-page changes, which is the whole point: Nick asked
-    for 'every metric you can think of' to be visible, not a fixed list
-    someone has to remember to update."""
-    if not categories:
+# Sep 2 2026: Nick's call -- "nothing should be unshown or unstated," and
+# explicitly, a tag value sitting at zero right now must still appear as a
+# zero row, not vanish because a GROUP BY over existing rows can only ever
+# return values that occur at least once. These are the known finite value
+# sets per tag category, pulled from the actual source-of-truth constants
+# (not hand-copied, so they can't drift out of sync with scanners.py/
+# research.py). `locale` is deliberately excluded -- it's open-ended
+# (specific council/town names), so "every possible value" isn't a fixed,
+# meaningful list the way it is for the others.
+KNOWN_TAG_VALUES = {
+    "job": sorted(set(scanners.JOB_TYPE_KEYWORDS.keys()) | {"other"}),
+    "size": ["small", "medium", "large"],
+    "agent": ["yes", "no", "unconfirmed"],
+    "vertical": ["tree", "hmo"],
+    "region": sorted(set(scanners.COUNCIL_TO_REGION.values())) + ["unclassified"],
+    "business": sorted(set(research.SIC_DIVISION_TO_BUSINESS_KIND.values())) + ["unclassified"],
+    "director": ["yes", "no"],
+    "phone": ["yes", "no"],
+    "email": ["yes", "no"],
+    "contact": ["reachable", "dead"],
+}
+# job is the one genuinely multi-label category (a tree lead can be both
+# crown-work and tpo at once) -- every other category assigns exactly one
+# value per lead/partner, so its counts are held to "should sum to the
+# total" and the gap (if any) is surfaced explicitly rather than silently
+# absorbed.
+MULTI_LABEL_CATEGORIES = {"job"}
+
+
+def _render_tag_stat_section(categories: dict, total: int, untagged: int, entity_label: str) -> str:
+    """Generic renderer for the tag-based stats grids on /admin. Any
+    category dict shaped like {"prefix": {"prefix:value": n}} (see
+    database.get_tag_counts / get_partner_tag_counts) renders automatically
+    as a card with a mini bar per value -- a brand new tag category added
+    to scanners.py or research.py later shows up here with zero further
+    admin-page changes. `total` and `untagged` (the whole-table counts) let
+    every card state plainly how its numbers relate to the whole, per
+    Nick's 'nothing unshown or unstated' rule -- including a zero row for
+    any known value that currently has no matches at all, and an explicit
+    'no <category> tag' row for the gap when a single-value category's
+    counts don't add up to `total` (a real, visible fact -- e.g. some
+    leads have no council_source at all -- not a rendering bug)."""
+    if not categories and not KNOWN_TAG_VALUES:
         return "<p style='color:#94a3b8; font-size:13px;'>No data yet.</p>"
+    all_prefixes = sorted(set(categories.keys()) | set(KNOWN_TAG_VALUES.keys()))
     cards = []
-    for prefix in sorted(categories.keys()):
-        tag_counts = categories[prefix]
-        rows = sorted(tag_counts.items(), key=lambda kv: -kv[1])
+    for prefix in all_prefixes:
+        tag_counts = dict(categories.get(prefix, {}))
+        for known_value in KNOWN_TAG_VALUES.get(prefix, []):
+            tag_counts.setdefault(f"{prefix}:{known_value}", 0)
+        if not tag_counts:
+            continue
+        rows = sorted(tag_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        category_sum = sum(n for _, n in rows)
+        is_multi = prefix in MULTI_LABEL_CATEGORIES
+        gap = total - category_sum
+        if not is_multi and gap > 0:
+            rows.append((f"{prefix}:(no {prefix} tag)", gap))
         max_n = max((n for _, n in rows), default=1) or 1
         row_html = ""
         for tag, n in rows:
             label = tag.split(":", 1)[1] if ":" in tag else tag
-            pct = int((n / max_n) * 100)
-            bar_color = "#dc2626" if prefix == "contact" and label == "dead" else \
-                        "#dc2626" if prefix == "region" and label == "unclassified" else "#059669"
+            is_gap_row = label.startswith("(no ")
+            pct = int((n / max_n) * 100) if max_n else 0
+            bar_color = "#cbd5e1" if is_gap_row else (
+                "#dc2626" if (prefix == "contact" and label == "dead")
+                or (prefix == "region" and label == "unclassified") else "#059669"
+            )
             row_html += f"""
             <div style="display:flex; align-items:center; gap:8px; margin:5px 0; font-size:12.5px;">
-                <div style="width:140px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; color:#334155;" title="{html.escape(tag)}">{html.escape(label)}</div>
+                <div style="width:150px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; color:{'#94a3b8' if is_gap_row else '#334155'};" title="{html.escape(tag)}">{html.escape(label)}</div>
                 <div style="flex:1; background:#f1f5f9; border-radius:4px; height:13px;">
                     <div style="background:{bar_color}; width:{pct}%; height:13px; border-radius:4px;"></div>
                 </div>
                 <div style="width:46px; text-align:right; font-weight:bold; color:#0f172a;">{n}</div>
             </div>"""
+        if is_multi:
+            header_note = f"{category_sum} tags across {total} {entity_label} -- multi-label, one can carry more than one"
+        else:
+            header_note = f"{category_sum} of {total} {entity_label} accounted for"
         cards.append(f"""
         <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px; min-width:230px; flex:1;">
-            <div style="font-weight:bold; color:#0f172a; margin-bottom:8px; text-transform:capitalize; font-size:13px;">{html.escape(prefix)}</div>
+            <div style="font-weight:bold; color:#0f172a; text-transform:capitalize; font-size:13px;">{html.escape(prefix)}</div>
+            <div style="font-size:11px; color:#94a3b8; margin-bottom:8px;">{header_note}</div>
             {row_html}
         </div>""")
-    return f"<div style='display:flex; flex-wrap:wrap; gap:12px;'>{''.join(cards)}</div>"
+    if untagged:
+        untagged_note = (
+            ' &nbsp;|&nbsp; <span style="color:#dc2626;">'
+            f'Untagged (never processed): <b>{untagged}</b></span>'
+        )
+    else:
+        untagged_note = " &nbsp;|&nbsp; Untagged: 0"
+    header_line = (
+        "<p style='color:#64748b; font-size:12.5px; margin:-4px 0 12px 0;'>"
+        f"Total {entity_label}: <b>{total}</b>{untagged_note}</p>"
+    )
+    return header_line + f"<div style='display:flex; flex-wrap:wrap; gap:12px;'>{''.join(cards)}</div>"
 
 
 def _time_ago(iso_str: Optional[str]) -> str:
@@ -1238,11 +1300,11 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
         <hr>
 
         <h3>&#127795; Leads, by Category</h3>
-        {_render_tag_stat_section(lead_tag_stats.get("categories", {}))}
+        {_render_tag_stat_section(lead_tag_stats.get("categories", {}), lead_tag_stats.get("total_leads", 0), lead_tag_stats.get("untagged_leads", 0), "leads")}
 
         <hr>
         <h3>&#127970; Partners, by Category</h3>
-        {_render_tag_stat_section(partner_tag_stats.get("categories", {}))}
+        {_render_tag_stat_section(partner_tag_stats.get("categories", {}), partner_tag_stats.get("total_partners", 0), partner_tag_stats.get("untagged_partners", 0), "partners")}
 
         <hr>
         <h4>Recent Leads (Past 24-48 Hours)</h4>
@@ -4804,6 +4866,19 @@ def view_partner_tag_report(secret: Optional[str] = Query(None)):
     tagging system -- see database.get_partner_tag_counts. Read-only."""
     verify_cron_secret(secret)
     return database.get_partner_tag_counts()
+
+
+@app.get("/trigger-resync-partner-tags")
+def trigger_resync_partner_tags(secret: Optional[str] = Query(None)):
+    """Sep 2 2026: recomputes EVERY partner's tags from current column
+    values (not just untagged rows) -- see database.resync_all_partner_tags.
+    Run this once after deploying the director-name-quality audit fix
+    (corporate/nominee Companies House officers no longer count as
+    director:yes) so partners tagged before the fix get corrected too,
+    not just newly-discovered ones."""
+    verify_cron_secret(secret)
+    result = database.resync_all_partner_tags()
+    return {"status": "complete", **result}
 
 
 @app.get("/trigger-backfill-lead-tags")

@@ -126,6 +126,77 @@ class TestGeneratePartnerTags(unittest.TestCase):
         self.assertIn("email:no", tags)
         self.assertIn("contact:dead", tags)
 
+    def test_corporate_officer_name_is_not_a_director(self):
+        """Sep 2 2026 audit fix: md_name coming back as another company's
+        registered name (a corporate officer, not a person) must not be
+        presented as 'the boss's name.'"""
+        tags = research._generate_partner_tags([], "Acme Trustees Limited", "020 7946 0958", None)
+        self.assertIn("director:no", tags)
+        self.assertNotIn("director:yes", tags)
+
+
+class TestRealisticPersonNameCheck(unittest.TestCase):
+    """Sep 2 2026: added during the 'don't trust anything inherited,
+    verify it' audit Nick asked for after the region-tag mislabeling was
+    found. get_director_from_ch's own fallback loop used to hand back a
+    corporate officer's company name as if it were a person, and a blank
+    or single-word placeholder value was truthy enough to pass the old
+    'if md_name' check. This is the same shape of bug as the region
+    issue: a value inherited from an external system was trusted at face
+    value instead of independently sanity-checked."""
+
+    def test_accepts_plausible_full_names(self):
+        self.assertTrue(research._is_realistic_person_name("Jane Smith"))
+        self.assertTrue(research._is_realistic_person_name("Mohammed Al-Farsi"))
+
+    def test_rejects_missing_blank_and_single_word(self):
+        self.assertFalse(research._is_realistic_person_name(None))
+        self.assertFalse(research._is_realistic_person_name(""))
+        self.assertFalse(research._is_realistic_person_name("   "))
+        self.assertFalse(research._is_realistic_person_name("Unknown"))
+
+    def test_rejects_corporate_looking_names(self):
+        self.assertFalse(research._is_realistic_person_name("Acme Trustees Limited"))
+        self.assertFalse(research._is_realistic_person_name("Bromley Holdings Ltd"))
+        self.assertFalse(research._is_realistic_person_name("Green Group PLC"))
+        self.assertFalse(research._is_realistic_person_name("Corporate Secretarial Services LLP"))
+
+
+class TestGetDirectorFromChExcludesCorporateOfficers(unittest.TestCase):
+    """Mocks research.net_utils.smart_get -- no real network call, no API
+    key required."""
+
+    def setUp(self):
+        research.CH_KEY = "fake-test-key"
+
+    def _fake_response(self, items):
+        class _Resp:
+            status_code = 200
+            def json(self_inner):
+                return {"items": items}
+        return _Resp()
+
+    def test_skips_corporate_director_and_returns_the_individual(self):
+        items = [
+            {"officer_role": "corporate-director", "name": "SHELL COMPANY LIMITED"},
+            {"officer_role": "director", "name": "SMITH, Jane"},
+        ]
+        import unittest.mock as mock
+        with mock.patch.object(research.net_utils, "smart_get", return_value=self._fake_response(items)):
+            name = research.get_director_from_ch("12345678")
+        self.assertEqual(name, "Jane Smith")
+
+    def test_fallback_loop_also_skips_corporate_officers(self):
+        """No individual director/secretary present at all -- the
+        fallback must still refuse to hand back a corporate officer."""
+        items = [
+            {"officer_role": "corporate-nominee-director", "name": "NOMINEE SERVICES LTD"},
+        ]
+        import unittest.mock as mock
+        with mock.patch.object(research.net_utils, "smart_get", return_value=self._fake_response(items)):
+            name = research.get_director_from_ch("12345678")
+        self.assertIsNone(name)
+
 
 if __name__ == "__main__":
     unittest.main()

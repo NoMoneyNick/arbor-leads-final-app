@@ -601,6 +601,43 @@ class TestPartnerTagQuerying(unittest.TestCase):
             result = database.get_partner_tag_counts()
         self.assertIn("error", result)
 
+    def test_resync_all_partner_tags_recomputes_every_row_not_just_untagged(self):
+        """Unlike backfill_partner_tags, this must touch a row that
+        already has tags -- added for the director-name-quality audit fix
+        (corporate/nominee CH officers no longer count as director:yes),
+        which only new lookups pick up on their own."""
+        rows = [
+            ("p1", ["81300"], "Acme Trustees Limited", "020 7946 0958", None, ["business:landscaping-grounds-maintenance", "director:yes", "phone:yes", "email:no", "contact:reachable"]),
+            ("p2", ["81300"], "Jane Smith", "020 7946 0958", None, ["business:landscaping-grounds-maintenance", "director:yes", "phone:yes", "email:no", "contact:reachable"]),
+        ]
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.fetchall.return_value = rows
+        conn.cursor.return_value = cur
+        fake_research = types.ModuleType("research")
+
+        def _fake_generate(sic_codes, md_name, phone, email):
+            is_person = md_name == "Jane Smith"
+            return ["business:landscaping-grounds-maintenance",
+                    "director:yes" if is_person else "director:no",
+                    "phone:yes", "email:no", "contact:reachable"]
+        fake_research._generate_partner_tags = _fake_generate
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"), \
+             patch.dict(sys.modules, {"research": fake_research}):
+            result = database.resync_all_partner_tags(commit_every=500)
+        self.assertEqual(result["updated"], 1)   # p1's tags changed (director:yes -> director:no)
+        self.assertEqual(result["unchanged"], 1)  # p2's tags stayed the same
+        self.assertEqual(result["errors"], 0)
+        update_calls = [c for c in cur.execute.call_args_list if "UPDATE potential_partners SET tags" in c[0][0]]
+        self.assertEqual(len(update_calls), 1)
+        self.assertEqual(update_calls[0][0][1][1], "p1")
+
+    def test_resync_all_partner_tags_returns_error_with_no_db(self):
+        with patch.object(database, "SURL", ""):
+            result = database.resync_all_partner_tags()
+        self.assertIn("error", result)
+
 
 if __name__ == "__main__":
     unittest.main()
