@@ -31,9 +31,10 @@ import os
 import sys
 import types
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 
 import requests as _requests  # noqa: E402  (used for constructing real exception instances below)
+from bs4 import BeautifulSoup  # noqa: E402  (used to build real soup fixtures for form-serialization tests)
 
 # ---------------------------------------------------------------------------
 # Stub heavy/external modules BEFORE importing the project modules under
@@ -100,6 +101,33 @@ import scanners    # noqa: E402
 import mesh_scrapers  # noqa: E402
 import research    # noqa: E402
 import database    # noqa: E402  (real module if psycopg2 is installed, else the stub above)
+import contextlib  # noqa: E402
+
+
+@contextlib.contextmanager
+def _patch_non_idox_mesh_platforms():
+    """Sep 3 2026: scanners.run_mesh_network_scan() sweeps SIX platforms
+    now (Idox, Northgate, Agile Applications, Arcus, Hounslow, North York
+    Moors) -- every one past Idox was added this session. Any test that
+    calls run_mesh_network_scan() but only mocks the Idox path (as every
+    pre-existing test here did, back when Idox was the only registry) lets
+    the other five hit real council/vendor domains for real -- caught by a
+    live full-suite run that genuinely tried, and largely failed only
+    because of this sandbox's own egress policy, not because the test
+    intended a live call. This is a pure logic test file (see its own
+    module docstring); nothing in it should ever dial out. Use as an extra
+    `with` clause alongside whatever else a test already patches."""
+    with patch.object(mesh_scrapers, "scrape_northgate_council", return_value=[]), \
+         patch.object(mesh_scrapers, "scrape_agile_applications_council", return_value=[]), \
+         patch.object(mesh_scrapers, "scrape_arcus_council", return_value=[]), \
+         patch.object(mesh_scrapers, "scrape_hounslow_council", return_value=[]), \
+         patch.object(mesh_scrapers, "scrape_north_york_moors", return_value=[]), \
+         patch.object(mesh_scrapers, "scrape_havering_council", return_value=[]), \
+         patch.object(mesh_scrapers, "scrape_st_albans_council", return_value=[]), \
+         patch.object(mesh_scrapers, "scrape_kensington_chelsea_council", return_value=[]), \
+         patch.object(mesh_scrapers, "scrape_dorset_council", return_value=[]), \
+         patch.object(mesh_scrapers, "scrape_stratford_on_avon_council", return_value=[]):
+        yield
 
 
 class _FakeDedupStore:
@@ -1981,7 +2009,8 @@ class TestMeshScanSameDayDedup(unittest.TestCase):
         with patch.object(mesh_scrapers, "COUNCIL_REGISTRY", fake_registry), \
              patch.object(mesh_scrapers, "scrape_mesh_council", return_value=[]) as mock_scrape, \
              patch("database.get_db_conn", return_value=self.conn), \
-             patch("time.sleep", return_value=None):
+             patch("time.sleep", return_value=None), \
+             _patch_non_idox_mesh_platforms():
             scanners.run_mesh_network_scan()
 
         mock_scrape.assert_called_once_with("Testville")
@@ -1991,7 +2020,8 @@ class TestMeshScanSameDayDedup(unittest.TestCase):
         with patch.object(mesh_scrapers, "COUNCIL_REGISTRY", fake_registry), \
              patch.object(mesh_scrapers, "scrape_mesh_council", return_value=[]) as mock_scrape, \
              patch("database.get_db_conn", return_value=self.conn), \
-             patch("time.sleep", return_value=None):
+             patch("time.sleep", return_value=None), \
+             _patch_non_idox_mesh_platforms():
             scanners.run_mesh_network_scan()            # first trigger today
             first_call_count = mock_scrape.call_count
             result = scanners.run_mesh_network_scan()   # second trigger, same day
@@ -2646,7 +2676,8 @@ class TestMeshScraperHmoGeneralization(unittest.TestCase):
              patch.object(mesh_scrapers, "scrape_mesh_council", return_value=mesh_leads), \
              patch("database.get_db_conn", return_value=self.conn), \
              patch.object(scanners, "_insert_lead", return_value=None) as mock_insert, \
-             patch("time.sleep", return_value=None):
+             patch("time.sleep", return_value=None), \
+             _patch_non_idox_mesh_platforms():
             scanners.run_mesh_network_scan()
 
         by_ref = {c.args[1]: c.kwargs.get("vertical") for c in mock_insert.call_args_list}
@@ -2664,7 +2695,8 @@ class TestMeshScraperHmoGeneralization(unittest.TestCase):
              patch.object(mesh_scrapers, "scrape_mesh_council", return_value=mesh_leads), \
              patch("database.get_db_conn", return_value=self.conn), \
              patch.object(scanners, "_insert_lead", return_value=None) as mock_insert, \
-             patch("time.sleep", return_value=None):
+             patch("time.sleep", return_value=None), \
+             _patch_non_idox_mesh_platforms():
             scanners.run_mesh_network_scan()
 
         self.assertEqual(mock_insert.call_args.kwargs.get("vertical"), "tree")
@@ -3478,6 +3510,1293 @@ class TestLeadTagging(unittest.TestCase):
         import mesh_scrapers
         missing = [c for c in mesh_scrapers.COUNCIL_REGISTRY if c not in scanners.COUNCIL_TO_REGION]
         self.assertEqual(missing, [], f"Councils missing a region mapping: {missing}")
+
+    def test_council_to_region_covers_every_registered_northgate_council(self):
+        """Same guard as the Idox one above, applied to the separate
+        NORTHGATE_COUNCILS registry (Sep 3 2026)."""
+        import mesh_scrapers
+        missing = [c for c in mesh_scrapers.NORTHGATE_COUNCILS if c not in scanners.COUNCIL_TO_REGION]
+        self.assertEqual(missing, [], f"Northgate councils missing a region mapping: {missing}")
+
+    def test_council_to_region_covers_every_registered_agile_council(self):
+        """Same guard again, applied to the third registry -- Agile
+        Applications' AGILE_APPLICATIONS_COUNCILS (Sep 3 2026)."""
+        import mesh_scrapers
+        missing = [c for c in mesh_scrapers.AGILE_APPLICATIONS_COUNCILS if c not in scanners.COUNCIL_TO_REGION]
+        self.assertEqual(missing, [], f"Agile Applications councils missing a region mapping: {missing}")
+
+    def test_council_to_region_covers_every_registered_arcus_council(self):
+        """Same guard again, applied to the fourth registry -- Arcus BE's
+        ARCUS_COUNCILS (Sep 3 2026)."""
+        import mesh_scrapers
+        missing = [c for c in mesh_scrapers.ARCUS_COUNCILS if c not in scanners.COUNCIL_TO_REGION]
+        self.assertEqual(missing, [], f"Arcus councils missing a region mapping: {missing}")
+
+
+class TestNorthgateResultsParsing(unittest.TestCase):
+    """Feeds realistic Northgate/PlanningExplorer HTML (built from a real Sep
+    3 2026 live browser session against planning.wandsworth.gov.uk) through
+    NorthgateScraper with net_utils.smart_get/smart_post mocked out -- no
+    real network call -- to lock the parsing logic in against regressions.
+    """
+
+    SEARCH_FORM_HTML = """
+    <html><body>
+    <form method="post" action="GeneralSearch.aspx">
+        <input type="hidden" name="__VIEWSTATE" value="fakeviewstate123" />
+        <input type="hidden" name="__VIEWSTATEGENERATOR" value="ABCD1234" />
+        <input type="hidden" name="__EVENTVALIDATION" value="fakeeventvalidation456" />
+        <input type="text" name="txtApplicationNumber" value="" />
+        <select name="cboApplicationTypeCode" id="cboApplicationTypeCode">
+            <option value="">&lt; all &gt;</option>
+            <option value="FL">Application for Full Permission</option>
+            <option value="DD">Dead and Dangerous Tree</option>
+            <option value="TC">Work to trees in conservation area</option>
+            <option value="TPO">Works to a T.P.O. Tree</option>
+        </select>
+        <select name="cboStatusCode" id="cboStatusCode">
+            <option value="" selected="selected">&lt; all &gt;</option>
+            <option value="1">NEW</option>
+            <option value="5">COMPLETE</option>
+        </select>
+        <input type="submit" name="csbtnSearch" value="Search" />
+    </form>
+    </body></html>
+    """
+
+    RESULTS_HTML = """
+    <html><body>
+    <table class="display_table">
+        <tr class="Row0">
+            <th class="data_header">Application Number</th>
+            <th class="data_header">Site Address</th>
+            <th class="data_header">Development Description</th>
+            <th class="data_header">Status</th>
+        </tr>
+        <tr class="Row1">
+            <td class="TableData"><a class="data_text" href="StdDetails.aspx?PARAM0=1242794">2026/1773</a></td>
+            <td class="data_text">14 Cromer Villas Road, London SW18 1PN</td>
+            <td class="data_text">T1 - Veteran Horse Chestnut - Fell the tree on safety grounds.</td>
+            <td class="data_text">NEW</td>
+        </tr>
+        <tr class="Row0">
+            <td class="TableData"><a class="data_text" href="StdDetails.aspx?PARAM0=1220614">2025/4520</a></td>
+            <td class="data_text">18 Kingslawn Close SW15 6QJ</td>
+            <td class="data_text">Extension to existing garage.</td>
+            <td class="data_text">NEW</td>
+        </tr>
+    </table>
+    </body></html>
+    """
+
+    NO_RESULTS_HTML = "<html><body><p>No records found.</p></body></html>"
+
+    DETAIL_HTML_WITH_AGENT = """
+    <html><body>
+    <div><span>Applicant</span>Ms J Smith&nbsp;</div>
+    <div><span>Agent</span>Custom Cutters Tree Specialists Ltd&nbsp;</div>
+    <div><span>Application Registered</span>03 Sep 2026&nbsp;</div>
+    </body></html>
+    """
+
+    DETAIL_HTML_NO_AGENT = """
+    <html><body>
+    <div><span>Applicant</span>Treehab Arboricultural Contractors&nbsp;</div>
+    <div><span>Agent</span></div>
+    <div><span>Application Registered</span></div>
+    </body></html>
+    """
+
+    def _fake_response(self, status_code=200, text=""):
+        r = MagicMock()
+        r.status_code = status_code
+        r.text = text
+        return r
+
+    def test_extracts_only_tree_related_application_types(self):
+        """Wandsworth's own dropdown also lists plenty of non-tree types
+        (e.g. 'Application for Full Permission') -- only DD/TC/TPO-shaped
+        options (matched by TEXT, not a hardcoded code) should ever be
+        searched."""
+        scraper = mesh_scrapers.NorthgateScraper("https://example-council.gov.uk/Northgate/PlanningExplorer")
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=self.SEARCH_FORM_HTML)), \
+             patch("net_utils.smart_post", return_value=self._fake_response(text=self.NO_RESULTS_HTML)) as mock_post:
+            scraper.search_tree_applications()
+        searched_codes = {call.kwargs["data"]["cboApplicationTypeCode"] for call in mock_post.call_args_list}
+        self.assertEqual(searched_codes, {"DD", "TC", "TPO"})
+
+    def test_extracts_only_tree_related_leads_from_results_table(self):
+        scraper = mesh_scrapers.NorthgateScraper("https://example-council.gov.uk/Northgate/PlanningExplorer")
+        with patch("net_utils.smart_get", side_effect=[
+                self._fake_response(text=self.SEARCH_FORM_HTML),
+                self._fake_response(text=self.DETAIL_HTML_NO_AGENT),
+            ]), \
+             patch("net_utils.smart_post", return_value=self._fake_response(text=self.RESULTS_HTML)):
+            leads = scraper.search_tree_applications()
+        refs = {l["reference"] for l in leads}
+        self.assertIn("2026/1773", refs)  # tree work -- kept
+        self.assertNotIn("2025/4520", refs)  # garage extension -- filtered out by _resolve_vertical
+
+    def test_detail_page_extracts_agent_when_present(self):
+        scraper = mesh_scrapers.NorthgateScraper("https://example-council.gov.uk/Northgate/PlanningExplorer")
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=self.DETAIL_HTML_WITH_AGENT)):
+            out = scraper._fetch_applicant_and_agent("https://example-council.gov.uk/Northgate/PlanningExplorer/StdDetails.aspx?PARAM0=1")
+        self.assertEqual(out.get("applicant_name"), "Ms J Smith")
+        self.assertEqual(out.get("agent_name"), "Custom Cutters Tree Specialists Ltd")
+        self.assertTrue(out.get("has_agent"))
+        self.assertEqual(out.get("registered_date"), "2026-09-03")
+
+    def test_detail_page_blank_agent_is_not_a_placeholder_false_positive(self):
+        """An empty <span>Agent</span> value must never be read as some
+        placeholder string flipping has_agent True -- same defensive
+        principle as IdoxScraper's own 'Not Available' filtering."""
+        scraper = mesh_scrapers.NorthgateScraper("https://example-council.gov.uk/Northgate/PlanningExplorer")
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=self.DETAIL_HTML_NO_AGENT)):
+            out = scraper._fetch_applicant_and_agent("https://example-council.gov.uk/Northgate/PlanningExplorer/StdDetails.aspx?PARAM0=2")
+        self.assertEqual(out.get("applicant_name"), "Treehab Arboricultural Contractors")
+        self.assertIsNone(out.get("agent_name"))
+        self.assertFalse(out.get("has_agent"))
+
+    def test_no_results_table_is_not_treated_as_an_error(self):
+        scraper = mesh_scrapers.NorthgateScraper("https://example-council.gov.uk/Northgate/PlanningExplorer")
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=self.SEARCH_FORM_HTML)), \
+             patch("net_utils.smart_post", return_value=self._fake_response(text=self.NO_RESULTS_HTML)):
+            leads = scraper.search_tree_applications()
+        self.assertEqual(leads, [])
+
+    def test_scrape_northgate_council_unknown_name_returns_empty(self):
+        self.assertEqual(mesh_scrapers.scrape_northgate_council("NOT-A-REAL-COUNCIL"), [])
+
+    def test_scrape_northgate_council_routes_to_registered_url(self):
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=self.SEARCH_FORM_HTML)), \
+             patch("net_utils.smart_post", return_value=self._fake_response(text=self.NO_RESULTS_HTML)):
+            leads = mesh_scrapers.scrape_northgate_council("wandsworth")
+        self.assertEqual(leads, [])  # NO_RESULTS_HTML -- just confirms it routes and runs without error
+
+
+class TestAgileApplicationsResultsParsing(unittest.TestCase):
+    """Feeds realistic Agile Applications JSON (shaped from the real Sep 3
+    2026 live browser XHR capture against Islington's Citizen Portal API)
+    through scrape_agile_applications_council with net_utils.smart_get
+    mocked out -- no real network call -- to lock the parsing logic in
+    against regressions."""
+
+    UNDECIDED_TREE_LEAD = {
+        "id": 555001, "applicationType": "Tree Works Unspecified",
+        "reference": "T/2026/0891", "webReference": "T/2026/0891",
+        "proposal": "T1 Sycamore - crown reduce by 20%.",
+        "location": "12 Highbury Grove, London N5 2EA",
+        "applicantSurname": "Okafor", "agentName": "Ivy Tree Surgeons Ltd",
+        "decisionText": "", "decisionDate": None,
+        "registrationDate": "2026-08-20T00:00:00", "status": "Registered",
+    }
+    DECIDED_TREE_LEAD = {
+        "id": 555002, "applicationType": "Tree Works Unspecified",
+        "reference": "T/2026/0700", "webReference": "T/2026/0700",
+        "proposal": "T2 Oak - fell, dead.",
+        "location": "4 Barnsbury Square, London N1 1JG",
+        "applicantSurname": "Patel", "agentName": "Not Available",
+        "decisionText": "Consent Granted", "decisionDate": "2026-08-25T00:00:00",
+        "registrationDate": "2026-08-01T00:00:00", "status": "Decided",
+    }
+    NO_AGENT_LEAD = {
+        "id": 555003, "applicationType": "Tree Works Notice Dead/Dangerous",
+        "reference": "T/2026/0905", "webReference": "T/2026/0905",
+        "proposal": "T1 Ash - fell, ash dieback.",
+        "location": "9 Thornhill Road, London N1 1HW",
+        "applicantSurname": "Nguyen", "agentName": None,
+        "decisionText": None, "decisionDate": None,
+        "registrationDate": "2026-08-22T00:00:00", "status": "Registered",
+    }
+
+    def _fake_response(self, status_code=200, payload=None):
+        r = MagicMock()
+        r.status_code = status_code
+        r.json.return_value = payload or {"total": 0, "results": []}
+        return r
+
+    def test_unknown_council_returns_empty(self):
+        self.assertEqual(mesh_scrapers.scrape_agile_applications_council("NOT-A-REAL-COUNCIL"), [])
+
+    def test_only_undecided_leads_are_kept(self):
+        payload = {"total": 2, "results": [self.UNDECIDED_TREE_LEAD, self.DECIDED_TREE_LEAD]}
+        with patch("net_utils.smart_get", return_value=self._fake_response(payload=payload)):
+            leads = mesh_scrapers.scrape_agile_applications_council("islington")
+        refs = {l["reference"] for l in leads}
+        self.assertIn("T/2026/0891", refs)  # still open -- kept
+        self.assertNotIn("T/2026/0700", refs)  # already decided -- filtered out
+
+    def test_agent_and_applicant_fields_mapped_correctly(self):
+        payload = {"total": 1, "results": [self.UNDECIDED_TREE_LEAD]}
+        with patch("net_utils.smart_get", return_value=self._fake_response(payload=payload)):
+            leads = mesh_scrapers.scrape_agile_applications_council("islington")
+        lead = leads[0]
+        self.assertEqual(lead["applicant_name"], "Okafor")
+        self.assertEqual(lead["agent_name"], "Ivy Tree Surgeons Ltd")
+        self.assertTrue(lead["has_agent"])
+        self.assertEqual(lead["vertical"], "tree")
+        self.assertEqual(lead["registered_date"], "2026-08-20")
+
+    def test_placeholder_agent_is_not_a_false_positive(self):
+        """Agile's own 'Not Available' placeholder on a decided lead must
+        never register as a real agent -- same defensive filtering as
+        every other scraper in this project (_looks_like_real_value)."""
+        payload = {"total": 1, "results": [self.NO_AGENT_LEAD]}
+        with patch("net_utils.smart_get", return_value=self._fake_response(payload=payload)):
+            leads = mesh_scrapers.scrape_agile_applications_council("islington")
+        self.assertIsNone(leads[0]["agent_name"])
+        self.assertFalse(leads[0]["has_agent"])
+
+    def test_non_200_response_is_skipped_not_an_error(self):
+        """Application type id 74 is a confirmed, permanent 400 on this
+        platform -- must be skipped cleanly, not raise or crash the scan."""
+        with patch("net_utils.smart_get", return_value=self._fake_response(status_code=400)):
+            leads = mesh_scrapers.scrape_agile_applications_council("islington")
+        self.assertEqual(leads, [])
+
+    def test_sends_required_headers(self):
+        payload = {"total": 0, "results": []}
+        with patch("net_utils.smart_get", return_value=self._fake_response(payload=payload)) as mock_get:
+            mesh_scrapers.scrape_agile_applications_council("islington")
+        headers = mock_get.call_args_list[0].kwargs["headers"]
+        self.assertEqual(headers["x-client"], "IS")
+        self.assertEqual(headers["x-product"], "CITIZENPORTAL")
+        self.assertEqual(headers["x-service"], "PA")
+
+    def test_queries_one_application_type_id_per_request(self):
+        """Comma-separated ids return 400 on this platform -- must issue
+        one request per confirmed tree-related type id (72, 73, 76)."""
+        payload = {"total": 0, "results": []}
+        with patch("net_utils.smart_get", return_value=self._fake_response(payload=payload)) as mock_get:
+            mesh_scrapers.scrape_agile_applications_council("islington")
+        queried_ids = {call.kwargs["params"]["applicationTypeId"] for call in mock_get.call_args_list}
+        self.assertEqual(queried_ids, {72, 73, 76})
+
+    def test_each_council_uses_its_own_type_ids_and_x_client(self):
+        """Sep 3 2026 expansion -- confirmed live that Agile's numeric
+        application-type ids are NOT shared across councils (id 72 means
+        something completely different on Yorkshire Dales than on
+        Islington), so each council must query its OWN tree_type_ids and
+        send its OWN x-client, never Islington's."""
+        payload = {"total": 0, "results": []}
+        expected = {
+            "REDBRIDGE": ("REDBRIDGE", {23, 24, 100011}),
+            "RICHMOND UPON THAMES": ("RICHMONDUPONTHAMES", {26, 28}),
+            "LAKE DISTRICT": ("LDNPA", {94, 98, 106723}),
+            "PEMBROKESHIRE COAST": ("PEMBROKESHIRECOAST", {29, 30}),
+        }
+        for council, (x_client, type_ids) in expected.items():
+            with patch("net_utils.smart_get", return_value=self._fake_response(payload=payload)) as mock_get:
+                mesh_scrapers.scrape_agile_applications_council(council)
+            queried_ids = {call.kwargs["params"]["applicationTypeId"] for call in mock_get.call_args_list}
+            self.assertEqual(queried_ids, type_ids, f"{council} queried the wrong type ids")
+            for call in mock_get.call_args_list:
+                self.assertEqual(call.kwargs["headers"]["x-client"], x_client, f"{council} sent the wrong x-client")
+
+    def test_yorkshire_dales_and_snowdonia_are_not_registered(self):
+        """Both confirmed live (Sep 3 2026) to be on this same platform but
+        genuinely lacking any tree/TPO/woodland application type -- a real
+        data gap, not a scraper bug, so they must stay unregistered rather
+        than silently returning zero leads forever."""
+        self.assertNotIn("YORKSHIRE DALES", mesh_scrapers.AGILE_APPLICATIONS_COUNCILS)
+        self.assertNotIn("SNOWDONIA", mesh_scrapers.AGILE_APPLICATIONS_COUNCILS)
+
+    def test_council_to_region_has_the_four_new_agile_councils(self):
+        self.assertEqual(scanners.COUNCIL_TO_REGION.get("REDBRIDGE"), "London")
+        self.assertEqual(scanners.COUNCIL_TO_REGION.get("RICHMOND UPON THAMES"), "London")
+        self.assertEqual(scanners.COUNCIL_TO_REGION.get("LAKE DISTRICT"), "North West")
+        self.assertEqual(scanners.COUNCIL_TO_REGION.get("PEMBROKESHIRE COAST"), "Wales")
+
+
+class TestArcusResultsParsing(unittest.TestCase):
+    """Feeds realistic Arcus BE Aura JSON (shaped from the real Sep 3 2026
+    live browser XHR capture, obtained by replaying the exact request the
+    Manchester Public Register page sends with credentials stripped out)
+    through scrape_arcus_council with net_utils.smart_post mocked out -- no
+    real network call -- to lock the parsing logic in against regressions.
+    """
+
+    SEARCH_RESPONSE_OPEN = {
+        "actions": [{"id": "1;a", "state": "SUCCESS", "returnValue": {"returnValue": {
+            "thresholdHit": False,
+            "records": [
+                {"Id": "a1D0001", "Name": "OTH-2026-001368",
+                 "arcusbuiltenv__Type__c": "Consent under Tree Preservation Orders",
+                 "arcusbuiltenv__Site_Address__c": "6 Oak Road\r\nManchester\r\nM20 3DA",
+                 "arcusbuiltenv__Proposal__c": "Works to trees - proposed pruning works to T1 T2.",
+                 "arcusbuiltenv__Status__c": "Under Consideration",
+                 "arcusbuiltenv__Valid_Date__c": "2026-09-01"},
+                {"Id": "a1D0002", "Name": "OTH-2026-000900",
+                 "arcusbuiltenv__Type__c": "Consent under Tree Preservation Orders",
+                 "arcusbuiltenv__Site_Address__c": "1 Elm Street\r\nManchester\r\nM1 1AA",
+                 "arcusbuiltenv__Proposal__c": "Works to trees - fell dead ash.",
+                 "arcusbuiltenv__Status__c": "Final",
+                 "arcusbuiltenv__Valid_Date__c": "2026-07-01"},
+            ],
+        }}, "error": []}],
+    }
+
+    DETAIL_RESPONSE_WITH_AGENT = {
+        "actions": [{"id": "1;a", "state": "SUCCESS", "returnValue": {"returnValue": {
+            "sections": [{"fields": [
+                {"label": "Applicant Name", "primaryLanguageLabel": "Applicant", "value": "Tessa Green"},
+                {"label": "Agent Name", "primaryLanguageLabel": "Agent", "value": "Mr Oliver Bancroft"},
+            ]}],
+        }}, "error": []}],
+    }
+
+    DETAIL_RESPONSE_NO_AGENT = {
+        "actions": [{"id": "1;a", "state": "SUCCESS", "returnValue": {"returnValue": {
+            "sections": [{"fields": [
+                {"label": "Applicant Name", "primaryLanguageLabel": "Applicant", "value": "Mr John Doe"},
+                {"label": "Agent Name", "primaryLanguageLabel": "Agent", "value": ""},
+            ]}],
+        }}, "error": []}],
+    }
+
+    def _fake_response(self, status_code=200, payload=None):
+        r = MagicMock()
+        r.status_code = status_code
+        r.json.return_value = payload or {"actions": []}
+        return r
+
+    def test_unknown_council_returns_empty(self):
+        self.assertEqual(mesh_scrapers.scrape_arcus_council("NOT-A-REAL-COUNCIL"), [])
+
+    def test_only_undecided_status_leads_are_kept(self):
+        with patch("net_utils.smart_post", side_effect=[
+                self._fake_response(payload=self.SEARCH_RESPONSE_OPEN),
+                self._fake_response(payload=self.DETAIL_RESPONSE_NO_AGENT),
+            ]):
+            leads = mesh_scrapers.scrape_arcus_council("manchester")
+        refs = {l["reference"] for l in leads}
+        self.assertIn("OTH-2026-001368", refs)  # Under Consideration -- kept
+        self.assertNotIn("OTH-2026-000900", refs)  # Final -- filtered out
+
+    def test_detail_fetch_extracts_agent_by_label(self):
+        with patch("net_utils.smart_post", side_effect=[
+                self._fake_response(payload=self.SEARCH_RESPONSE_OPEN),
+                self._fake_response(payload=self.DETAIL_RESPONSE_WITH_AGENT),
+            ]):
+            leads = mesh_scrapers.scrape_arcus_council("manchester")
+        lead = leads[0]
+        self.assertEqual(lead["applicant_name"], "Tessa Green")
+        self.assertEqual(lead["agent_name"], "Mr Oliver Bancroft")
+        self.assertTrue(lead["has_agent"])
+        self.assertEqual(lead["vertical"], "tree")
+        self.assertEqual(lead["registered_date"], "2026-09-01")
+
+    def test_blank_agent_field_is_not_a_false_positive(self):
+        with patch("net_utils.smart_post", side_effect=[
+                self._fake_response(payload=self.SEARCH_RESPONSE_OPEN),
+                self._fake_response(payload=self.DETAIL_RESPONSE_NO_AGENT),
+            ]):
+            leads = mesh_scrapers.scrape_arcus_council("manchester")
+        self.assertIsNone(leads[0]["agent_name"])
+        self.assertFalse(leads[0]["has_agent"])
+
+    def test_non_success_aura_state_is_skipped_not_an_error(self):
+        """A stale pinned fwuid/app hash (Manchester's Salesforce org
+        upgraded) would show up as a non-SUCCESS action state, not an HTTP
+        error -- must be skipped cleanly, not raise or crash the scan."""
+        error_response = {"actions": [{"id": "1;a", "state": "ERROR", "returnValue": {}, "error": [{"message": "stale fwuid"}]}]}
+        with patch("net_utils.smart_post", return_value=self._fake_response(payload=error_response)):
+            leads = mesh_scrapers.scrape_arcus_council("manchester")
+        self.assertEqual(leads, [])
+
+    def test_non_200_response_is_skipped_not_an_error(self):
+        with patch("net_utils.smart_post", return_value=self._fake_response(status_code=500)):
+            leads = mesh_scrapers.scrape_arcus_council("manchester")
+        self.assertEqual(leads, [])
+
+    def test_search_uses_correct_apex_class_and_category(self):
+        with patch("net_utils.smart_post", side_effect=[
+                self._fake_response(payload=self.SEARCH_RESPONSE_OPEN),
+                self._fake_response(payload=self.DETAIL_RESPONSE_NO_AGENT),
+            ]) as mock_post:
+            mesh_scrapers.scrape_arcus_council("manchester")
+        first_call_message = mock_post.call_args_list[0].kwargs["data"]["message"]
+        self.assertIn('"classname": "PR_SearchService"', first_call_message)
+        self.assertIn('"searchName": "Planning_Applications"', first_call_message)
+        self.assertEqual(mock_post.call_args_list[0].kwargs["data"]["aura.token"], "null")
+
+    def test_wiltshire_uses_its_own_path_prefix_and_page_slug(self):
+        """Wiltshire's Arcus deployment uses a different URL path prefix
+        ('pr3' not 'pr') and search-page slug ('be-register-view' not
+        'register-view') from Manchester -- confirmed live Sep 3 2026.
+        Guards against a future refactor silently hardcoding Manchester's
+        paths again."""
+        with patch("net_utils.smart_post", side_effect=[
+                self._fake_response(payload=self.SEARCH_RESPONSE_OPEN),
+                self._fake_response(payload=self.DETAIL_RESPONSE_NO_AGENT),
+            ]) as mock_post:
+            mesh_scrapers.scrape_arcus_council("wiltshire")
+        search_url = mock_post.call_args_list[0].args[0]
+        self.assertIn("development.wiltshire.gov.uk/pr3/s/sfsites/aura", search_url)
+        detail_page_uri = mock_post.call_args_list[1].kwargs["data"]["aura.pageURI"]
+        self.assertIn("/pr3/s/detail/", detail_page_uri)
+
+
+class TestHounslowResultsParsing(unittest.TestCase):
+    """Feeds realistic Hounslow HTML (built from a real Sep 3 2026 live
+    browser session against planningandbuilding.hounslow.gov.uk) through
+    HounslowScraper with net_utils.smart_get/smart_post mocked out -- no
+    real network call -- to lock the parsing logic in against regressions.
+    """
+
+    SEARCH_FORM_HTML = """
+    <html><body><form>
+        <input type="hidden" name="basepath" value="/NECSWS" />
+        <input type="radio" name="SearchFor" value="PlanningApplications" checked="checked" />
+        <input type="radio" name="SearchFor" value="WorksToTrees" />
+        <input type="checkbox" name="Validated" value="true" />
+        <input type="hidden" name="Validated" value="false" />
+        <input type="radio" name="StatusOptions" value="ReceivedAnyTime" checked="checked" />
+        <input type="text" name="SearchInput" value="" />
+    </form></body></html>
+    """
+
+    RESULTS_HTML = """
+    <div>
+        <div class="row"><div class="col-xs-12">2 Results</div></div>
+        <br>
+        <div class="row">
+            <div class="col-xs-12"><a href="/NECSWS/ES/.../OnlinePlanningOverview?applicationNumber=P%2F2026%2F2509&amp;guid=abc"><span class="SearchResultsToHighlight">51 Grove Park Road, Chiswick, London W4 3RU</span></a></div>
+            <div class="col-xs-12"><a href="/NECSWS/ES/.../OnlinePlanningOverview?applicationNumber=P%2F2026%2F2509&amp;guid=abc"><span class="SearchResultsToHighlight">Works to Trees in Conservation Area</span></a></div>
+            <div class="col-xs-12"><a href="/NECSWS/ES/.../OnlinePlanningOverview?applicationNumber=P%2F2026%2F2509&amp;guid=abc"><span title="Full untruncated proposal text about T1 Lime crown reduction." class="SearchResultsToHighlight">Full untruncated proposal text...</span></a></div>
+            <div class="col-xs-12"><a href="/NECSWS/ES/.../OnlinePlanningOverview?applicationNumber=P%2F2026%2F2509&amp;guid=abc"><span>Application No: <span class="SearchResultsToHighlight">P/2026/2509</span></span> | Registered : <span class="SearchResultsToHighlight">03 September 2026</span></a></div>
+            <div class="col-xs-12"><div class="row padding-left-15"><div class="col-xs-3">APPLICATION STATUS -  REGISTERED</div></div></div>
+        </div>
+        <div>&nbsp;</div>
+        <div class="row">
+            <div class="col-xs-12"><a href="/NECSWS/ES/.../OnlinePlanningOverview?applicationNumber=P%2F2026%2F1000&amp;guid=def"><span class="SearchResultsToHighlight">99 High Street, Hounslow TW3 1AA</span></a></div>
+            <div class="col-xs-12"><a href="/NECSWS/ES/.../OnlinePlanningOverview?applicationNumber=P%2F2026%2F1000&amp;guid=def"><span class="SearchResultsToHighlight">Householder extension</span></a></div>
+            <div class="col-xs-12"><a href="/NECSWS/ES/.../OnlinePlanningOverview?applicationNumber=P%2F2026%2F1000&amp;guid=def"><span title="Single storey rear extension." class="SearchResultsToHighlight">Single storey rear extension.</span></a></div>
+            <div class="col-xs-12"><a href="/NECSWS/ES/.../OnlinePlanningOverview?applicationNumber=P%2F2026%2F1000&amp;guid=def"><span>Application No: <span class="SearchResultsToHighlight">P/2026/1000</span></span> | Registered : <span class="SearchResultsToHighlight">01 August 2026</span></a></div>
+            <div class="col-xs-12"><div class="row padding-left-15"><div class="col-xs-3">APPLICATION STATUS -  REGISTERED</div></div></div>
+        </div>
+    </div>
+    """
+
+    NO_RESULTS_HTML = '<div><div class="row"><div class="col-xs-12">0 Results</div></div></div>'
+
+    DETAIL_HTML_WITH_AGENT = """
+    <html><body><table>
+        <tr><td class="width-30"><label>Applicant</label></td><td class="width-70"><label class="font-weight-normal"> Hodges</label></td></tr>
+        <tr><td class="width-30"><label>Agent</label></td><td class="width-70"><label class="font-weight-normal">Crown &amp; Branch Tree Surgeons</label></td></tr>
+        <tr><td class="width-30"><label>Validated</label></td><td class="width-70"><label class="font-weight-normal">03 September 2026</label></td></tr>
+    </table></body></html>
+    """
+
+    DETAIL_HTML_NO_AGENT = """
+    <html><body><table>
+        <tr><td class="width-30"><label>Applicant</label></td><td class="width-70"><label class="font-weight-normal">Mr John Doe</label></td></tr>
+        <tr><td class="width-30"><label>Validated</label></td><td class="width-70"><label class="font-weight-normal">01 August 2026</label></td></tr>
+    </table></body></html>
+    """
+
+    def _fake_response(self, status_code=200, text=""):
+        r = MagicMock()
+        r.status_code = status_code
+        r.text = text
+        return r
+
+    def test_search_overrides_category_status_and_keyword(self):
+        scraper = mesh_scrapers.HounslowScraper()
+        with patch("net_utils.smart_get", side_effect=[
+                self._fake_response(text=self.SEARCH_FORM_HTML),
+                self._fake_response(text=self.DETAIL_HTML_NO_AGENT),
+                self._fake_response(text=self.DETAIL_HTML_NO_AGENT),
+            ]), \
+             patch("net_utils.smart_post", return_value=self._fake_response(text=self.RESULTS_HTML)) as mock_post:
+            scraper.search_tree_applications()
+        payload = mock_post.call_args.kwargs["data"]
+        self.assertEqual(payload["SearchFor"], "WorksToTrees")
+        self.assertEqual(payload["Validated"], "true")
+        self.assertEqual(payload["SearchInput"], "")
+
+    def test_extracts_leads_from_results_html(self):
+        scraper = mesh_scrapers.HounslowScraper()
+        with patch("net_utils.smart_get", side_effect=[
+                self._fake_response(text=self.SEARCH_FORM_HTML),
+                self._fake_response(text=self.DETAIL_HTML_WITH_AGENT),
+                self._fake_response(text=self.DETAIL_HTML_NO_AGENT),
+            ]), \
+             patch("net_utils.smart_post", return_value=self._fake_response(text=self.RESULTS_HTML)):
+            leads = scraper.search_tree_applications()
+        self.assertEqual(len(leads), 2)
+        refs = {l["reference"] for l in leads}
+        self.assertEqual(refs, {"P/2026/2509", "P/2026/1000"})
+        for l in leads:
+            self.assertEqual(l["vertical"], "tree")
+
+    def test_detail_page_extracts_agent_by_label(self):
+        scraper = mesh_scrapers.HounslowScraper()
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=self.DETAIL_HTML_WITH_AGENT)):
+            out = scraper._fetch_applicant_and_agent("P/2026/2509")
+        self.assertEqual(out["applicant_name"], "Hodges")
+        self.assertEqual(out["agent_name"], "Crown & Branch Tree Surgeons")
+        self.assertTrue(out["has_agent"])
+        self.assertEqual(out["registered_date"], "2026-09-03")
+
+    def test_detail_page_missing_agent_label_is_not_a_false_positive(self):
+        scraper = mesh_scrapers.HounslowScraper()
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=self.DETAIL_HTML_NO_AGENT)):
+            out = scraper._fetch_applicant_and_agent("P/2026/1000")
+        self.assertIsNone(out["agent_name"])
+        self.assertFalse(out["has_agent"])
+
+    def test_no_results_is_not_treated_as_an_error(self):
+        scraper = mesh_scrapers.HounslowScraper()
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=self.SEARCH_FORM_HTML)), \
+             patch("net_utils.smart_post", return_value=self._fake_response(text=self.NO_RESULTS_HTML)):
+            leads = scraper.search_tree_applications()
+        self.assertEqual(leads, [])
+
+    def test_scrape_hounslow_council_rejects_other_names(self):
+        self.assertEqual(mesh_scrapers.scrape_hounslow_council("NOT-HOUNSLOW"), [])
+
+    def test_council_to_region_has_hounslow(self):
+        self.assertIn("HOUNSLOW", scanners.COUNCIL_TO_REGION)
+
+
+class TestNorthYorkMoorsResultsParsing(unittest.TestCase):
+    """Feeds realistic North York Moors HorizoNext JSON (shaped from the
+    real Sep 3 2026 live browser session against the StatMap public
+    portal) through scrape_north_york_moors with net_utils.smart_get/
+    smart_post mocked out -- no real network call -- to lock the parsing
+    logic in against regressions."""
+
+    LIVE_TCA_SEARCH_RESPONSE = {
+        "total": 1,
+        "records": [{
+            "id": "821404", "name": "WTCA/2026/00394", "initialAppRef": "HC/2026/00443",
+            "address": "SYCAMORE COTTAGE\nHEADLANDS ROAD\nAPPLETON LE MOORS\nYO62 6TE",
+            "status": "Live", "proposal": "Wild Cherry tree in garden, to clear fell",
+            "receivedDate": "2026-09-02T12:00:00", "decision": "PENDING",
+        }],
+    }
+    LIVE_TPO_SEARCH_RESPONSE = {
+        "total": 1,
+        "records": [{
+            "id": "821999", "name": "WTPO/2026/00500", "initialAppRef": "PP/2026/00600",
+            "address": "1 MOOR LANE\nWHITBY\nYO21 1AA",
+            "status": "Live", "proposal": "T1 Oak - crown reduce by 2m.",
+            "receivedDate": "2026-09-01T12:00:00", "decision": "PENDING",
+        }],
+    }
+    EMPTY_SEARCH_RESPONSE = {"total": 0, "records": []}
+
+    DETAIL_WITH_AGENT = {
+        "id": 821999, "applicantFullName": "Jane Smith", "agentFullName": "Ivy Tree Surgeons Ltd",
+        "agentCompany": "Ivy Tree Surgeons Ltd",
+    }
+    DETAIL_NO_AGENT = {
+        "id": 821404, "applicantFullName": "Philip Trevelyan", "agentFullName": "", "agentCompany": "",
+    }
+
+    def _fake_response(self, status_code=200, payload=None):
+        r = MagicMock()
+        r.status_code = status_code
+        r.json.return_value = payload if payload is not None else {}
+        return r
+
+    def test_queries_all_three_tree_app_types_with_live_status(self):
+        with patch("net_utils.smart_post", return_value=self._fake_response(payload=self.EMPTY_SEARCH_RESPONSE)) as mock_post, \
+             patch("net_utils.smart_get", return_value=self._fake_response(payload=self.DETAIL_NO_AGENT)):
+            mesh_scrapers.scrape_north_york_moors()
+        queried_types = set()
+        for call in mock_post.call_args_list:
+            filter_items = call.kwargs["json"]["filter"]["parts"][0]["filterItems"]
+            by_col = {i["columnName"]: i["value"] for i in filter_items}
+            queried_types.add(by_col["appType"])
+            self.assertEqual(by_col["status"], "Live")
+        self.assertEqual(queried_types, set(mesh_scrapers._NYM_TREE_APP_TYPES))
+
+    def test_extracts_leads_and_maps_fields(self):
+        with patch("net_utils.smart_post", side_effect=[
+                self._fake_response(payload=self.LIVE_TCA_SEARCH_RESPONSE),
+                self._fake_response(payload=self.LIVE_TPO_SEARCH_RESPONSE),
+                self._fake_response(payload=self.EMPTY_SEARCH_RESPONSE),
+            ]), \
+             patch("net_utils.smart_get", side_effect=[
+                self._fake_response(payload=self.DETAIL_NO_AGENT),
+                self._fake_response(payload=self.DETAIL_WITH_AGENT),
+            ]):
+            leads = mesh_scrapers.scrape_north_york_moors()
+        self.assertEqual(len(leads), 2)
+        refs = {l["reference"] for l in leads}
+        self.assertEqual(refs, {"WTCA/2026/00394", "WTPO/2026/00500"})
+        for l in leads:
+            self.assertEqual(l["vertical"], "tree")
+        by_ref = {l["reference"]: l for l in leads}
+        self.assertEqual(by_ref["WTCA/2026/00394"]["registered_date"], "2026-09-02")
+        self.assertIsNone(by_ref["WTCA/2026/00394"]["agent_name"])
+        self.assertFalse(by_ref["WTCA/2026/00394"]["has_agent"])
+        self.assertEqual(by_ref["WTPO/2026/00500"]["agent_name"], "Ivy Tree Surgeons Ltd")
+        self.assertTrue(by_ref["WTPO/2026/00500"]["has_agent"])
+
+    def test_blank_agent_fields_are_not_a_false_positive(self):
+        with patch("net_utils.smart_get", return_value=self._fake_response(payload=self.DETAIL_NO_AGENT)):
+            out = mesh_scrapers._nym_fetch_applicant_and_agent(821404)
+        self.assertIsNone(out["agent_name"])
+        self.assertIsNone(out["agent_company"])
+        self.assertFalse(out["has_agent"])
+
+    def test_non_200_search_response_is_skipped_not_an_error(self):
+        with patch("net_utils.smart_post", return_value=self._fake_response(status_code=500)):
+            leads = mesh_scrapers.scrape_north_york_moors()
+        self.assertEqual(leads, [])
+
+    def test_council_to_region_has_north_york_moors(self):
+        self.assertIn("NORTH YORK MOORS", scanners.COUNCIL_TO_REGION)
+
+
+class TestHaveringResultsParsing(unittest.TestCase):
+    """Feeds realistic Havering Civica JSON (shaped from the real Sep 3
+    2026 live browser session against msp.havering.gov.uk) through
+    scrape_havering_council with net_utils.smart_post mocked out -- no
+    real network call -- to lock the parsing logic in against
+    regressions."""
+
+    def _key_object(self, fields: dict):
+        """Havering's real response shape is a list of {FieldName, Label,
+        Value, DataType} items per record, not a flat dict -- this builds
+        one the same way the live API actually does."""
+        return {"Items": [{"FieldName": k, "Label": k, "Value": v, "DataType": "S"} for k, v in fields.items()]}
+
+    UNDECIDED_TPO = {
+        "KeyNo": "T0095.26", "Type": "TREE WORK APP TPO", "Decision": "",
+        "DevelopmentDescription": "T1 Oak - reduce crown by 2m, remove deadwood.",
+        "LocationLine1": "12 Hall Lane", "LocationLine2": "Romford", "LocationPostcode": "RM1 2AB",
+        "ApplicantName": "MR JOHN SMITH", "AgentName": "MR JASON KING", "AgentEmail": "INFO@KINGSCUTSTREESERVICES.CO.UK",
+        "DateRcvd": "05/08/2026",
+    }
+    DECIDED_TPO = {
+        "KeyNo": "T0050.26", "Type": "TREE WORK APP TPO", "Decision": "TREE WORK APP + COND",
+        "DevelopmentDescription": "T2 Ash - fell, ash dieback.",
+        "LocationLine1": "4 Church Road", "LocationLine2": "Hornchurch", "LocationPostcode": "RM11 1AA",
+        "ApplicantName": "MRS JANE DOE", "AgentName": "", "DateRcvd": "10/01/2026",
+    }
+    UNDECIDED_CA = {
+        "KeyNo": "T0096.26", "Type": "TREE WORK APP IN CA", "Decision": "",
+        "DevelopmentDescription": "Sycamore - crown thin by 20%.",
+        "LocationLine1": "9 Park Lane", "LocationLine2": "Upminster", "LocationPostcode": "RM14 1BB",
+        "ApplicantName": "MS AMY LEE", "AgentName": None, "DateRcvd": "06/08/2026",
+    }
+    NON_TREE = {
+        "KeyNo": "A0010.26", "Type": "ADVERT", "Decision": "",
+        "DevelopmentDescription": "1 x internally illuminated fascia sign.",
+        "LocationLine1": "1 High Street", "LocationLine2": "Romford", "LocationPostcode": "RM1 1AA",
+        "ApplicantName": "SIGN CO LTD", "AgentName": None, "DateRcvd": "07/08/2026",
+    }
+
+    def _fake_response(self, status_code=200, payload=None):
+        r = MagicMock()
+        r.status_code = status_code
+        r.json.return_value = payload if payload is not None else {"KeyObjects": []}
+        return r
+
+    def test_only_undecided_tree_types_are_kept(self):
+        payload = {"KeyObjects": [
+            self._key_object(self.UNDECIDED_TPO),
+            self._key_object(self.DECIDED_TPO),
+            self._key_object(self.UNDECIDED_CA),
+            self._key_object(self.NON_TREE),
+        ]}
+        with patch("net_utils.smart_post", return_value=self._fake_response(payload=payload)), \
+             patch("time.sleep", return_value=None):
+            leads = mesh_scrapers.scrape_havering_council()
+        refs = {l["reference"] for l in leads}
+        # Kept: genuinely undecided tree types. Filtered: decided (however
+        # tree-related) and non-tree types (however undecided). The same
+        # mocked payload is returned for every one of the 8 month windows
+        # queried, so each kept reference repeats 8x in `leads` -- fine,
+        # since the real API never returns identical months and downstream
+        # _insert_lead() dedups by reference anyway (same reliance every
+        # other platform in this file has, no separate dedup needed here).
+        self.assertEqual(refs, {"T0095.26", "T0096.26"})
+
+    def test_agent_applicant_address_and_date_mapped_correctly(self):
+        payload = {"KeyObjects": [self._key_object(self.UNDECIDED_TPO)]}
+        with patch("net_utils.smart_post", return_value=self._fake_response(payload=payload)), \
+             patch("time.sleep", return_value=None):
+            leads = mesh_scrapers.scrape_havering_council()
+        lead = leads[0]
+        self.assertEqual(lead["applicant_name"], "MR JOHN SMITH")
+        self.assertEqual(lead["agent_name"], "MR JASON KING")
+        self.assertTrue(lead["has_agent"])
+        self.assertEqual(lead["address"], "12 Hall Lane, Romford, RM1 2AB")
+        self.assertEqual(lead["registered_date"], "2026-08-05")
+        self.assertEqual(lead["vertical"], "tree")
+
+    def test_blank_agent_name_is_not_a_false_positive(self):
+        payload = {"KeyObjects": [self._key_object(self.UNDECIDED_CA)]}
+        with patch("net_utils.smart_post", return_value=self._fake_response(payload=payload)), \
+             patch("time.sleep", return_value=None):
+            leads = mesh_scrapers.scrape_havering_council()
+        self.assertIsNone(leads[0]["agent_name"])
+        self.assertFalse(leads[0]["has_agent"])
+
+    def test_non_200_response_is_skipped_not_an_error(self):
+        with patch("net_utils.smart_post", return_value=self._fake_response(status_code=500)), \
+             patch("time.sleep", return_value=None):
+            leads = mesh_scrapers.scrape_havering_council()
+        self.assertEqual(leads, [])
+
+    def test_queries_multiple_calendar_month_windows(self):
+        """Confirmed live that a single toRow:1000 request errors instead
+        of returning JSON, so months are queried one at a time (toRow:300,
+        confirmed safe) rather than one big date range."""
+        payload = {"KeyObjects": []}
+        with patch("net_utils.smart_post", return_value=self._fake_response(payload=payload)) as mock_post, \
+             patch("time.sleep", return_value=None):
+            mesh_scrapers.scrape_havering_council()
+        self.assertEqual(mock_post.call_count, mesh_scrapers._HAVERING_LOOKBACK_MONTHS)
+        for call in mock_post.call_args_list:
+            self.assertEqual(call.kwargs["json"]["toRow"], mesh_scrapers._HAVERING_ROWS_PER_MONTH)
+            self.assertIn("DateRcvdFrom", call.kwargs["json"]["searchFields"])
+            self.assertIn("DateRcvdTo", call.kwargs["json"]["searchFields"])
+
+    def test_council_to_region_has_havering(self):
+        self.assertEqual(scanners.COUNCIL_TO_REGION.get("HAVERING"), "London")
+
+    def test_merton_is_not_registered(self):
+        """AWS WAF bot-detection on Merton's 'Regulatory Services Hub' is a
+        genuine block, not attempted around -- confirmed there's no
+        registration for it anywhere a real council would be wired in."""
+        self.assertNotIn("MERTON", scanners.COUNCIL_TO_REGION)
+
+
+class TestStAlbansResultsParsing(unittest.TestCase):
+    """Feeds realistic St Albans Portal360/Civica JSON (shaped from the
+    real Sep 3 2026 live browser session against
+    planningapplications.stalbans.gov.uk) through scrape_st_albans_council
+    with net_utils.smart_post mocked out -- no real network call -- to
+    lock the parsing logic in against regressions."""
+
+    def _key_object(self, fields: dict):
+        return {"Items": [{"FieldName": k, "Label": k, "Value": v, "DataType": "S"} for k, v in fields.items()]}
+
+    UNDECIDED_TPO = {
+        "ref_no": "TP/2026/0397", "app_type": "TPO", "decision_notice_type": "PENDING",
+        "proposal": "T9 Lime Crown raise to 3m.", "application_address": "2 Anson Close Sandridge",
+        "UPRNDisplay": "2 Anson Close Sandridge", "ApplicantContactNoName": "Mr Andrew McGregor",
+        "AgentContactNoName": "Mr Gray (St Albans Trees & Garden Services Ltd)", "received_date": "28/08/2026",
+    }
+    UNDECIDED_TCA_BLANK_DECISION = {
+        "ref_no": "TP/2026/0410", "app_type": "TCA", "decision_notice_type": "",
+        "proposal": "Fell 1 x Ash, ash dieback.", "application_address": "5 Old Fishpool Road",
+        "UPRNDisplay": "5 Old Fishpool Road", "ApplicantContactNoName": "", "AgentContactNoName": "",
+        "received_date": "01/09/2026",
+    }
+    DECIDED_TPO = {
+        "ref_no": "TP/2025/0100", "app_type": "TPO", "decision_notice_type": "Treeworks approval",
+        "proposal": "T1 Oak - crown reduce.", "application_address": "1 High Street",
+        "UPRNDisplay": "1 High Street", "ApplicantContactNoName": "Mrs Jones", "AgentContactNoName": "",
+        "received_date": "10/01/2025",
+    }
+
+    def _fake_response(self, status_code=200, payload=None):
+        r = MagicMock()
+        r.status_code = status_code
+        r.json.return_value = payload if payload is not None else {"KeyObjects": []}
+        return r
+
+    def test_only_undecided_leads_are_kept(self):
+        payload = {"KeyObjects": [self._key_object(self.UNDECIDED_TPO), self._key_object(self.DECIDED_TPO)]}
+        with patch("net_utils.smart_post", return_value=self._fake_response(payload=payload)), \
+             patch("time.sleep", return_value=None):
+            leads = mesh_scrapers.scrape_st_albans_council()
+        refs = {l["reference"] for l in leads}
+        self.assertIn("TP/2026/0397", refs)
+        self.assertNotIn("TP/2025/0100", refs)
+
+    def test_blank_decision_notice_type_also_counts_as_undecided(self):
+        payload = {"KeyObjects": [self._key_object(self.UNDECIDED_TCA_BLANK_DECISION)]}
+        # Same mocked payload is returned for both the TPO and TCA type
+        # queries, so this reference repeats twice in `leads` here -- fine,
+        # since the real API only ever returns a record under its own
+        # actual app_type and downstream _insert_lead() dedups by reference
+        # anyway (same convention as scrape_havering_council()'s tests).
+        with patch("net_utils.smart_post", return_value=self._fake_response(payload=payload)), \
+             patch("time.sleep", return_value=None):
+            leads = mesh_scrapers.scrape_st_albans_council()
+        refs = {l["reference"] for l in leads}
+        self.assertEqual(refs, {"TP/2026/0410"})
+        lead = leads[0]
+        self.assertIsNone(lead["agent_name"])
+        self.assertFalse(lead["has_agent"])
+
+    def test_agent_and_applicant_mapped_correctly(self):
+        payload = {"KeyObjects": [self._key_object(self.UNDECIDED_TPO)]}
+        with patch("net_utils.smart_post", return_value=self._fake_response(payload=payload)), \
+             patch("time.sleep", return_value=None):
+            leads = mesh_scrapers.scrape_st_albans_council()
+        lead = leads[0]
+        self.assertEqual(lead["applicant_name"], "Mr Andrew McGregor")
+        self.assertEqual(lead["agent_name"], "Mr Gray (St Albans Trees & Garden Services Ltd)")
+        self.assertTrue(lead["has_agent"])
+        self.assertEqual(lead["registered_date"], "2026-08-28")
+        self.assertEqual(lead["vertical"], "tree")
+
+    def test_queries_one_application_type_per_request(self):
+        payload = {"KeyObjects": []}
+        with patch("net_utils.smart_post", return_value=self._fake_response(payload=payload)) as mock_post, \
+             patch("time.sleep", return_value=None):
+            mesh_scrapers.scrape_st_albans_council()
+        queried_types = {call.kwargs["json"]["searchFields"]["app_type"] for call in mock_post.call_args_list}
+        self.assertEqual(queried_types, {"TPO", "TCA"})
+        for call in mock_post.call_args_list:
+            self.assertIn("received_dateFrom", call.kwargs["json"]["searchFields"])
+
+    def test_non_200_response_is_skipped_not_an_error(self):
+        with patch("net_utils.smart_post", return_value=self._fake_response(status_code=500)), \
+             patch("time.sleep", return_value=None):
+            leads = mesh_scrapers.scrape_st_albans_council()
+        self.assertEqual(leads, [])
+
+    def test_council_to_region_has_st_albans(self):
+        self.assertEqual(scanners.COUNCIL_TO_REGION.get("ST ALBANS"), "East of England")
+
+
+class TestRbkcResultsParsing(unittest.TestCase):
+    """Feeds realistic RBKC "Planning Portal" SPA responses (shaped from
+    the real Sep 3 2026 live browser session against
+    rbkc.gov.uk/planningsearch) through the individual helper functions and
+    scrape_kensington_chelsea_council() -- no real network call -- to lock
+    the binary-list decoder and the seroval-detail-response parsing in
+    against regressions."""
+
+    # A real (undecided) case detail response, captured live -- seroval's
+    # JS-expression-literal format, not JSON.
+    PENDING_DETAIL_TEXT = (
+        ';0x00000959;((self.$R=self.$R||{})["server-fn:0"]=[],($R=>$R[0]={'
+        'caseReference:"ARB/26/04610",caseReferenceId:"NArc61T0XzlgDd|rPS2Z-L38xqBoQbHp",'
+        'localUprnPointId:30630,sk:306993,'
+        'dateReceived:$R[1]=new Date("2026-08-26T00:00:00.000Z"),'
+        'dateRegistered:$R[2]=new Date("2026-08-26T00:00:00.000Z"),'
+        'decisionName:"Raise No Objection",decisionNameNormalised:"Granted",'
+        'applicationStatus:"Pre-Determination Stage",applicationType:"Prune",'
+        'address:"41 Harrington Gardens, London, SW7 4JU",'
+        'descriptionShort:"Prune 1 x Mulberry (rear)",'
+        'hasConsultation:!0,hasDecision:!1,hasAppeal:!1,isInConsultationPeriod:!1,'
+        'applicantName:"Louise Galvin LLP",applicantCompanyName:"",applicantContactAddress:"",'
+        'descriptionFull:"Prune 1 x Mulberry (rear)",'
+        'latitude:51.4926084,longitude:-0.1850352,caseType:"planning"})($R["server-fn:0"]))'
+    )
+    # A real (decided) case detail response, captured live -- same shape,
+    # hasDecision:!0 (true) this time.
+    DECIDED_DETAIL_TEXT = (
+        ';0x0000099d;((self.$R=self.$R||{})["server-fn:0"]=[],($R=>$R[0]={'
+        'caseReference:"ARB/26/04082",caseReferenceId:"iWlq8Y6VYx1-2cje|0bSUn4qOITZylLm",'
+        'localUprnPointId:16485,sk:306463,'
+        'dateReceived:$R[1]=new Date("2026-07-24T00:00:00.000Z"),'
+        'decisionName:"Grant Planning Permission/Consent",decisionNameNormalised:"Granted",'
+        'applicationStatus:"Decided",applicationType:"Prune",'
+        'address:"18 Pelham Place, London, SW7 2NH",'
+        'descriptionShort:"Prune 6x Plane trees",'
+        'hasConsultation:!0,hasDecision:!0,hasAppeal:!1,isInConsultationPeriod:!1,'
+        'applicantName:"Mrs Jones",applicantCompanyName:"",'
+        'descriptionFull:"Prune 6x Plane trees",'
+        'caseType:"planning"})($R["server-fn:0"]))'
+    )
+
+    def _fake_response(self, status_code=200, content=b"", text=""):
+        r = MagicMock()
+        r.status_code = status_code
+        r.content = content
+        r.text = text
+        return r
+
+    def _pack_string(self, s: str) -> bytes:
+        b = s.encode("ascii")
+        return len(b).to_bytes(4, "little") + b
+
+    def test_binary_decoder_extracts_strings_around_numeric_noise(self):
+        import struct
+        blob = (
+            b"\x00\x01\x02\x03" + struct.pack("<d", 3.14159)
+            + self._pack_string("41 Test Street, London") + struct.pack("<d", -0.5)
+            + self._pack_string("planning") + self._pack_string("ARB/26/09999")
+            + self._pack_string("Prune 1 x Oak") + b"\xff\xfe\xfd\xfc"
+        )
+        strings = mesh_scrapers._decode_rbkc_binary_strings(blob)
+        self.assertEqual(strings, ["41 Test Street, London", "planning", "ARB/26/09999", "Prune 1 x Oak"])
+
+    def test_reference_regex_matches_only_genuine_references(self):
+        candidates = ["ARB/26/04610", "PP/26/03636", "not a ref", "planning", "Granted", "CON/25/06287"]
+        matches = [c for c in candidates if mesh_scrapers._RBKC_REFERENCE_RE.match(c)]
+        self.assertEqual(set(matches), {"ARB/26/04610", "PP/26/03636", "CON/25/06287"})
+
+    def test_undecided_tree_references_deduped_and_filtered(self):
+        blob = (
+            self._pack_string("217036610") + self._pack_string("41 Harrington Gardens")
+            + self._pack_string("planning") + self._pack_string("ARB/26/04610")
+            + self._pack_string("Prune 1 x Mulberry") + self._pack_string("Open")
+            # same reference repeated, as the live platform confirmed it can be
+            + self._pack_string("ARB/26/04610") + self._pack_string("noise-token-not-a-ref")
+        )
+        with patch("net_utils.smart_get", return_value=self._fake_response(content=blob)):
+            refs = mesh_scrapers._rbkc_undecided_tree_references()
+        self.assertEqual(refs, ["ARB/26/04610"])
+
+    def test_has_decision_reads_seroval_boolean_shorthand(self):
+        self.assertFalse(mesh_scrapers._rbkc_has_decision(self.PENDING_DETAIL_TEXT))
+        self.assertTrue(mesh_scrapers._rbkc_has_decision(self.DECIDED_DETAIL_TEXT))
+
+    def test_extract_field_pulls_values_out_of_js_literal(self):
+        self.assertEqual(mesh_scrapers._rbkc_extract_field(self.PENDING_DETAIL_TEXT, "address"),
+                          "41 Harrington Gardens, London, SW7 4JU")
+        self.assertEqual(mesh_scrapers._rbkc_extract_field(self.PENDING_DETAIL_TEXT, "applicantName"),
+                          "Louise Galvin LLP")
+        self.assertEqual(mesh_scrapers._rbkc_extract_field(self.PENDING_DETAIL_TEXT, "descriptionFull"),
+                          "Prune 1 x Mulberry (rear)")
+
+    def test_case_detail_returns_lead_for_pending_case(self):
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=self.PENDING_DETAIL_TEXT)):
+            lead = mesh_scrapers._rbkc_case_detail("ARB/26/04610")
+        self.assertIsNotNone(lead)
+        self.assertEqual(lead["reference"], "ARB/26/04610")
+        self.assertEqual(lead["address"], "41 Harrington Gardens, London, SW7 4JU")
+        self.assertEqual(lead["applicant_name"], "Louise Galvin LLP")
+        self.assertEqual(lead["registered_date"], "2026-08-26")
+        self.assertEqual(lead["vertical"], "tree")
+        # RBKC's own system has no separate agent field -- every lead is
+        # agent-less by construction (see mesh_scrapers.py's own comment).
+        self.assertIsNone(lead["agent_name"])
+        self.assertFalse(lead["has_agent"])
+
+    def test_case_detail_returns_none_for_decided_case(self):
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=self.DECIDED_DETAIL_TEXT)):
+            lead = mesh_scrapers._rbkc_case_detail("ARB/26/04082")
+        self.assertIsNone(lead)
+
+    def test_case_detail_non_200_response_returns_none(self):
+        with patch("net_utils.smart_get", return_value=self._fake_response(status_code=500, text="")):
+            lead = mesh_scrapers._rbkc_case_detail("ARB/26/04610")
+        self.assertIsNone(lead)
+
+    def test_scrape_orchestrates_list_then_per_case_detail(self):
+        with patch.object(mesh_scrapers, "_rbkc_undecided_tree_references",
+                           return_value=["ARB/26/04610", "ARB/26/04082"]), \
+             patch.object(mesh_scrapers, "_rbkc_case_detail") as mock_detail, \
+             patch("time.sleep", return_value=None):
+            mock_detail.side_effect = [{"reference": "ARB/26/04610"}, None]
+            leads = mesh_scrapers.scrape_kensington_chelsea_council()
+        self.assertEqual(leads, [{"reference": "ARB/26/04610"}])
+        self.assertEqual(mock_detail.call_args_list, [call("ARB/26/04610"), call("ARB/26/04082")])
+
+    def test_council_to_region_has_kensington_and_chelsea(self):
+        self.assertEqual(scanners.COUNCIL_TO_REGION.get("KENSINGTON AND CHELSEA"), "London")
+
+
+class TestDorsetResultsParsing(unittest.TestCase):
+    """Feeds realistic Dorset "dorsetforyou.com" ASP.NET WebForms responses
+    (shaped from the real Sep 3 2026 live browser session against
+    planning.dorsetcouncil.gov.uk) through the individual helper functions
+    and scrape_dorset_council() -- no real network call -- to lock the
+    disclaimer-gate handshake, results-page parsing, and the Applicant-
+    duplicated-into-Agent dedup logic in against regressions."""
+
+    DISCLAIMER_HTML = (
+        '<html><body>Disclaimer'
+        '<form action="disclaimer.aspx?returnURL=%2f" method="post">'
+        '<input type="hidden" name="__VIEWSTATE" value="vs123" />'
+        '<input type="hidden" name="__VIEWSTATEGENERATOR" value="vg456" />'
+        '<input type="hidden" name="__EVENTVALIDATION" value="ev789" />'
+        '<input type="submit" name="ctl00$ContentPlaceHolder1$btnAccept" value="Accept" />'
+        '</form></body></html>'
+    )
+
+    ADVSEARCH_HTML = (
+        '<html><body>'
+        '<form action="searchresults.aspx" method="post">'
+        '<input type="hidden" name="__VIEWSTATE" value="vs-search" />'
+        '<select name="ctl00$ContentPlaceHolder1$ddlApplicationType">'
+        '<option value="">-- Please Select --</option>'
+        '<option value="TRT">Tree Works- TPO</option>'
+        '<option value="TRC">Tree Works- Conservation Area</option>'
+        '</select>'
+        '<input type="checkbox" name="ctl00$ContentPlaceHolder1$chkOutstanding" value="on" />'
+        '<input type="submit" name="ctl00$ContentPlaceHolder1$btnSearch" value="Search" />'
+        '</form></body></html>'
+    )
+
+    RESULTS_PAGE_ONE_UNDECIDED = (
+        '<html><body>'
+        '<div class="emphasise-area">'
+        '<h2><a href="plandisp.aspx?recno=1001">WD/26/00111/TRT</a></h2>'
+        '<h3>Location:</h3><p>12 Forest Lane, Wimborne</p>'
+        '<h3>Proposal:</h3><p>Fell 1no. diseased ash tree</p>'
+        '<h3>Decision:</h3><p></p>'
+        '<h3>Decision Date:</h3><p></p>'
+        '</div>'
+        '<div class="emphasise-area">'
+        '<h2><a href="plandisp.aspx?recno=1002">WD/26/00222/TRT</a></h2>'
+        '<h3>Location:</h3><p>4 Church Street, Dorchester</p>'
+        '<h3>Proposal:</h3><p>Crown reduction of oak tree</p>'
+        '<h3>Decision:</h3><p>Granted</p>'
+        '<h3>Decision Date:</h3><p>01/09/2026</p>'
+        '</div>'
+        '<a href="javascript:__doPostBack(&#39;ctl00$ContentPlaceHolder1$lvResults$RadDataPager1$ctl01$ctl01&#39;,&#39;&#39;)">2</a>'
+        '</body></html>'
+    )
+
+    RESULTS_PAGE_NO_PAGER = (
+        '<html><body>'
+        '<div class="emphasise-area">'
+        '<h2><a href="plandisp.aspx?recno=2001">WD/26/00333/TRC</a></h2>'
+        '<h3>Location:</h3><p>1 High Street, Bridport</p>'
+        '<h3>Proposal:</h3><p>Pollard 3no. lime trees</p>'
+        '<h3>Decision:</h3><p></p>'
+        '</div>'
+        '</body></html>'
+    )
+
+    DETAIL_NO_AGENT_HTML = (
+        '<html><body>'
+        '<span class="applabel">Applicant</span><p class="appdata">Mrs Joanna Wilding</p>'
+        '<span class="applabel">Agent</span><p class="appdata">Mrs Joanna Wilding</p>'
+        '<span class="applabel">Valid Date</span><p class="appdata">26/08/2026</p>'
+        '</body></html>'
+    )
+
+    DETAIL_WITH_AGENT_HTML = (
+        '<html><body>'
+        '<span class="applabel">Applicant</span><p class="appdata">Mr John Smith</p>'
+        '<span class="applabel">Agent</span><p class="appdata">Acme Tree Surgeons Ltd</p>'
+        '<span class="applabel">Valid Date</span><p class="appdata">15/07/2026</p>'
+        '</body></html>'
+    )
+
+    def _fake_response(self, status_code=200, text="", url=""):
+        r = MagicMock()
+        r.status_code = status_code
+        r.text = text
+        r.url = url
+        return r
+
+    def test_serialize_form_reads_hidden_fields_checkboxes_and_selected_option(self):
+        soup = BeautifulSoup(self.ADVSEARCH_HTML, "html.parser")
+        data = mesh_scrapers._dorset_serialize_form(soup)
+        self.assertEqual(data["__VIEWSTATE"], "vs-search")
+        # No option marked selected=True in the fixture -- falls back to the
+        # dropdown's first option, exactly like a real unfiltered page load.
+        self.assertEqual(data["ctl00$ContentPlaceHolder1$ddlApplicationType"], "")
+        # Checkbox not marked checked -- must NOT appear in the serialized data.
+        self.assertNotIn("ctl00$ContentPlaceHolder1$chkOutstanding", data)
+        # Submit buttons are never serialized (mirrors NorthgateScraper).
+        self.assertNotIn("ctl00$ContentPlaceHolder1$btnSearch", data)
+
+    def test_accept_disclaimer_posts_serialized_form_with_accept_button(self):
+        session = MagicMock()
+        get_resp = self._fake_response(text=self.DISCLAIMER_HTML, url=f"{mesh_scrapers.DORSET_BASE}/disclaimer.aspx")
+        post_resp = self._fake_response(status_code=200)
+        with patch("net_utils.smart_get", return_value=get_resp) as mock_get, \
+             patch("net_utils.smart_post", return_value=post_resp) as mock_post:
+            ok = mesh_scrapers._dorset_accept_disclaimer(session)
+        self.assertTrue(ok)
+        mock_get.assert_called_once()
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["data"]["__VIEWSTATE"], "vs123")
+        self.assertEqual(kwargs["data"]["ctl00$ContentPlaceHolder1$btnAccept"], "Accept")
+
+    def test_accept_disclaimer_short_circuits_when_already_past_it(self):
+        session = MagicMock()
+        get_resp = self._fake_response(text="<html>Search form here</html>", url=f"{mesh_scrapers.DORSET_BASE}/advsearch.aspx")
+        with patch("net_utils.smart_get", return_value=get_resp), \
+             patch("net_utils.smart_post") as mock_post:
+            ok = mesh_scrapers._dorset_accept_disclaimer(session)
+        self.assertTrue(ok)
+        mock_post.assert_not_called()
+
+    def test_parse_results_page_excludes_decided_and_extracts_pager_target(self):
+        rows, next_target = mesh_scrapers._dorset_parse_results_page(self.RESULTS_PAGE_ONE_UNDECIDED)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["reference"], "WD/26/00111/TRT")
+        self.assertEqual(rows[0]["recno"], "1001")
+        self.assertEqual(rows[0]["address"], "12 Forest Lane, Wimborne")
+        self.assertEqual(rows[0]["description"], "Fell 1no. diseased ash tree")
+        self.assertEqual(next_target, "ctl00$ContentPlaceHolder1$lvResults$RadDataPager1$ctl01$ctl01")
+
+    def test_parse_results_page_returns_none_target_when_no_pager_present(self):
+        rows, next_target = mesh_scrapers._dorset_parse_results_page(self.RESULTS_PAGE_NO_PAGER)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["reference"], "WD/26/00333/TRC")
+        self.assertIsNone(next_target)
+
+    def test_case_detail_dedups_agent_identical_to_applicant(self):
+        session = MagicMock()
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=self.DETAIL_NO_AGENT_HTML)):
+            detail = mesh_scrapers._dorset_case_detail(session, "1001")
+        self.assertEqual(detail["applicant_name"], "Mrs Joanna Wilding")
+        # Dorset copies the Applicant verbatim into Agent when nobody
+        # actually represents the case -- must be treated as no agent.
+        self.assertIsNone(detail["agent_name"])
+        self.assertFalse(detail["has_agent"])
+        self.assertEqual(detail["registered_date"], "2026-08-26")
+
+    def test_case_detail_keeps_genuinely_distinct_agent(self):
+        session = MagicMock()
+        with patch("net_utils.smart_get", return_value=self._fake_response(text=self.DETAIL_WITH_AGENT_HTML)):
+            detail = mesh_scrapers._dorset_case_detail(session, "1002")
+        self.assertEqual(detail["applicant_name"], "Mr John Smith")
+        self.assertEqual(detail["agent_name"], "Acme Tree Surgeons Ltd")
+        self.assertTrue(detail["has_agent"])
+        self.assertEqual(detail["registered_date"], "2026-07-15")
+
+    def test_case_detail_non_200_response_returns_empty_dict(self):
+        session = MagicMock()
+        with patch("net_utils.smart_get", return_value=self._fake_response(status_code=500, text="")):
+            detail = mesh_scrapers._dorset_case_detail(session, "9999")
+        self.assertEqual(detail, {})
+
+    def test_scrape_returns_empty_list_when_disclaimer_cannot_be_accepted(self):
+        with patch.object(mesh_scrapers, "_dorset_accept_disclaimer", return_value=False), \
+             patch("net_utils.smart_get") as mock_get:
+            leads = mesh_scrapers.scrape_dorset_council()
+        self.assertEqual(leads, [])
+        mock_get.assert_not_called()
+
+    def test_scrape_orchestrates_search_pagination_and_detail_per_type(self):
+        detail_no_agent = {
+            "applicant_name": "Mrs Joanna Wilding", "agent_name": None,
+            "has_agent": False, "agent_is_tree_surgeon": False,
+            "registered_date": "2026-08-26",
+        }
+        with patch.object(mesh_scrapers, "_dorset_accept_disclaimer", return_value=True), \
+             patch("net_utils.smart_get", return_value=self._fake_response(text=self.ADVSEARCH_HTML)), \
+             patch("net_utils.smart_post", return_value=self._fake_response(text=self.RESULTS_PAGE_NO_PAGER)), \
+             patch.object(mesh_scrapers, "_dorset_case_detail", return_value=detail_no_agent), \
+             patch("time.sleep", return_value=None):
+            leads = mesh_scrapers.scrape_dorset_council()
+        # Three tree type codes (TRT, TRC, TRD) each searched separately,
+        # same one-row fixture returned for every type/page combination.
+        self.assertEqual(len(leads), len(mesh_scrapers._DORSET_TREE_TYPE_CODES))
+        for lead in leads:
+            self.assertEqual(lead["reference"], "WD/26/00333/TRC")
+            self.assertEqual(lead["vertical"], "tree")
+            self.assertIsNone(lead["agent_name"])
+            self.assertFalse(lead["has_agent"])
+
+    def test_council_to_region_has_dorset(self):
+        self.assertEqual(scanners.COUNCIL_TO_REGION.get("DORSET"), "South West")
+
+
+class TestStratfordOnAvonResultsParsing(unittest.TestCase):
+    """Feeds realistic Stratford-on-Avon "E-Planning" Vue.js SPA JSON
+    responses (shaped from the real Sep 3 2026 live browser session against
+    apps.stratford.gov.uk/eplanningv2) through _stratford_case_detail and
+    scrape_stratford_on_avon_council() -- no real network call -- to lock
+    the plain-JSON REST contract in against regressions. Simplest of the
+    bespoke one-offs so far: no disclaimer gate, no CAPTCHA, no binary
+    format -- just two clean JSON endpoints."""
+
+    SEARCH_RESULTS_JSON = [
+        {
+            "id": "81991408-45d2-c454-c594-08df09a5256d",
+            "validDate": "03/09/2026", "decisionDate": None,
+            "reference": "26/02211/TREE",
+            "proposal": "T1 - birch - reduce to 6m height and 4.5m width.",
+            "address": "5 Icknield Street Bidford-on-Avon Alcester B50 4BX",
+            "status": "Pending Consideration",
+        },
+        {
+            "id": "6131e42b-db0c-c8d7-14e2-08df041b4832",
+            "validDate": "03/09/2026", "decisionDate": None,
+            "reference": "26/02154/TREE",
+            "proposal": "T1 Yew tree - Fell",
+            "address": "30 Warwick Road Southam CV47 0HN",
+            "status": "Pending Consideration",
+        },
+    ]
+
+    DETAIL_NO_AGENT_JSON = {
+        "reference": "26/02211/TREE",
+        "applicantDetails": {"name": "Mr Tony Judd", "address": "", "company": ""},
+        "agentDetails": {"name": "", "address": "", "phone": None, "company": ""},
+        "importantDates": {"applicationValidDate": "03/09/2026"},
+    }
+
+    DETAIL_WITH_AGENT_JSON = {
+        "reference": "26/02154/TREE",
+        "applicantDetails": {"name": "Mr P Wain", "address": "", "company": ""},
+        "agentDetails": {"name": "MR Joshua Robbins", "address": "3 Verney Close Lighthorne CV35 0AZ",
+                          "phone": None, "company": "Rural Works"},
+        "importantDates": {"applicationValidDate": "03/09/2026"},
+    }
+
+    def _fake_response(self, status_code=200, json_data=None):
+        r = MagicMock()
+        r.status_code = status_code
+        r.json = MagicMock(return_value=json_data)
+        return r
+
+    def test_case_detail_returns_none_agent_when_both_fields_blank(self):
+        with patch("net_utils.smart_get", return_value=self._fake_response(json_data=self.DETAIL_NO_AGENT_JSON)):
+            detail = mesh_scrapers._stratford_case_detail("81991408-45d2-c454-c594-08df09a5256d")
+        self.assertEqual(detail["applicant_name"], "Mr Tony Judd")
+        self.assertIsNone(detail["agent_name"])
+        self.assertIsNone(detail["agent_company"])
+        self.assertFalse(detail["has_agent"])
+        self.assertEqual(detail["registered_date"], "2026-09-03")
+
+    def test_case_detail_keeps_genuine_agent_and_company(self):
+        with patch("net_utils.smart_get", return_value=self._fake_response(json_data=self.DETAIL_WITH_AGENT_JSON)):
+            detail = mesh_scrapers._stratford_case_detail("6131e42b-db0c-c8d7-14e2-08df041b4832")
+        self.assertEqual(detail["applicant_name"], "Mr P Wain")
+        self.assertEqual(detail["agent_name"], "MR Joshua Robbins")
+        self.assertEqual(detail["agent_company"], "Rural Works")
+        self.assertTrue(detail["has_agent"])
+
+    def test_case_detail_non_200_response_returns_empty_dict(self):
+        with patch("net_utils.smart_get", return_value=self._fake_response(status_code=500, json_data=None)):
+            detail = mesh_scrapers._stratford_case_detail("nonexistent")
+        self.assertEqual(detail, {})
+
+    def test_case_detail_non_json_response_returns_empty_dict(self):
+        bad_response = self._fake_response(status_code=200)
+        bad_response.json.side_effect = ValueError("not JSON")
+        with patch("net_utils.smart_get", return_value=bad_response):
+            detail = mesh_scrapers._stratford_case_detail("81991408-45d2-c454-c594-08df09a5256d")
+        self.assertEqual(detail, {})
+
+    def test_scrape_orchestrates_search_then_per_case_detail_across_types(self):
+        search_resp = self._fake_response(json_data=self.SEARCH_RESULTS_JSON)
+        with patch("net_utils.smart_get", return_value=search_resp), \
+             patch.object(mesh_scrapers, "_stratford_case_detail") as mock_detail, \
+             patch("time.sleep", return_value=None):
+            mock_detail.side_effect = [
+                {"applicant_name": "Mr Tony Judd", "agent_name": None, "has_agent": False,
+                 "agent_is_tree_surgeon": False, "registered_date": "2026-09-03"},
+                {"applicant_name": "Mr P Wain", "agent_name": "MR Joshua Robbins", "has_agent": True,
+                 "agent_is_tree_surgeon": True, "registered_date": "2026-09-03"},
+            ] * len(mesh_scrapers._STRATFORD_TREE_APPLICATION_TYPES)
+            leads = mesh_scrapers.scrape_stratford_on_avon_council()
+        # Same two-row fixture returned for every one of the three tree
+        # application-type GUIDs searched.
+        self.assertEqual(len(leads), 2 * len(mesh_scrapers._STRATFORD_TREE_APPLICATION_TYPES))
+        refs = {lead["reference"] for lead in leads}
+        self.assertEqual(refs, {"26/02211/TREE", "26/02154/TREE"})
+        for lead in leads:
+            self.assertEqual(lead["vertical"], "tree")
+
+    def test_scrape_skips_rows_missing_required_fields(self):
+        incomplete_rows = [
+            {"id": "abc", "reference": "", "proposal": "Fell 1 tree", "address": "1 Road"},  # blank reference
+            {"id": "def", "reference": "26/99999/TREE", "proposal": "", "address": "2 Road"},  # blank proposal
+            {"id": "", "reference": "26/88888/TREE", "proposal": "Fell 1 tree", "address": "3 Road"},  # blank id
+        ]
+        with patch("net_utils.smart_get", return_value=self._fake_response(json_data=incomplete_rows)), \
+             patch.object(mesh_scrapers, "_stratford_case_detail") as mock_detail, \
+             patch("time.sleep", return_value=None):
+            leads = mesh_scrapers.scrape_stratford_on_avon_council()
+        self.assertEqual(leads, [])
+        mock_detail.assert_not_called()
+
+    def test_council_to_region_has_stratford_on_avon(self):
+        self.assertEqual(scanners.COUNCIL_TO_REGION.get("STRATFORD-ON-AVON"), "West Midlands")
 
 
 if __name__ == "__main__":

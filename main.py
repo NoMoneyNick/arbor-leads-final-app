@@ -49,6 +49,27 @@ basic_auth = HTTPBasic()
 _PIPELINE_LOCK = threading.Lock()
 _pipeline_state = {"running": False, "started_at": None}
 
+# Sep 3 2026: background state for /system-health-check -- see that route's
+# own docstring for why this exists (Nick's ask: "build failsafe auto check
+# auto fixes ... even if they have never shown an error"). A separate lock
+# from _PIPELINE_LOCK on purpose: this never writes to the database and
+# never inserts a lead, so it's safe to run independently -- it only reads
+# each council portal, exactly like /test-mesh-council already does, just
+# looped across every registered council instead of one at a time. Still
+# refuses to START while a real scan is running (checked at trigger time),
+# purely so the same ~50+ council portals never get hit by two overlapping
+# processes within seconds of each other -- the exact pattern Aug 30 2026's
+# _PIPELINE_LOCK comment above already identified as looking like abuse to
+# a portal's own rate limiter.
+_HEALTH_CHECK_LOCK = threading.Lock()
+_health_check_state = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "results": [],
+    "summary": None,
+}
+
 optional_auth = HTTPBasic(auto_error=False)
 
 
@@ -180,6 +201,60 @@ def _verify_session_cookie(cookie_value: Optional[str]) -> Optional[str]:
     except Exception:
         return None
 
+
+
+# Sep 3 2026: Nick's ask -- "we should place a note on the website when an
+# area cannot be accessed due to the councils fault or issue". Every entry
+# here is a council whose OWN public planning portal was investigated live
+# this session and confirmed broken/bot-gated on the council's own end --
+# not a gap in TreeKey's coverage, and not something we're choosing not to
+# build. Distinguishing these from an ordinary "0 leads today" area matters
+# because a visitor in one of these districts would otherwise see the exact
+# same "0 leads" result as a district with a perfectly healthy pipeline but
+# genuinely nothing pending -- honest, not misleading, disclosure:
+#   - Merton (London): the council's own site is behind an AWS WAF that
+#     blocks automated requests outright.
+#   - Bath & North East Somerset: confirmed via live browser console errors
+#     that the council's own search page JS crashes on load
+#     (ReferenceError: APIroot is not defined) and the server ignores every
+#     query parameter regardless -- a genuine defect on their end, not a
+#     data gap.
+#   - West Northamptonshire: the council's own planning register gates
+#     every search (quick or advanced) behind an invisible Google reCAPTCHA
+#     that a real browser session passes silently but a plain HTTP request
+#     cannot -- confirmed live that a token-less submission is bounced back
+#     to the search form rather than returning results.
+# Matched against the postcodes.io `admin_district` name already resolved
+# below -- a simple substring match (lower-cased) since ONS district names
+# are consistent but occasionally carry "Council"/"District Council"
+# suffixes depending on the source.
+        # Sep 3 2026 (Nick, verbatim): "when i said to show on website that
+        # certain areas cannot be gotten do not mention bots or anything.
+        # just state we havent got them and that its on the councils end
+        # not ours" -- these three messages are deliberately plain and
+        # non-technical (no "bot-detection", "reCAPTCHA", "WAF", "broken
+        # JS", etc.). The real technical reason each one is here is
+        # recorded in this file's own comment above _council_source_issue
+        # and in mesh_scrapers.py -- keep the WHY there, keep the
+        # user-facing copy simple.
+_COUNCIL_SOURCE_ISSUES = {
+    "merton": "We don't currently have live leads for Merton. This is an issue on the council's end, not ours -- we're monitoring it and will resume automatically as soon as it's resolved.",
+    "bath and north east somerset": "We don't currently have live leads for Bath & North East Somerset. This is an issue on the council's end, not ours -- we're monitoring it and will resume automatically as soon as it's resolved.",
+    "west northamptonshire": "We don't currently have live leads for West Northamptonshire. This is an issue on the council's end, not ours -- we're monitoring it and will resume automatically as soon as it's resolved.",
+}
+
+
+def _council_source_issue(district: Optional[str]) -> Optional[str]:
+    """Returns the public-facing disclosure note for `district` if it's a
+    council whose own portal is confirmed broken/bot-gated right now, else
+    None. See _COUNCIL_SOURCE_ISSUES above for why each entry is there."""
+    if not district:
+        return None
+    normalized = district.strip().lower()
+    for key, message in _COUNCIL_SOURCE_ISSUES.items():
+        if key in normalized:
+            return message
+    return None
 
 
 @app.get("/api/check-postcode")
@@ -380,6 +455,11 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
     is_claimed = database.is_territory_claimed(display_pc)
     exclusivity_label = "&#128274; Locked (Claimed by Local Partner)" if is_claimed else "&#9989; Available (Unclaimed)"
 
+    # Sep 3 2026: see _COUNCIL_SOURCE_ISSUES above -- None for every normal
+    # district, a plain-English disclosure note for the handful confirmed
+    # blocked on the council's own end.
+    council_source_issue = _council_source_issue(district)
+
     return {
         "status": "ok",
         "postcode": display_pc,
@@ -395,7 +475,8 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
         "total_leads_in_scope": selected_leads + connected_leads,
         "est_min_val": f"{min_val:,}",
         "est_max_val": f"{max_val:,}",
-        "exclusivity_status": exclusivity_label
+        "exclusivity_status": exclusivity_label,
+        "council_source_issue": council_source_issue
     }
 
 
@@ -977,8 +1058,9 @@ def public_homepage():
                     document.getElementById('btn-checkout-sole').href = `/checkout/sole_trader?outcode=${{data.postcode}}`;
                     document.getElementById('btn-checkout-pro').href = `/checkout/commercial_pro?outcode=${{data.postcode}}`;
                     document.getElementById('btn-checkout-elite').href = `/checkout/regional_elite?outcode=${{data.postcode}}`;
-                    document.getElementById('targetIntel').innerHTML = `<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>`;
-                    
+                    const issueNoticeA = data.council_source_issue ? `<div class="text-amber-400 text-xs border border-amber-700/50 bg-amber-900/20 rounded px-2 py-1 mb-2">&#9888; ${{data.council_source_issue}}</div>` : '';
+                    document.getElementById('targetIntel').innerHTML = `${{issueNoticeA}}<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>`;
+
                     document.getElementById('statusBadge').innerHTML = `
                         <div class="flex items-center gap-2 text-emerald-400 mb-1 sm:justify-end">
                             <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse sm:hidden"></span>
@@ -1027,8 +1109,9 @@ def public_homepage():
                     document.getElementById('btn-checkout-sole').href = `/checkout/sole_trader?outcode=${{data.postcode}}`;
                     document.getElementById('btn-checkout-pro').href = `/checkout/commercial_pro?outcode=${{data.postcode}}`;
                     document.getElementById('btn-checkout-elite').href = `/checkout/regional_elite?outcode=${{data.postcode}}`;
-                    document.getElementById("targetIntel").innerHTML = `<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>`;
-                    
+                    const issueNoticeB = data.council_source_issue ? `<div class="text-amber-400 text-xs border border-amber-700/50 bg-amber-900/20 rounded px-2 py-1 mb-2">&#9888; ${{data.council_source_issue}}</div>` : '';
+                    document.getElementById("targetIntel").innerHTML = `${{issueNoticeB}}<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>`;
+
                     setTimeout(() => {{
                         status.innerHTML = `
                             <div class="flex items-center gap-2 text-emerald-400 mb-1 sm:justify-end">
@@ -4709,8 +4792,46 @@ def run_full_autonomous_cycle():
     except Exception as e:
         logger.error(f"[AUTO] enrich_existing_partners error: {e}")
 
+    _check_for_silent_source_failures()
+
     database.set_system_state("last_autonomous_cycle_at", datetime.datetime.utcnow().isoformat() + "Z")
     logger.info("[AUTO] Autonomous daily cycle fully complete.")
+
+
+def _check_for_silent_source_failures():
+    """Sep 3 2026: runs at the end of every autonomous cycle. See
+    database.get_lead_source_health_report()'s own docstring for the full
+    reasoning (the Leeds ArcGIS incident: months of silent zero-output with
+    no error ever raised). Fires one throttled WARNING per flagged source
+    -- WARNING, not CRITICAL, because a genuinely dead source costs no
+    money and breaks nothing else; it just means fewer leads until a human
+    looks. throttle_hours=24 so a source stuck at zero for a week gets one
+    alert a day, not one every 20 hours a fresh cycle happens to check."""
+    try:
+        report = database.get_lead_source_health_report()
+        flagged = [r for r in report if r.get("possible_silent_failure")]
+        if not flagged:
+            return
+        import notifications
+        for r in flagged:
+            notifications.send_system_incident_alert(
+                category="SILENT SOURCE FAILURE",
+                title=f"{r['council_source']} HAS PRODUCED ZERO LEADS IN {r['recent_days']} DAYS",
+                description=(
+                    f"'{r['council_source']}' historically produces roughly "
+                    f"{r['baseline_daily_rate']} leads/day but has produced "
+                    f"exactly 0 in the last {r['recent_days']} days. No error was "
+                    f"raised anywhere -- this is the same failure shape the Leeds "
+                    f"ArcGIS bug had (wrong field names, zero real leads, zero "
+                    f"exceptions) before it was found and fixed Sep 3 2026."
+                ),
+                impact=f"'{r['council_source']}' is likely producing no real leads right now, silently.",
+                action_required=f"Manually check this source (e.g. /test-mesh-council for a mesh council) to confirm whether it's genuinely broken or just quiet.",
+                severity="WARNING",
+                throttle_hours=24.0
+            )
+    except Exception as e:
+        logger.error(f"[AUTO] Silent source failure check error: {e}")
 
 
 def _autonomous_scheduler_loop():
@@ -4905,6 +5026,225 @@ def test_mesh_council(city_slug: str, secret: Optional[str] = Query(None)):
             "error": str(e),
             "elapsed_seconds": round(time.time() - start, 1),
         }
+
+
+def _all_mesh_health_targets(mesh_scrapers):
+    """Sep 3 2026: every mesh-network target /system-health-check should
+    verify, across ALL platforms -- not just Idox. Found while answering
+    Nick's "do we have every area working" question: this health check had
+    ONLY ever looped mesh_scrapers.COUNCIL_REGISTRY (the plain Idox dict),
+    silently skipping the Northgate/Agile Applications/Arcus registries and
+    all seven single-authority bespoke platforms (Hounslow, North York
+    Moors, and the five built this session -- Havering, St Albans,
+    Kensington & Chelsea, Dorset, Stratford-on-Avon). A green
+    /system-health-check result was never actually proof the whole mesh
+    network was healthy -- only that the ~51 Idox councils were. Returns a
+    list of (name, url, callable) tuples, each callable taking zero args
+    and returning a lead list, so _run_council_health_check can treat every
+    platform identically."""
+    targets = []
+    for council_name, url in mesh_scrapers.COUNCIL_REGISTRY.items():
+        targets.append((council_name, url, lambda cn=council_name: mesh_scrapers.scrape_mesh_council(cn)))
+    for council_name, url in mesh_scrapers.NORTHGATE_COUNCILS.items():
+        targets.append((council_name, url, lambda cn=council_name: mesh_scrapers.scrape_northgate_council(cn)))
+    for council_name, url in mesh_scrapers.AGILE_APPLICATIONS_COUNCILS.items():
+        targets.append((council_name, url, lambda cn=council_name: mesh_scrapers.scrape_agile_applications_council(cn)))
+    for council_name, url in mesh_scrapers.ARCUS_COUNCILS.items():
+        targets.append((council_name, url, lambda cn=council_name: mesh_scrapers.scrape_arcus_council(cn)))
+    # Single-authority bespoke platforms -- no dict registry, so listed
+    # explicitly here (name, base URL, entry-point function).
+    targets.append(("HOUNSLOW", mesh_scrapers.HOUNSLOW_BASE, mesh_scrapers.scrape_hounslow_council))
+    targets.append(("NORTH YORK MOORS", mesh_scrapers.NORTH_YORK_MOORS_BASE, mesh_scrapers.scrape_north_york_moors))
+    targets.append(("HAVERING", mesh_scrapers.HAVERING_BASE, mesh_scrapers.scrape_havering_council))
+    targets.append(("ST ALBANS", mesh_scrapers.ST_ALBANS_BASE, mesh_scrapers.scrape_st_albans_council))
+    targets.append(("KENSINGTON AND CHELSEA", mesh_scrapers.RBKC_BASE, mesh_scrapers.scrape_kensington_chelsea_council))
+    targets.append(("DORSET", mesh_scrapers.DORSET_BASE, mesh_scrapers.scrape_dorset_council))
+    targets.append(("STRATFORD-ON-AVON", mesh_scrapers.STRATFORD_BASE, mesh_scrapers.scrape_stratford_on_avon_council))
+    return targets
+
+
+def _run_council_health_check():
+    """Background worker for /system-health-check. Loops every mesh-network
+    target across every platform (see _all_mesh_health_targets above)
+    through the same safe, zero-DB-write path /test-mesh-council already
+    uses one at a time -- this just does all of them in one pass and keeps
+    the running tally in _health_check_state so /system-health-check-status
+    can report progress without the caller having to hold a connection
+    open for however long ~65+ real council portal fetches take (minutes,
+    not seconds -- same reason run_mesh_network_scan() sleeps 2s between
+    each below). Deliberately does NOT include Merton, Bath & North East
+    Somerset, or West Northamptonshire -- those are confirmed blocked on
+    the council's own end (see main.py's _COUNCIL_SOURCE_ISSUES) and were
+    never registered anywhere in mesh_scrapers.py, so they were never
+    reachable here to begin with."""
+    import mesh_scrapers
+    results = []
+    targets = _all_mesh_health_targets(mesh_scrapers)
+    for council_name, url, fn in targets:
+        start = time.time()
+        try:
+            leads = fn()
+            results.append({
+                "council": council_name,
+                "url": url,
+                "status": "ok",
+                "leads_found": len(leads),
+                "elapsed_seconds": round(time.time() - start, 1),
+            })
+        except Exception as e:
+            results.append({
+                "council": council_name,
+                "url": url,
+                "status": "error",
+                "error": str(e)[:300],
+                "elapsed_seconds": round(time.time() - start, 1),
+            })
+        _health_check_state["results"] = list(results)  # progress visible mid-run
+        time.sleep(2)  # same per-council courtesy delay as run_mesh_network_scan()
+
+    ok_count = sum(1 for r in results if r["status"] == "ok")
+    error_count = len(results) - ok_count
+    zero_leads = [r["council"] for r in results if r["status"] == "ok" and r["leads_found"] == 0]
+    _health_check_state["summary"] = {
+        "total_councils": len(results),
+        "reachable": ok_count,
+        "erroring": error_count,
+        # Sep 3 2026: zero leads is NOT necessarily broken (a small council
+        # can genuinely have nothing new today) -- listed separately from
+        # "erroring" rather than folded into it, so a human decides whether
+        # a long stretch at zero is normal or worth a closer look, exactly
+        # the Leeds ArcGIS lesson (it never errored, it just always found
+        # nothing) applied here as a visibility tool rather than an
+        # automatic verdict.
+        "reachable_but_zero_leads_this_run": zero_leads,
+        "failing_councils": [r["council"] for r in results if r["status"] == "error"],
+    }
+    _health_check_state["finished_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+    _health_check_state["running"] = False
+    try:
+        _HEALTH_CHECK_LOCK.release()
+    except RuntimeError:
+        pass
+
+
+@app.get("/system-health-check")
+def system_health_check(secret: Optional[str] = Query(None)):
+    """Sep 3 2026: starts a full live check of every mesh-network council
+    across EVERY platform (Idox, Northgate, Agile Applications, Arcus, and
+    all seven single-authority bespoke platforms -- see
+    _all_mesh_health_targets), one at a time, in the background -- returns
+    immediately with {"status": "started"}; poll
+    /system-health-check-status for progress and the final report. Makes
+    zero database writes (same guarantee as /test-mesh-council, just
+    looped). Refuses to start while a real scan (/trigger-daily-pipeline,
+    /scan-nationwide, etc.) is already running, so this never doubles up
+    real traffic against the same council portals a live scan is also
+    hitting right now.
+    Previously only looped mesh_scrapers.COUNCIL_REGISTRY (~51 Idox
+    councils) -- widened to cover the other ~16 mesh-network councils/
+    platforms too, none of which this endpoint had ever actually verified
+    before."""
+    verify_cron_secret(secret)
+    import mesh_scrapers
+    total_targets = len(_all_mesh_health_targets(mesh_scrapers))
+    if _pipeline_state.get("running"):
+        return {
+            "status": "declined",
+            "reason": "A real scan is currently running (shares council portals with this check) -- wait for it to finish, then retry. Check /pipeline-status.",
+        }
+    if not _HEALTH_CHECK_LOCK.acquire(blocking=False):
+        return {
+            "status": "already_running",
+            "started_at": _health_check_state.get("started_at"),
+            "progress": f"{len(_health_check_state.get('results', []))} of {total_targets} councils checked so far",
+        }
+    _health_check_state["running"] = True
+    _health_check_state["started_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+    _health_check_state["finished_at"] = None
+    _health_check_state["results"] = []
+    _health_check_state["summary"] = None
+    threading.Thread(target=_run_council_health_check, daemon=True).start()
+    return {
+        "status": "started",
+        "total_councils": total_targets,
+        "estimated_seconds": total_targets * 3,
+        "check_progress_at": "/system-health-check-status?secret=...",
+    }
+
+
+@app.get("/system-health-check-status")
+def system_health_check_status(secret: Optional[str] = Query(None)):
+    verify_cron_secret(secret)
+    return _health_check_state
+
+
+@app.get("/lead-source-health")
+def lead_source_health(secret: Optional[str] = Query(None)):
+    """Sep 3 2026: on-demand version of the same check
+    _check_for_silent_source_failures() runs automatically at the end of
+    every autonomous cycle -- read-only, does not send alerts itself (the
+    automatic version does that), just lets you look at the current
+    numbers for every source right now instead of waiting for the next
+    cycle or an email."""
+    verify_cron_secret(secret)
+    return {"sources": database.get_lead_source_health_report()}
+
+
+@app.get("/scheduler-heartbeat")
+def scheduler_heartbeat(secret: Optional[str] = Query(None)):
+    """Sep 3 2026: the failsafe for the failsafe. Every automatic check in
+    this app (silent-source detection, the daily pipeline itself) runs
+    INSIDE the same one background thread (_autonomous_scheduler_loop) --
+    if that thread ever dies silently (an uncaught exception somewhere
+    that isn't already wrapped, or a Render issue), every single one of
+    those checks stops running with NOTHING to report it, because the
+    thing that would normally sound the alarm is the thing that died. A
+    check running inside that same thread can never detect its own death.
+    The only real fix is an outside observer: point an external uptime
+    monitor (cron-job.org, UptimeRobot, healthchecks.io -- Nick already
+    uses cron-job.org for other triggers per this file's own notes) at
+    this URL every 30-60 minutes. It reports unhealthy in its OWN response
+    if the last cycle start is older than expected, AND -- just as
+    importantly -- if the whole app is down or this thread is dead, the
+    external monitor gets no response at all, which is itself the alert.
+    Deliberately does not send its own email alert: an unhealthy INTERNAL
+    check still requires the process to be alive to send that email in the
+    first place, which defeats the entire point of an external, independent
+    check."""
+    verify_cron_secret(secret)
+    try:
+        last_started_iso = database.get_system_state("last_autonomous_cycle_started_at")
+        if not last_started_iso:
+            return {"healthy": False, "reason": "Autonomous cycle has never started since this system_state key existed."}
+        last_started = datetime.datetime.fromisoformat(last_started_iso.replace("Z", "+00:00"))
+        hours_since = (datetime.datetime.now(datetime.timezone.utc) - last_started).total_seconds() / 3600
+        # The internal scheduler's own cooldown is 20h -- 30h gives a full
+        # extra 20-minute-check-interval's worth of slack (the loop only
+        # checks every 20 minutes) before calling it unhealthy, so this
+        # doesn't false-positive on totally normal timing jitter.
+        healthy = hours_since < 30
+
+        # Sep 3 2026: also surfaces the email channel's own health here --
+        # see notifications._record_email_attempt's docstring for why this
+        # can't just be another email alert (an alert-sending failure can't
+        # reliably alert about itself). Reported alongside the scheduler
+        # check, not folded into the same `healthy` flag: an email failure
+        # doesn't mean the scanning pipeline itself is broken, but it DOES
+        # mean nothing else in this app can currently warn Nick about
+        # anything -- worth a human glancing at this field specifically,
+        # which is why it's a separate named field rather than silent.
+        last_email_status = database.get_system_state("last_email_send_status")
+        return {
+            "healthy": healthy,
+            "hours_since_last_cycle_started": round(hours_since, 1),
+            "last_cycle_started_at": last_started_iso,
+            "pipeline_currently_running": _pipeline_state.get("running", False),
+            "last_alert_email_status": last_email_status,  # None = never attempted yet; "ok" or "failed"
+            "last_alert_email_at": database.get_system_state("last_email_send_at"),
+            "last_alert_email_error": database.get_system_state("last_email_send_error") if last_email_status == "failed" else None,
+        }
+    except Exception as e:
+        return {"healthy": False, "reason": f"Heartbeat check itself errored: {e}"}
 
 
 @app.get("/trigger-backfill-tree-surgeon")

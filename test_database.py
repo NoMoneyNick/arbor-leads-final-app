@@ -826,5 +826,62 @@ class TestPartnerTagQuerying(unittest.TestCase):
         self.assertIn("error", result)
 
 
+class TestLeadSourceHealthReport(unittest.TestCase):
+    """Sep 3 2026: get_lead_source_health_report() -- the failsafe built
+    after the Leeds ArcGIS incident, which never raised a single error
+    while silently producing zero real leads. See the function's own
+    docstring for the full reasoning; these tests prove the flagging logic
+    itself (a source with a real history that suddenly goes to zero gets
+    flagged; a naturally-quiet source does not; a brand-new source with no
+    history does not)."""
+
+    def _conn_with_rows(self, rows):
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.fetchall.return_value = rows
+        conn.cursor.return_value = cur
+        return conn, cur
+
+    def test_source_with_real_history_and_zero_recent_is_flagged(self):
+        """Leeds' own shape: used to produce leads steadily, then zero in
+        the recent window, with no error anywhere in the pipeline."""
+        conn, cur = self._conn_with_rows([("Leeds", 54, 0)])  # 54 over the 27-day baseline window, 0 recently
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            report = database.get_lead_source_health_report()
+        self.assertEqual(len(report), 1)
+        self.assertEqual(report[0]["council_source"], "Leeds")
+        self.assertTrue(report[0]["possible_silent_failure"])
+        self.assertEqual(report[0]["recent_leads"], 0)
+
+    def test_naturally_quiet_source_is_not_flagged(self):
+        """A genuinely low-volume small council (a handful of leads across
+        the whole month) going quiet for 3 days is normal, not a failure --
+        must not be flagged just for having a low baseline rate."""
+        conn, cur = self._conn_with_rows([("Tiny Rural Council", 1, 0)])  # ~0.037/day baseline
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            report = database.get_lead_source_health_report()
+        self.assertFalse(report[0]["possible_silent_failure"])
+
+    def test_source_still_producing_leads_is_not_flagged(self):
+        conn, cur = self._conn_with_rows([("London", 90, 5)])
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            report = database.get_lead_source_health_report()
+        self.assertFalse(report[0]["possible_silent_failure"])
+
+    def test_no_database_returns_empty_list_not_an_error(self):
+        with patch.object(database, "SURL", ""):
+            report = database.get_lead_source_health_report()
+        self.assertEqual(report, [])
+
+    def test_db_error_returns_empty_list_not_a_crash(self):
+        with patch.object(database, "get_db_conn", side_effect=Exception("connection refused")), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            report = database.get_lead_source_health_report()
+        self.assertEqual(report, [])
+
+
 if __name__ == "__main__":
     unittest.main()

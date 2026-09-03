@@ -772,6 +772,73 @@ def get_pending_review_queue(limit: int = 50, max_llm_attempts: int = None) -> l
         return []
 
 
+def get_lead_source_health_report(recent_days: int = 3, baseline_days: int = 30, min_baseline_daily_rate: float = 0.1) -> list:
+    """Sep 3 2026: the failsafe Nick asked for after the Leeds ArcGIS
+    incident -- 'predict possible future issues... even if they have never
+    shown an error.' Leeds' bug never raised a single exception in months;
+    it just silently produced zero real leads while quietly stuffing junk
+    into the manual-review queue instead. No error-rate alert would ever
+    have caught that, because there was no error. The only signal that
+    incident actually left behind was a source that used to produce leads
+    and then, quietly, stopped -- so that's what this checks for directly,
+    per council_source, instead of only watching for exceptions.
+
+    For each council_source that has ever produced a lead: compares its
+    historical daily rate (leads/day over the `baseline_days` window,
+    EXCLUDING the most recent `recent_days` so a real ongoing problem
+    doesn't get averaged away) against how many it actually produced in
+    that most recent window. Flags a source as `possible_silent_failure`
+    only when BOTH (a) its historical rate clears `min_baseline_daily_rate`
+    -- so a genuinely low-volume source (a small council that might
+    legitimately go a week between applications) isn't flagged just for
+    having a quiet few days -- AND (b) it produced literally zero in the
+    recent window. Read-only, never raises: returns [] on any DB error so
+    a broken health check can never itself become an outage."""
+    if not SURL:
+        return []
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT
+                    council_source,
+                    COUNT(*) FILTER (
+                        WHERE discovered_at >= NOW() - (%s || ' days')::interval
+                          AND discovered_at <  NOW() - (%s || ' days')::interval
+                    ) AS baseline_leads,
+                    COUNT(*) FILTER (
+                        WHERE discovered_at >= NOW() - (%s || ' days')::interval
+                    ) AS recent_leads
+                FROM leads
+                GROUP BY council_source;
+                """,
+                (baseline_days, recent_days, recent_days)
+            )
+            rows = cur.fetchall()
+        finally:
+            cur.close()
+            conn.close()
+
+        baseline_window_days = max(1, baseline_days - recent_days)
+        report = []
+        for council_source, baseline_leads, recent_leads in rows:
+            baseline_daily_rate = (baseline_leads or 0) / baseline_window_days
+            flagged = baseline_daily_rate >= min_baseline_daily_rate and (recent_leads or 0) == 0
+            report.append({
+                "council_source": council_source,
+                "baseline_daily_rate": round(baseline_daily_rate, 3),
+                "recent_leads": recent_leads or 0,
+                "recent_days": recent_days,
+                "possible_silent_failure": flagged,
+            })
+        return report
+    except Exception as e:
+        logger.error(f"[LeadSourceHealth] Error building health report: {e}")
+        return []
+
+
 def increment_review_queue_llm_attempts(reference: str) -> bool:
     """Records that Tier 3 looked at this row and could NOT confidently
     classify it -- the row stays 'pending_review' (still visible to a human,

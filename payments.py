@@ -222,6 +222,28 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
 
     except stripe.error.AuthenticationError:
         logger.error("[Stripe] Invalid API key.")
+        # Sep 3 2026: found during the "predict future issues, even ones
+        # that have never errored" audit -- this is the single most
+        # expensive silent-failure path in the whole app. This function IS
+        # the customer checkout button. If STRIPE_SECRET_KEY ever goes
+        # invalid (revoked, rotated in Stripe but not updated in Render,
+        # accidentally swapped for a test-mode key), every single customer
+        # trying to pay gets a silently-failed checkout (this just returns
+        # None) with nothing ever alerting a human -- revenue could stop
+        # completely and the only symptom would be a customer complaining,
+        # or nobody noticing at all. The webhook side of this file already
+        # alerts on its own auth/signature failures; this is the matching
+        # fix for the checkout-creation side.
+        import notifications
+        notifications.send_system_incident_alert(
+            category="SECURITY & API KEYS",
+            title="STRIPE API KEY INVALID -- CHECKOUT IS DOWN",
+            description="CRITICAL: Stripe rejected checkout-session creation with an authentication error -- STRIPE_SECRET_KEY is invalid, revoked, or mismatched (e.g. a live key swapped for test, or vice versa).",
+            impact="No customer can complete a purchase right now -- every checkout attempt is silently failing.",
+            action_required="Check STRIPE_SECRET_KEY in Render against the current key in the Stripe Dashboard (API keys page). Confirm live/test mode matches.",
+            severity="CRITICAL",
+            throttle_hours=1.0
+        )
     except stripe.error.StripeError as e:
         logger.error(f"[Stripe] API error: {e}")
     except Exception as e:

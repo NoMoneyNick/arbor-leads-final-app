@@ -31,6 +31,29 @@ def _agent_status_badge(lead: dict) -> str:
     return "<span style='color:#94a3b8;'>— Unconfirmed</span>"
 
 
+def _record_email_attempt(success: bool, error: Optional[str]):
+    """Sep 3 2026: the failsafe-for-the-failsafe problem. Every incident
+    alert in this app -- an expired Stripe key, all councils failing, a
+    silently dead lead source -- ultimately depends on this one function
+    successfully reaching Resend. If RESEND_API_KEY itself goes bad
+    (expired, domain verification lapses, account suspended), every one of
+    those alerts fails silently and Nick would never know, because the
+    very channel meant to tell him is what broke. An email alert cannot
+    warn about its own failure to send. The only fix is recording the
+    outcome somewhere OUTSIDE the email channel itself -- here, in
+    system_state -- so an external, non-email check (/scheduler-heartbeat)
+    can surface it. Best-effort: never lets a DB hiccup here affect
+    whether send_resend_email itself succeeds/fails for its caller."""
+    try:
+        import database
+        import datetime
+        database.set_system_state("last_email_send_at", datetime.datetime.utcnow().isoformat() + "Z")
+        database.set_system_state("last_email_send_status", "ok" if success else "failed")
+        database.set_system_state("last_email_send_error", (error or "")[:300])
+    except Exception:
+        pass
+
+
 def send_resend_email(subject: str, html_body: str) -> bool:
     """Sends an email alert via the Resend API. Returns True only on a
     confirmed successful send -- callers (notably send_system_incident_alert's
@@ -41,6 +64,7 @@ def send_resend_email(subject: str, html_body: str) -> bool:
     had actually gone out."""
     if not RESEND_API_KEY or not TEST_EMAIL:
         logging.warning("[Email] RESEND_API_KEY or TEST_EMAIL not set — skipping.")
+        _record_email_attempt(False, "RESEND_API_KEY or TEST_EMAIL not configured")
         return False
     try:
         res = requests.post(
@@ -59,13 +83,17 @@ def send_resend_email(subject: str, html_body: str) -> bool:
         )
         if res.status_code not in (200, 201):
             logging.error(f"[Email] Resend returned {res.status_code}: {res.text[:200]}")
+            _record_email_attempt(False, f"HTTP {res.status_code}: {res.text[:200]}")
             return False
+        _record_email_attempt(True, None)
         return True
     except requests.exceptions.Timeout:
         logging.error("[Email] Resend request timed out.")
+        _record_email_attempt(False, "Resend request timed out")
         return False
     except Exception as e:
         logging.error(f"[Email] Unexpected error: {e}")
+        _record_email_attempt(False, str(e)[:300])
         return False
 
 
@@ -221,13 +249,29 @@ def dispatch_lead_alerts(city: str, leads: list):
                             matched = True
                             break
 
-            # Priority 3: Regional prefix fallback (same letter prefix e.g. NG)
+            # Priority 3: Regional prefix fallback (same postcode AREA, e.g.
+            # both "NG" -- Nottingham). Sep 3 2026: this used to be
+            # oc.startswith(prefix), a one-sided check -- a subscriber
+            # locked to area "M" (Manchester) also matched any outcode
+            # STARTING WITH "M", including "ME" (Medway) and "MK" (Milton
+            # Keynes), both 150+ miles away and nothing to do with
+            # Manchester. Found during the "is this actually fair to a
+            # paying customer" audit -- a contractor who paid to lock a
+            # specific area could be sold, and travel out for, a lead
+            # nowhere near them. Fixed by extracting the SAME 1-2 letter
+            # area code from the lead's own outcode and requiring an EXACT
+            # match against the subscriber's area, not a substring match --
+            # the identical fix already applied to scanners.py's regional-
+            # labeling bug the same day.
             if not matched:
                 prefix_m = re.match(r'^([A-Z]{1,2})', sub_outcode)
                 if prefix_m:
                     prefix = prefix_m.group(1)
-                    if any(oc.startswith(prefix) for oc in extracted_outcodes):
-                        matched = True
+                    for oc in extracted_outcodes:
+                        oc_prefix_m = re.match(r'^([A-Z]{1,2})', oc)
+                        if oc_prefix_m and oc_prefix_m.group(1) == prefix:
+                            matched = True
+                            break
 
             if matched:
                 matching_subs.append(sub)
