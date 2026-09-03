@@ -1000,6 +1000,77 @@ def is_tree_trade_company_name(name: str) -> bool:
     return not any(w in name_lower for w in EXCLUDED_NAME_WORDS)
 
 
+def _enrich_and_upsert_partner_candidate(item):
+    """Sep 2 2026: pulled out of perform_research's local process_single_candidate
+    closure so perform_research_by_sic (the new SIC-code discovery path below)
+    can share the exact same enrichment/upsert logic instead of drifting its
+    own copy -- the same "one shared gate, never a second copy that rots"
+    discipline already applied to is_tree_trade_company_name and
+    SPAM_WEBSITE_DOMAINS earlier this session. Behaviour is unchanged from
+    the original nested function."""
+    co, name, company_number, addr, assigned_city = item
+    try:
+        md_name = get_director_from_ch(company_number)
+        rating, phone, website = get_google_places_info(name, f"{addr} {assigned_city}")
+        # DDG's search-snippet phone regex above rarely matches (see
+        # scrape_contact_info_from_website's docstring) -- the
+        # company's own site is a much better source for both.
+        email, site_phone = scrape_contact_info_from_website(website) if website else (None, None)
+        phone = phone or site_phone
+        sic_codes = co.get("sic_codes", [])
+        tags = _generate_partner_tags(sic_codes, md_name, phone, email, company_name=name)
+
+        co_conn = database.get_db_conn()
+        co_cur = co_conn.cursor()
+        co_cur.execute("""
+            INSERT INTO potential_partners
+                (company_name, company_number, status, address, target_city,
+                 sic_codes, md_name, phone_number, google_rating, website, email, tags)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (company_number) DO UPDATE SET
+                company_name  = EXCLUDED.company_name,
+                target_city   = EXCLUDED.target_city,
+                md_name       = COALESCE(EXCLUDED.md_name, potential_partners.md_name),
+                phone_number  = COALESCE(EXCLUDED.phone_number, potential_partners.phone_number),
+                google_rating = COALESCE(EXCLUDED.google_rating, potential_partners.google_rating),
+                website       = COALESCE(EXCLUDED.website, potential_partners.website),
+                email         = COALESCE(EXCLUDED.email, potential_partners.email),
+                tags          = EXCLUDED.tags
+        """, (
+            name, company_number, co.get("company_status") or "active",
+            addr, assigned_city,
+            sic_codes, md_name, phone, rating,
+            website, email, tags
+        ))
+        co_conn.commit()
+        co_cur.close()
+        co_conn.close()
+
+        # Sep 2 2026: added Website to this line specifically to debug
+        # the DDG throttle fix's real-world effect -- after fixing the
+        # cross-thread rate-limit bug, Nick reported EVERY company in a
+        # 30+ row live sample still coming back Phone: N/A | Email: N/A,
+        # with no "[DDG Scrape] Non-200" warning anywhere in the same
+        # logs (that warning is the other thing this same fix added).
+        # 200-but-empty and non-200-and-logged are two different
+        # failure modes needing two different fixes, and this one line
+        # is what tells them apart on the next live run: "Website:
+        # NONE" every time means get_google_places_info itself never
+        # finds a result link (DDG search/parsing problem -- markup
+        # changed, or DDG serves a 200 OK soft-block/consent page
+        # instead of real results, which a bare status-code check
+        # can't detect); a real URL there with Phone/Email still N/A
+        # means the website WAS found but scrape_contact_info_from_
+        # website can't extract anything from that specific page.
+        logger.info(f"[Investigator] ✅ {name} ({assigned_city}) → "
+                    f"Director: {md_name or 'N/A'} | Website: {website or 'NONE'} | "
+                    f"Phone: {phone or 'N/A'} | Email: {email or 'N/A'}")
+        return name
+    except Exception as pe:
+        logger.error(f"[Investigator] Error on company {name}: {pe}")
+        return None
+
+
 def perform_research(city_name: str):
     """
     Finds Tree Surgery LTD companies via Companies House across major boroughs/districts,
@@ -1104,73 +1175,10 @@ def perform_research(city_name: str):
         logger.info(f"[Investigator] ⚡ {len(candidates_to_enrich)} brand new tree surgery LTDs to enrich for {city_name} (out of {len(all_companies)} raw search items).")
 
 
-        def process_single_candidate(item):
-            co, name, company_number, addr, assigned_city = item
-            try:
-                md_name = get_director_from_ch(company_number)
-                rating, phone, website = get_google_places_info(name, f"{addr} {assigned_city}")
-                # DDG's search-snippet phone regex above rarely matches (see
-                # scrape_contact_info_from_website's docstring) -- the
-                # company's own site is a much better source for both.
-                email, site_phone = scrape_contact_info_from_website(website) if website else (None, None)
-                phone = phone or site_phone
-                sic_codes = co.get("sic_codes", [])
-                tags = _generate_partner_tags(sic_codes, md_name, phone, email, company_name=name)
-
-                co_conn = database.get_db_conn()
-                co_cur = co_conn.cursor()
-                co_cur.execute("""
-                    INSERT INTO potential_partners
-                        (company_name, company_number, status, address, target_city,
-                         sic_codes, md_name, phone_number, google_rating, website, email, tags)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (company_number) DO UPDATE SET
-                        company_name  = EXCLUDED.company_name,
-                        target_city   = EXCLUDED.target_city,
-                        md_name       = COALESCE(EXCLUDED.md_name, potential_partners.md_name),
-                        phone_number  = COALESCE(EXCLUDED.phone_number, potential_partners.phone_number),
-                        google_rating = COALESCE(EXCLUDED.google_rating, potential_partners.google_rating),
-                        website       = COALESCE(EXCLUDED.website, potential_partners.website),
-                        email         = COALESCE(EXCLUDED.email, potential_partners.email),
-                        tags          = EXCLUDED.tags
-                """, (
-                    name, company_number, co.get("company_status"),
-                    addr, assigned_city,
-                    sic_codes, md_name, phone, rating,
-                    website, email, tags
-                ))
-                co_conn.commit()
-                co_cur.close()
-                co_conn.close()
-
-                # Sep 2 2026: added Website to this line specifically to debug
-                # the DDG throttle fix's real-world effect -- after fixing the
-                # cross-thread rate-limit bug, Nick reported EVERY company in a
-                # 30+ row live sample still coming back Phone: N/A | Email: N/A,
-                # with no "[DDG Scrape] Non-200" warning anywhere in the same
-                # logs (that warning is the other thing this same fix added).
-                # 200-but-empty and non-200-and-logged are two different
-                # failure modes needing two different fixes, and this one line
-                # is what tells them apart on the next live run: "Website:
-                # NONE" every time means get_google_places_info itself never
-                # finds a result link (DDG search/parsing problem -- markup
-                # changed, or DDG serves a 200 OK soft-block/consent page
-                # instead of real results, which a bare status-code check
-                # can't detect); a real URL there with Phone/Email still N/A
-                # means the website WAS found but scrape_contact_info_from_
-                # website can't extract anything from that specific page.
-                logger.info(f"[Investigator] ✅ {name} ({assigned_city}) → "
-                            f"Director: {md_name or 'N/A'} | Website: {website or 'NONE'} | "
-                            f"Phone: {phone or 'N/A'} | Email: {email or 'N/A'}")
-                return name
-            except Exception as pe:
-                logger.error(f"[Investigator] Error on company {name}: {pe}")
-                return None
-
         if candidates_to_enrich:
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=10) as executor:
-                executor.map(process_single_candidate, candidates_to_enrich)
+                executor.map(_enrich_and_upsert_partner_candidate, candidates_to_enrich)
 
         cur.close()
         conn.close()
@@ -1180,8 +1188,277 @@ def perform_research(city_name: str):
         logger.error(f"[Investigator] Fatal error in perform_research: {e}")
 
 
+# Sep 2 2026: SIC (business-activity) code discovery -- catches genuinely
+# relevant tree surgery companies perform_research's name-substring search
+# can never find, because their registered name is generic/branded (e.g.
+# "Ridgeline Contracting Ltd", "Greenwood Grounds Ltd") and says nothing
+# about trees. Companies House's advanced-search endpoint supports filtering
+# by SIC code directly. Two confidence tiers, same design already proven in
+# bulk_contractor_extractor.py's CONTRACTOR_VERTICALS['tree'] config (that
+# file is a standalone, isolated offline CSV tool with its own inferior DDG-
+# based enrichment -- including a hardcoded synthetic 4.5 rating placeholder
+# -- kept deliberately disconnected from the live DB, so only the SIC-code
+# values and the trusted/gated split are reused here, not that file's code):
+#   - TREE_SIC_CODES_TRUSTED: silviculture/logging/forestry-support-service
+#     codes. Essentially never anything other than genuine tree/forestry
+#     work -- accepted on the SIC code alone, no name check.
+#   - TREE_SIC_CODES_GATED: general landscape service activities. Broad
+#     enough to also cover lawn care, planting, and garden design, so still
+#     run through is_tree_trade_company_name (the same single gate every
+#     other discovery path in this file uses) to avoid flooding
+#     potential_partners with unrelated gardening companies.
+TREE_SIC_CODES_TRUSTED = ["02100", "02200", "02400"]  # Silviculture / Logging / Support services to forestry
+TREE_SIC_CODES_GATED = ["81300"]                       # Landscape service activities (broad -- name-gated)
+
+
+def _search_companies_house_by_sic(sic_codes: list, location: str = None, items_per_page: int = 100) -> list:
+    """Searches Companies House's advanced-search endpoint by SIC code rather
+    than company name. Confirmed live against Companies House's own
+    advanced-search API spec (comma-delimited sic_codes param). Returns the
+    advanced-search response shape: items carry `company_name` (not `title`)
+    and a structured `registered_office_address` dict (not `address_snippet`)
+    -- different from the basic /search/companies endpoint perform_research
+    uses, so callers must read the right keys for each."""
+    if not CH_KEY:
+        return []
+    url = "https://api.company-information.service.gov.uk/advanced-search/companies"
+    params = {
+        "sic_codes": ",".join(sic_codes),
+        "company_status": "active",
+        "company_type": "ltd",
+        "size": items_per_page,
+    }
+    if location:
+        params["location"] = location
+    try:
+        res = net_utils.smart_get(url, headers=_ch_headers(), params=params, timeout=12)
+        if res.status_code == 200:
+            return res.json().get("items", [])
+    except Exception as e:
+        logger.debug(f"[Investigator SIC] {sic_codes} @ {location}: {e}")
+    return []
+
+
+def perform_research_by_sic(city_name: str):
+    """Runs alongside perform_research (name-search) rather than replacing
+    it -- finds tree surgery LTDs whose registered name doesn't mention
+    trees at all, via SIC code instead. Shares the exact same dedup/
+    enrichment/upsert path (_enrich_and_upsert_partner_candidate) so a SIC-
+    code find is indistinguishable in data quality from a name-search find."""
+    if not CH_KEY:
+        logger.error("[Investigator SIC] COMPANIES_HOUSE_KEY not set. Aborting.")
+        return
+
+    try:
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT company_number FROM potential_partners WHERE company_number IS NOT NULL")
+        already_known = set(r[0] for r in cur.fetchall() if r[0])
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"[Investigator SIC] DB error loading known companies: {e}")
+        return
+
+    sub_areas = CITY_SUB_AREAS.get(city_name, [city_name])
+    primary_area = sub_areas[0]
+
+    jobs = [(TREE_SIC_CODES_TRUSTED, False), (TREE_SIC_CODES_GATED, True)]
+    all_candidates = []
+
+    for sic_codes, name_gated in jobs:
+        items = _search_companies_house_by_sic(sic_codes, location=primary_area, items_per_page=100)
+        for co in items:
+            name = (co.get("company_name") or "").upper()
+            company_number = co.get("company_number", "")
+            if not company_number or company_number in already_known:
+                continue
+            if not any(t in name for t in ["LTD", "LIMITED"]):
+                continue
+            if name_gated and not is_tree_trade_company_name(name):
+                continue
+            already_known.add(company_number)  # dedup within this same run too
+
+            addr_data = co.get("registered_office_address", {}) or {}
+            addr = ", ".join(filter(None, [
+                addr_data.get("address_line_1"),
+                addr_data.get("address_line_2"),
+                addr_data.get("locality"),
+                addr_data.get("postal_code"),
+            ]))
+            assigned_city = resolve_uk_city(addr, name, default_city=city_name)
+            all_candidates.append((co, name, company_number, addr, assigned_city))
+
+    logger.info(f"[Investigator SIC] ⚡ {len(all_candidates)} new SIC-code-matched tree "
+                f"companies to enrich for {city_name} (branded/non-obvious names a "
+                f"keyword search would miss).")
+
+    if all_candidates:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            executor.map(_enrich_and_upsert_partner_candidate, all_candidates)
+
+    logger.info(f"[Investigator SIC] 🚀 SIC-code research complete for {city_name}! "
+                f"Enriched {len(all_candidates)} new partners.")
+
+
+def discover_sole_traders_via_google_places(city_name: str, limit_per_area: int = 15) -> int:
+    """Sep 2 2026: sole traders never register with Companies House at all --
+    perform_research and perform_research_by_sic search Companies House, so
+    no amount of tuning those two can ever find a sole trader, structurally,
+    regardless of name or SIC code. This is a genuinely different discovery
+    method: a Google Places category search ("tree surgeon in <area>")
+    instead of a company lookup, storing whatever real business it finds
+    even with no company number at all.
+
+    Shares the SAME monthly cost cap as every other paid Places call
+    (_google_places_paid_call_budget_available()) -- one hard ceiling
+    covering all Places spend combined, matching the fail-closed design the
+    cap was built around after the incident that created it. Unlike
+    per-company enrichment, ONE budgeted call here can return up to
+    `limit_per_area` businesses at once (Google bills per request, not per
+    result returned), so this is actually the most budget-efficient way to
+    grow the partner list -- worth knowing given the cap is finite.
+
+    Returns the count of new/updated partners written."""
+    if not GOOGLE_MAPS_KEY:
+        logger.error("[Sole Trader Discovery] GOOGLE_MAPS_KEY not set. Aborting.")
+        return 0
+
+    sub_areas = CITY_SUB_AREAS.get(city_name, [city_name])
+    primary_area = sub_areas[0]
+
+    if not _google_places_paid_call_budget_available():
+        _warn_monthly_cap_exhausted_throttled()
+        logger.info(f"[Sole Trader Discovery] Monthly Places budget exhausted -- skipping {city_name} this cycle.")
+        return 0
+
+    try:
+        query = f"tree surgeon in {primary_area}, UK"
+        url = "https://places.googleapis.com/v1/places:searchText"
+        headers = {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": GOOGLE_MAPS_KEY,
+            "X-Goog-FieldMask": (
+                "places.id,places.displayName,places.formattedAddress,"
+                "places.nationalPhoneNumber,places.websiteUri,places.rating"
+            ),
+        }
+        body = {"textQuery": query, "pageSize": limit_per_area}
+        res = net_utils.smart_post(url, json=body, headers=headers, timeout=10)
+        if res.status_code != 200:
+            logger.warning(f"[Sole Trader Discovery] Non-200 ({res.status_code}) for '{query}': {res.text[:200]}")
+            return 0
+        places = (res.json() or {}).get("places") or []
+    except Exception as e:
+        logger.error(f"[Sole Trader Discovery] Error searching '{city_name}': {e}")
+        return 0
+
+    if not places:
+        return 0
+
+    try:
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT phone_number FROM potential_partners WHERE phone_number IS NOT NULL")
+        # _is_valid_uk_phone() returns the number in whatever formatting it
+        # arrived in (spaces/dashes preserved) -- the same real number can
+        # reach us as "07911 123456" from Google Places and "07911123456"
+        # from a website scrape. Dedup on digits-only so those two don't
+        # look like different people.
+        known_phones = set(
+            re.sub(r'[\s\(\)\-\.]', '', r[0]) for r in cur.fetchall() if r[0]
+        )
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"[Sole Trader Discovery] DB error loading known phones: {e}")
+        known_phones = set()
+
+    written = 0
+    for place in places:
+        place_id = place.get("id")
+        name = ((place.get("displayName") or {}).get("text") or "").strip()
+        if not place_id or not name:
+            continue
+        if not is_tree_trade_company_name(name.upper()):
+            # Places' own category search is already scoped to "tree
+            # surgeon", but a handful of loosely-related results (a garden
+            # centre, a general landscaper) slip through relevance ranking
+            # -- apply the same single name gate every other discovery path
+            # uses rather than trusting Google's relevance alone.
+            continue
+
+        website = place.get("websiteUri")
+        if website and any(spam in website.lower() for spam in SPAM_WEBSITE_DOMAINS):
+            continue
+
+        raw_phone = place.get("nationalPhoneNumber")
+        phone = _is_valid_uk_phone(raw_phone) if raw_phone else None
+        if phone and re.sub(r'[\s\(\)\-\.]', '', phone) in known_phones:
+            # Same real business already known under a Ltd company record
+            # found via Companies House -- don't duplicate it as a second,
+            # contact-less sole-trader row.
+            continue
+
+        address = place.get("formattedAddress") or ""
+        rating = place.get("rating")
+        assigned_city = resolve_uk_city(address, name, default_city=city_name)
+        email, site_phone = scrape_contact_info_from_website(website) if website else (None, None)
+        phone = phone or site_phone
+        tags = _generate_partner_tags(None, None, phone, email, company_name=name)
+        tags.append("registration:sole_trader")
+
+        try:
+            w_conn = database.get_db_conn()
+            w_cur = w_conn.cursor()
+            w_cur.execute("""
+                INSERT INTO potential_partners
+                    (company_name, company_number, place_id, status, address, target_city,
+                     phone_number, google_rating, website, email, tags)
+                VALUES (%s, NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (place_id) DO UPDATE SET
+                    company_name  = EXCLUDED.company_name,
+                    target_city   = EXCLUDED.target_city,
+                    phone_number  = COALESCE(EXCLUDED.phone_number, potential_partners.phone_number),
+                    google_rating = COALESCE(EXCLUDED.google_rating, potential_partners.google_rating),
+                    website       = COALESCE(EXCLUDED.website, potential_partners.website),
+                    email         = COALESCE(EXCLUDED.email, potential_partners.email),
+                    tags          = EXCLUDED.tags
+            """, (
+                name.upper(), place_id, "active", address, assigned_city,
+                phone, rating, website, email, tags
+            ))
+            w_conn.commit()
+            w_cur.close()
+            w_conn.close()
+            written += 1
+            if phone:
+                known_phones.add(re.sub(r'[\s\(\)\-\.]', '', phone))
+            logger.info(f"[Sole Trader Discovery] ✅ {name} ({assigned_city}) → "
+                        f"Website: {website or 'NONE'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'}")
+        except Exception as we:
+            logger.error(f"[Sole Trader Discovery] DB write error for {name}: {we}")
+
+    logger.info(f"[Sole Trader Discovery] 🚀 Sole-trader discovery complete for {city_name}! "
+                f"Wrote {written} of {len(places)} Places results (rest were duplicates, spam, or off-trade).")
+    return written
+
+
 def research_all_cities():
-    """Runs deep partner research across all UK regions (England, Scotland, Wales)."""
+    """Runs deep partner research across all UK regions (England, Scotland, Wales).
+
+    Sep 2 2026: now runs three discovery methods per region instead of one --
+    the original name-substring search (perform_research), the new SIC-code
+    search (perform_research_by_sic) for branded/generically-named Ltd
+    companies a keyword search can't find, and Google Places category
+    discovery (discover_sole_traders_via_google_places) for sole traders,
+    who never appear in Companies House at all no matter how either of the
+    first two searches is tuned. All hooked into the same autonomous cycle
+    with no separate manual step required. The Places call is
+    budget-gated by the same monthly cost cap as every other paid Places
+    call in this file -- it will simply do nothing once that's exhausted
+    for the month, same fail-closed behaviour as everywhere else."""
     regions = [
         "London", "South East", "South West", "West Midlands",
         "East Midlands", "Yorkshire", "North West", "North East", "East of England",
@@ -1190,6 +1467,8 @@ def research_all_cities():
     for r in regions:
         logger.info(f"[Investigator] 🚀 Starting nationwide batch discovery for {r}...")
         perform_research(r)
+        perform_research_by_sic(r)
+        discover_sole_traders_via_google_places(r)
 
 
 

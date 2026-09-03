@@ -161,11 +161,14 @@ class TestInsertLeadBackfill(unittest.TestCase):
         )
         self.assertEqual(result["vertical"], "tree")
         _, params = cur.execute.call_args[0]
-        # Sep 2 2026: `tags` was added as a new final bound param after
-        # `vertical` for the lead tagging system -- vertical moved from
-        # last to second-to-last.
-        self.assertEqual(params[-2], "tree")
-        self.assertIn("vertical:tree", params[-1])
+        # Sep 2 2026: `tags` was added as a new bound param after `vertical`
+        # for the lead tagging system. Sep 3 2026: `registered_date` and
+        # `statutory_deadline` were added after `tags` for the real-filed-
+        # date countdown fix -- both None here since this call doesn't pass
+        # them, pushing vertical/tags from the last two slots to -4/-3.
+        self.assertEqual(params[-4], "tree")
+        self.assertIn("vertical:tree", params[-3])
+        self.assertEqual(params[-2:], (None, None))
 
     def test_vertical_param_is_passed_through_and_stored(self):
         cur = self._mock_cursor(("some-uuid", True))
@@ -176,8 +179,8 @@ class TestInsertLeadBackfill(unittest.TestCase):
         )
         self.assertEqual(result["vertical"], "hmo")
         _, params = cur.execute.call_args[0]
-        self.assertEqual(params[-2], "hmo")
-        self.assertIn("vertical:hmo", params[-1])
+        self.assertEqual(params[-4], "hmo")
+        self.assertIn("vertical:hmo", params[-3])
 
     def test_hmo_lead_never_stores_applicant_or_agent_identity_even_if_passed_in(self):
         """Sep 2 2026, master_expansion_plan_v2.md build-order step 3 (the
@@ -204,15 +207,18 @@ class TestInsertLeadBackfill(unittest.TestCase):
         _, params = cur.execute.call_args[0]
         # INSERT param order: (reference, address, summary, source, lead_score,
         # lead_price, applicant_name, agent_name, agent_company, has_agent,
-        # agent_is_tree_surgeon, vertical, tags) -- indices 6-10 are the 5
-        # identity fields; tags is now the new final param (Sep 2 2026).
+        # agent_is_tree_surgeon, vertical, tags, registered_date,
+        # statutory_deadline) -- indices 6-10 are the 5 identity fields;
+        # registered_date/statutory_deadline (Sep 3 2026) are the new final
+        # two params, both None since this call doesn't pass them.
         self.assertEqual(params[6:11], (None, None, None, None, None))
-        self.assertEqual(params[-2], "hmo")
-        self.assertIn("vertical:hmo", params[-1])
+        self.assertEqual(params[-4], "hmo")
+        self.assertIn("vertical:hmo", params[-3])
+        self.assertEqual(params[-2:], (None, None))
 
         # HMO's own identity-stripping must not leak into the tags either --
         # no applicant/agent name should ever end up embedded in a tag string.
-        self.assertFalse(any("jane smith" in t.lower() or "john doe" in t.lower() for t in params[-1]))
+        self.assertFalse(any("jane smith" in t.lower() or "john doe" in t.lower() for t in params[-3]))
 
     def test_generic_placeholder_address_is_rejected_even_with_a_long_description(self):
         """Sep 2 2026 audit: this used to only reject a bare "London"/

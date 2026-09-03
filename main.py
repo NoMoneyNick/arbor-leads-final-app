@@ -1682,6 +1682,100 @@ async def submit_suggestion(request: Request):
 
 
 
+# ── QR-code partner landing page ──────────────────────────────────────────────
+# Sep 3 2026: Nick's ask -- a QR code he can put on printed material (a
+# business card, a trade-show stand, a future letter run) that lands a
+# prospective tree-surgeon partner on a real page, not just TreeKey's
+# homepage. `src` is a short campaign code baked into the QR image itself
+# (see generate_qr_codes.py) so response can be measured per batch/channel
+# once real campaigns exist -- see MARKETING_OUTREACH_IDEAS.md for what
+# this was originally built alongside (a letter campaign, a testimonials
+# idea) that Nick explicitly said to file for later, not build yet. This
+# page and its QR codes work standalone today regardless of that decision.
+
+@app.get("/partner-offer", response_class=HTMLResponse)
+def partner_offer_page(src: str = "unknown"):
+    src_safe = html.escape(src)[:60]
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Planning-Application Tree Leads | TreeKey</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; }}
+            .box {{ max-width:560px; margin:auto; background:white; padding:32px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04); }}
+            h1 {{ color:#044332; font-size:24px; margin:0 0 10px 0; }}
+            p {{ color:#64748b; font-size:14px; line-height:1.6; }}
+            ul {{ color:#334155; font-size:14px; line-height:1.8; padding-left:20px; }}
+            input {{ width:100%; box-sizing:border-box; padding:12px; border:1px solid #cbd5e1; border-radius:8px; margin-bottom:14px; font-family:inherit; font-size:14px; }}
+            label {{ font-size:13px; font-weight:600; display:block; margin-bottom:4px; }}
+            button {{ background:#044332; color:white; border:none; padding:14px 24px; border-radius:8px; font-weight:bold; font-size:15px; cursor:pointer; width:100%; }}
+            .altlink {{ text-align:center; margin-top:18px; font-size:13px; }}
+            .altlink a {{ color:#044332; font-weight:600; text-decoration:none; }}
+        </style>
+    </head>
+    <body>
+    <div class="box">
+        <h1>🌳 Real planning-application tree leads, straight from the council register</h1>
+        <p>TreeKey scans UK council planning portals every day for TPO, felling, and tree-work applications the moment they're filed -- so you can quote before anyone else even knows the job exists.</p>
+        <ul>
+            <li>Leads sourced directly from statutory planning notices, not resold directory data</li>
+            <li>Priced per lead from £19 -- no lock-in subscription required to start</li>
+            <li>See if a job already has an agent on record before you pay for it</li>
+        </ul>
+        <form action="/api/submit-partner-offer" method="POST">
+            <input type="hidden" name="src" value="{src_safe}">
+            <label>Your Name / Company Name</label>
+            <input type="text" name="name" placeholder="e.g. Dave, Apex Tree Care Ltd" required>
+            <label>Phone Number</label>
+            <input type="text" name="phone" placeholder="07XXX XXXXXX">
+            <label>Email (optional)</label>
+            <input type="email" name="email" placeholder="you@example.com">
+            <label>Town / Area You Work In</label>
+            <input type="text" name="town" placeholder="e.g. Leeds" required>
+            <button type="submit">Get In Touch →</button>
+        </form>
+        <p class="altlink">Already know what you want? <a href="/pricing">See pricing and sign up directly →</a></p>
+    </div>
+    </body>
+    </html>
+    """
+
+
+@app.post("/api/submit-partner-offer")
+async def submit_partner_offer(request: Request):
+    form = await request.form()
+    src = (form.get("src") or "unknown").strip()[:60]
+    name = (form.get("name") or "").strip()[:200]
+    phone = (form.get("phone") or "").strip()[:40] or None
+    email = (form.get("email") or "").strip()[:200] or None
+    town = (form.get("town") or "").strip()[:100] or None
+
+    if name:
+        database.save_qr_campaign_lead(src, name, phone, email, town)
+
+    return HTMLResponse("""
+    <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#f8fafc;">
+        <div style="max-width:500px; margin:auto; background:white; padding:40px; border-radius:16px; border:1px solid #e2e8f0;">
+            <h2 style="color:#059669; margin-top:0;">✅ Thanks -- we've got your details!</h2>
+            <p style="color:#64748b; font-size:15px; line-height:1.5;">We'll be in touch shortly. In the meantime, feel free to look around.</p>
+            <a href="/pricing" style="display:inline-block; background:#044332; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; margin-top:15px;">See Pricing</a>
+        </div>
+    </body></html>
+    """)
+
+
+@app.get("/trigger-qr-campaign-stats")
+def trigger_qr_campaign_stats(secret: Optional[str] = Query(None)):
+    """Sep 3 2026: read-only view of /partner-offer form submissions grouped
+    by campaign src code, so Nick can check which printed QR batch/channel
+    is actually generating interest without needing direct DB access."""
+    verify_cron_secret(secret)
+    return {"status": "ok", "campaigns": database.get_qr_campaign_stats()}
+
+
 # ── 1-Tap Homeowner Introduction Letter Generator ─────────────────────────────
 
 @app.get("/generate-letter/{lead_id}", response_class=HTMLResponse)

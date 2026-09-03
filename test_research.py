@@ -22,6 +22,7 @@ import os
 import sys
 import types
 import unittest
+import unittest.mock as mock
 
 if "database" not in sys.modules:
     _fake_database = types.ModuleType("database")
@@ -500,6 +501,359 @@ class TestGetGooglePlacesInfo(unittest.TestCase):
         import unittest.mock as mock
         with mock.patch.object(research.database, "get_system_state", side_effect=Exception("db down")):
             self.assertFalse(research._google_places_paid_call_budget_available())
+
+
+class _FakeCursor:
+    """Minimal cursor test double shared by the SIC-code and sole-trader
+    discovery tests below -- records every execute() call so tests can
+    assert on what was actually written, without a real Postgres driver."""
+    def __init__(self, fetchall_result=None, executed_log=None):
+        self._fetchall_result = fetchall_result if fetchall_result is not None else []
+        self.executed = executed_log if executed_log is not None else []
+
+    def execute(self, query, params=None):
+        self.executed.append((query, params))
+
+    def fetchall(self):
+        return self._fetchall_result
+
+    def fetchone(self):
+        return self._fetchall_result[0] if self._fetchall_result else None
+
+    def close(self):
+        pass
+
+
+class _FakeConn:
+    def __init__(self, fetchall_result=None, executed_log=None):
+        self._cursor = _FakeCursor(fetchall_result, executed_log)
+
+    def cursor(self):
+        return self._cursor
+
+    def commit(self):
+        pass
+
+    def close(self):
+        pass
+
+
+class TestSicCodeCompanyDiscovery(unittest.TestCase):
+    """Sep 2 2026: perform_research_by_sic finds tree surgery Ltd companies
+    whose registered NAME says nothing about trees (e.g. "Ridgeline
+    Contracting Ltd") by searching Companies House by SIC code instead --
+    something perform_research's name-substring search can never do,
+    regardless of how it's tuned. Mocks research.database and
+    research._search_companies_house_by_sic -- no real network call, no
+    live database."""
+
+    def setUp(self):
+        self._orig_key = research.CH_KEY
+        research.CH_KEY = "fake-ch-key"
+        self._executed_log = []
+
+    def tearDown(self):
+        research.CH_KEY = self._orig_key
+
+    def _patch_db(self, known_company_numbers=None):
+        fetchall_result = [(n,) for n in (known_company_numbers or [])]
+        conn = _FakeConn(fetchall_result, self._executed_log)
+        return mock.patch.object(research.database, "get_db_conn", return_value=conn)
+
+    def test_no_ch_key_aborts_without_searching(self):
+        research.CH_KEY = ""
+        with mock.patch.object(research, "_search_companies_house_by_sic") as mock_search:
+            research.perform_research_by_sic("Bristol")
+        mock_search.assert_not_called()
+
+    def test_trusted_sic_tier_accepted_without_a_name_check(self):
+        """A genuine forestry SIC code (02100/02200/02400) is trusted on its
+        own -- a branded name with zero tree-related words must still be
+        accepted, which is the entire point of this discovery method."""
+        trusted_item = {
+            "company_name": "RIDGELINE CONTRACTING LTD", "company_number": "SIC001",
+            "registered_office_address": {"postal_code": "BS1 1AA"}, "sic_codes": ["02100"],
+        }
+        def fake_search(sic_codes, location=None, items_per_page=100):
+            return [trusted_item] if sic_codes == research.TREE_SIC_CODES_TRUSTED else []
+
+        with self._patch_db(), \
+             mock.patch.object(research, "_search_companies_house_by_sic", side_effect=fake_search), \
+             mock.patch.object(research, "_enrich_and_upsert_partner_candidate") as mock_enrich:
+            research.perform_research_by_sic("Bristol")
+
+        mock_enrich.assert_called_once()
+        candidate = mock_enrich.call_args[0][0]
+        self.assertEqual(candidate[2], "SIC001")  # company_number
+        self.assertIn("RIDGELINE", candidate[1])   # name, upper-cased
+
+    def test_gated_sic_tier_rejects_a_name_with_no_tree_signal(self):
+        """SIC 81300 (general landscape service activities) also covers
+        lawn care and garden design -- a name with no tree-related word at
+        all must be rejected here, unlike the trusted tier above."""
+        gated_item = {
+            "company_name": "GREEN LAWNS LANDSCAPING LTD", "company_number": "SIC002",
+            "registered_office_address": {"postal_code": "BS1 1AA"}, "sic_codes": ["81300"],
+        }
+        def fake_search(sic_codes, location=None, items_per_page=100):
+            return [gated_item] if sic_codes == research.TREE_SIC_CODES_GATED else []
+
+        with self._patch_db(), \
+             mock.patch.object(research, "_search_companies_house_by_sic", side_effect=fake_search), \
+             mock.patch.object(research, "_enrich_and_upsert_partner_candidate") as mock_enrich:
+            research.perform_research_by_sic("Bristol")
+
+        mock_enrich.assert_not_called()
+
+    def test_gated_sic_tier_accepts_a_name_with_a_real_tree_signal(self):
+        gated_item = {
+            "company_name": "GREENWOOD TREE & GARDEN SERVICES LTD", "company_number": "SIC003",
+            "registered_office_address": {"postal_code": "BS1 1AA"}, "sic_codes": ["81300"],
+        }
+        def fake_search(sic_codes, location=None, items_per_page=100):
+            return [gated_item] if sic_codes == research.TREE_SIC_CODES_GATED else []
+
+        with self._patch_db(), \
+             mock.patch.object(research, "_search_companies_house_by_sic", side_effect=fake_search), \
+             mock.patch.object(research, "_enrich_and_upsert_partner_candidate") as mock_enrich:
+            research.perform_research_by_sic("Bristol")
+
+        mock_enrich.assert_called_once()
+
+    def test_already_known_company_number_is_skipped(self):
+        trusted_item = {
+            "company_name": "RIDGELINE CONTRACTING LTD", "company_number": "SIC001",
+            "registered_office_address": {"postal_code": "BS1 1AA"}, "sic_codes": ["02100"],
+        }
+        def fake_search(sic_codes, location=None, items_per_page=100):
+            return [trusted_item] if sic_codes == research.TREE_SIC_CODES_TRUSTED else []
+
+        with self._patch_db(known_company_numbers=["SIC001"]), \
+             mock.patch.object(research, "_search_companies_house_by_sic", side_effect=fake_search), \
+             mock.patch.object(research, "_enrich_and_upsert_partner_candidate") as mock_enrich:
+            research.perform_research_by_sic("Bristol")
+
+        mock_enrich.assert_not_called()
+
+    def test_non_ltd_company_is_skipped(self):
+        """company_type=ltd is already a server-side filter on the real
+        endpoint, but a defensive client-side check costs nothing and
+        matches perform_research's own equivalent check."""
+        weird_item = {
+            "company_name": "RIDGELINE FORESTRY LLP", "company_number": "SIC004",
+            "registered_office_address": {"postal_code": "BS1 1AA"}, "sic_codes": ["02100"],
+        }
+        def fake_search(sic_codes, location=None, items_per_page=100):
+            return [weird_item] if sic_codes == research.TREE_SIC_CODES_TRUSTED else []
+
+        with self._patch_db(), \
+             mock.patch.object(research, "_search_companies_house_by_sic", side_effect=fake_search), \
+             mock.patch.object(research, "_enrich_and_upsert_partner_candidate") as mock_enrich:
+            research.perform_research_by_sic("Bristol")
+
+        mock_enrich.assert_not_called()
+
+    def test_db_error_loading_known_companies_aborts_safely(self):
+        with mock.patch.object(research.database, "get_db_conn", side_effect=Exception("db down")), \
+             mock.patch.object(research, "_search_companies_house_by_sic") as mock_search:
+            research.perform_research_by_sic("Bristol")  # must not raise
+        mock_search.assert_not_called()
+
+
+class TestSearchCompaniesHouseBySic(unittest.TestCase):
+    def setUp(self):
+        self._orig_key = research.CH_KEY
+        research.CH_KEY = "fake-ch-key"
+
+    def tearDown(self):
+        research.CH_KEY = self._orig_key
+
+    def _fake_response(self, status_code=200, json_data=None):
+        class _Resp:
+            pass
+        r = _Resp()
+        r.status_code = status_code
+        r.json = lambda: json_data or {}
+        return r
+
+    def test_no_ch_key_returns_empty_without_a_network_call(self):
+        research.CH_KEY = ""
+        with mock.patch.object(research.net_utils, "smart_get") as mock_get:
+            result = research._search_companies_house_by_sic(["02100"])
+        self.assertEqual(result, [])
+        mock_get.assert_not_called()
+
+    def test_passes_comma_joined_sic_codes_and_ltd_filter(self):
+        with mock.patch.object(research.net_utils, "smart_get",
+                                return_value=self._fake_response(json_data={"items": []})) as mock_get:
+            research._search_companies_house_by_sic(["02100", "02200"], location="Leeds")
+        params = mock_get.call_args.kwargs.get("params", {})
+        self.assertEqual(params.get("sic_codes"), "02100,02200")
+        self.assertEqual(params.get("company_type"), "ltd")
+        self.assertEqual(params.get("company_status"), "active")
+        self.assertEqual(params.get("location"), "Leeds")
+
+    def test_non_200_returns_empty_not_a_crash(self):
+        with mock.patch.object(research.net_utils, "smart_get",
+                                return_value=self._fake_response(status_code=500)):
+            result = research._search_companies_house_by_sic(["02100"])
+        self.assertEqual(result, [])
+
+    def test_network_exception_returns_empty_not_a_crash(self):
+        with mock.patch.object(research.net_utils, "smart_get", side_effect=Exception("timeout")):
+            result = research._search_companies_house_by_sic(["02100"])
+        self.assertEqual(result, [])
+
+
+class TestSoleTraderDiscovery(unittest.TestCase):
+    """Sep 2 2026: discover_sole_traders_via_google_places finds sole
+    traders, who never register with Companies House at all, via a Google
+    Places category search instead of a company lookup. Mocks
+    research.net_utils.smart_post and research.database -- no real network
+    call, no live database, no live API key."""
+
+    def setUp(self):
+        self._orig_key = research.GOOGLE_MAPS_KEY
+        research.GOOGLE_MAPS_KEY = "fake-test-key"
+        import database as _db
+        self._orig_state_store = dict(_db._fake_state_store)
+        _db._fake_state_store.clear()
+        self._executed_log = []
+
+    def tearDown(self):
+        research.GOOGLE_MAPS_KEY = self._orig_key
+        import database as _db
+        _db._fake_state_store.clear()
+        _db._fake_state_store.update(self._orig_state_store)
+
+    def _fake_response(self, status_code=200, json_data=None, text=""):
+        class _Resp:
+            pass
+        r = _Resp()
+        r.status_code = status_code
+        r.text = text
+        r.json = lambda: json_data or {}
+        return r
+
+    def _patch_db(self, known_phones=None):
+        fetchall_result = [(p,) for p in (known_phones or [])]
+        conn = _FakeConn(fetchall_result, self._executed_log)
+        return mock.patch.object(research.database, "get_db_conn", return_value=conn)
+
+    def test_no_key_aborts_without_a_network_call(self):
+        research.GOOGLE_MAPS_KEY = ""
+        with mock.patch.object(research.net_utils, "smart_post") as mock_post:
+            result = research.discover_sole_traders_via_google_places("Bristol")
+        self.assertEqual(result, 0)
+        mock_post.assert_not_called()
+
+    def test_monthly_cap_exhausted_skips_without_a_network_call(self):
+        """Shares the SAME monthly cap as every other paid Places call --
+        must not spend a separate budget of its own."""
+        orig_cap = research.GOOGLE_PLACES_MONTHLY_PAID_CALL_CAP
+        research.GOOGLE_PLACES_MONTHLY_PAID_CALL_CAP = 0
+        try:
+            with mock.patch.object(research.net_utils, "smart_post") as mock_post:
+                result = research.discover_sole_traders_via_google_places("Bristol")
+            self.assertEqual(result, 0)
+            mock_post.assert_not_called()
+        finally:
+            research.GOOGLE_PLACES_MONTHLY_PAID_CALL_CAP = orig_cap
+
+    def test_writes_a_new_sole_trader_with_no_company_number(self):
+        places_response = {"places": [{
+            "id": "places/abc123",
+            "displayName": {"text": "Barker's Tree Surgery"},
+            "formattedAddress": "12 Oak Lane, Bristol, BS1 1AA",
+            "nationalPhoneNumber": "07911 123456",
+            "websiteUri": "https://barkerstreesurgery.example.co.uk",
+            "rating": 4.8,
+        }]}
+        with self._patch_db(), \
+             mock.patch.object(research.net_utils, "smart_post",
+                                return_value=self._fake_response(json_data=places_response)), \
+             mock.patch.object(research, "scrape_contact_info_from_website", return_value=(None, None)):
+            written = research.discover_sole_traders_via_google_places("Bristol")
+
+        self.assertEqual(written, 1)
+        insert_calls = [e for e in self._executed_log if "INSERT INTO potential_partners" in e[0]]
+        self.assertEqual(len(insert_calls), 1)
+        params = insert_calls[0][1]
+        self.assertIn("BARKER'S TREE SURGERY", params[0])
+        self.assertEqual(params[1], "places/abc123")  # place_id
+        self.assertIn("registration:sole_trader", params[-1])
+
+    def test_non_tree_name_is_rejected(self):
+        places_response = {"places": [{
+            "id": "places/xyz789",
+            "displayName": {"text": "Bristol Garden Centre"},
+            "formattedAddress": "1 High St, Bristol",
+            "nationalPhoneNumber": "0117 123 4567",
+        }]}
+        with self._patch_db(), \
+             mock.patch.object(research.net_utils, "smart_post",
+                                return_value=self._fake_response(json_data=places_response)):
+            written = research.discover_sole_traders_via_google_places("Bristol")
+        self.assertEqual(written, 0)
+
+    def test_known_spam_website_is_rejected(self):
+        places_response = {"places": [{
+            "id": "places/spam1",
+            "displayName": {"text": "Some Tree Surgeon Ltd"},
+            "websiteUri": "https://10summersheatingandcoolingllc.pro/",
+            "nationalPhoneNumber": "0117 123 4567",
+        }]}
+        with self._patch_db(), \
+             mock.patch.object(research.net_utils, "smart_post",
+                                return_value=self._fake_response(json_data=places_response)):
+            written = research.discover_sole_traders_via_google_places("Bristol")
+        self.assertEqual(written, 0)
+
+    def test_phone_already_known_is_treated_as_a_duplicate(self):
+        """A phone number that already belongs to a Ltd company partner
+        means this is the same real business found twice -- must not be
+        inserted again as a second, contact-less sole-trader row."""
+        places_response = {"places": [{
+            "id": "places/dup1",
+            "displayName": {"text": "Barker's Tree Surgery"},
+            "nationalPhoneNumber": "07911 123456",
+        }]}
+        with self._patch_db(known_phones=["07911123456"]), \
+             mock.patch.object(research.net_utils, "smart_post",
+                                return_value=self._fake_response(json_data=places_response)):
+            written = research.discover_sole_traders_via_google_places("Bristol")
+        self.assertEqual(written, 0)
+
+    def test_non_200_response_returns_zero_not_a_crash(self):
+        with mock.patch.object(research.net_utils, "smart_post",
+                                return_value=self._fake_response(status_code=403, text="denied")):
+            written = research.discover_sole_traders_via_google_places("Bristol")
+        self.assertEqual(written, 0)
+
+    def test_no_places_found_returns_zero(self):
+        with mock.patch.object(research.net_utils, "smart_post",
+                                return_value=self._fake_response(json_data={"places": []})):
+            written = research.discover_sole_traders_via_google_places("Bristol")
+        self.assertEqual(written, 0)
+
+
+class TestResearchAllCitiesRunsAllThreeDiscoveryMethods(unittest.TestCase):
+    """Sep 2 2026: research_all_cities is the function the live autonomous
+    cycle actually calls (confirmed against production logs) -- this just
+    guards that all three discovery methods stay wired in per region, so a
+    future refactor can't silently drop one without a test failing."""
+
+    def test_all_three_methods_called_once_per_region(self):
+        with mock.patch.object(research, "perform_research") as mock_name, \
+             mock.patch.object(research, "perform_research_by_sic") as mock_sic, \
+             mock.patch.object(research, "discover_sole_traders_via_google_places") as mock_sole:
+            research.research_all_cities()
+        expected_calls = 11  # London, South East, South West, West Midlands,
+        # East Midlands, Yorkshire, North West, North East, East of England,
+        # Scotland, Wales
+        self.assertEqual(mock_name.call_count, expected_calls)
+        self.assertEqual(mock_sic.call_count, expected_calls)
+        self.assertEqual(mock_sole.call_count, expected_calls)
 
 
 if __name__ == "__main__":

@@ -420,6 +420,23 @@ def init_db():
                 value TEXT,
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             );
+
+            -- Sep 3 2026: backs the /partner-offer QR-code landing page
+            -- (main.py). `src` is a short campaign code baked into each
+            -- printed QR image (business card, trade-show stand, a future
+            -- letter run -- see MARKETING_OUTREACH_IDEAS.md) so response
+            -- can be measured per batch/channel without building a full
+            -- per-recipient tracking system before any real campaign has
+            -- actually launched.
+            CREATE TABLE IF NOT EXISTS qr_campaign_leads (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                src TEXT,
+                name TEXT,
+                phone TEXT,
+                email TEXT,
+                town TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
         """)
 
         # Performance Indices for Instant High-Volume Queries
@@ -462,6 +479,14 @@ def init_db():
             "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS website TEXT;",
             "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS email TEXT;",
             "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMPTZ;",
+            # Sep 2 2026: sole traders never appear in Companies House at all,
+            # so they'll always have company_number = NULL here (harmless --
+            # NULL never conflicts with itself under a UNIQUE constraint).
+            # place_id (the Google Places result ID) is their dedup key
+            # instead, so research.discover_sole_traders_via_google_places
+            # can ON CONFLICT (place_id) DO UPDATE instead of re-inserting
+            # the same sole trader as a fresh duplicate every autonomous cycle.
+            "ALTER TABLE potential_partners ADD COLUMN IF NOT EXISTS place_id TEXT UNIQUE;",
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_score TEXT DEFAULT 'small';",
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_price NUMERIC DEFAULT 25;",
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_source_type TEXT DEFAULT 'council_planning';",
@@ -1290,6 +1315,56 @@ def set_system_state(key: str, value: str) -> bool:
         return False
 
 
+def save_qr_campaign_lead(src: Optional[str], name: str, phone: Optional[str],
+                           email: Optional[str], town: Optional[str]) -> bool:
+    """Sep 3 2026: records one interest-capture submission from the
+    /partner-offer QR landing page. Returns False (never raises) on any
+    failure -- a lost marketing-form submission is a real shame but must
+    never 500 the page the person is looking at on their phone."""
+    if not SURL:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO qr_campaign_leads (src, name, phone, email, town)
+            VALUES (%s, %s, %s, %s, %s);
+        """, (src, name, phone, email, town))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.warning(f"[QR Campaign] save_qr_campaign_lead error: {e}")
+        return False
+
+
+def get_qr_campaign_stats() -> list:
+    """Sep 3 2026: submission counts grouped by campaign src code, most
+    recent first -- lets Nick see which printed batch/channel is actually
+    generating interest without needing direct DB access. Returns [] on
+    any error rather than raising."""
+    if not SURL:
+        return []
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT COALESCE(src, '(none)') AS src, COUNT(*) AS submissions,
+                   MAX(created_at) AS last_submission
+            FROM qr_campaign_leads
+            GROUP BY src
+            ORDER BY last_submission DESC;
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [{"src": r[0], "submissions": r[1], "last_submission": r[2]} for r in rows]
+    except Exception as e:
+        logger.warning(f"[QR Campaign] get_qr_campaign_stats error: {e}")
+        return []
+
+
 def reset_monthly_quotas_if_needed() -> int:
     """
     Resets delivered_this_month to 0 for all active subscribers at the start of each new month.
@@ -1966,13 +2041,22 @@ def get_closest_unallocated_leads(outcode: str, limit: int = 5) -> list:
         return []
 
 
-def calculate_lead_freshness(discovered_at, planning_status: str = "pending", summary: str = "", source_type: str = "council_planning") -> dict:
+def calculate_lead_freshness(discovered_at, planning_status: str = "pending", summary: str = "", source_type: str = "council_planning", registered_date=None) -> dict:
     """
     Calculates statutory lead freshness, countdown timer, color badge, and dynamic decay price:
     - Flash Hot (Day 0-3): £29 unlock (0 competitors aware)
     - Active Quoting (Day 4-14): £19 unlock (Prime window)
     - Clearance / Late Window (Day 15-30): £9 unlock (Consultation closing)
     - Granted / Approved: £25 unlock (Permitted felling ready to start)
+
+    registered_date (Sep 3 2026, Nick's explicit ask): the real date the
+    application was filed with the council, when a scan source provided one
+    -- takes priority over discovered_at (when TreeKey's own scraper found
+    it) for starting the countdown, since the two can differ by however
+    long a scan cycle lagged. Only mesh/Idox, PlanIt, and ukplanningapi.co.uk
+    leads carry this so far (see _insert_lead's docstring in scanners.py);
+    every other source leaves it None and this falls back to discovered_at
+    exactly as before this parameter existed.
     """
     import datetime
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -1989,17 +2073,29 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
         }
     days_old = 0
 
-    if discovered_at:
-        if isinstance(discovered_at, str):
+    # Sep 3 2026: prefer the real filed date over discovered_at whenever a
+    # source actually gave us one -- see this function's docstring. A DATE
+    # column comes back from psycopg2 as a plain datetime.date (no time
+    # component), which is why that case is handled separately from the
+    # full-timestamp cases below rather than falling into the
+    # hasattr(..., "timestamp") branch (datetime.date has no .timestamp()).
+    clock_start = registered_date if registered_date else discovered_at
+
+    if clock_start:
+        if isinstance(clock_start, str):
             try:
-                dt = datetime.datetime.fromisoformat(discovered_at.replace("Z", "+00:00"))
+                dt = datetime.datetime.fromisoformat(clock_start.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=datetime.timezone.utc)
                 days_old = (now - dt).days
             except Exception:
                 days_old = 0
-        elif hasattr(discovered_at, "timestamp"):
-            if discovered_at.tzinfo is None:
-                discovered_at = discovered_at.replace(tzinfo=datetime.timezone.utc)
-            days_old = (now - discovered_at).days
+        elif isinstance(clock_start, datetime.date) and not isinstance(clock_start, datetime.datetime):
+            days_old = (now.date() - clock_start).days
+        elif hasattr(clock_start, "timestamp"):
+            if clock_start.tzinfo is None:
+                clock_start = clock_start.replace(tzinfo=datetime.timezone.utc)
+            days_old = (now - clock_start).days
 
     # 1. Domestic Jobs: Strict 7-Day Expiration Guardrail
     if source_type in ("direct_homeowner", "domestic_classified"):
@@ -2245,7 +2341,7 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
 
             enriched = []
             for l in raw_leads:
-                freshness = calculate_lead_freshness(l["discovered_at"], l["status"], l["summary"], source_type=l.get("source_type", "council_planning"))
+                freshness = calculate_lead_freshness(l["discovered_at"], l["status"], l["summary"], source_type=l.get("source_type", "council_planning"), registered_date=l.get("reg_date"))
                 if freshness.get("tier") == "expired":
                     continue
                 l.update(freshness)

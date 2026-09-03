@@ -32,6 +32,34 @@ def _looks_like_real_value(value: Optional[str]) -> bool:
     return value.strip().lower() not in _PLACEHOLDER_FIELD_VALUES
 
 
+# Sep 3 2026: Idox's own "Important Dates" table renders its date cells as
+# plain text, not a machine-readable attribute -- format varies by council
+# theme (seen live: "02/09/2026", "2 Sep 2026", "02-Sep-2026"). No new
+# dependency added for this (python-dateutil isn't in requirements.txt, and
+# this project has already been burned once by a production import that
+# worked locally but wasn't actually installed on Render) -- a short list of
+# explicit formats covers every variant seen so far, and an unparseable
+# value safely returns None (registered_date just stays unset, exactly
+# today's behaviour) rather than crashing the whole lead insert.
+_IDOX_DATE_FORMATS = ("%d/%m/%Y", "%d-%m-%Y", "%d %b %Y", "%d-%b-%Y", "%d %B %Y", "%d-%B-%Y")
+
+
+def _parse_idox_date(raw: Optional[str]) -> Optional[str]:
+    """Parses an Idox detail-page date cell into an ISO 'YYYY-MM-DD' string,
+    or None if it doesn't match any known format (e.g. a placeholder like
+    'Not Available' already filtered out by the caller, or a genuinely new
+    format this hasn't seen yet)."""
+    if not raw or not isinstance(raw, str):
+        return None
+    cleaned = raw.strip()
+    for fmt in _IDOX_DATE_FORMATS:
+        try:
+            return datetime.datetime.strptime(cleaned, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
 # Aug 31 2026: Nick's point -- "an agent" on a planning application isn't
 # always a tree surgeon. Architects, planning consultants, block management
 # companies, and even the council itself all get filed as the "Agent" too
@@ -119,7 +147,17 @@ except ImportError:
 # NOT yet load-tested against live council portals at this term count --
 # run once and watch for 429s/bans before trusting it at full national scale,
 # same caveat as the SIC-code pass.
-IDOX_SEARCH_TERMS = ["tree", "tpo", "hedge"]
+#
+# Sep 2 2026: added "woodland" and "hedgerow". "Hedgerow Removal Notice" is a
+# genuinely distinct consent type (Hedgerows Regulations 1997, not a TPO or a
+# tree-in-conservation-area notice) that "hedge" alone may not reliably
+# surface if a council's search backend tokenizes by whole word rather than
+# substring -- cheap to add explicitly rather than assume. "Woodland
+# management"/"woodland" applications are a similarly real, separate wording
+# pattern. This takes the per-council term count from 3 to 5 (+67% request
+# volume for this scraper) -- watch logs after deploying for any new 429s/
+# bans on top of the ones already being watched for at the 3-term count.
+IDOX_SEARCH_TERMS = ["tree", "tpo", "hedge", "hedgerow", "woodland"]
 
 # Sep 2 2026: HMO-specific search terms, run ONLY against councils confirmed
 # below to actually have HMO application volume worth searching for (running
@@ -391,7 +429,29 @@ COUNCIL_REGISTRY = {
     # the standard Idox convention this registry uses everywhere else);
     # confirmed a genuine, live "Simple Search" Idox portal before shipping.
     "NEW FOREST": "https://planning.newforest.gov.uk/online-applications",
-    "DACORUM": "https://planning.dacorum.gov.uk/publicaccess"
+    "DACORUM": "https://planning.dacorum.gov.uk/publicaccess",
+
+    # Sep 3 2026: National Park Authorities -- Nick's explicit ask ("are
+    # there any smaller places than councils jobs may be listed?"). Each of
+    # the UK's 13 National Parks is legally its OWN planning authority,
+    # separate from the underlying district/county council -- e.g. a tree
+    # job inside the South Downs falls under South Downs NPA, not
+    # Winchester/Chichester/whichever district it geographically sits in,
+    # so none of these were ever covered by this registry no matter how
+    # many ordinary councils it already had. Checked all 13 individually
+    # (live search + fetch, not assumed) before adding anything -- only
+    # these 3 actually run Idox "online-applications" software this
+    # scraper can read. The other 10 (Peak District: bespoke/migrated
+    # system; Lake District, Yorkshire Dales, Eryri/Snowdonia,
+    # Pembrokeshire Coast: Agile Applications; Dartmoor: Tascomi;
+    # North York Moors: Northgate; Northumberland: planning-register.co.uk;
+    # Exmoor: no portal of its own, defers entirely to North Devon/Somerset
+    # West & Taunton's own councils) run different vendor software this
+    # file has no adapter for -- a real future opportunity, not wired in
+    # here rather than guess at 5 different platforms' markup.
+    "SOUTH DOWNS": "https://planningpublicaccess.southdowns.gov.uk/online-applications",
+    "BROADS AUTHORITY": "https://planning.broads-authority.gov.uk/online-applications",
+    "BRECON BEACONS": "https://planningonline.beacons-npa.gov.uk/online-applications",
 }
 
 def is_tree_related(description: str) -> bool:
@@ -500,6 +560,12 @@ class IdoxScraper:
             a tree surgeon) has already been hired to file the application on
             the applicant's behalf. Its presence is what tells us a lead is
             already taken rather than genuinely open.
+          - registered_date (Sep 3 2026): the real date the application was
+            received/validated by the council, read from the same "Important
+            Dates" table -- used to start the statutory countdown from the
+            actual filing date instead of whenever TreeKey's scraper happened
+            to find it. Absent (key not set) when the page has no recognisable
+            date field, exactly like every other field here.
         Returns {} on any failure -- callers must treat a missing key as
         "unknown", never silently as "no agent".
         """
@@ -532,6 +598,21 @@ class IdoxScraper:
                 # source (the council portal itself, not PlanIt).
                 if not _looks_like_real_value(value):
                     continue
+                # Sep 3 2026: Nick's explicit ask -- the statutory countdown
+                # should start from the date the application was actually
+                # FILED, not the date TreeKey's own scraper happened to find
+                # it. Idox's own detail page carries this in its "Important
+                # Dates" table; the exact label varies by council theme, so
+                # match the common variants in order of how close each one
+                # is to the true filing moment (received > validated).
+                if label in ("Date Received", "Application Received", "Received Date") and not out.get("registered_date"):
+                    parsed = _parse_idox_date(value)
+                    if parsed:
+                        out["registered_date"] = parsed
+                elif label in ("Registration Date", "Valid Date", "Application Validated", "Date Valid") and not out.get("registered_date"):
+                    parsed = _parse_idox_date(value)
+                    if parsed:
+                        out["registered_date"] = parsed
                 if label == "Applicant Name":
                     out["applicant_name"] = value
                 elif label == "Applicant Company Name" and not out.get("applicant_name"):

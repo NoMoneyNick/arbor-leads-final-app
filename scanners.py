@@ -655,6 +655,11 @@ COUNCIL_TO_REGION = {
     "CHESHIRE EAST": "North West", "CHESHIRE WEST": "North West",
     # East of England (COUNCIL_REGISTRY)
     "NORWICH": "East of England", "DACORUM": "East of England",
+    # National Park Authorities (COUNCIL_REGISTRY, Sep 3 2026) -- region is
+    # geographic, matching where each park physically sits, same as every
+    # ordinary council above.
+    "SOUTH DOWNS": "South East", "BROADS AUTHORITY": "East of England",
+    "BRECON BEACONS": "Wales",
     # From REGION_TOWNS (paid-API/PlanIT authority names) -- towns not
     # already covered above.
     "READING": "South East", "GRIMSBY": "Yorkshire and the Humber",
@@ -902,11 +907,31 @@ def _generate_tags(address: str, summary: str, council_source: str, vertical: st
     return tags
 
 
+_ISO_DATE_PREFIX_RE = re.compile(r'^(\d{4}-\d{2}-\d{2})')
+
+
+def _clean_iso_date(value) -> Optional[str]:
+    """Sep 3 2026: guards the registered_date/statutory_deadline DATE columns
+    against a malformed string from any scan source (a source's date field
+    changing shape, an unverified new field name returning something
+    unexpected) -- Postgres would reject the entire INSERT on a bad DATE
+    literal, which is a much worse failure than just leaving the field unset
+    for that one lead. Accepts a plain 'YYYY-MM-DD' or a full timestamp
+    starting with one (some APIs return 'YYYY-MM-DDTHH:MM:SS') and truncates
+    to just the date; anything else returns None."""
+    if not value or not isinstance(value, str):
+        return None
+    match = _ISO_DATE_PREFIX_RE.match(value.strip())
+    return match.group(1) if match else None
+
+
 def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
                   applicant_name: Optional[str] = None, agent_name: Optional[str] = None,
                   agent_company: Optional[str] = None, has_agent: Optional[bool] = None,
                   agent_is_tree_surgeon: Optional[bool] = None,
-                  vertical: str = "tree") -> Optional[dict]:
+                  vertical: str = "tree",
+                  registered_date: Optional[str] = None,
+                  statutory_deadline: Optional[str] = None) -> Optional[dict]:
     """
     Inserts a lead into the DB. Returns the lead dict if new, None if duplicate or low-quality junk.
     Enforces a strict quality gate: blocks empty, generic placeholders like 'tree-preservation-order'.
@@ -937,6 +962,18 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
     forced to None before the INSERT, regardless of what the caller passed
     in -- see the capture_identity block below and VERTICALS' own comment
     for why this lives here rather than at each call site.
+
+    registered_date / statutory_deadline (Sep 3 2026): the real date the
+    application was filed/received by the council, and (when a source
+    provides it) its real statutory decision-due date -- Nick's explicit
+    ask so the marketplace countdown starts from the actual filing date,
+    not from whenever a scan happened to find it. Only sources that expose
+    these (mesh/Idox detail pages, PlanIt's start_date/
+    application_expires_date, ukplanningapi.co.uk's received_date) ever
+    pass them; every other call site leaves them None, and
+    calculate_lead_freshness() falls back to discovered_at exactly as
+    before for those. Not identity fields, so the capture_identity=False
+    block below does not touch them.
     """
     if not summary or not reference:
         return None
@@ -982,24 +1019,29 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
 
     lead_score, lead_price = score_lead(summary)
     tags = _generate_tags(address, summary, source, vertical, lead_score, has_agent, agent_is_tree_surgeon)
+    registered_date = _clean_iso_date(registered_date)
+    statutory_deadline = _clean_iso_date(statutory_deadline)
     try:
         cur.execute(
             """
             INSERT INTO leads (reference, address, summary, council_source, lead_score, lead_price,
                                 applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon,
-                                vertical, tags)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                vertical, tags, registered_date, statutory_deadline)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (reference) DO UPDATE SET
                 applicant_name = COALESCE(leads.applicant_name, EXCLUDED.applicant_name),
                 agent_name     = COALESCE(leads.agent_name, EXCLUDED.agent_name),
                 agent_company  = COALESCE(leads.agent_company, EXCLUDED.agent_company),
                 has_agent      = COALESCE(leads.has_agent, EXCLUDED.has_agent),
                 agent_is_tree_surgeon = COALESCE(leads.agent_is_tree_surgeon, EXCLUDED.agent_is_tree_surgeon),
-                tags = CASE WHEN leads.tags IS NULL OR leads.tags = '{}' THEN EXCLUDED.tags ELSE leads.tags END
+                tags = CASE WHEN leads.tags IS NULL OR leads.tags = '{}' THEN EXCLUDED.tags ELSE leads.tags END,
+                registered_date = COALESCE(leads.registered_date, EXCLUDED.registered_date),
+                statutory_deadline = COALESCE(leads.statutory_deadline, EXCLUDED.statutory_deadline)
             RETURNING id, (xmax = 0) AS was_inserted;
             """,
             (reference, address, summary[:350], source, lead_score, lead_price,
-             applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon, vertical, tags)
+             applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon, vertical, tags,
+             registered_date, statutory_deadline)
         )
     except Exception as e:
         # Sep 2 2026 (production incident fix, extended for the new `tags`
@@ -1025,18 +1067,22 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
         cur.execute(
             """
             INSERT INTO leads (reference, address, summary, council_source, lead_score, lead_price,
-                                applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon,
+                                registered_date, statutory_deadline)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (reference) DO UPDATE SET
                 applicant_name = COALESCE(leads.applicant_name, EXCLUDED.applicant_name),
                 agent_name     = COALESCE(leads.agent_name, EXCLUDED.agent_name),
                 agent_company  = COALESCE(leads.agent_company, EXCLUDED.agent_company),
                 has_agent      = COALESCE(leads.has_agent, EXCLUDED.has_agent),
-                agent_is_tree_surgeon = COALESCE(leads.agent_is_tree_surgeon, EXCLUDED.agent_is_tree_surgeon)
+                agent_is_tree_surgeon = COALESCE(leads.agent_is_tree_surgeon, EXCLUDED.agent_is_tree_surgeon),
+                registered_date = COALESCE(leads.registered_date, EXCLUDED.registered_date),
+                statutory_deadline = COALESCE(leads.statutory_deadline, EXCLUDED.statutory_deadline)
             RETURNING id, (xmax = 0) AS was_inserted;
             """,
             (reference, address, summary[:350], source, lead_score, lead_price,
-             applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon)
+             applicant_name, agent_name, agent_company, has_agent, agent_is_tree_surgeon,
+             registered_date, statutory_deadline)
         )
     row = cur.fetchone()
     if row and row[1]:  # was_inserted -- a genuinely new lead, not a backfill of an existing one
@@ -1044,7 +1090,8 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
                 "lead_score": lead_score, "lead_price": lead_price, "tags": tags,
                 "applicant_name": applicant_name, "agent_name": agent_name,
                 "agent_company": agent_company, "has_agent": has_agent,
-                "agent_is_tree_surgeon": agent_is_tree_surgeon, "vertical": vertical}
+                "agent_is_tree_surgeon": agent_is_tree_surgeon, "vertical": vertical,
+                "registered_date": registered_date, "statutory_deadline": statutory_deadline}
     return None
 
 
@@ -1135,6 +1182,7 @@ def run_mesh_network_scan() -> int:
                     # exactly for every council not in
                     # COUNCILS_WITH_CONFIRMED_HMO_ARTICLE_4.
                     vertical=lead.get("vertical", "tree"),
+                    registered_date=lead.get("registered_date"),
                 )
                 if inserted:
                     new_leads.append(inserted)
@@ -1905,6 +1953,20 @@ def scan_city_planning_api(city_name: str) -> int:
                         # follow to actually check, the same way the mesh
                         # scanner already does for its own registered councils.
                         "source_url": rec.get("url") or other.get("source_url") or "",
+                        # Sep 3 2026: PlanIt's own published data dictionary
+                        # (planit.org.uk/dictionary) confirms these as real,
+                        # documented fields -- start_date is defined there as
+                        # "the earliest of the date_received or
+                        # date_validated fields" (exactly the true filing
+                        # date Nick asked for), and
+                        # other_fields.application_expires_date is PlanIt's
+                        # own real statutory decision-due date, better than
+                        # this pipeline's own guessed 42/56-day window
+                        # whenever a source actually provides it. Verified
+                        # against PlanIt's own docs before wiring in, not
+                        # guessed.
+                        "registered_date": rec.get("start_date"),
+                        "statutory_deadline": other.get("application_expires_date"),
                     })
                 return town, mapped_data
             except Exception as e:
@@ -2054,7 +2116,14 @@ def scan_city_planning_api(city_name: str) -> int:
                                 f"skipping to avoid mislabeling council_source ('{addr}')."
                             )
                             continue
-                        lead = _insert_lead(cur, ref, addr, summary, city_name, vertical=vertical)
+                        # Sep 3 2026: ukplanningapi.co.uk's own published API
+                        # docs (api-docs page) confirm `received_date`
+                        # (YYYY-MM-DD) as the real field name -- verified,
+                        # not guessed, before wiring in.
+                        lead = _insert_lead(
+                            cur, ref, addr, summary, city_name, vertical=vertical,
+                            registered_date=item.get("received_date"),
+                        )
                         if lead:
                             new_leads.append(lead)
                     except Exception as e:
@@ -2117,6 +2186,8 @@ def scan_city_planning_api(city_name: str) -> int:
                             continue
                         ref  = real_ref or f"PLANIT-{town}-{int(time.time())}"
                         addr = item.get("address") or f"{city_name} / {town}"
+                        registered_date = item.get("registered_date")
+                        statutory_deadline = item.get("statutory_deadline")
                         applicant_name = item.get("applicant_name")
                         agent_name = item.get("agent_name")
                         agent_company = item.get("agent_company")
@@ -2214,6 +2285,13 @@ def scan_city_planning_api(city_name: str) -> int:
                                     # just "yes".
                                     has_agent = confirmed["has_agent"]
                                     agent_is_tree_surgeon = confirmed.get("agent_is_tree_surgeon") if has_agent else None
+                                    # Sep 3 2026: this detail-page visit reads
+                                    # the same "Important Dates" table
+                                    # _fetch_applicant_and_agent always
+                                    # checks -- free bonus fill-in for the
+                                    # (rare) case PlanIt's own start_date was
+                                    # missing for this record.
+                                    registered_date = registered_date or confirmed.get("registered_date")
                                     confirm_stats["resolved_true" if has_agent else "resolved_false"] += 1
                                 else:
                                     confirm_stats["inconclusive"] += 1
@@ -2226,6 +2304,8 @@ def scan_city_planning_api(city_name: str) -> int:
                             has_agent=has_agent,
                             agent_is_tree_surgeon=agent_is_tree_surgeon,
                             vertical=vertical,
+                            registered_date=registered_date,
+                            statutory_deadline=statutory_deadline,
                         )
                         if lead:
                             new_leads.append(lead)
