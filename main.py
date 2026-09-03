@@ -4571,6 +4571,23 @@ def run_master_daily_pipeline():
                     total_leads_scanned += gla_leads
                 except Exception as gla_e:
                     logger.error(f"[PIPELINE] Stage 1 GLA Datahub error: {gla_e}")
+            # Sep 3 2026: same gap as the GLA Datahub fix above, found while
+            # checking what this morning's automatic run would actually have
+            # covered -- scanners.scan_leeds_leads() (the ArcGIS field-name/
+            # date-filter fix from earlier today) was ONLY reachable via
+            # scan_nationwide_bulk_crawler(), itself only reachable from
+            # manual/admin-triggered endpoints, never from this scheduled
+            # pipeline. "Yorkshire" above already covers Leeds through the
+            # generic postcode-radar path, but that's the paid/PlanIt route,
+            # not Leeds' own free ArcGIS layer -- so today's fix would have
+            # sat unused every single day exactly like GLA Datahub did before
+            # Aug 30 2026's fix, if left as-is. Wiring it in here the same way.
+            if city == "Yorkshire":
+                try:
+                    leeds_leads = scanners.scan_leeds_leads()
+                    total_leads_scanned += leeds_leads
+                except Exception as leeds_e:
+                    logger.error(f"[PIPELINE] Stage 1 Leeds ArcGIS error: {leeds_e}")
         logger.info(f"[PIPELINE] Stage 1 Complete: All UK regions scanned ({total_leads_scanned} planning leads processed).")
     except Exception as e:
         logger.error(f"[PIPELINE] Stage 1 error: {e}")
@@ -5105,6 +5122,38 @@ def trigger_enrich_all(secret: Optional[str] = Query(None)):
     threading.Thread(target=research.enrich_existing_partners, kwargs={"limit": 0}, daemon=True).start()
     return {"status": "started", "action": "enrich_all"}
 
+
+
+@app.get("/google-places-budget-status")
+def google_places_budget_status(secret: Optional[str] = Query(None)):
+    """Sep 3 2026: read-only visibility into the monthly paid-call cost cap
+    (research.GOOGLE_PLACES_MONTHLY_PAID_CALL_CAP / _google_places_paid_
+    call_budget_available). Added after a live incident where a real
+    £28.72 charge (an uncapped historical backlog clear-out, before this
+    cap existed) had to be reasoned about entirely from code review --
+    there was no way to just look up "how many paid calls has this month
+    already used" without a raw database query. Read-only: never
+    increments or resets anything, safe to hit as often as you like."""
+    verify_cron_secret(secret)
+    try:
+        current_month = datetime.datetime.utcnow().strftime("%Y-%m")
+        stored_month = database.get_system_state("google_places_paid_calls_month")
+        stored_count_raw = database.get_system_state("google_places_paid_calls_count")
+        stored_count = int(stored_count_raw) if (stored_count_raw or "").isdigit() else 0
+        # Same "different month -> counter hasn't reset yet, but effectively
+        # is 0" logic as the real budget check in research.py -- otherwise
+        # this would misreport last month's leftover count as still active.
+        calls_used_this_month = stored_count if stored_month == current_month else 0
+        cap = research.GOOGLE_PLACES_MONTHLY_PAID_CALL_CAP
+        return {
+            "month": current_month,
+            "paid_calls_used": calls_used_this_month,
+            "monthly_cap": cap,
+            "calls_remaining": max(0, cap - calls_used_this_month),
+            "cap_reached": calls_used_this_month >= cap,
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.get("/api-stats")

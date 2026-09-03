@@ -593,11 +593,21 @@ def _get_google_places_info_via_api(company_name: str, city_or_addr: str = ""):
             body_text = res.text[:300]
             if "per day" in body_text.lower():
                 _GOOGLE_PLACES_DAILY_QUOTA_RESET_AT[0] = time.time() + _GOOGLE_PLACES_QUOTA_COOLDOWN_SECONDS
+                # Sep 3 2026: this branch used to log a fixed, generic message
+                # and silently drop `body_text` -- the ONE piece of evidence
+                # (Google's own error body) that names the exact quota metric
+                # that was actually exceeded. A live 2026-09-03 investigation
+                # (console showed a 75k/day SearchText quota, well above real
+                # usage, yet this branch still fired) had no way to confirm
+                # WHICH quota bucket Google meant, because the real text was
+                # never kept anywhere. Logging it now so the next occurrence
+                # is diagnosable from Render logs instead of guessed at.
                 logger.warning(
                     f"[Google Places] Daily SearchText quota exhausted (429 'per day') on '{company_name}' -- "
                     f"falling back to the free DuckDuckGo scrape for roughly the next "
                     f"{_GOOGLE_PLACES_QUOTA_COOLDOWN_SECONDS // 3600}h instead of sending more doomed API calls. "
-                    f"Fix the underlying cap in Google Cloud Console under Google Maps Platform > Quotas."
+                    f"Fix the underlying cap in Google Cloud Console under Google Maps Platform > Quotas. "
+                    f"Google's own error body (names the exact quota metric that was hit): {body_text}"
                 )
             else:
                 logger.warning(f"[Google Places] Non-200 (429, not a daily-quota message) for '{company_name}': {body_text}")
