@@ -1234,9 +1234,55 @@ def scan_leeds_leads() -> int:
     cur = conn.cursor()
 
     # 1. Leeds Council ArcGIS Server Query
+    #
+    # Sep 3 2026 (Nick's explicit "fix Leeds" ask): this whole block was
+    # silently dead code. Two compounding bugs, found by fetching the
+    # layer's own field schema and a live sample directly:
+    #
+    # (1) Wrong field names -- this used to read rec.get("DESCRIPTION") and
+    #     rec.get("REFERENCE"), but the layer's real fields (confirmed via
+    #     .../MapServer/12?f=json) are PROPOSAL and REFVAL. "DESCRIPTION"
+    #     doesn't exist, so `summary` was ALWAYS "" -- _resolve_vertical("")
+    #     always returns None -- meaning every single feature, every single
+    #     run, fell into the manual-review branch, not a real lead. Worse,
+    #     "REFERENCE" doesn't exist either, so real_ref silently fell back
+    #     to the bare OBJECTID (e.g. "1", "2", "3"...) -- queuing junk,
+    #     blank-summary rows under tiny numeric references into
+    #     unclassified_applications on every run, forever.
+    #
+    # (2) No date filter at all ("where": "1=1") and no ordering -- a live
+    #     sample of the unfiltered query returned OBJECTID 1/2/3 with
+    #     DATEDECISS timestamps from 1995. ArcGIS has no implicit recency
+    #     ordering, so within 15 miles of central Leeds, "first 200 by
+    #     OBJECTID" is effectively "200 arbitrary, mostly decades-old
+    #     records" -- even with bug (1) fixed, this would almost never
+    #     surface a genuinely live, current application. Confirmed live
+    #     that filtering on DATEAPVAL (the layer's "date application
+    #     valid" field -- the real filed/validated date) actually returns
+    #     current 2026 applications, including real tree references
+    #     (e.g. "26/04913/TR", "T1 Beech Remove to ground level...").
+    #
+    # Also added: DECSN IS NULL (not yet decided -- DECSN is populated only
+    # once a decision is made, confirmed live) so this only pulls
+    # genuinely still-open applications, and DATEAPVAL is captured as
+    # registered_date -- Leeds' own equivalent of Idox's "Date Received",
+    # feeding the same real-filed-date countdown fix as every other source.
+    #
+    # No applicant/agent field exists anywhere in this layer's schema
+    # (confirmed via the same live field-list fetch) -- that data still
+    # only comes from Leeds' Idox portal, already covered separately via
+    # COUNCIL_REGISTRY's "LEEDS" entry (mesh scan). The two sources share
+    # the exact same reference format (confirmed live: Idox's own indexed
+    # detail pages use "YY/NNNNN/SUFFIX", identical to REFVAL here -- e.g.
+    # "22/01964/FU"), so once this path inserts a lead under its real
+    # REFVAL reference, a same-day or later mesh-scan hit on the same
+    # application backfills applicant/agent/registered_date onto this
+    # exact row via _insert_lead's existing ON CONFLICT ... COALESCE logic
+    # -- no new merge mechanism needed, this only had to stop being broken.
+    cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=60)).strftime("%Y-%m-%d")
     url = "https://mapservices.leeds.gov.uk/arcgis/rest/services/Public/Planning/MapServer/12/query"
     params = {
-        "where":        "1=1",
+        "where":        f"DATEAPVAL >= DATE '{cutoff}' AND DECSN IS NULL",
         "outFields":    "*",
         "geometry":     "-1.5491,53.8008",
         "geometryType": "esriGeometryPoint",
@@ -1244,17 +1290,26 @@ def scan_leeds_leads() -> int:
         "spatialRel":   "esriSpatialRelIntersects",
         "distance":     24140,          # 15 miles in metres
         "units":        "esriSRUnit_Meter",
-        "resultRecordCount": 200,
+        "resultRecordCount": 500,
+        "orderByFields": "DATEAPVAL DESC",
         "f": "json"
     }
     try:
         res = net_utils.smart_get(url, params=params, timeout=20)
         if res.status_code == 200:
-            features = res.json().get("features", [])
+            body = res.json()
+            features = body.get("features", [])
+            if body.get("exceededTransferLimit"):
+                logger.warning(
+                    f"[Leeds ArcGIS] Query hit the server's own result cap with "
+                    f"{len(features)} features returned -- some recent applications "
+                    f"in the last 60 days may be missing this run (consider a "
+                    f"narrower date window or paging via resultOffset)."
+                )
             for feature in features:
                 rec = feature.get("attributes", {})
-                summary = str(rec.get("DESCRIPTION") or "")
-                real_ref = str(rec.get("REFERENCE") or rec.get("OBJECTID") or "").strip()
+                summary = str(rec.get("PROPOSAL") or "")
+                real_ref = str(rec.get("REFVAL") or "").strip()
                 vertical = _resolve_vertical(summary)
                 if vertical is None:
                     # Sep 2 2026, Tier 4: same reasoning as the GLA loop below --
@@ -1275,7 +1330,14 @@ def scan_leeds_leads() -> int:
                 # astronomically unlikely without touching the DB schema.
                 ref = real_ref or f"LDS-{int(time.time())}-{secrets.token_hex(3)}"
                 addr = rec.get("ADDRESS") or "Leeds"
-                lead = _insert_lead(cur, ref, addr, summary, "Leeds", vertical=vertical)
+                registered_date = None
+                date_apval = rec.get("DATEAPVAL")
+                if isinstance(date_apval, (int, float)) and date_apval > 0:
+                    try:
+                        registered_date = datetime.datetime.utcfromtimestamp(date_apval / 1000).date().isoformat()
+                    except (ValueError, OSError, OverflowError):
+                        registered_date = None
+                lead = _insert_lead(cur, ref, addr, summary, "Leeds", vertical=vertical, registered_date=registered_date)
                 if lead:
                     new_leads.append(lead)
     except Exception as e:
@@ -1411,6 +1473,33 @@ def scan_gla_datahub_london() -> int:
                         or ""
                     )
 
+                    # Sep 3 2026, real-filed-date fix (Nick: "timer starts at
+                    # permission date not date we found it"): GLA's OWN
+                    # published technical doc (planninglondondatahub_api_
+                    # connection_technical_documentation_v1.pdf, fetched live)
+                    # gives its own worked search example using exactly the
+                    # fields "lpa_name, lpa_app_no, last_updated, valid_date,
+                    # decision_date, id, application_type" -- confirmed real,
+                    # not guessed. "valid_date" is the UK planning-law term
+                    # for the date an application became statutorily valid
+                    # (starts the 8-week determination clock), i.e. exactly
+                    # the "permission date" Nick means, so it maps straight
+                    # onto every other source's `registered_date`.
+                    # Checked the same document for "agent"/"applicant"/
+                    # "expiry"/"target"/"statutory": NONE of those words
+                    # appear anywhere in it (confirmed by a second full-text
+                    # pass), and the doc explicitly says the full field list
+                    # only exists in a separate, non-public "technical
+                    # schema" this project has no access to. So, like Leeds'
+                    # ArcGIS layer, this is a real, documented limitation,
+                    # not an oversight: no applicant/agent name or statutory-
+                    # deadline field is claimed here. `application_type` IS
+                    # documented and real, but London runs entirely through
+                    # keyword classification already (no Tier-2 structured-
+                    # field path exists for GLA) -- adding one unverified
+                    # extra signal isn't part of this fix, so not done here.
+                    registered_date = item.get("valid_date")
+
                     vertical = _resolve_vertical(summary) if summary else None
                     if vertical is None:
                         # Sep 2 2026, Tier 4 (manual review queue): only queue when a
@@ -1427,7 +1516,7 @@ def scan_gla_datahub_london() -> int:
                     # Leeds loop above -- a same-second fallback reference
                     # collision here silently discards a second GLA record.
                     ref = real_ref or f"LON-{int(time.time())}-{secrets.token_hex(3)}"
-                    lead = _insert_lead(cur, ref, addr, summary, "London", vertical=vertical)
+                    lead = _insert_lead(cur, ref, addr, summary, "London", vertical=vertical, registered_date=registered_date)
                 except Exception as e:
                     # Sep 2 2026: one malformed GLA record must never cost the rest of
                     # this batch (up to 100 records) -- caught here instead of only at

@@ -42,25 +42,53 @@ import requests as _requests  # noqa: E402  (used for constructing real exceptio
 # somewhere with psycopg2 installed), we leave them alone.
 # ---------------------------------------------------------------------------
 if "database" not in sys.modules:
-    _fake_database = types.ModuleType("database")
-    _fake_database.get_db_conn = MagicMock()
-    _fake_database.increment_api_usage = MagicMock(return_value={"warning_needed": False})
-    # Sep 2 2026, Tier 4 (manual review queue): stub attributes so
-    # patch.object(database, "...") works in the wiring/Tier-3/Tier-4 tests
-    # below without needing a real psycopg2 install in this environment.
-    _fake_database.insert_unclassified_application = MagicMock(return_value=True)
-    _fake_database.get_pending_review_queue = MagicMock(return_value=[])
-    _fake_database.increment_review_queue_llm_attempts = MagicMock(return_value=True)
-    _fake_database.resolve_unclassified_application = MagicMock(return_value=True)
-    sys.modules["database"] = _fake_database
+    sys.modules["database"] = types.ModuleType("database")
+# Sep 3 2026: changed from a one-shot `if "database" not in sys.modules`
+# block to idempotent per-attribute defaults. Reason: test_research.py
+# (alphabetically earlier, so it can import first when the whole suite is
+# discovered together, e.g. `python -m unittest discover`) stubs its own
+# minimal `database` fake (get_db_conn/get_system_state/set_system_state
+# only) into sys.modules BEFORE this file ever runs. The old guard here
+# saw `database` already present and skipped entirely, so every attribute
+# below (increment_api_usage, insert_unclassified_application, etc.) was
+# silently missing whenever test_research ran first -- live-verified: this
+# caused 16 real ERRORs/11 FAILUREs in `python -m unittest discover`, none
+# of which reproduce running test_scrapers.py alone. `setdefault`-style
+# idempotent assignment fixes it regardless of which test file's stub
+# creates the module first.
+_database = sys.modules["database"]
+if not hasattr(_database, "get_db_conn"):
+    _database.get_db_conn = MagicMock()
+if not hasattr(_database, "increment_api_usage"):
+    _database.increment_api_usage = MagicMock(return_value={"warning_needed": False})
+# Sep 2 2026, Tier 4 (manual review queue): stub attributes so
+# patch.object(database, "...") works in the wiring/Tier-3/Tier-4 tests
+# below without needing a real psycopg2 install in this environment.
+if not hasattr(_database, "insert_unclassified_application"):
+    _database.insert_unclassified_application = MagicMock(return_value=True)
+if not hasattr(_database, "get_pending_review_queue"):
+    _database.get_pending_review_queue = MagicMock(return_value=[])
+if not hasattr(_database, "increment_review_queue_llm_attempts"):
+    _database.increment_review_queue_llm_attempts = MagicMock(return_value=True)
+if not hasattr(_database, "resolve_unclassified_application"):
+    _database.resolve_unclassified_application = MagicMock(return_value=True)
 
 if "notifications" not in sys.modules:
-    _fake_notifications = types.ModuleType("notifications")
-    _fake_notifications.send_system_incident_alert = MagicMock()
-    _fake_notifications.send_resend_email = MagicMock()
-    _fake_notifications.dispatch_lead_alerts = MagicMock()
-    _fake_notifications.send_api_quota_warning_email = MagicMock()
-    sys.modules["notifications"] = _fake_notifications
+    sys.modules["notifications"] = types.ModuleType("notifications")
+# Same idempotent-stubbing fix as `database` above, same root cause: no
+# other test file happens to stub `notifications` today, but fixing this
+# the same defensive way (rather than only patching the one attribute that
+# happened to be missing) means a future test file that adds its own
+# minimal `notifications` stub can't silently reintroduce this bug.
+_notifications = sys.modules["notifications"]
+if not hasattr(_notifications, "send_system_incident_alert"):
+    _notifications.send_system_incident_alert = MagicMock()
+if not hasattr(_notifications, "send_resend_email"):
+    _notifications.send_resend_email = MagicMock()
+if not hasattr(_notifications, "dispatch_lead_alerts"):
+    _notifications.dispatch_lead_alerts = MagicMock()
+if not hasattr(_notifications, "send_api_quota_warning_email"):
+    _notifications.send_api_quota_warning_email = MagicMock()
 
 if "dotenv" not in sys.modules:
     _fake_dotenv = types.ModuleType("dotenv")
@@ -2135,6 +2163,110 @@ class TestGlaDatahubLondon(unittest.TestCase):
         self.assertEqual(result, 0)
 
 
+class TestGlaLondonRealFieldNamesForRegisteredDate(unittest.TestCase):
+    """Sep 3 2026, real-filed-date fix (Nick: "timer starts at permission
+    date not date we found it") -- London's turn, after Leeds.
+
+    Verified live via the GLA's OWN published technical documentation
+    (planninglondondatahub_api_connection_technical_documentation_v1.pdf,
+    fetched this session): its own worked search example uses exactly the
+    fields "lpa_name, lpa_app_no, last_updated, valid_date, decision_date,
+    id, application_type" -- "valid_date" is the real, confirmed field for
+    when an application became statutorily valid (starts the UK's 8-week
+    determination clock), i.e. the permission-filed date every other
+    source's `registered_date` already means.
+
+    A second full-text pass over the same document (also done live this
+    session) confirmed "agent", "applicant", "expiry", "target", and
+    "statutory" appear NOWHERE in it -- the document explicitly says the
+    complete field list lives only in a separate, non-public "technical
+    schema" this project has no access to. So, like Leeds' ArcGIS layer,
+    the absence of applicant/agent identity or an explicit statutory-
+    deadline field from this source is a real, documented limitation, not
+    an oversight -- this class also proves that limitation is honoured
+    (never fabricated) rather than silently assumed away."""
+
+    def setUp(self):
+        self.cur = MagicMock()
+        self.conn = MagicMock()
+        self.conn.cursor.return_value = self.cur
+        dedup_patch = patch.object(scanners, "dedup", new=_FakeDedupStore())
+        dedup_patch.start()
+        self.addCleanup(dedup_patch.stop)
+
+    def test_valid_date_field_reaches_insert_lead_as_registered_date(self):
+        body = {"data": [
+            {"reference": "GLA-VD-1",
+             "description": "Crown reduction of protected oak tree, TPO.",
+             "location": {"address": "1 Borough High St, London"},
+             "valid_date": "2026-08-15"},
+        ]}
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = body
+
+        with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "GLA-VD-1"}) as mock_insert, \
+             patch("time.sleep", return_value=None):
+            scanners.scan_gla_datahub_london()
+
+        mock_insert.assert_called_once()
+        _, kwargs = mock_insert.call_args
+        self.assertEqual(kwargs.get("registered_date"), "2026-08-15")
+
+    def test_missing_valid_date_does_not_crash_and_leaves_registered_date_none(self):
+        """Not every GLA record is guaranteed to carry valid_date (e.g. a
+        very early-stage or malformed upstream record) -- must degrade to
+        None (which _insert_lead's own _clean_iso_date already handles),
+        never raise, never fabricate a date."""
+        body = {"data": [
+            {"reference": "GLA-NO-VD",
+             "description": "Crown reduction of protected oak tree, TPO.",
+             "location": {"address": "1 Borough High St, London"}},
+        ]}
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = body
+
+        with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "GLA-NO-VD"}) as mock_insert, \
+             patch("time.sleep", return_value=None):
+            scanners.scan_gla_datahub_london()
+
+        mock_insert.assert_called_once()
+        _, kwargs = mock_insert.call_args
+        self.assertIsNone(kwargs.get("registered_date"))
+
+    def test_no_applicant_or_agent_fields_exist_on_this_source(self):
+        """Documents a real, verified limitation rather than an oversight
+        (see class docstring): _insert_lead is never asked to pass
+        has_agent/applicant_name from this GLA path."""
+        body = {"data": [
+            {"reference": "GLA-NOAGENT",
+             "description": "Crown reduction of protected oak tree, TPO.",
+             "location": {"address": "1 Borough High St, London"},
+             "valid_date": "2026-08-15",
+             "agent_name": "Should Never Be Read",  # not a real documented field
+             "applicant_name": "Should Never Be Read Either"},
+        ]}
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = body
+
+        with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
+             patch("net_utils.smart_get", return_value=resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "GLA-NOAGENT"}) as mock_insert, \
+             patch("time.sleep", return_value=None):
+            scanners.scan_gla_datahub_london()
+
+        mock_insert.assert_called_once()
+        _, kwargs = mock_insert.call_args
+        self.assertNotIn("has_agent", kwargs)
+        self.assertNotIn("applicant_name", kwargs)
+
+
 class TestVerticalWiringPaidApiAndPlanit(unittest.TestCase):
     """Sep 2 2026: proves scan_city_planning_api's two data sources (the
     paid ukplanningapi.co.uk loop and the free PlanIt loop) now tag each
@@ -2403,19 +2535,25 @@ class TestVerticalWiringLeeds(unittest.TestCase):
         self.conn.cursor.return_value = self.cur
 
     def test_hmo_only_feature_is_inserted_with_hmo_vertical_not_discarded(self):
+        # Sep 3 2026: field names corrected to match the layer's REAL schema
+        # (PROPOSAL/REFVAL) -- confirmed live via the layer's own field-list
+        # endpoint. The old fixture used DESCRIPTION/REFERENCE, which don't
+        # exist on this layer at all; that mismatch is exactly why
+        # scan_leeds_leads' ArcGIS half never inserted a single real lead
+        # before this fix (see scan_leeds_leads' own docstring/comments).
         arcgis_resp = MagicMock(status_code=200)
         arcgis_resp.json.return_value = {"features": [
             {"attributes": {
-                "DESCRIPTION": "Change of use to a house in multiple occupation (7 persons).",
-                "REFERENCE": "LDS/HMO/1", "ADDRESS": "1 Kirkgate, Leeds",
+                "PROPOSAL": "Change of use to a house in multiple occupation (7 persons).",
+                "REFVAL": "LDS/HMO/1", "ADDRESS": "1 Kirkgate, Leeds",
             }},
             {"attributes": {
-                "DESCRIPTION": "Felling of 2no. diseased ash trees",
-                "REFERENCE": "LDS/TREE/1", "ADDRESS": "2 Kirkgate, Leeds",
+                "PROPOSAL": "Felling of 2no. diseased ash trees",
+                "REFVAL": "LDS/TREE/1", "ADDRESS": "2 Kirkgate, Leeds",
             }},
             {"attributes": {
-                "DESCRIPTION": "Erection of a two-storey rear extension.",
-                "REFERENCE": "LDS/JUNK/1", "ADDRESS": "3 Kirkgate, Leeds",
+                "PROPOSAL": "Erection of a two-storey rear extension.",
+                "REFVAL": "LDS/JUNK/1", "ADDRESS": "3 Kirkgate, Leeds",
             }},
         ]}
 
@@ -2567,6 +2705,118 @@ class TestLeedsScanDelegation(unittest.TestCase):
         self.assertEqual(total, 5)  # 0 from ArcGIS (no features) + 5 delegated
 
 
+class TestLeedsArcgisRealFieldNamesAndDateFilter(unittest.TestCase):
+    """Sep 3 2026, Nick's explicit "fix Leeds" ask: proves the two
+    compounding bugs found by fetching the live ArcGIS layer's own field
+    schema are actually fixed, not just that the old (wrong-field-name)
+    fixtures still pass. See scan_leeds_leads' own comment for the full
+    live-data evidence (a live unfiltered sample returned 1995-era decided
+    applications; PROPOSAL/REFVAL, not DESCRIPTION/REFERENCE, are the
+    layer's real fields)."""
+
+    def setUp(self):
+        self.cur = MagicMock()
+        self.conn = MagicMock()
+        self.conn.cursor.return_value = self.cur
+
+    def test_query_filters_by_dateapval_and_excludes_decided_applications(self):
+        """The request itself must ask ArcGIS for recent, still-undecided
+        applications -- not "where": "1=1", which live evidence showed
+        returns decades-old, already-decided records within the geographic
+        radius, before any field-name bug even comes into play."""
+        arcgis_resp = MagicMock(status_code=200)
+        arcgis_resp.json.return_value = {"features": []}
+
+        with patch("net_utils.smart_get", return_value=arcgis_resp) as mock_get, \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "scan_city_planning_api", return_value=0):
+            scanners.scan_leeds_leads()
+
+        _, kwargs = mock_get.call_args
+        where_clause = kwargs["params"]["where"]
+        self.assertIn("DATEAPVAL >=", where_clause)
+        self.assertIn("DECSN IS NULL", where_clause)
+        self.assertEqual(kwargs["params"]["orderByFields"], "DATEAPVAL DESC")
+
+    def test_real_field_names_produce_a_real_lead_with_registered_date(self):
+        """PROPOSAL/REFVAL (the layer's real fields, confirmed live) must
+        actually reach _insert_lead -- and DATEAPVAL (epoch milliseconds,
+        confirmed live) must convert to the same 'YYYY-MM-DD' registered_date
+        shape every other source uses, feeding the real-filed-date countdown
+        fix."""
+        arcgis_resp = MagicMock(status_code=200)
+        arcgis_resp.json.return_value = {"features": [
+            {"attributes": {
+                # Real TREE_GOLD keyword ("beech tree" + "felling") included
+                # deliberately -- bare arborist shorthand like "T1 Beech -
+                # remove" alone does NOT match any TREE_GOLD phrase (no
+                # species-only entry exists, by design -- see TREE_GOLD's own
+                # comments), so a fixture without a real keyword would fail
+                # classification before ever reaching _insert_lead, which is
+                # not what this test is checking.
+                "PROPOSAL": "T1 Beech tree - felling due to failure of codominant stem.",
+                "REFVAL": "26/04913/TR", "ADDRESS": "1 Kirkgate, Leeds",
+                "DATEAPVAL": 1788307200000,  # 2026-09-02 00:00:00 UTC
+                "DECSN": None,
+            }},
+        ]}
+
+        with patch("net_utils.smart_get", return_value=arcgis_resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "scan_city_planning_api", return_value=0), \
+             patch.object(scanners, "_insert_lead", return_value=None) as mock_insert:
+            scanners.scan_leeds_leads()
+
+        mock_insert.assert_called_once()
+        args, kwargs = mock_insert.call_args
+        self.assertEqual(args[1], "26/04913/TR")
+        self.assertEqual(args[2], "1 Kirkgate, Leeds")
+        self.assertIn("Beech", args[3])
+        self.assertEqual(kwargs.get("registered_date"), "2026-09-02")
+
+    def test_no_applicant_or_agent_fields_exist_on_this_layer(self):
+        """Documents a real, verified limitation rather than an oversight:
+        the ArcGIS layer's own schema (fetched live) has no applicant/agent
+        field at all. This path can never supply that data directly --
+        confirms _insert_lead is never asked to pass has_agent/
+        applicant_name from this source, matching the docstring's own
+        explanation of why real agent data still has to come from Leeds'
+        Idox portal (COUNCIL_REGISTRY) merging onto the same reference."""
+        arcgis_resp = MagicMock(status_code=200)
+        arcgis_resp.json.return_value = {"features": [
+            {"attributes": {
+                "PROPOSAL": "Felling of 2no. diseased ash trees",
+                "REFVAL": "26/00001/TR", "ADDRESS": "9 Kirkgate, Leeds",
+                "DATEAPVAL": 1788307200000, "DECSN": None,
+            }},
+        ]}
+
+        with patch("net_utils.smart_get", return_value=arcgis_resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "scan_city_planning_api", return_value=0), \
+             patch.object(scanners, "_insert_lead", return_value=None) as mock_insert:
+            scanners.scan_leeds_leads()
+
+        _, kwargs = mock_insert.call_args
+        self.assertNotIn("has_agent", kwargs)
+        self.assertNotIn("applicant_name", kwargs)
+
+    def test_exceeded_transfer_limit_logs_a_warning_instead_of_silently_truncating(self):
+        arcgis_resp = MagicMock(status_code=200)
+        arcgis_resp.json.return_value = {"features": [], "exceededTransferLimit": True}
+
+        with patch("net_utils.smart_get", return_value=arcgis_resp), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "scan_city_planning_api", return_value=0), \
+             patch.object(scanners, "logger") as mock_logger:
+            scanners.scan_leeds_leads()
+
+        self.assertTrue(
+            any("exceededTransferLimit" in str(c) or "result cap" in str(c)
+                for c in mock_logger.warning.call_args_list)
+        )
+
+
 class TestIsTreeTradeCompanyName(unittest.TestCase):
     """research.is_tree_trade_company_name (Aug 31 2026): a real production
     run of perform_research() enriched a psychology practice, a nursery, an
@@ -2690,11 +2940,15 @@ class TestReviewQueueWiringAtAllFourCallSites(unittest.TestCase):
         scanners._PLANIT_LAST_REQUEST_AT = 0.0
 
     def test_leeds_arcgis_queues_unmatched_record_with_a_real_reference(self):
+        # Sep 3 2026: PROPOSAL/REFVAL are the layer's real field names --
+        # see scan_leeds_leads' own comment for how DESCRIPTION/REFERENCE
+        # (neither of which exist on this layer) caused every feature to
+        # silently fall into this exact branch before the fix, forever.
         arcgis_resp = MagicMock(status_code=200)
         arcgis_resp.json.return_value = {"features": [
             {"attributes": {
-                "DESCRIPTION": "Erection of a two-storey rear extension.",
-                "REFERENCE": "LDS/JUNK/1", "ADDRESS": "3 Kirkgate, Leeds",
+                "PROPOSAL": "Erection of a two-storey rear extension.",
+                "REFVAL": "LDS/JUNK/1", "ADDRESS": "3 Kirkgate, Leeds",
             }},
         ]}
 
@@ -2712,8 +2966,8 @@ class TestReviewQueueWiringAtAllFourCallSites(unittest.TestCase):
         arcgis_resp = MagicMock(status_code=200)
         arcgis_resp.json.return_value = {"features": [
             {"attributes": {
-                "DESCRIPTION": "Erection of a two-storey rear extension.",
-                "REFERENCE": "", "ADDRESS": "3 Kirkgate, Leeds",
+                "PROPOSAL": "Erection of a two-storey rear extension.",
+                "REFVAL": "", "ADDRESS": "3 Kirkgate, Leeds",
             }},
         ]}
 
