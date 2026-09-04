@@ -5190,6 +5190,24 @@ def lead_source_health(secret: Optional[str] = Query(None)):
     return {"sources": database.get_lead_source_health_report()}
 
 
+@app.get("/recent-warnings")
+def recent_warnings(secret: Optional[str] = Query(None), hours: int = Query(24)):
+    """Sep 4 2026: pairs with the WARNING-severity change in notifications.
+    send_system_incident_alert() -- WARNING alerts (benign-until-proven-
+    otherwise scraper quirks like a TLS fallback or a possible page-
+    structure change) no longer email immediately, they're logged to the
+    system_warnings table and only escalate to an email once the same
+    issue has recurred on 3+ distinct days in a week. This route is the
+    read-only way to check what's been logged-but-not-emailed on your own
+    schedule, so a real pattern can still be spotted early even before it
+    hits the 3-day escalation threshold -- Nick's own ask: "make sure i
+    only get emails when there is a serious issue... is there anything you
+    can do about that" -- CRITICAL/SECURITY alerts are unaffected by any
+    of this, they still email immediately as before."""
+    verify_cron_secret(secret)
+    return {"warnings": database.get_recent_warnings(hours=hours)}
+
+
 @app.get("/scheduler-heartbeat")
 def scheduler_heartbeat(secret: Optional[str] = Query(None)):
     """Sep 3 2026: the failsafe for the failsafe. Every automatic check in

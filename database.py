@@ -437,6 +437,30 @@ def init_db():
                 town TEXT,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
+
+            -- Sep 4 2026: backs the WARNING-severity half of
+            -- notifications.send_system_incident_alert() (see that
+            -- function's own Sep 4 comment for the full reasoning). Nick's
+            -- own words: "if the warning emails are mostly ignored i will
+            -- never know when to pay attention" -- CRITICAL alerts still
+            -- email immediately as before, but a WARNING now gets logged
+            -- here instead of emailed, and only escalates to a real email
+            -- once the SAME category+title has recurred on 3+ distinct
+            -- calendar days within a rolling week (get_warning_recurrence_
+            -- days below) -- a genuinely sustained problem, not a one-off
+            -- blip or a burst of stale alerts re-firing after a redeploy
+            -- resets the in-memory per-key throttle (exactly what happened
+            -- Sep 3/4: a wave of TLS-fallback/page-structure warnings across
+            -- ~15 unrelated councils fired in one batch purely because the
+            -- throttle cache was wiped, live-verified as false alarms on
+            -- every council spot-checked).
+            CREATE TABLE IF NOT EXISTS system_warnings (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                category TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT,
+                occurred_at TIMESTAMPTZ DEFAULT NOW()
+            );
         """)
 
         # Performance Indices for Instant High-Volume Queries
@@ -459,6 +483,7 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_leads_source_type ON leads(lead_source_type);",
             "CREATE INDEX IF NOT EXISTS idx_territory_outcode ON territory_claims(outcode);",
             "CREATE INDEX IF NOT EXISTS idx_unclassified_status ON unclassified_applications(status, discovered_at ASC);",
+            "CREATE INDEX IF NOT EXISTS idx_system_warnings_lookup ON system_warnings(category, title, occurred_at DESC);",
         ]
         for idx in indices:
             cur.execute(idx)
@@ -836,6 +861,100 @@ def get_lead_source_health_report(recent_days: int = 3, baseline_days: int = 30,
         return report
     except Exception as e:
         logger.error(f"[LeadSourceHealth] Error building health report: {e}")
+        return []
+
+
+def log_system_warning(category: str, title: str, description: str = "") -> bool:
+    """Sep 4 2026: persists a WARNING-severity incident (see
+    notifications.send_system_incident_alert's own comment for the full
+    reasoning) instead of emailing it immediately. Best-effort -- returns
+    False and logs on any DB error rather than raising, since a warning
+    that fails to log should never itself become the incident."""
+    if not SURL:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "INSERT INTO system_warnings (category, title, description) VALUES (%s, %s, %s);",
+                (category, title, description),
+            )
+            conn.commit()
+            return True
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[SystemWarnings] Error logging warning {category}:{title}: {e}")
+        return False
+
+
+def get_warning_recurrence_days(category: str, title: str, window_days: int = 7) -> int:
+    """Counts the number of DISTINCT calendar days this exact category+
+    title has been logged within the trailing `window_days` -- the signal
+    notifications.send_system_incident_alert uses to tell a genuinely
+    sustained, worsening problem (the same thing, day after day) apart from
+    a one-off blip or a burst of unrelated alerts all re-firing at once
+    (e.g. every in-memory alert throttle resetting on the same redeploy --
+    live-confirmed Sep 3/4 2026 to look identical to a real incident from
+    the alert titles alone, but NOT be one). Returns 0 on any DB error so a
+    health-check failure can never itself block or wrongly escalate an
+    alert."""
+    if not SURL:
+        return 0
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT COUNT(DISTINCT occurred_at::date)
+                FROM system_warnings
+                WHERE category = %s AND title = %s
+                  AND occurred_at >= NOW() - (%s || ' days')::interval;
+                """,
+                (category, title, window_days),
+            )
+            row = cur.fetchone()
+            return row[0] if row else 0
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[SystemWarnings] Error counting recurrence for {category}:{title}: {e}")
+        return 0
+
+
+def get_recent_warnings(hours: int = 24) -> list:
+    """Read-only lookup for a human to check on their own schedule (e.g. a
+    /recent-warnings dashboard route) -- everything logged by
+    log_system_warning in the last `hours`, most recent first. Returns []
+    on any DB error, same failsafe pattern as get_lead_source_health_report
+    above."""
+    if not SURL:
+        return []
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT category, title, description, occurred_at
+                FROM system_warnings
+                WHERE occurred_at >= NOW() - (%s || ' hours')::interval
+                ORDER BY occurred_at DESC
+                LIMIT 500;
+                """,
+                (hours,),
+            )
+            cols = ["category", "title", "description", "occurred_at"]
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[SystemWarnings] Error fetching recent warnings: {e}")
         return []
 
 

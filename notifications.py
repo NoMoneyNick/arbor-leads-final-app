@@ -550,9 +550,59 @@ def send_system_incident_alert(
     """
     Unified high-visibility system incident alert dispatcher.
     Sends ultra-bold ALL-CAPS emails for any critical issue or near-term system risk.
+
+    Sep 4 2026 (Nick, verbatim): "if the warning emails are mostly ignored i
+    will never know when to pay attention ... make sure i only get emails
+    when there is a serious issue or a serious issue about to occur." Root
+    cause: this function used to email for EVERY severity identically --
+    severity only ever changed the HTML colour theme, never whether an
+    email actually went out. That's exactly why the Sep 3/4 redeploy
+    (which resets net_utils._TLS_ALERT_THROTTLE and IdoxScraper.
+    _structure_alert_throttle -- both plain in-process-memory dicts) caused
+    ~15 unrelated WARNING alerts to fire in one simultaneous burst, all
+    confirmed false alarms by live spot-check (Royal Greenwich/Brent still
+    parse fine, Croydon loads fine in a real browser -- see net_utils.py
+    and mesh_scrapers.py's own alert functions for the detail).
+
+    New behaviour: CRITICAL and SECURITY are unchanged -- always an
+    immediate email, still deduped by the throttle below. WARNING no
+    longer emails immediately at all -- it's logged to the system_warnings
+    table (database.log_system_warning) and only escalates to a real email
+    once the SAME category+title has recurred on 3+ distinct calendar days
+    within a trailing 7-day window (database.get_warning_recurrence_days)
+    -- a genuinely sustained/worsening problem, not a one-off blip or a
+    burst of stale per-key throttles re-firing after a deploy wipes them.
+    The escalation email is a separately-throttled (48h), distinctly
+    titled "RECURRING" alert, so Nick can tell it apart from a fresh
+    CRITICAL and it doesn't re-nag daily once he's already seen it.
     """
     cache_key = f"{category}:{title}"
     now_ts = time.time()
+
+    if severity.upper() == "WARNING":
+        try:
+            import database
+            database.log_system_warning(category, title, description)
+            recurrence_days = database.get_warning_recurrence_days(category, title, window_days=7)
+        except Exception as e:
+            logging.error(f"[SYSTEM WARNING] Failed to log/check recurrence for {cache_key}: {e}")
+            recurrence_days = 0
+
+        if recurrence_days < 3:
+            logging.info(
+                f"[SYSTEM WARNING LOGGED] {cache_key} logged, not emailed "
+                f"(recurred on {recurrence_days} distinct day(s) in the last 7 -- needs 3+ to escalate)."
+            )
+            return
+
+        # Escalate: recurring on 3+ distinct days is a real, sustained
+        # trend -- worth an actual email, but kept clearly labelled and
+        # throttled far more loosely (48h) than a CRITICAL, since it's
+        # already been true for days and won't stop being true in an hour.
+        cache_key = f"ESCALATED:{category}:{title}"
+        throttle_hours = 48.0
+        title = f"RECURRING — {title} (seen on {recurrence_days} of the last 7 days)"
+
     last_sent = _ALERT_THROTTLE_CACHE.get(cache_key, 0)
     if (now_ts - last_sent) < (throttle_hours * 3600):
         logging.info(f"[ALERT THROTTLED] Suppressed duplicate alert for {cache_key} (sent {round((now_ts - last_sent)/60)}m ago).")

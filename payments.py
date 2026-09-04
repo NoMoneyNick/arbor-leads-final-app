@@ -275,13 +275,21 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
     except stripe.error.SignatureVerificationError:
         logger.warning("[Stripe Webhook] Invalid signature — possible spoofed request.")
+        # Sep 4 2026: bumped from WARNING to CRITICAL. notifications.
+        # send_system_incident_alert()'s WARNING tier now logs-and-waits-
+        # for-recurrence instead of emailing immediately (see that
+        # function's own Sep 4 comment) -- right for a benign, low-stakes
+        # scraper quirk, wrong here: a broken STRIPE_WEBHOOK_SECRET means
+        # every real payment silently fails to fulfil, and a genuine
+        # spoofed request is a live security event. Neither should sit
+        # unreported for up to 3 days waiting to "recur".
         notifications.send_system_incident_alert(
             category="SECURITY & PAYMENTS",
             title="STRIPE WEBHOOK SIGNATURE MISMATCH / INVALID SIGNATURE",
-            description="WARNING: An incoming webhook payload failed cryptographic signature verification against STRIPE_WEBHOOK_SECRET.",
+            description="An incoming webhook payload failed cryptographic signature verification against STRIPE_WEBHOOK_SECRET.",
             impact="The webhook was rejected to protect against spoofed transactions. If this was a legitimate Stripe event, webhook fulfillment failed.",
             action_required="1. Verify STRIPE_WEBHOOK_SECRET in Render matches the Signing Secret in Stripe Dashboard. 2. Check if a new webhook endpoint was created in Stripe.",
-            severity="WARNING",
+            severity="CRITICAL",
             throttle_hours=2.0
         )
         return {"error": "Invalid signature"}

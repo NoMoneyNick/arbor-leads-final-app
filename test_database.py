@@ -883,5 +883,100 @@ class TestLeadSourceHealthReport(unittest.TestCase):
         self.assertEqual(report, [])
 
 
+class TestSystemWarningsLogging(unittest.TestCase):
+    """Sep 4 2026: backs the WARNING-severity half of notifications.
+    send_system_incident_alert() -- see that function's own Sep 4 comment.
+    Nick's own words: "if the warning emails are mostly ignored i will
+    never know when to pay attention" -- a WARNING now gets logged here
+    instead of emailed immediately, and only escalates to a real email
+    once the same category+title has recurred on 3+ distinct calendar days
+    within a rolling week. These tests lock in the three DB functions that
+    logic depends on, independent of the email-dispatch decision itself
+    (which is covered in test_notifications.py)."""
+
+    def _conn_with_execute(self):
+        conn = MagicMock()
+        cur = MagicMock()
+        conn.cursor.return_value = cur
+        return conn, cur
+
+    def test_log_system_warning_inserts_and_returns_true(self):
+        conn, cur = self._conn_with_execute()
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            ok = database.log_system_warning("SCRAPER TLS FALLBACK", "example.gov.uk required fallback", "some detail")
+        self.assertTrue(ok)
+        cur.execute.assert_called_once()
+        args = cur.execute.call_args[0]
+        self.assertIn("INSERT INTO system_warnings", args[0])
+        self.assertEqual(args[1], ("SCRAPER TLS FALLBACK", "example.gov.uk required fallback", "some detail"))
+        conn.commit.assert_called_once()
+
+    def test_log_system_warning_no_database_returns_false(self):
+        with patch.object(database, "SURL", ""):
+            ok = database.log_system_warning("CAT", "TITLE")
+        self.assertFalse(ok)
+
+    def test_log_system_warning_db_error_returns_false_not_a_crash(self):
+        with patch.object(database, "get_db_conn", side_effect=Exception("connection refused")), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            ok = database.log_system_warning("CAT", "TITLE")
+        self.assertFalse(ok)
+
+    def test_get_warning_recurrence_days_returns_count(self):
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.fetchone.return_value = (3,)
+        conn.cursor.return_value = cur
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            days = database.get_warning_recurrence_days("CAT", "TITLE", window_days=7)
+        self.assertEqual(days, 3)
+
+    def test_get_warning_recurrence_days_no_rows_returns_zero(self):
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.fetchone.return_value = None
+        conn.cursor.return_value = cur
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            days = database.get_warning_recurrence_days("CAT", "TITLE")
+        self.assertEqual(days, 0)
+
+    def test_get_warning_recurrence_days_no_database_returns_zero(self):
+        with patch.object(database, "SURL", ""):
+            days = database.get_warning_recurrence_days("CAT", "TITLE")
+        self.assertEqual(days, 0)
+
+    def test_get_warning_recurrence_days_db_error_returns_zero_not_a_crash(self):
+        with patch.object(database, "get_db_conn", side_effect=Exception("boom")), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            days = database.get_warning_recurrence_days("CAT", "TITLE")
+        self.assertEqual(days, 0)
+
+    def test_get_recent_warnings_returns_dicts(self):
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.fetchall.return_value = [("SCRAPER TLS FALLBACK", "x.gov.uk required fallback", "detail", "2026-09-04T10:00:00Z")]
+        conn.cursor.return_value = cur
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            warnings = database.get_recent_warnings(hours=24)
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0]["category"], "SCRAPER TLS FALLBACK")
+        self.assertEqual(warnings[0]["title"], "x.gov.uk required fallback")
+
+    def test_get_recent_warnings_no_database_returns_empty_list(self):
+        with patch.object(database, "SURL", ""):
+            warnings = database.get_recent_warnings()
+        self.assertEqual(warnings, [])
+
+    def test_get_recent_warnings_db_error_returns_empty_list_not_a_crash(self):
+        with patch.object(database, "get_db_conn", side_effect=Exception("boom")), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            warnings = database.get_recent_warnings()
+        self.assertEqual(warnings, [])
+
+
 if __name__ == "__main__":
     unittest.main()
