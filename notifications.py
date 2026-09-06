@@ -97,6 +97,62 @@ def send_resend_email(subject: str, html_body: str) -> bool:
         return False
 
 
+def send_transactional_email(to_email: str, subject: str, html_body: str,
+                              from_label: str = "TreeKey Support <leads@treekey.uk>") -> bool:
+    """Sep 5 2026 CRITICAL FIX: send_resend_email() above always sends to the
+    fixed internal TEST_EMAIL address -- correct for the admin/incident
+    alerts it was built for, but main.py's magic-link login handler
+    (request_magic_link) was calling THAT function for the actual
+    customer-facing login email, meaning every contractor requesting a
+    1-tap login link had it delivered to Nick's own TEST_EMAIL inbox
+    instead of their own -- the entire login flow was silently broken for
+    every real contractor except whoever's email happens to be TEST_EMAIL.
+    Root-caused live while building the free-signup feature (which also
+    needs to email a real customer directly). This function is the
+    customer-facing counterpart to send_resend_email: same Resend call
+    shape as send_purchased_lead_email's already-correct direct request,
+    just generalised so future customer-facing sends don't reach for the
+    admin-only helper by mistake."""
+    if not RESEND_API_KEY:
+        logging.warning(f"[Email] RESEND_API_KEY not set — cannot send to {to_email}.")
+        _record_email_attempt(False, "RESEND_API_KEY not configured")
+        return False
+    if not to_email or "@" not in to_email:
+        logging.warning(f"[Email] Refusing to send — {to_email!r} doesn't look like an email address.")
+        _record_email_attempt(False, "invalid recipient")
+        return False
+    try:
+        res = requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "from": from_label,
+                "to": [to_email],
+                "subject": subject,
+                "html": html_body
+            },
+            timeout=10
+        )
+        if res.status_code not in (200, 201):
+            logging.error(f"[Email] Failed to send to {to_email}: HTTP {res.status_code}: {res.text[:200]}")
+            _record_email_attempt(False, f"HTTP {res.status_code}: {res.text[:200]}")
+            return False
+        logging.info(f"[Email] Sent '{subject}' to {to_email}")
+        _record_email_attempt(True, None)
+        return True
+    except requests.exceptions.Timeout:
+        logging.error(f"[Email] Request to send to {to_email} timed out.")
+        _record_email_attempt(False, "Resend request timed out")
+        return False
+    except Exception as e:
+        logging.error(f"[Email] Unexpected error sending to {to_email}: {e}")
+        _record_email_attempt(False, str(e)[:300])
+        return False
+
+
 def send_purchased_lead_email(customer_email: str, lead_data: dict):
     """Emails the completely unlocked lead details to the buyer after a successful Stripe payment."""
     if not RESEND_API_KEY:

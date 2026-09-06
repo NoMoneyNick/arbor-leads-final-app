@@ -1289,17 +1289,17 @@ def scrape_northgate_council(council_name: str) -> List[Dict]:
 # No cookies/session are involved -- confirmed via document.cookie being
 # empty on a successful call from the page's own console.
 #
-# IMPORTANT, HONEST CAVEAT: WebFetch and this project's own cloud tooling
-# both got HTTP 403 hitting this same domain from outside a real browser,
-# while the browser itself (no special auth, just these 3 headers) worked
-# cleanly. That could mean either (a) this API blocks any non-browser
-# client by IP/ASN reputation -- in which case a plain requests-based
-# scraper would ALSO get blocked once deployed, or (b) the 403 was specific
-# to this sandbox's own outbound network path and a normal server (e.g.
-# Render, this project's actual host) will succeed fine. This has NOT been
-# verified from Render -- it can only be confirmed after deployment, by
-# checking whether this scraper actually returns leads in production logs
-# rather than silently erroring out every run (it fails soft, see below).
+# RESOLVED Sep 4 2026 (was: "IMPORTANT, HONEST CAVEAT" -- WebFetch and this
+# project's own cloud tooling both got HTTP 403 hitting this domain from
+# outside a real browser, while the browser itself worked cleanly, and it
+# was unclear whether that was IP/ASN blocking that would ALSO catch
+# Render, or just this dev sandbox's own outbound network path). It's now
+# confirmed option (b): the Sep 4 /system-health-check swept this exact
+# code path live from Render itself and got real results back for all 5
+# Agile Applications councils (Islington: 2, Redbridge: 4, Richmond upon
+# Thames: 2, Lake District: 0, Pembrokeshire Coast: 2 -- all status "ok").
+# This API does not block Render's outbound traffic; the earlier 403s were
+# specific to this dev sandbox's own network path.
 #
 # Response shape (confirmed live):
 #   {"total": N, "results": [{"id", "applicationType", "reference",
@@ -1553,18 +1553,15 @@ def scrape_agile_applications_council(council_name: str, max_rows: int = 40) -> 
 #      generically by label, same defensive approach as every other
 #      scraper in this project).
 #
-# SAME HONEST CAVEAT AS AGILE APPLICATIONS ABOVE: this could only be
-# confirmed to work from inside the browser's own origin. A cloud-bash curl
-# attempt at this exact domain from this project's own dev sandbox didn't
-# even get a response -- the sandbox's own outbound network policy refused
-# the connection outright (not even a 403 from Manchester's server, a
-# rejection before the request left this environment). That's now the
-# SECOND UK council domain in this session (after Agile Applications) that
-# this sandbox's own tooling can't reach at all while a real browser can --
-# consistent with this being specific to this dev sandbox's own network
-# path, not necessarily true of Render (this project's actual production
-# host), but still genuinely UNCONFIRMED until this runs live in
-# production and either returns leads or logs errors every run.
+# RESOLVED Sep 4 2026 (was: "SAME HONEST CAVEAT AS AGILE APPLICATIONS
+# ABOVE... still genuinely UNCONFIRMED until this runs live in production").
+# It has now run live in production: the Sep 4 /system-health-check swept
+# every mesh-network target directly from Render itself (not this dev
+# sandbox, which genuinely can't reach outbound domains at all -- a
+# separate, sandbox-only restriction unrelated to Manchester specifically)
+# and got real results back -- Manchester: 17 leads, Wiltshire: 1 lead,
+# both status "ok". This platform is now confirmed reachable from this
+# project's actual production host, not just from a browser.
 
 # Sep 3 2026: Wiltshire runs the same Arcus BE product as Manchester but on
 # a differently-configured path -- confirmed live via the same browser-

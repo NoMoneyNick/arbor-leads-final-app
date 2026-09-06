@@ -1235,109 +1235,36 @@ def run_mesh_network_scan() -> int:
                     new_leads.append(inserted)
             conn.commit()
 
-            # Sep 3 2026: Northgate/NEC "PlanningExplorer" councils (Wandsworth,
-            # Camden) -- a genuinely different platform from Idox, previously
-            # removed from COUNCIL_REGISTRY above with no replacement engine
-            # ever built, so they sat at zero leads indefinitely. Same loop
-            # shape as the Idox one above, kept separate since NORTHGATE_
-            # COUNCILS is its own registry (see mesh_scrapers.py's own comment
-            # for why Idox and Northgate need separate scraper classes).
-            for council_name, url in mesh_scrapers.NORTHGATE_COUNCILS.items():
-                logger.info(f"[NORTHGATE] Scraping {council_name} directly from {url}...")
-                time.sleep(2)
-                leads = mesh_scrapers.scrape_northgate_council(council_name)
-                for lead in leads:
-                    ref = lead.get("reference")
-                    addr = lead.get("address")
-                    desc = lead.get("description")
-                    if not ref or not desc:
-                        continue
-                    inserted = _insert_lead(
-                        cur, ref, addr, desc, council_name.title(),
-                        applicant_name=lead.get("applicant_name"),
-                        agent_name=lead.get("agent_name"),
-                        agent_company=lead.get("agent_company"),
-                        has_agent=lead.get("has_agent"),
-                        agent_is_tree_surgeon=lead.get("agent_is_tree_surgeon"),
-                        vertical=lead.get("vertical", "tree"),
-                        registered_date=lead.get("registered_date"),
-                    )
-                    if inserted:
-                        new_leads.append(inserted)
-                conn.commit()
-
-            # Sep 3 2026: Agile Applications "Citizen Portal" councils
-            # (Islington) -- a third distinct platform, a direct JSON API
-            # rather than an HTML form scrape (see mesh_scrapers.py's own
-            # comment for the full API contract and the honest caveat about
-            # this only being confirmed to work from a real browser so far,
-            # not yet confirmed from this server's own network path). Kept
-            # as its own loop/registry for the same reason Northgate is
-            # separate from Idox -- a genuinely different scraper mechanism.
-            for council_name, entry in mesh_scrapers.AGILE_APPLICATIONS_COUNCILS.items():
-                logger.info(f"[AGILE] Scraping {council_name} directly from {entry['base']}...")
-                time.sleep(2)
-                leads = mesh_scrapers.scrape_agile_applications_council(council_name)
-                for lead in leads:
-                    ref = lead.get("reference")
-                    addr = lead.get("address")
-                    desc = lead.get("description")
-                    if not ref or not desc:
-                        continue
-                    inserted = _insert_lead(
-                        cur, ref, addr, desc, council_name.title(),
-                        applicant_name=lead.get("applicant_name"),
-                        agent_name=lead.get("agent_name"),
-                        agent_company=lead.get("agent_company"),
-                        has_agent=lead.get("has_agent"),
-                        agent_is_tree_surgeon=lead.get("agent_is_tree_surgeon"),
-                        vertical=lead.get("vertical", "tree"),
-                        registered_date=lead.get("registered_date"),
-                    )
-                    if inserted:
-                        new_leads.append(inserted)
-                conn.commit()
-
-            # Sep 3 2026: Arcus BE councils (Manchester) -- a fourth
-            # distinct platform (Salesforce Aura), see mesh_scrapers.py's
-            # own comment for the full call contract, why the pinned
-            # fwuid/app hash is safe to hardcode, and the same "confirmed
-            # in-browser, not yet confirmed from this server's own network
-            # path" honest caveat that applies to Agile Applications above.
-            for council_name, entry in mesh_scrapers.ARCUS_COUNCILS.items():
-                logger.info(f"[ARCUS] Scraping {council_name} directly from {entry['base']}...")
-                time.sleep(2)
-                leads = mesh_scrapers.scrape_arcus_council(council_name)
-                for lead in leads:
-                    ref = lead.get("reference")
-                    addr = lead.get("address")
-                    desc = lead.get("description")
-                    if not ref or not desc:
-                        continue
-                    inserted = _insert_lead(
-                        cur, ref, addr, desc, council_name.title(),
-                        applicant_name=lead.get("applicant_name"),
-                        agent_name=lead.get("agent_name"),
-                        agent_company=lead.get("agent_company"),
-                        has_agent=lead.get("has_agent"),
-                        agent_is_tree_surgeon=lead.get("agent_is_tree_surgeon"),
-                        vertical=lead.get("vertical", "tree"),
-                        registered_date=lead.get("registered_date"),
-                    )
-                    if inserted:
-                        new_leads.append(inserted)
-                conn.commit()
-
-            # Sep 3 2026: Hounslow -- a fifth distinct platform (NEC Online
-            # Planning, a different/newer Northgate product from Wandsworth/
-            # Camden's classic PlanningExplorer). Single council, no dict
-            # registry to loop -- see mesh_scrapers.py's own comment for
-            # the full contract. Genuinely stateless (no cookies/session,
-            # confirmed live), so no honest caveat needed here unlike Agile
-            # Applications/Arcus above.
-            logger.info(f"[HOUNSLOW] Scraping Hounslow directly from {mesh_scrapers.HOUNSLOW_BASE}...")
+        # Sep 4 2026 BUG FOUND AND FIXED: every block below (Northgate,
+        # Agile Applications, Arcus, Hounslow, North York Moors, Havering,
+        # St Albans, RBKC, Dorset, Stratford-on-Avon) used to be indented
+        # ONE LEVEL TOO DEEP -- nested INSIDE the `for council_name, url in
+        # mesh_scrapers.COUNCIL_REGISTRY.items():` loop above instead of
+        # after it. That meant every one of those ~16 councils/platforms
+        # was being re-scraped once per Idox council in COUNCIL_REGISTRY
+        # (~50 councils) -- roughly 50x the intended request volume, EVERY
+        # single day, against the smallest, most fragile targets in the
+        # whole mesh network. Found while auditing for efficiency after
+        # Nick asked "check the rest for working efficiency and bugs" --
+        # this alone was almost certainly a real, silent factor behind
+        # slow/hanging council responses (the exact opposite of the
+        # "be polite to council portals" goal every 2s sleep/User-Agent
+        # change in this file and net_utils.py was written for). Dedented
+        # so each of these now runs exactly once per daily sweep, same as
+        # every Idox council.
+        #
+        # Sep 3 2026 (original comment, still accurate): Northgate/NEC
+        # "PlanningExplorer" councils (Wandsworth, Camden) -- a genuinely
+        # different platform from Idox, previously removed from
+        # COUNCIL_REGISTRY above with no replacement engine ever built, so
+        # they sat at zero leads indefinitely. Same loop shape as the Idox
+        # one above, kept separate since NORTHGATE_COUNCILS is its own
+        # registry (see mesh_scrapers.py's own comment for why Idox and
+        # Northgate need separate scraper classes).
+        for council_name, url in mesh_scrapers.NORTHGATE_COUNCILS.items():
+            logger.info(f"[NORTHGATE] Scraping {council_name} directly from {url}...")
             time.sleep(2)
-            leads = mesh_scrapers.scrape_hounslow_council("HOUNSLOW")
+            leads = mesh_scrapers.scrape_northgate_council(council_name)
             for lead in leads:
                 ref = lead.get("reference")
                 addr = lead.get("address")
@@ -1345,7 +1272,7 @@ def run_mesh_network_scan() -> int:
                 if not ref or not desc:
                     continue
                 inserted = _insert_lead(
-                    cur, ref, addr, desc, "Hounslow",
+                    cur, ref, addr, desc, council_name.title(),
                     applicant_name=lead.get("applicant_name"),
                     agent_name=lead.get("agent_name"),
                     agent_company=lead.get("agent_company"),
@@ -1358,18 +1285,25 @@ def run_mesh_network_scan() -> int:
                     new_leads.append(inserted)
             conn.commit()
 
-            # Sep 3 2026: North York Moors NPA -- a sixth distinct platform
-            # (StatMap HorizoNext public portal, not the "Aurora" map widget
-            # the council's own site embeds -- Aurora's own search results
-            # carry no reference/status/date, so it isn't usable for lead
-            # gen; HorizoNext is a separate, proper register found via
-            # Aurora's own "More Info" links). Single authority, no dict
-            # registry -- see mesh_scrapers.py's own comment for the full
-            # contract. Genuinely stateless (no cookies/session, confirmed
-            # live).
-            logger.info(f"[NYM] Scraping North York Moors directly from {mesh_scrapers.NORTH_YORK_MOORS_BASE}...")
+        # Sep 3 2026: Agile Applications "Citizen Portal" councils
+        # (Islington) -- a third distinct platform, a direct JSON API
+        # rather than an HTML form scrape (see mesh_scrapers.py's own
+        # comment for the full API contract). Kept as its own loop/registry
+        # for the same reason Northgate is separate from Idox -- a
+        # genuinely different scraper mechanism.
+        #
+        # Sep 4 2026: the original honest caveat here ("confirmed to work
+        # from a real browser so far, not yet confirmed from this server's
+        # own network path") is now resolved -- the Sep 4 /system-health-
+        # check run hit this exact code path live FROM Render itself and
+        # got real results back for all 5 Agile Applications councils
+        # (Islington, Redbridge, Richmond upon Thames, Lake District,
+        # Pembrokeshire Coast), so this platform is confirmed reachable
+        # from this server's real network path, not just from a browser.
+        for council_name, entry in mesh_scrapers.AGILE_APPLICATIONS_COUNCILS.items():
+            logger.info(f"[AGILE] Scraping {council_name} directly from {entry['base']}...")
             time.sleep(2)
-            leads = mesh_scrapers.scrape_north_york_moors()
+            leads = mesh_scrapers.scrape_agile_applications_council(council_name)
             for lead in leads:
                 ref = lead.get("reference")
                 addr = lead.get("address")
@@ -1377,7 +1311,7 @@ def run_mesh_network_scan() -> int:
                 if not ref or not desc:
                     continue
                 inserted = _insert_lead(
-                    cur, ref, addr, desc, "North York Moors",
+                    cur, ref, addr, desc, council_name.title(),
                     applicant_name=lead.get("applicant_name"),
                     agent_name=lead.get("agent_name"),
                     agent_company=lead.get("agent_company"),
@@ -1390,16 +1324,19 @@ def run_mesh_network_scan() -> int:
                     new_leads.append(inserted)
             conn.commit()
 
-            # Sep 3 2026: Havering -- a seventh distinct platform (Civica,
-            # msp.havering.gov.uk). First of Nick's 8 "bespoke one-off"
-            # councils; see mesh_scrapers.py's own comment for the full
-            # contract, including why Merton (checked alongside it) is NOT
-            # built -- AWS WAF bot-detection, a genuine block rather than a
-            # missed opportunity. Single authority, no dict registry.
-            # Genuinely stateless (no cookies/session, confirmed live).
-            logger.info(f"[HAVERING] Scraping Havering directly from {mesh_scrapers.HAVERING_BASE}...")
+        # Sep 3 2026: Arcus BE councils (Manchester) -- a fourth
+        # distinct platform (Salesforce Aura), see mesh_scrapers.py's
+        # own comment for the full call contract and why the pinned
+        # fwuid/app hash is safe to hardcode.
+        #
+        # Sep 4 2026: same resolution as Agile Applications above -- the
+        # Sep 4 /system-health-check run confirmed this platform live from
+        # Render itself (Manchester: 17 leads, Wiltshire: 1), so the
+        # original "confirmed in-browser only" caveat no longer applies.
+        for council_name, entry in mesh_scrapers.ARCUS_COUNCILS.items():
+            logger.info(f"[ARCUS] Scraping {council_name} directly from {entry['base']}...")
             time.sleep(2)
-            leads = mesh_scrapers.scrape_havering_council()
+            leads = mesh_scrapers.scrape_arcus_council(council_name)
             for lead in leads:
                 ref = lead.get("reference")
                 addr = lead.get("address")
@@ -1407,7 +1344,7 @@ def run_mesh_network_scan() -> int:
                 if not ref or not desc:
                     continue
                 inserted = _insert_lead(
-                    cur, ref, addr, desc, "Havering",
+                    cur, ref, addr, desc, council_name.title(),
                     applicant_name=lead.get("applicant_name"),
                     agent_name=lead.get("agent_name"),
                     agent_company=lead.get("agent_company"),
@@ -1420,121 +1357,213 @@ def run_mesh_network_scan() -> int:
                     new_leads.append(inserted)
             conn.commit()
 
-            # Sep 3 2026: St Albans -- second bespoke one-off, an eighth
-            # distinct platform (a differently-configured Civica deployment
-            # from Havering's -- see mesh_scrapers.py's own comment for the
-            # full contract). Single authority, no dict registry.
-            logger.info(f"[ST ALBANS] Scraping St Albans directly from {mesh_scrapers.ST_ALBANS_BASE}...")
-            time.sleep(2)
-            leads = mesh_scrapers.scrape_st_albans_council()
-            for lead in leads:
-                ref = lead.get("reference")
-                addr = lead.get("address")
-                desc = lead.get("description")
-                if not ref or not desc:
-                    continue
-                inserted = _insert_lead(
-                    cur, ref, addr, desc, "St Albans",
-                    applicant_name=lead.get("applicant_name"),
-                    agent_name=lead.get("agent_name"),
-                    agent_company=lead.get("agent_company"),
-                    has_agent=lead.get("has_agent"),
-                    agent_is_tree_surgeon=lead.get("agent_is_tree_surgeon"),
-                    vertical=lead.get("vertical", "tree"),
-                    registered_date=lead.get("registered_date"),
-                )
-                if inserted:
-                    new_leads.append(inserted)
-            conn.commit()
+        # Sep 3 2026: Hounslow -- a fifth distinct platform (NEC Online
+        # Planning, a different/newer Northgate product from Wandsworth/
+        # Camden's classic PlanningExplorer). Single council, no dict
+        # registry to loop -- see mesh_scrapers.py's own comment for
+        # the full contract. Genuinely stateless (no cookies/session,
+        # confirmed live), so no honest caveat needed here unlike Agile
+        # Applications/Arcus above.
+        logger.info(f"[HOUNSLOW] Scraping Hounslow directly from {mesh_scrapers.HOUNSLOW_BASE}...")
+        time.sleep(2)
+        leads = mesh_scrapers.scrape_hounslow_council("HOUNSLOW")
+        for lead in leads:
+            ref = lead.get("reference")
+            addr = lead.get("address")
+            desc = lead.get("description")
+            if not ref or not desc:
+                continue
+            inserted = _insert_lead(
+                cur, ref, addr, desc, "Hounslow",
+                applicant_name=lead.get("applicant_name"),
+                agent_name=lead.get("agent_name"),
+                agent_company=lead.get("agent_company"),
+                has_agent=lead.get("has_agent"),
+                agent_is_tree_surgeon=lead.get("agent_is_tree_surgeon"),
+                vertical=lead.get("vertical", "tree"),
+                registered_date=lead.get("registered_date"),
+            )
+            if inserted:
+                new_leads.append(inserted)
+        conn.commit()
 
-            # Sep 3 2026: Kensington & Chelsea (RBKC) -- third bespoke
-            # one-off, a ninth distinct platform. A genuinely custom-built
-            # SPA (not any vendor platform above) -- see mesh_scrapers.py's
-            # own comment for the full contract (binary list API + a
-            # seroval-serialized per-case detail API, since the list API
-            # alone carries no applicant info). Single authority, no dict
-            # registry.
-            logger.info(f"[RBKC] Scraping Kensington & Chelsea directly from {mesh_scrapers.RBKC_BASE}...")
-            time.sleep(2)
-            leads = mesh_scrapers.scrape_kensington_chelsea_council()
-            for lead in leads:
-                ref = lead.get("reference")
-                addr = lead.get("address")
-                desc = lead.get("description")
-                if not ref or not desc:
-                    continue
-                inserted = _insert_lead(
-                    cur, ref, addr, desc, "Kensington and Chelsea",
-                    applicant_name=lead.get("applicant_name"),
-                    agent_name=lead.get("agent_name"),
-                    agent_company=lead.get("agent_company"),
-                    has_agent=lead.get("has_agent"),
-                    agent_is_tree_surgeon=lead.get("agent_is_tree_surgeon"),
-                    vertical=lead.get("vertical", "tree"),
-                    registered_date=lead.get("registered_date"),
-                )
-                if inserted:
-                    new_leads.append(inserted)
-            conn.commit()
+        # Sep 3 2026: North York Moors NPA -- a sixth distinct platform
+        # (StatMap HorizoNext public portal, not the "Aurora" map widget
+        # the council's own site embeds -- Aurora's own search results
+        # carry no reference/status/date, so it isn't usable for lead
+        # gen; HorizoNext is a separate, proper register found via
+        # Aurora's own "More Info" links). Single authority, no dict
+        # registry -- see mesh_scrapers.py's own comment for the full
+        # contract. Genuinely stateless (no cookies/session, confirmed
+        # live).
+        logger.info(f"[NYM] Scraping North York Moors directly from {mesh_scrapers.NORTH_YORK_MOORS_BASE}...")
+        time.sleep(2)
+        leads = mesh_scrapers.scrape_north_york_moors()
+        for lead in leads:
+            ref = lead.get("reference")
+            addr = lead.get("address")
+            desc = lead.get("description")
+            if not ref or not desc:
+                continue
+            inserted = _insert_lead(
+                cur, ref, addr, desc, "North York Moors",
+                applicant_name=lead.get("applicant_name"),
+                agent_name=lead.get("agent_name"),
+                agent_company=lead.get("agent_company"),
+                has_agent=lead.get("has_agent"),
+                agent_is_tree_surgeon=lead.get("agent_is_tree_surgeon"),
+                vertical=lead.get("vertical", "tree"),
+                registered_date=lead.get("registered_date"),
+            )
+            if inserted:
+                new_leads.append(inserted)
+        conn.commit()
 
-            # Sep 3 2026: Dorset -- fourth bespoke one-off, a tenth distinct
-            # platform. Legacy "dorsetforyou.com" ASP.NET WebForms portal
-            # (disclaimer gate -> type-filtered search -> paginated results
-            # -> per-case detail page) -- see mesh_scrapers.py's own comment
-            # for the full contract. Single authority, no dict registry.
-            logger.info(f"[DORSET] Scraping Dorset directly from {mesh_scrapers.DORSET_BASE}...")
-            time.sleep(2)
-            leads = mesh_scrapers.scrape_dorset_council()
-            for lead in leads:
-                ref = lead.get("reference")
-                addr = lead.get("address")
-                desc = lead.get("description")
-                if not ref or not desc:
-                    continue
-                inserted = _insert_lead(
-                    cur, ref, addr, desc, "Dorset",
-                    applicant_name=lead.get("applicant_name"),
-                    agent_name=lead.get("agent_name"),
-                    agent_company=lead.get("agent_company"),
-                    has_agent=lead.get("has_agent"),
-                    agent_is_tree_surgeon=lead.get("agent_is_tree_surgeon"),
-                    vertical=lead.get("vertical", "tree"),
-                    registered_date=lead.get("registered_date"),
-                )
-                if inserted:
-                    new_leads.append(inserted)
-            conn.commit()
+        # Sep 3 2026: Havering -- a seventh distinct platform (Civica,
+        # msp.havering.gov.uk). First of Nick's 8 "bespoke one-off"
+        # councils; see mesh_scrapers.py's own comment for the full
+        # contract, including why Merton (checked alongside it) is NOT
+        # built -- AWS WAF bot-detection, a genuine block rather than a
+        # missed opportunity. Single authority, no dict registry.
+        # Genuinely stateless (no cookies/session, confirmed live).
+        logger.info(f"[HAVERING] Scraping Havering directly from {mesh_scrapers.HAVERING_BASE}...")
+        time.sleep(2)
+        leads = mesh_scrapers.scrape_havering_council()
+        for lead in leads:
+            ref = lead.get("reference")
+            addr = lead.get("address")
+            desc = lead.get("description")
+            if not ref or not desc:
+                continue
+            inserted = _insert_lead(
+                cur, ref, addr, desc, "Havering",
+                applicant_name=lead.get("applicant_name"),
+                agent_name=lead.get("agent_name"),
+                agent_company=lead.get("agent_company"),
+                has_agent=lead.get("has_agent"),
+                agent_is_tree_surgeon=lead.get("agent_is_tree_surgeon"),
+                vertical=lead.get("vertical", "tree"),
+                registered_date=lead.get("registered_date"),
+            )
+            if inserted:
+                new_leads.append(inserted)
+        conn.commit()
 
-            # Sep 3 2026: Stratford-on-Avon -- fifth bespoke one-off, an
-            # eleventh distinct platform. A genuinely custom-built Vue.js
-            # SPA with its own clean JSON REST API (no vendor platform, no
-            # disclaimer gate, no CAPTCHA -- see mesh_scrapers.py's own
-            # comment for the full contract, and its comment on West
-            # Northamptonshire for the contrasting reCAPTCHA-blocked case
-            # that was correctly left unbuilt instead). Single authority,
-            # no dict registry.
-            logger.info(f"[STRATFORD] Scraping Stratford-on-Avon directly from {mesh_scrapers.STRATFORD_BASE}...")
-            time.sleep(2)
-            leads = mesh_scrapers.scrape_stratford_on_avon_council()
-            for lead in leads:
-                ref = lead.get("reference")
-                addr = lead.get("address")
-                desc = lead.get("description")
-                if not ref or not desc:
-                    continue
-                inserted = _insert_lead(
-                    cur, ref, addr, desc, "Stratford-on-Avon",
-                    applicant_name=lead.get("applicant_name"),
-                    agent_name=lead.get("agent_name"),
-                    agent_company=lead.get("agent_company"),
-                    has_agent=lead.get("has_agent"),
-                    agent_is_tree_surgeon=lead.get("agent_is_tree_surgeon"),
-                    vertical=lead.get("vertical", "tree"),
-                    registered_date=lead.get("registered_date"),
-                )
-                if inserted:
-                    new_leads.append(inserted)
-            conn.commit()
+        # Sep 3 2026: St Albans -- second bespoke one-off, an eighth
+        # distinct platform (a differently-configured Civica deployment
+        # from Havering's -- see mesh_scrapers.py's own comment for the
+        # full contract). Single authority, no dict registry.
+        logger.info(f"[ST ALBANS] Scraping St Albans directly from {mesh_scrapers.ST_ALBANS_BASE}...")
+        time.sleep(2)
+        leads = mesh_scrapers.scrape_st_albans_council()
+        for lead in leads:
+            ref = lead.get("reference")
+            addr = lead.get("address")
+            desc = lead.get("description")
+            if not ref or not desc:
+                continue
+            inserted = _insert_lead(
+                cur, ref, addr, desc, "St Albans",
+                applicant_name=lead.get("applicant_name"),
+                agent_name=lead.get("agent_name"),
+                agent_company=lead.get("agent_company"),
+                has_agent=lead.get("has_agent"),
+                agent_is_tree_surgeon=lead.get("agent_is_tree_surgeon"),
+                vertical=lead.get("vertical", "tree"),
+                registered_date=lead.get("registered_date"),
+            )
+            if inserted:
+                new_leads.append(inserted)
+        conn.commit()
+
+        # Sep 3 2026: Kensington & Chelsea (RBKC) -- third bespoke
+        # one-off, a ninth distinct platform. A genuinely custom-built
+        # SPA (not any vendor platform above) -- see mesh_scrapers.py's
+        # own comment for the full contract (binary list API + a
+        # seroval-serialized per-case detail API, since the list API
+        # alone carries no applicant info). Single authority, no dict
+        # registry.
+        logger.info(f"[RBKC] Scraping Kensington & Chelsea directly from {mesh_scrapers.RBKC_BASE}...")
+        time.sleep(2)
+        leads = mesh_scrapers.scrape_kensington_chelsea_council()
+        for lead in leads:
+            ref = lead.get("reference")
+            addr = lead.get("address")
+            desc = lead.get("description")
+            if not ref or not desc:
+                continue
+            inserted = _insert_lead(
+                cur, ref, addr, desc, "Kensington and Chelsea",
+                applicant_name=lead.get("applicant_name"),
+                agent_name=lead.get("agent_name"),
+                agent_company=lead.get("agent_company"),
+                has_agent=lead.get("has_agent"),
+                agent_is_tree_surgeon=lead.get("agent_is_tree_surgeon"),
+                vertical=lead.get("vertical", "tree"),
+                registered_date=lead.get("registered_date"),
+            )
+            if inserted:
+                new_leads.append(inserted)
+        conn.commit()
+
+        # Sep 3 2026: Dorset -- fourth bespoke one-off, a tenth distinct
+        # platform. Legacy "dorsetforyou.com" ASP.NET WebForms portal
+        # (disclaimer gate -> type-filtered search -> paginated results
+        # -> per-case detail page) -- see mesh_scrapers.py's own comment
+        # for the full contract. Single authority, no dict registry.
+        logger.info(f"[DORSET] Scraping Dorset directly from {mesh_scrapers.DORSET_BASE}...")
+        time.sleep(2)
+        leads = mesh_scrapers.scrape_dorset_council()
+        for lead in leads:
+            ref = lead.get("reference")
+            addr = lead.get("address")
+            desc = lead.get("description")
+            if not ref or not desc:
+                continue
+            inserted = _insert_lead(
+                cur, ref, addr, desc, "Dorset",
+                applicant_name=lead.get("applicant_name"),
+                agent_name=lead.get("agent_name"),
+                agent_company=lead.get("agent_company"),
+                has_agent=lead.get("has_agent"),
+                agent_is_tree_surgeon=lead.get("agent_is_tree_surgeon"),
+                vertical=lead.get("vertical", "tree"),
+                registered_date=lead.get("registered_date"),
+            )
+            if inserted:
+                new_leads.append(inserted)
+        conn.commit()
+
+        # Sep 3 2026: Stratford-on-Avon -- fifth bespoke one-off, an
+        # eleventh distinct platform. A genuinely custom-built Vue.js
+        # SPA with its own clean JSON REST API (no vendor platform, no
+        # disclaimer gate, no CAPTCHA -- see mesh_scrapers.py's own
+        # comment for the full contract, and its comment on West
+        # Northamptonshire for the contrasting reCAPTCHA-blocked case
+        # that was correctly left unbuilt instead). Single authority,
+        # no dict registry.
+        logger.info(f"[STRATFORD] Scraping Stratford-on-Avon directly from {mesh_scrapers.STRATFORD_BASE}...")
+        time.sleep(2)
+        leads = mesh_scrapers.scrape_stratford_on_avon_council()
+        for lead in leads:
+            ref = lead.get("reference")
+            addr = lead.get("address")
+            desc = lead.get("description")
+            if not ref or not desc:
+                continue
+            inserted = _insert_lead(
+                cur, ref, addr, desc, "Stratford-on-Avon",
+                applicant_name=lead.get("applicant_name"),
+                agent_name=lead.get("agent_name"),
+                agent_company=lead.get("agent_company"),
+                has_agent=lead.get("has_agent"),
+                agent_is_tree_surgeon=lead.get("agent_is_tree_surgeon"),
+                vertical=lead.get("vertical", "tree"),
+                registered_date=lead.get("registered_date"),
+            )
+            if inserted:
+                new_leads.append(inserted)
+        conn.commit()
     except Exception as e:
         logger.error(f"[MESH] Fatal error during mesh scan: {e}")
     finally:
@@ -1750,8 +1779,36 @@ def scan_gla_datahub_london() -> int:
     scan_city_planning_api("London") call -- exactly the "more free sources
     to spread the request load across" strategy this was built for.
     """
-    if not GLA_API_KEY:
-        return 0
+    # Sep 5 2026 CRITICAL FIX: everything below this comment used to be
+    # simply wrong, root-caused live after Nick forwarded a "GLA_API_KEY
+    # invalid, regenerate token" alert and reported zero new London leads.
+    # Confirmed against the GLA's OWN published technical PDF
+    # (planninglondondatahub_api_connection_technical_documentation_v1.pdf)
+    # AND a live test call this session (real 200 back with real planning
+    # records -- not a guess):
+    #   - The correct base path is "/api-guest/applications/_search", not
+    #     "/api/applications". The old path was never a valid route, which
+    #     is what was actually producing the 401/403 -- not an expired key.
+    #   - Guest access needs NO Authorization header at all ("If
+    #     Authorisation is required, this should be set to No Auth" --
+    #     GLA's own doc; confirmed live: a plain request with zero auth
+    #     headers returned 200 with real data). There is no per-account
+    #     regeneratable "GLA_API_KEY" bearer token for this endpoint, so
+    #     the old alert's "regenerate token in Render" instruction was
+    #     never actionable advice.
+    #   - GLA's doc separately publishes a static, non-secret guest header
+    #     (Key: X-API-AllowRequest, Value: be2rmRnt&) -- sent below as a
+    #     courtesy/rate-limit-friendly identifier, defaulting to that
+    #     published value if Render's GLA_API_KEY happens to be blank, but
+    #     NOT required (the live test above succeeded without it).
+    #   - It's a standard Elasticsearch (v7.9) _search endpoint, so the
+    #     real response envelope is {"hits": {"hits": [{"_source": {...}}]}},
+    #     not the flat {"data": [...]} shape this function used to assume --
+    #     meaning even a lucky 200 would previously have silently parsed
+    #     zero records, every single time, forever.
+    # This function no longer refuses to run without GLA_API_KEY set --
+    # guest access needs nothing, so gating on it was itself a bug.
+    _GLA_GUEST_HEADER_VALUE = GLA_API_KEY or "be2rmRnt&"
 
     new_leads = []
     conn = database.get_db_conn()
@@ -1765,12 +1822,20 @@ def scan_gla_datahub_london() -> int:
         return 0
     dedup.mark_done_today(conn, _GLA_DEDUP_KEY)
     try:
-        headers = {"Authorization": GLA_API_KEY, "Accept": "application/json"}
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-API-AllowRequest": _GLA_GUEST_HEADER_VALUE,
+        }
         import time
         time.sleep(1.0)  # London throttle
-        res = net_utils.smart_get(
-            "https://planningdata.london.gov.uk/api/applications",
-            params={"limit": 100},
+        query_body = {
+            "size": 100,
+            "sort": [{"last_updated": {"order": "desc"}}],
+        }
+        res = net_utils.smart_post(
+            "https://planningdata.london.gov.uk/api-guest/applications/_search",
+            json=query_body,
             headers=headers,
             timeout=15
         )
@@ -1780,12 +1845,12 @@ def scan_gla_datahub_london() -> int:
                 title="LONDON GLA PLANNING DATAHUB TOKEN INVALID",
                 description="CRITICAL: London GLA Planning Datahub rejected requests with HTTP 401/403 Unauthorized.",
                 impact="Planning lead scraping across all 32 London Boroughs via the free GLA Datahub is paused.",
-                action_required="Check GLA_API_KEY in Render and regenerate token at planningdata.london.gov.uk.",
+                action_required="Guest access to /api-guest/applications/_search needs no Authorization header per GLA's own published spec (confirmed live Sep 5 2026) -- there is no Render env var to regenerate here. A 401/403 now means GLA changed their public access policy or moved the endpoint again; search london.gov.uk for 'Planning London Datahub API' for updated docs.",
                 severity="CRITICAL",
                 throttle_hours=6.0
             )
         elif res.status_code == 200:
-            records = res.json().get("data", [])
+            records = [hit.get("_source", {}) for hit in res.json().get("hits", {}).get("hits", [])]
             for item in records:
                 try:
                     # Search across all possible GLA description fields to avoid placeholder names.

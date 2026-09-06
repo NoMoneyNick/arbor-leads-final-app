@@ -1153,59 +1153,31 @@ def public_homepage():
 # research.py). `locale` is deliberately excluded -- it's open-ended
 # (specific council/town names), so "every possible value" isn't a fixed,
 # meaningful list the way it is for the others.
-KNOWN_TAG_VALUES = {
+LEAD_KNOWN_TAG_VALUES = {
     "job": sorted(set(scanners.JOB_TYPE_KEYWORDS.keys()) | {"other"}),
     "size": ["small", "medium", "large"],
     "agent": ["yes", "no", "unconfirmed"],
-    # Sep 2 2026: Nick's ask -- "not only agent yes/no but rather
-    # none/agent/tree surgeon as the agent ones who are not tree surgeons
-    # are potentially viable leads". Kept as its own prefix alongside
-    # 'agent' above (rather than replacing it) so nothing that already
-    # filters on agent:yes/no/unconfirmed breaks -- this is additive detail,
-    # not a replacement. Only emitted for the tree vertical (see
-    # scanners._generate_tags -- agent_is_tree_surgeon has no equivalent
-    # concept for HMO, so tagging every HMO lead 'type-unconfirmed' would
-    # just be noise, not information).
     "agent_type": ["none", "confirmed-tree-surgeon", "confirmed-other", "type-unconfirmed", "unconfirmed"],
-    # Sep 2 2026: the "third round" educated guess for leads where the
-    # agent status has no hard confirmation at all -- a best-effort read of
-    # the application's own description text (see
-    # mesh_scrapers.classify_agent_as_tree_surgeon). Deliberately has no
-    # 'no signal' value of its own: a lead with nothing to go on simply gets
-    # no agent_guess tag at all and the generic renderer's own gap row
-    # ("no agent_guess tag") shows that honestly, rather than this list
-    # claiming a fixed set of guessable outcomes that don't include "none".
     "agent_guess": ["tree-surgeon", "non-tree-surgeon"],
     "vertical": ["tree", "hmo"],
-    # Sep 2 2026 audit fix: this used to be the raw pretty-printed region
-    # names ("East Midlands", "South East", ...) while every REAL stored
-    # region tag is slugified (region:east-midlands) by
-    # scanners._slugify_tag -- so every one of these known-value rows never
-    # matched a real row and always rendered as a duplicate, permanently-
-    # zero entry next to the real (slugified) one carrying the actual
-    # count. Caught by Nick looking straight at the admin page and asking
-    # "why are the regions empty?" -- they weren't empty, they were just
-    # the wrong (unslugified) rows sitting at zero next to the real ones.
     "region": sorted({scanners._slugify_tag(v) for v in scanners.COUNCIL_TO_REGION.values()}) + ["unclassified"],
+    "locale": []
+}
+
+PARTNER_KNOWN_TAG_VALUES = {
     "business": sorted(set(research.SIC_DIVISION_TO_BUSINESS_KIND.values()) | {research.BUSINESS_KIND_NAME_OVERRIDE}) + ["unclassified"],
-    # Sep 2 2026: the partner-side third-round guess -- see
-    # research._guess_business_kind. Same "no guess tag at all, not a
-    # 'none' value" rule as agent_guess above.
     "business_guess": sorted(set(research._BUSINESS_GUESS_KEYWORDS.keys())),
     "director": ["yes", "no"],
     "phone": ["yes", "no"],
     "email": ["yes", "no"],
     "contact": ["reachable", "dead"],
+    "registration": ["sole_trader", "limited_company"]
 }
-# job is the one genuinely multi-label category (a tree lead can be both
-# crown-work and tpo at once) -- every other category assigns exactly one
-# value per lead/partner, so its counts are held to "should sum to the
-# total" and the gap (if any) is surfaced explicitly rather than silently
-# absorbed.
-MULTI_LABEL_CATEGORIES = {"job"}
+
+_MULTI_LABEL_TAG_CATEGORIES = {"job"}
 
 
-def _render_tag_stat_section(categories: dict, total: int, untagged: int, entity_label: str) -> str:
+def _render_tag_stat_section(categories: dict, total: int, untagged: int, entity_label: str, known_tags: dict) -> str:
     """Generic renderer for the tag-based stats grids on /admin. Any
     category dict shaped like {"prefix": {"prefix:value": n}} (see
     database.get_tag_counts / get_partner_tag_counts) renders automatically
@@ -1218,19 +1190,19 @@ def _render_tag_stat_section(categories: dict, total: int, untagged: int, entity
     'no <category> tag' row for the gap when a single-value category's
     counts don't add up to `total` (a real, visible fact -- e.g. some
     leads have no council_source at all -- not a rendering bug)."""
-    if not categories and not KNOWN_TAG_VALUES:
+    if not categories and not known_tags:
         return "<p style='color:#94a3b8; font-size:13px;'>No data yet.</p>"
-    all_prefixes = sorted(set(categories.keys()) | set(KNOWN_TAG_VALUES.keys()))
+    all_prefixes = sorted(set(categories.keys()) | set(known_tags.keys()))
     cards = []
     for prefix in all_prefixes:
         tag_counts = dict(categories.get(prefix, {}))
-        for known_value in KNOWN_TAG_VALUES.get(prefix, []):
+        for known_value in known_tags.get(prefix, []):
             tag_counts.setdefault(f"{prefix}:{known_value}", 0)
         if not tag_counts:
             continue
         rows = sorted(tag_counts.items(), key=lambda kv: (-kv[1], kv[0]))
         category_sum = sum(n for _, n in rows)
-        is_multi = prefix in MULTI_LABEL_CATEGORIES
+        is_multi = prefix in _MULTI_LABEL_TAG_CATEGORIES
         gap = total - category_sum
         if not is_multi and gap > 0:
             rows.append((f"{prefix}:(no {prefix} tag)", gap))
@@ -1415,11 +1387,11 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
         <hr>
 
         <h3>&#127795; Leads, by Category</h3>
-        {_render_tag_stat_section(lead_tag_stats.get("categories", {}), lead_tag_stats.get("total_leads", 0), lead_tag_stats.get("untagged_leads", 0), "leads")}
+        {_render_tag_stat_section(lead_tag_stats.get("categories", {}), lead_tag_stats.get("total_leads", 0), lead_tag_stats.get("untagged_leads", 0), "leads", LEAD_KNOWN_TAG_VALUES)}
 
         <hr>
         <h3>&#127970; Partners, by Category</h3>
-        {_render_tag_stat_section(partner_tag_stats.get("categories", {}), partner_tag_stats.get("total_partners", 0), partner_tag_stats.get("untagged_partners", 0), "partners")}
+        {_render_tag_stat_section(partner_tag_stats.get("categories", {}), partner_tag_stats.get("total_partners", 0), partner_tag_stats.get("untagged_partners", 0), "partners", PARTNER_KNOWN_TAG_VALUES)}
 
         <hr>
         <h4>Recent Leads (Past 24-48 Hours)</h4>

@@ -2050,32 +2050,47 @@ class TestGlaDatahubLondon(unittest.TestCase):
         dedup_patch.start()
         self.addCleanup(dedup_patch.stop)
 
-    def test_returns_zero_without_crashing_when_key_not_configured(self):
-        """If GLA_API_KEY isn't set in Render, this must be a harmless no-op
-        (not an exception, not a wasted DB connection) -- Stage 1 calls this
-        unconditionally for London every day regardless of whether the key
-        is configured."""
+    def test_runs_fine_with_no_key_configured_guest_access_needs_none(self):
+        """Sep 5 2026 fix: this used to hard-gate on GLA_API_KEY being set
+        and return 0 without even opening a DB connection. That gate was
+        itself a bug -- GLA's own published spec says guest access to
+        /api-guest/applications/_search needs NO Authorization at all
+        (confirmed live), so an unset key must NOT stop this scan from
+        running. It should fall back to the documented public guest
+        header value and proceed normally."""
+        body = {"hits": {"hits": [
+            {"_source": {"id": "GLA-1", "lpa_app_no": "GLA-1",
+                          "description": "Crown reduction of protected oak tree, TPO.",
+                          "location": {"address": "1 Borough High St, London"}}},
+        ]}}
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = body
+
         with patch.object(scanners, "GLA_API_KEY", ""), \
-             patch("database.get_db_conn") as mock_get_conn:
+             patch("net_utils.smart_post", return_value=resp) as mock_post, \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value={"ref": "GLA-1"}) as mock_insert, \
+             patch("time.sleep", return_value=None):
             count = scanners.scan_gla_datahub_london()
 
-        self.assertEqual(count, 0)
-        mock_get_conn.assert_not_called()
+        self.assertEqual(count, 1)
+        mock_insert.assert_called_once()
+        # Falls back to the documented public guest value, never sends a blank header.
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["headers"]["X-API-AllowRequest"], "be2rmRnt&")
 
     def test_valid_response_inserts_only_tree_related_leads(self):
-        body = {
-            "data": [
-                {"reference": "GLA-1", "description": "Crown reduction of protected oak tree, TPO.",
-                 "location": {"address": "1 Borough High St, London"}},
-                {"reference": "GLA-2", "description": "Change of use to former bank branch.",
-                 "location": {"address": "2 Borough High St, London"}},  # not tree-related
-            ]
-        }
+        body = {"hits": {"hits": [
+            {"_source": {"reference": "GLA-1", "description": "Crown reduction of protected oak tree, TPO.",
+                          "location": {"address": "1 Borough High St, London"}}},
+            {"_source": {"reference": "GLA-2", "description": "Change of use to former bank branch.",
+                          "location": {"address": "2 Borough High St, London"}}},  # not tree-related
+        ]}}
         resp = MagicMock(status_code=200)
         resp.json.return_value = body
 
         with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
-             patch("net_utils.smart_get", return_value=resp), \
+             patch("net_utils.smart_post", return_value=resp), \
              patch("database.get_db_conn", return_value=self.conn), \
              patch.object(scanners, "_insert_lead", return_value={"ref": "GLA-1"}) as mock_insert, \
              patch("time.sleep", return_value=None):
@@ -2096,19 +2111,17 @@ class TestGlaDatahubLondon(unittest.TestCase):
         London batch would have been lost until tomorrow. Proves: the bad
         record is skipped, the good one right after it still gets inserted,
         and the whole batch still commits."""
-        body = {
-            "data": [
-                {"reference": "GLA-BAD", "description": {"nested": "not a string"},
-                 "location": {"address": "Bad Record House, London"}},
-                {"reference": "GLA-GOOD", "description": "Crown reduction of protected oak tree, TPO.",
-                 "location": {"address": "1 Borough High St, London"}},
-            ]
-        }
+        body = {"hits": {"hits": [
+            {"_source": {"reference": "GLA-BAD", "description": {"nested": "not a string"},
+                         "location": {"address": "Bad Record House, London"}}},
+            {"_source": {"reference": "GLA-GOOD", "description": "Crown reduction of protected oak tree, TPO.",
+                         "location": {"address": "1 Borough High St, London"}}},
+        ]}}
         resp = MagicMock(status_code=200)
         resp.json.return_value = body
 
         with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
-             patch("net_utils.smart_get", return_value=resp), \
+             patch("net_utils.smart_post", return_value=resp), \
              patch("database.get_db_conn", return_value=self.conn), \
              patch.object(scanners, "_insert_lead", return_value={"ref": "GLA-GOOD"}) as mock_insert, \
              patch("time.sleep", return_value=None):
@@ -2124,18 +2137,16 @@ class TestGlaDatahubLondon(unittest.TestCase):
         the bare _is_tree_related check here and was silently skipped --
         never reached _insert_lead at all. This is new, additive pipeline
         output, not a change to anything already flowing."""
-        body = {
-            "data": [
-                {"reference": "GLA-HMO-1",
-                 "description": "Change of use to a house in multiple occupation (7 persons).",
-                 "location": {"address": "3 Borough High St, London"}},
-            ]
-        }
+        body = {"hits": {"hits": [
+            {"_source": {"reference": "GLA-HMO-1",
+                         "description": "Change of use to a house in multiple occupation (7 persons).",
+                         "location": {"address": "3 Borough High St, London"}}},
+        ]}}
         resp = MagicMock(status_code=200)
         resp.json.return_value = body
 
         with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
-             patch("net_utils.smart_get", return_value=resp), \
+             patch("net_utils.smart_post", return_value=resp), \
              patch("database.get_db_conn", return_value=self.conn), \
              patch.object(scanners, "_insert_lead", return_value={"ref": "GLA-HMO-1"}) as mock_insert, \
              patch("time.sleep", return_value=None):
@@ -2150,7 +2161,7 @@ class TestGlaDatahubLondon(unittest.TestCase):
         resp = MagicMock(status_code=401)
 
         with patch.object(scanners, "GLA_API_KEY", "stale-key"), \
-             patch("net_utils.smart_get", return_value=resp), \
+             patch("net_utils.smart_post", return_value=resp), \
              patch("database.get_db_conn", return_value=self.conn), \
              patch("time.sleep", return_value=None), \
              patch("notifications.send_system_incident_alert") as mock_alert:
@@ -2178,18 +2189,18 @@ class TestGlaDatahubLondon(unittest.TestCase):
 
     def test_same_day_retrigger_skips_the_gla_fetch(self):
         resp = MagicMock(status_code=200)
-        resp.json.return_value = {"data": []}
+        resp.json.return_value = {"hits": {"hits": []}}
 
         with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
-             patch("net_utils.smart_get", return_value=resp) as mock_get, \
+             patch("net_utils.smart_post", return_value=resp) as mock_post, \
              patch("database.get_db_conn", return_value=self.conn), \
              patch("time.sleep", return_value=None):
             scanners.scan_gla_datahub_london()   # first trigger today
-            first_call_count = mock_get.call_count
+            first_call_count = mock_post.call_count
             result = scanners.scan_gla_datahub_london()  # second trigger, same day
 
         self.assertEqual(first_call_count, 1)
-        self.assertEqual(mock_get.call_count, first_call_count)  # no second HTTP call
+        self.assertEqual(mock_post.call_count, first_call_count)  # no second HTTP call
         self.assertEqual(result, 0)
 
 
@@ -2225,17 +2236,17 @@ class TestGlaLondonRealFieldNamesForRegisteredDate(unittest.TestCase):
         self.addCleanup(dedup_patch.stop)
 
     def test_valid_date_field_reaches_insert_lead_as_registered_date(self):
-        body = {"data": [
-            {"reference": "GLA-VD-1",
-             "description": "Crown reduction of protected oak tree, TPO.",
-             "location": {"address": "1 Borough High St, London"},
-             "valid_date": "2026-08-15"},
-        ]}
+        body = {"hits": {"hits": [
+            {"_source": {"reference": "GLA-VD-1",
+                         "description": "Crown reduction of protected oak tree, TPO.",
+                         "location": {"address": "1 Borough High St, London"},
+                         "valid_date": "2026-08-15"}},
+        ]}}
         resp = MagicMock(status_code=200)
         resp.json.return_value = body
 
         with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
-             patch("net_utils.smart_get", return_value=resp), \
+             patch("net_utils.smart_post", return_value=resp), \
              patch("database.get_db_conn", return_value=self.conn), \
              patch.object(scanners, "_insert_lead", return_value={"ref": "GLA-VD-1"}) as mock_insert, \
              patch("time.sleep", return_value=None):
@@ -2250,16 +2261,16 @@ class TestGlaLondonRealFieldNamesForRegisteredDate(unittest.TestCase):
         very early-stage or malformed upstream record) -- must degrade to
         None (which _insert_lead's own _clean_iso_date already handles),
         never raise, never fabricate a date."""
-        body = {"data": [
-            {"reference": "GLA-NO-VD",
-             "description": "Crown reduction of protected oak tree, TPO.",
-             "location": {"address": "1 Borough High St, London"}},
-        ]}
+        body = {"hits": {"hits": [
+            {"_source": {"reference": "GLA-NO-VD",
+                         "description": "Crown reduction of protected oak tree, TPO.",
+                         "location": {"address": "1 Borough High St, London"}}},
+        ]}}
         resp = MagicMock(status_code=200)
         resp.json.return_value = body
 
         with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
-             patch("net_utils.smart_get", return_value=resp), \
+             patch("net_utils.smart_post", return_value=resp), \
              patch("database.get_db_conn", return_value=self.conn), \
              patch.object(scanners, "_insert_lead", return_value={"ref": "GLA-NO-VD"}) as mock_insert, \
              patch("time.sleep", return_value=None):
@@ -2273,19 +2284,19 @@ class TestGlaLondonRealFieldNamesForRegisteredDate(unittest.TestCase):
         """Documents a real, verified limitation rather than an oversight
         (see class docstring): _insert_lead is never asked to pass
         has_agent/applicant_name from this GLA path."""
-        body = {"data": [
-            {"reference": "GLA-NOAGENT",
-             "description": "Crown reduction of protected oak tree, TPO.",
-             "location": {"address": "1 Borough High St, London"},
-             "valid_date": "2026-08-15",
-             "agent_name": "Should Never Be Read",  # not a real documented field
-             "applicant_name": "Should Never Be Read Either"},
-        ]}
+        body = {"hits": {"hits": [
+            {"_source": {"reference": "GLA-NOAGENT",
+                         "description": "Crown reduction of protected oak tree, TPO.",
+                         "location": {"address": "1 Borough High St, London"},
+                         "valid_date": "2026-08-15",
+                         "agent_name": "Should Never Be Read",  # not a real documented field
+                         "applicant_name": "Should Never Be Read Either"}},
+        ]}}
         resp = MagicMock(status_code=200)
         resp.json.return_value = body
 
         with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
-             patch("net_utils.smart_get", return_value=resp), \
+             patch("net_utils.smart_post", return_value=resp), \
              patch("database.get_db_conn", return_value=self.conn), \
              patch.object(scanners, "_insert_lead", return_value={"ref": "GLA-NOAGENT"}) as mock_insert, \
              patch("time.sleep", return_value=None):
@@ -2710,6 +2721,67 @@ class TestMeshScraperHmoGeneralization(unittest.TestCase):
                 self.assertIn(council, mesh_scrapers.COUNCIL_REGISTRY)
 
 
+class TestRunMeshNetworkScanCallsEachPlatformExactlyOnce(unittest.TestCase):
+    """Sep 4 2026: real bug found and fixed while auditing run_mesh_network_
+    scan() for efficiency (Nick's ask: "check the rest for working
+    efficiency and bugs"). Every non-Idox platform block (Northgate, Agile
+    Applications, Arcus, Hounslow, North York Moors, Havering, St Albans,
+    RBKC, Dorset, Stratford-on-Avon) was indented one level too deep --
+    nested INSIDE the `for council_name, url in
+    mesh_scrapers.COUNCIL_REGISTRY.items():` loop instead of after it -- so
+    every one of those ~16 councils/platforms was silently being re-scraped
+    once per Idox council in COUNCIL_REGISTRY (roughly 50x the intended
+    request volume against the smallest, most fragile targets in the whole
+    mesh network, every single day). No pre-existing test caught this
+    because every prior test used a fake COUNCIL_REGISTRY with exactly ONE
+    entry (a call-count bug is invisible when N=1) -- this uses THREE, so a
+    reintroduction of the same indentation mistake fails immediately."""
+
+    def setUp(self):
+        self.cur = MagicMock()
+        self.conn = MagicMock()
+        self.conn.cursor.return_value = self.cur
+
+    def test_each_non_idox_platform_is_scraped_exactly_once_regardless_of_idox_registry_size(self):
+        fake_registry = {
+            "Bristol": "https://planningonline.bristol.gov.uk/online-applications",
+            "Cornwall": "https://planning.cornwall.gov.uk/online-applications",
+            "Leeds": "https://publicaccess.leeds.gov.uk/online-applications",
+        }
+        with patch.object(mesh_scrapers, "COUNCIL_REGISTRY", fake_registry), \
+             patch.object(mesh_scrapers, "scrape_mesh_council", return_value=[]), \
+             patch("database.get_db_conn", return_value=self.conn), \
+             patch.object(scanners, "_insert_lead", return_value=None), \
+             patch("time.sleep", return_value=None), \
+             patch.object(mesh_scrapers, "scrape_northgate_council", return_value=[]) as mock_northgate, \
+             patch.object(mesh_scrapers, "scrape_agile_applications_council", return_value=[]) as mock_agile, \
+             patch.object(mesh_scrapers, "scrape_arcus_council", return_value=[]) as mock_arcus, \
+             patch.object(mesh_scrapers, "scrape_hounslow_council", return_value=[]) as mock_hounslow, \
+             patch.object(mesh_scrapers, "scrape_north_york_moors", return_value=[]) as mock_nym, \
+             patch.object(mesh_scrapers, "scrape_havering_council", return_value=[]) as mock_havering, \
+             patch.object(mesh_scrapers, "scrape_st_albans_council", return_value=[]) as mock_st_albans, \
+             patch.object(mesh_scrapers, "scrape_kensington_chelsea_council", return_value=[]) as mock_rbkc, \
+             patch.object(mesh_scrapers, "scrape_dorset_council", return_value=[]) as mock_dorset, \
+             patch.object(mesh_scrapers, "scrape_stratford_on_avon_council", return_value=[]) as mock_stratford:
+            scanners.run_mesh_network_scan()
+
+        # NORTHGATE_COUNCILS/AGILE_APPLICATIONS_COUNCILS/ARCUS_COUNCILS each
+        # have their own multi-entry dict independent of the fake Idox
+        # registry above -- each entry within THOSE gets scraped once each
+        # (correct), but the whole block itself must run exactly once
+        # overall, not once per Idox council (3, in this fake registry).
+        self.assertEqual(mock_northgate.call_count, len(mesh_scrapers.NORTHGATE_COUNCILS))
+        self.assertEqual(mock_agile.call_count, len(mesh_scrapers.AGILE_APPLICATIONS_COUNCILS))
+        self.assertEqual(mock_arcus.call_count, len(mesh_scrapers.ARCUS_COUNCILS))
+        self.assertEqual(mock_hounslow.call_count, 1)
+        self.assertEqual(mock_nym.call_count, 1)
+        self.assertEqual(mock_havering.call_count, 1)
+        self.assertEqual(mock_st_albans.call_count, 1)
+        self.assertEqual(mock_rbkc.call_count, 1)
+        self.assertEqual(mock_dorset.call_count, 1)
+        self.assertEqual(mock_stratford.call_count, 1)
+
+
 class TestLeedsScanDelegation(unittest.TestCase):
     """scan_leeds_leads() -- same Aug 30 2026 gap as scan_london_leads()
     (found while checking "will that cover it though?"): part 2 used to
@@ -3012,17 +3084,15 @@ class TestReviewQueueWiringAtAllFourCallSites(unittest.TestCase):
         mock_queue.assert_not_called()
 
     def test_gla_london_queues_unmatched_record_with_a_real_reference(self):
-        body = {
-            "data": [
-                {"reference": "GLA-JUNK", "description": "Change of use to former bank branch.",
-                 "location": {"address": "2 Borough High St, London"}},
-            ]
-        }
+        body = {"hits": {"hits": [
+            {"_source": {"reference": "GLA-JUNK", "description": "Change of use to former bank branch.",
+                         "location": {"address": "2 Borough High St, London"}}},
+        ]}}
         resp = MagicMock(status_code=200)
         resp.json.return_value = body
 
         with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
-             patch("net_utils.smart_get", return_value=resp), \
+             patch("net_utils.smart_post", return_value=resp), \
              patch("database.get_db_conn", return_value=self.conn), \
              patch.object(scanners, "_queue_for_manual_review") as mock_queue, \
              patch.object(scanners, "_insert_lead") as mock_insert, \
@@ -3033,17 +3103,15 @@ class TestReviewQueueWiringAtAllFourCallSites(unittest.TestCase):
         mock_queue.assert_called_once_with("GLA-JUNK", "2 Borough High St, London", "Change of use to former bank branch.", "London")
 
     def test_gla_london_does_not_queue_a_record_with_no_real_reference(self):
-        body = {
-            "data": [
-                {"reference": "", "description": "Change of use to former bank branch.",
-                 "location": {"address": "2 Borough High St, London"}},
-            ]
-        }
+        body = {"hits": {"hits": [
+            {"_source": {"reference": "", "description": "Change of use to former bank branch.",
+                         "location": {"address": "2 Borough High St, London"}}},
+        ]}}
         resp = MagicMock(status_code=200)
         resp.json.return_value = body
 
         with patch.object(scanners, "GLA_API_KEY", "fake-gla-key"), \
-             patch("net_utils.smart_get", return_value=resp), \
+             patch("net_utils.smart_post", return_value=resp), \
              patch("database.get_db_conn", return_value=self.conn), \
              patch.object(scanners, "_queue_for_manual_review") as mock_queue, \
              patch("time.sleep", return_value=None):

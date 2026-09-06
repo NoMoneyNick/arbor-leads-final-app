@@ -30,7 +30,7 @@ import os
 import sys
 import types
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Stub heavy/external modules BEFORE importing main.py, so this file runs
@@ -50,6 +50,8 @@ if not hasattr(_database, "is_territory_claimed"):
     _database.is_territory_claimed = MagicMock(return_value=False)
 if not hasattr(_database, "increment_api_usage"):
     _database.increment_api_usage = MagicMock(return_value={"warning_needed": False})
+if not hasattr(_database, "create_magic_auth_token"):
+    _database.create_magic_auth_token = MagicMock(return_value={"token": "tok", "otp": "000000", "email": "test@example.com"})
 
 if "notifications" not in sys.modules:
     sys.modules["notifications"] = types.ModuleType("notifications")
@@ -58,6 +60,8 @@ if not hasattr(_notifications, "send_system_incident_alert"):
     _notifications.send_system_incident_alert = MagicMock()
 if not hasattr(_notifications, "send_resend_email"):
     _notifications.send_resend_email = MagicMock()
+if not hasattr(_notifications, "send_transactional_email"):
+    _notifications.send_transactional_email = MagicMock(return_value=True)
 if not hasattr(_notifications, "dispatch_lead_alerts"):
     _notifications.dispatch_lead_alerts = MagicMock()
 if not hasattr(_notifications, "send_api_quota_warning_email"):
@@ -272,6 +276,46 @@ class TestCouncilSourceIssueDisclosure(unittest.TestCase):
         for key, message in main._COUNCIL_SOURCE_ISSUES.items():
             self.assertTrue(key.islower(), f"key {key!r} should be lower-case for the substring match")
             self.assertGreater(len(message), 20)
+
+
+class TestMagicLinkGoesToTheRealContractorNotTestEmail(unittest.IsolatedAsyncioTestCase):
+    """Sep 5 2026 CRITICAL FIX regression test. request_magic_link() used to
+    call notifications.send_resend_email() for the login-link email --
+    that function ALWAYS sends to the fixed internal TEST_EMAIL address
+    (it's the admin/incident-alert helper), so every real contractor's
+    1-tap login link was silently delivered to Nick's own inbox instead of
+    theirs. Root-caused live while building the free-signup feature (which
+    also needed a genuine customer-facing send). This locks in that the
+    fix (notifications.send_transactional_email, which takes an explicit
+    recipient) is what actually gets called, with the contractor's own
+    address -- not the old admin-only helper."""
+
+    async def test_login_link_is_sent_to_the_contact_address_supplied(self):
+        class _FakeForm(dict):
+            pass
+
+        class _FakeRequest:
+            def __init__(self, contact):
+                self.client = MagicMock(host="127.0.0.1")
+                self._contact = contact
+
+            async def form(self):
+                return _FakeForm({"contact": self._contact})
+
+        fake_request = _FakeRequest("dave@apex-trees.co.uk")
+
+        with patch.object(main, "_check_rate_limit", return_value=True), \
+             patch("database.create_magic_auth_token",
+                   return_value={"token": "tok123", "otp": "123456", "email": "dave@apex-trees.co.uk"}), \
+             patch.object(_notifications, "send_transactional_email", return_value=True) as mock_send, \
+             patch.object(_notifications, "send_resend_email") as mock_old_send:
+            await main.request_magic_link(fake_request)
+
+        mock_send.assert_called_once()
+        _, kwargs = mock_send.call_args
+        self.assertEqual(kwargs.get("to_email"), "dave@apex-trees.co.uk")
+        # The old admin-only helper (always TEST_EMAIL) must never be used here again.
+        mock_old_send.assert_not_called()
 
 
 if __name__ == "__main__":
