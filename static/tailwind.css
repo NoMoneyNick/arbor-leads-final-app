@@ -1073,6 +1073,9 @@
   .opacity-25 {
     opacity: 25%;
   }
+  .opacity-45 {
+    opacity: 45%;
+  }
   .opacity-70 {
     opacity: 70%;
   }
@@ -1281,8 +1284,8 @@
     --tw-shadow: 0 0 20px var(--tw-shadow-color, rgba(16,185,129,0.15));
     box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
   }
-  .bg-\[linear-gradient\(to_bottom\,rgba\(2\,6\,23\,0\.85\)\,rgba\(2\,6\,23\,0\.92\)\,rgba\(2\,6\,23\,1\)\)\] {
-    background-image: linear-gradient(to bottom,rgba(2,6,23,0.85),rgba(2,6,23,0.92),rgba(2,6,23,1));
+  .bg-\[linear-gradient\(to_bottom\,rgba\(2\,6\,23\,0\.55\)\,rgba\(2\,6\,23\,0\.8\)\,rgba\(2\,6\,23\,0\.95\)\)\] {
+    background-image: linear-gradient(to bottom,rgba(2,6,23,0.55),rgba(2,6,23,0.8),rgba(2,6,23,0.95));
   }
   .bg-\[linear-gradient\(to_right\,rgba\(2\,6\,23\,1\)\,rgba\(2\,6\,23\,0\.85\)\,rgba\(2\,6\,23\,0\.4\)\)\] {
     background-image: linear-gradient(to right,rgba(2,6,23,1),rgba(2,6,23,0.85),rgba(2,6,23,0.4));
