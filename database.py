@@ -501,6 +501,22 @@ def init_db():
                 is_london BOOLEAN DEFAULT FALSE,
                 cached_at TIMESTAMPTZ DEFAULT NOW()
             );
+
+            -- Sep 8 2026, Nick's ask: the public "Today" counter shouldn't
+            -- jump by (say) 100 the instant a big morning scan lands -- it
+            -- should look like those same real leads are arriving steadily
+            -- across the working day. This is the persisted, server-side
+            -- pacing state (one row per day) so every visitor sees the same
+            -- number and a page refresh can't jump the queue -- see
+            -- get_public_lead_counts below. Never stores a count higher
+            -- than what's actually real; only paces WHEN the true number is
+            -- revealed.
+            CREATE TABLE IF NOT EXISTS public_counter_reveal (
+                reveal_date DATE PRIMARY KEY,
+                revealed_today INT DEFAULT 0,
+                last_reveal_at TIMESTAMPTZ DEFAULT NOW(),
+                next_reveal_at TIMESTAMPTZ DEFAULT NOW()
+            );
         """)
 
         # Performance Indices for Instant High-Volume Queries
@@ -643,6 +659,15 @@ def init_db():
             # only be matched to jobs at the scale they actually want.
             "ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS full_postcode TEXT;",
             "ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS job_size_preference TEXT DEFAULT 'all';",
+            # Sep 8 2026: the radar's "leads in radius" figure was matching
+            # only the exact outcode typed against address text, completely
+            # ignoring the radius slider and the map circle -- see
+            # classify_leads_by_radius below for the real fix. Piggybacks on
+            # the outcode_area_cache lookup that already runs for every
+            # ticker/notices row (get_outcode_area_label), so this costs no
+            # extra postcodes.io calls beyond what was already happening.
+            "ALTER TABLE outcode_area_cache ADD COLUMN IF NOT EXISTS lat FLOAT;",
+            "ALTER TABLE outcode_area_cache ADD COLUMN IF NOT EXISTS lon FLOAT;",
         ]
         failed_ddl = _run_ddl_statements_resiliently(conn, resilience_cols, phase_label="Phase1-columns")
 
@@ -2254,11 +2279,16 @@ def get_outcode_area_label(outcode: str) -> dict:
     free postcodes.io API already used for geocoding, cached in
     outcode_area_cache so this is a one-time lookup per outcode, not a live
     API call on every pageview. Returns {"district": str|None,
-    "is_london": bool, "label": str} -- label degrades gracefully to just
-    the outcode if the district can't be resolved."""
+    "is_london": bool, "label": str, "lat": float|None, "lon": float|None}
+    -- label degrades gracefully to just the outcode if the district can't
+    be resolved. lat/lon (Sep 8 2026 addition) are the outcode's centroid,
+    read from the exact same postcodes.io response already fetched here for
+    district -- no extra API call -- so classify_leads_by_radius below can
+    do a genuine distance check using data this function was already
+    caching."""
     outcode = (outcode or "").strip().upper()
     if not outcode:
-        return {"district": None, "is_london": False, "label": "UK"}
+        return {"district": None, "is_london": False, "label": "UK", "lat": None, "lon": None}
 
     def _label(district, is_london):
         if not district:
@@ -2268,22 +2298,27 @@ def get_outcode_area_label(outcode: str) -> dict:
     try:
         conn = get_db_conn()
         cur = conn.cursor()
-        cur.execute("SELECT district, is_london FROM outcode_area_cache WHERE outcode = %s", (outcode,))
+        cur.execute("SELECT district, is_london, lat, lon FROM outcode_area_cache WHERE outcode = %s", (outcode,))
         row = cur.fetchone()
         cur.close()
         conn.close()
         if row:
-            district, is_london = row
-            return {"district": district, "is_london": bool(is_london), "label": _label(district, is_london)}
+            district, is_london, lat, lon = row
+            return {"district": district, "is_london": bool(is_london), "label": _label(district, is_london),
+                    "lat": lat, "lon": lon}
     except Exception as e:
         logger.debug(f"[Area Label] cache read failed for {outcode}: {e}")
 
     district = None
+    lat = lon = None
     try:
         resp = requests.get(f"https://api.postcodes.io/outcodes/{outcode}", timeout=6)
         if resp.status_code == 200:
-            districts = (resp.json().get("result", {}) or {}).get("admin_district") or []
+            result = resp.json().get("result", {}) or {}
+            districts = result.get("admin_district") or []
             district = districts[0] if districts else None
+            lat = result.get("latitude")
+            lon = result.get("longitude")
     except Exception as e:
         _geocode_failure("outcode area label", outcode, e)
 
@@ -2292,10 +2327,11 @@ def get_outcode_area_label(outcode: str) -> dict:
         conn = get_db_conn()
         cur = conn.cursor()
         cur.execute(
-            """INSERT INTO outcode_area_cache (outcode, district, is_london)
-               VALUES (%s, %s, %s)
-               ON CONFLICT (outcode) DO UPDATE SET district = EXCLUDED.district, is_london = EXCLUDED.is_london""",
-            (outcode, district, is_london),
+            """INSERT INTO outcode_area_cache (outcode, district, is_london, lat, lon)
+               VALUES (%s, %s, %s, %s, %s)
+               ON CONFLICT (outcode) DO UPDATE SET district = EXCLUDED.district, is_london = EXCLUDED.is_london,
+                   lat = EXCLUDED.lat, lon = EXCLUDED.lon""",
+            (outcode, district, is_london, lat, lon),
         )
         conn.commit()
         cur.close()
@@ -2303,7 +2339,7 @@ def get_outcode_area_label(outcode: str) -> dict:
     except Exception as e:
         logger.debug(f"[Area Label] cache write failed for {outcode}: {e}")
 
-    return {"district": district, "is_london": is_london, "label": _label(district, is_london)}
+    return {"district": district, "is_london": is_london, "label": _label(district, is_london), "lat": lat, "lon": lon}
 
 
 def get_lead_discovery_counts() -> dict:
@@ -2327,6 +2363,131 @@ def get_lead_discovery_counts() -> dict:
     except Exception as e:
         logger.error(f"[Counters] Error fetching lead discovery counts: {e}")
         return {"today": 0, "week": 0, "month": 0}
+
+
+def get_public_lead_counts() -> dict:
+    """Sep 8 2026, Nick's ask: "if we get 100 leads in the scan in the
+    morning in one go, I wanted that counter to tick through the day rather
+    than dumping the leads in one go... its not disingenuous [because] its a
+    counter, they will not be able to see the leads are already live in the
+    marketplace." This never invents a lead or shows a number bigger than
+    what's real -- it only paces WHEN the true, already-real "today" total
+    is revealed to the public counter. State is persisted per calendar day
+    (public_counter_reveal) so every visitor sees the same number and a page
+    refresh can't jump the queue. Outside the 6am-11pm working window (or on
+    any error) it just shows the real total -- nothing left to pace by then.
+    Week/month are always the real totals, unthrottled -- Nick's ask was
+    specifically about the "ticks up through the day" Today figure."""
+    real = get_lead_discovery_counts()
+    try:
+        import random
+        import datetime
+        from zoneinfo import ZoneInfo
+        now_uk = datetime.datetime.now(ZoneInfo("Europe/London"))
+    except Exception as e:
+        logger.debug(f"[Public Counters] tz setup failed, falling back to real counts: {e}")
+        return real
+
+    real_today = real["today"]
+    if now_uk.hour < 6 or now_uk.hour >= 23:
+        return real
+
+    today_date = now_uk.date()
+    window_end = now_uk.replace(hour=23, minute=0, second=0, microsecond=0)
+    now_ts = datetime.datetime.now(datetime.timezone.utc)
+
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT revealed_today, next_reveal_at FROM public_counter_reveal WHERE reveal_date = %s", (today_date,))
+        row = cur.fetchone()
+
+        if row is None:
+            revealed, next_at = 0, now_ts
+            cur.execute(
+                """INSERT INTO public_counter_reveal (reveal_date, revealed_today, last_reveal_at, next_reveal_at)
+                   VALUES (%s, %s, %s, %s) ON CONFLICT (reveal_date) DO NOTHING""",
+                (today_date, revealed, now_ts, next_at),
+            )
+            conn.commit()
+        else:
+            revealed, next_at = row
+            if next_at and next_at.tzinfo is None:
+                next_at = next_at.replace(tzinfo=datetime.timezone.utc)
+
+        revealed = min(revealed, real_today)  # never let a stale reveal outrun a real total that dropped (e.g. data fix)
+        backlog = real_today - revealed
+
+        if backlog > 0 and now_ts >= (next_at or now_ts):
+            bump = random.choice([1, 1, 1, 2, 2, 3])
+            revealed = min(real_today, revealed + bump)
+
+            # Adaptive pacing: a big backlog with little of the working day
+            # left drains faster (so it can genuinely finish by 11pm); a
+            # small backlog with hours left drips lazily. Either way, always
+            # "sometimes fast, sometimes slower" via the random jitter.
+            remaining_seconds = max(60.0, (window_end - now_uk).total_seconds())
+            still_owed = max(1, real_today - revealed)
+            ideal_interval = remaining_seconds / max(1.0, still_owed / 2.0)
+            interval_seconds = max(45.0, min(900.0, ideal_interval)) * random.uniform(0.6, 1.4)
+            next_at = now_ts + datetime.timedelta(seconds=interval_seconds)
+
+            cur.execute(
+                """UPDATE public_counter_reveal SET revealed_today = %s, last_reveal_at = %s, next_reveal_at = %s
+                   WHERE reveal_date = %s""",
+                (revealed, now_ts, next_at, today_date),
+            )
+            conn.commit()
+
+        cur.close()
+        conn.close()
+        return {"today": revealed, "week": real["week"], "month": real["month"]}
+    except Exception as e:
+        logger.error(f"[Public Counters] reveal-throttle error, falling back to real counts: {e}")
+        return real
+
+
+def classify_leads_by_radius(pool_addresses: list, target_lat: Optional[float], target_lng: Optional[float],
+                              radius_miles: float) -> dict:
+    """Sep 8 2026, Nick's ask: the radar's "X Active Leads in radius" figure
+    was matching leads against the EXACT outcode typed (e.g. "CR6" only) --
+    it never actually used the radius dropdown or the map circle at all, so
+    a real nearby lead at CR5 or CR8 never counted as "in radius" for a CR6
+    search, even though the same leads correctly showed up in "connected
+    zones" and the notices table right next to it. This does a genuine
+    haversine-distance check against each lead's outcode centroid (same
+    proven approach as find_nearest_unclaimed_lead / dispatch_lead_alerts),
+    reusing get_outcode_area_label's cache so it costs no more postcodes.io
+    calls than the notices table already needed for these same leads.
+
+    `pool_addresses` is a list of address strings (or single-item tuples --
+    either is accepted) already filtered to the wider postcode-letter area.
+    Returns {"in_radius": int, "nearby": int} -- leads whose outcode can't
+    be resolved to a real coordinate are excluded from both counts, never
+    guessed into either bucket."""
+    in_radius = 0
+    nearby = 0
+    if target_lat is None or target_lng is None:
+        return {"in_radius": 0, "nearby": 0}
+    memo = {}
+    for row in pool_addresses:
+        address = row[0] if isinstance(row, (tuple, list)) else row
+        outcodes = _extract_outcodes(address)
+        if not outcodes:
+            continue
+        oc = outcodes[0]
+        if oc not in memo:
+            area = get_outcode_area_label(oc)
+            memo[oc] = (area.get("lat"), area.get("lon"))
+        lead_lat, lead_lon = memo[oc]
+        if lead_lat is None or lead_lon is None:
+            continue
+        dist = haversine_miles(target_lat, target_lng, lead_lat, lead_lon)
+        if dist <= radius_miles:
+            in_radius += 1
+        else:
+            nearby += 1
+    return {"in_radius": in_radius, "nearby": nearby}
 
 
 def _size_mix_select(pool: list, limit: int) -> list:
@@ -2354,6 +2515,45 @@ def _size_mix_select(pool: list, limit: int) -> list:
     import datetime
     selected.sort(key=lambda l: l["discovered_at"] or datetime.datetime.min, reverse=True)
     return selected[:limit]
+
+
+def _assign_display_times(selected: list) -> list:
+    """Sep 8 2026, Nick's ask: the ticker and radar notices used to show each
+    lead's REAL discovered_at clock-time -- fine most of the time, but a
+    single batch scan lands several leads within the same few minutes, so by
+    mid-afternoon the feed reads as several hours stale even though it's the
+    same real leads. Nick's own words: "they are real leads, we are just
+    fibbing about the time we got them" -- this never changes WHICH leads
+    are shown, never invents one, and never touches the leads table; it only
+    adjusts the DISPLAYED clock-time of today's real leads so they read as
+    landing steadily across the working day so far, proportionate to how
+    many of today's picks there are. A lead from a previous day keeps its
+    real timestamp untouched -- only today's own leads get smoothed, so
+    nothing ever implies an older lead is fresher than it actually is."""
+    import random
+    import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.datetime.now(ZoneInfo("Europe/London"))
+    except Exception:
+        now = datetime.datetime.now()
+    today = now.date()
+    window_start = now.replace(hour=6, minute=0, second=0, microsecond=0)
+    elapsed = max(300.0, (now - window_start).total_seconds())
+
+    todays = [l for l in selected if l.get("discovered_at") and l["discovered_at"].date() == today]
+    n = len(todays)
+    for i, lead in enumerate(todays):
+        # Rank 0 (truly most-recently-discovered today) gets the smallest
+        # offset so it still reads as the freshest; each next real lead is
+        # spread progressively further back across however much of the
+        # 6am-11pm window has elapsed -- never before 6am, never in the future.
+        frac = (i + 1) / (n + 1)
+        offset = max(60.0, min(elapsed - 30.0, elapsed * frac * random.uniform(0.7, 1.05)))
+        lead["discovered_at"] = now - datetime.timedelta(seconds=offset)
+
+    selected.sort(key=lambda l: l.get("discovered_at") or datetime.datetime.min, reverse=True)
+    return selected
 
 
 def select_diverse_ticker_leads(limit: int = 5, enforce_geo_mix: bool = True,
@@ -2404,7 +2604,7 @@ def select_diverse_ticker_leads(limit: int = 5, enforce_geo_mix: bool = True,
         return []
 
     if not enforce_geo_mix:
-        return _size_mix_select(pool, limit)
+        return _assign_display_times(_size_mix_select(pool, limit))
 
     size_targets = {"small": 2, "medium": 2, "large": 1}
     geo_defs = [
@@ -2458,7 +2658,7 @@ def select_diverse_ticker_leads(limit: int = 5, enforce_geo_mix: bool = True,
 
     import datetime
     selected.sort(key=lambda l: l["discovered_at"] or datetime.datetime.min, reverse=True)
-    return selected[:limit]
+    return _assign_display_times(selected[:limit])
 
 
 def find_nearest_unclaimed_lead(lat: float, lon: float, max_miles: float = 25.0, exclude_refs: list = None) -> Optional[dict]:

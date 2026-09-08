@@ -285,8 +285,11 @@ def api_live_counts():
     bottom of public_homepage(). Deliberately no auth (aggregate counts
     only, no addresses or names) and no rate limit beyond the existing
     global one, since this is meant to be polled every 8-30 seconds by
-    anyone with the homepage open."""
-    return database.get_lead_discovery_counts()
+    anyone with the homepage open.
+    Sep 8 2026: "today" is now the paced/throttled figure (see
+    database.get_public_lead_counts) so a big batch scan doesn't dump its
+    whole total into this counter in one poll -- week/month stay real."""
+    return database.get_public_lead_counts()
 
 
 @app.get("/api/check-postcode")
@@ -447,38 +450,37 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
     # A visitor with zero real leads in their area was shown a fabricated
     # 12-40 "active leads" figure. Fixed: every number below is now derived
     # from the actual leads table -- if there's nothing there, we say so.
-    # Sep 8 2026: Nick flagged "Connected Areas always shows 0". Root cause --
-    # `prefix_alpha` stripped ALL digits out of the outcode before it was
-    # ever used (e.g. "CR5" became just "CR"), and `area_alpha` was then
-    # computed FROM that already-digit-free string, so for any normal 2-letter
-    # outcode (CR5, SW1, NW3...) the two queries below ended up searching for
-    # the exact same pattern -- direct_leads and area_leads were always
-    # identical, so connected_leads = max(area - direct, 0) was always 0. The
-    # "exact catchment" query was also silently matching the WHOLE postcode
-    # area (any CR-outcode), not the specific outcode typed, compounding it.
-    # Fixed: match the real, full outcode (digits included) for the exact
-    # count, and just the postcode-area letters for the wider count.
+    # Sep 8 2026: Nick flagged "Connected Areas always shows 0" -- fixed
+    # earlier the same day (matching the real, full outcode for the exact
+    # count vs. just the postcode-area letters for the wider count), but
+    # Nick then flagged a second, deeper issue: the "X Active Leads in
+    # radius" figure was matching leads to the exact outcode TEXT typed,
+    # completely ignoring the radius dropdown and the map circle -- so a
+    # real, nearby lead at CR5 or CR8 never counted as "in radius" for a CR6
+    # search, even though it correctly showed up in "connected zones" and
+    # the notices table right next to it. Replaced with a genuine
+    # haversine-distance check (database.classify_leads_by_radius) against
+    # each lead's outcode centroid -- "in radius" now means what the radius
+    # dropdown says it means, and "connected zones" now means what Nick
+    # originally asked for: real leads nearby but outside the currently
+    # selected radius, not just "same postcode letters minus the exact one".
     display_pc_clean = re.sub(r'[^A-Z0-9]', '', display_pc.upper())
     area_letters = "".join([c for c in display_pc_clean if c.isalpha()])[:2]
     conn = database.get_db_conn()
     cur = conn.cursor()
     if display_pc_clean and area_letters:
-        # Exact catchment: this specific outcode (e.g. "CR5", not just "CR").
-        cur.execute("SELECT count(*) FROM leads WHERE (status = 'new' OR status IS NULL) AND (address ~* %s OR council_source ILIKE %s)",
-        (rf"\y{display_pc_clean}\y", f"%{district[:6]}%"))
-        direct_leads = cur.fetchone()[0]
-
-        # Wider catchment: the whole postcode area (e.g. "CR" covers every
-        # CR0-CR9 outcode), so "+N more in connected zones" is an honest,
-        # genuinely larger real number when there is more nearby -- not
-        # silently forced equal to the exact count.
-        cur.execute("SELECT count(*) FROM leads WHERE (status = 'new' OR status IS NULL) AND address ~* %s",
+        # Wide catchment: the whole postcode area (e.g. "CR" covers every
+        # CR0-CR9 outcode) -- classify_leads_by_radius then splits this into
+        # genuinely "in your selected radius" vs. "nearby but outside it"
+        # using real distance, not text matching.
+        cur.execute("SELECT address FROM leads WHERE (status = 'new' OR status IS NULL) AND address ~* %s",
         (rf"\y{area_letters}[0-9]",))
-        area_leads = cur.fetchone()[0]
+        wide_pool_addresses = cur.fetchall()
     else:
-        cur.execute("SELECT count(*) FROM leads WHERE (status = 'new' OR status IS NULL) AND council_source ILIKE %s", (f"%{district[:6]}%",))
-        direct_leads = cur.fetchone()[0]
-        area_leads = direct_leads
+        cur.execute("SELECT address FROM leads WHERE (status = 'new' OR status IS NULL) AND council_source ILIKE %s", (f"%{district[:6]}%",))
+        wide_pool_addresses = cur.fetchall()
+
+    radius_split = database.classify_leads_by_radius(wide_pool_addresses, target_lat, target_lng, radius)
 
     # Sep 8 2026, Nick's ask: the radar's "Intercepted Notices" panel should
     # follow wherever the radar is currently pointed, not always show the
@@ -509,8 +511,8 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
         selected_leads = 0
         connected_leads = 0
     else:
-        selected_leads = direct_leads
-        connected_leads = max(area_leads - direct_leads, 0)
+        selected_leads = radius_split["in_radius"]
+        connected_leads = radius_split["nearby"]
 
     # Contract valuation: a disclosed, flat per-notice estimate (&pound;450
     # to &pound;1,450, typical UK tree-work job range) applied to the REAL
@@ -687,7 +689,7 @@ def public_homepage():
         # diverse, still 100% real selection (size + geography mix). See
         # database.select_diverse_ticker_leads.
         stats["diverse_leads"] = database.select_diverse_ticker_leads(limit=5, enforce_geo_mix=True)
-        stats["counts"] = database.get_lead_discovery_counts()
+        stats["counts"] = database.get_public_lead_counts()
     except Exception as e:
         logger.error(f"[HOMEPAGE] DB error: {e}")
 
@@ -766,8 +768,19 @@ def public_homepage():
     <meta property="og:description" content="Exclusive tree surgery leads from live UK planning applications. Council TPO notices, S211 felling approvals, and domestic homeowner jobs — delivered first.">
     <meta property="og:url" content="https://treekey.uk">
     <meta property="og:type" content="website">
+    <!-- Sep 8 2026, Nick's ask: there was no og:image at all, so Google/
+         social link previews fell back to whatever icon happened to be
+         set -- the old "K"/leaf mark. Added a proper share image built
+         from the site's own current nav-bar branding (the diamond icon +
+         TREEKEY wordmark), and swapped the site icon files to match. -->
+    <meta property="og:image" content="https://treekey.uk/static/images/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:image" content="https://treekey.uk/static/images/og-image.png">
     <link rel="manifest" href="/static/manifest.json">
     <meta name="theme-color" content="#020617">
+    <link rel="icon" href="/static/icon-192.png">
     <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link href="/static/tailwind.css" rel="stylesheet">
     <script>if ('serviceWorker' in navigator) {{ window.addEventListener('load', () => {{ navigator.serviceWorker.register('/sw.js'); }}); }}</script>
@@ -843,9 +856,17 @@ def public_homepage():
         <!-- Sep 8 2026, Nick's ask: hero background photo (real UK arborist at
              work, supplied by Nick) -- kept low-opacity with a dark gradient
              on top so the headline and CTAs stay fully legible; this is
-             purely atmospheric, not a content layer. -->
+             purely atmospheric, not a content layer. On a phone the hero is
+             much taller/narrower than this landscape photo, so a plain
+             object-cover crop landed on a tight, unflattering headshot --
+             a <picture> source swaps in a portrait-cropped version (same
+             photo, cropped to keep the whole figure + chainsaw + harness)
+             under 640px; desktop/tablet get the original, unchanged. -->
         <div class="absolute inset-0 z-0" aria-hidden="true">
-            <img src="/static/images/hero-climber.jpg" alt="" class="w-full h-full object-cover opacity-25">
+            <picture>
+                <source media="(max-width: 639px)" srcset="/static/images/hero-climber-mobile.jpg">
+                <img src="/static/images/hero-climber.jpg" alt="" class="w-full h-full object-cover opacity-25">
+            </picture>
             <div class="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(2,6,23,0.3),rgba(2,6,23,0.5),rgba(2,6,23,0.7))]"></div>
         </div>
         <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 flex flex-col">
@@ -880,17 +901,42 @@ def public_homepage():
                      and animates any REAL increase; it never invents a
                      number, so it only visibly moves as often as a real
                      lead actually lands. -->
-                <div class="inline-flex flex-col items-center gap-2 px-5 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-sm shadow-[0_0_15px_rgba(16,185,129,0.15)] mb-4 sm:mb-6">
-                    <div class="flex items-center gap-2 text-[11px] uppercase tracking-widest">
-                        <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
-                        Intercepting Live — {_as_of_date}, {_as_of_time}<span class="tk-blink-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+                <!-- Sep 8 2026, Nick's ask: the live counters and the "never
+                     sold twice" guarantee sit side by side on desktop
+                     (counters left, guarantee right) where there's room to
+                     spare, and stack with the guarantee right underneath
+                     the counters on mobile so it's one of the first things
+                     visible on landing, not buried after both CTA buttons. -->
+                <div class="flex flex-col md:flex-row md:justify-center items-center gap-3 md:gap-6 mb-4 sm:mb-6">
+                    <!-- Sep 8 2026, Nick's ask: smaller/thinner on mobile, running
+                         the full width near the top rather than a padded floating
+                         pill -- md: and up restores the original sized box. -->
+                    <div class="flex md:inline-flex flex-col items-center gap-1.5 md:gap-2 w-full md:w-auto px-3 py-2 md:px-5 md:py-3 rounded-lg md:rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-xs md:text-sm shadow-[0_0_15px_rgba(16,185,129,0.15)]">
+                        <div class="flex items-center gap-2 text-[10px] md:text-[11px] uppercase tracking-widest">
+                            <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
+                            Intercepting Live — {_as_of_date}, {_as_of_time}<span class="tk-blink-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+                        </div>
+                        <!-- Sep 8 2026, Nick's ask: restored the overall running
+                             total (real, from the leads table) above the
+                             today/week/month breakdown -- it was dropped when
+                             the 3-counter row was added. -->
+                        <div class="text-emerald-400 font-bold text-base md:text-lg">{display_leads:,} <span class="text-emerald-600 text-[10px] font-normal uppercase tracking-widest">Total Intercepted</span></div>
+                        <div class="flex items-center gap-3 sm:gap-5">
+                            <span><strong id="countToday" class="text-white text-base md:text-lg">{stats['counts']['today']}</strong> Today</span>
+                            <span class="text-emerald-800">/</span>
+                            <span><strong id="countWeek" class="text-white text-base md:text-lg">{stats['counts']['week']}</strong> This Week</span>
+                            <span class="text-emerald-800">/</span>
+                            <span><strong id="countMonth" class="text-white text-base md:text-lg">{stats['counts']['month']}</strong> This Month</span>
+                        </div>
                     </div>
-                    <div class="flex items-center gap-3 sm:gap-5">
-                        <span><strong id="countToday" class="text-white text-lg">{stats['counts']['today']}</strong> Today</span>
-                        <span class="text-emerald-800">/</span>
-                        <span><strong id="countWeek" class="text-white text-lg">{stats['counts']['week']}</strong> This Week</span>
-                        <span class="text-emerald-800">/</span>
-                        <span><strong id="countMonth" class="text-white text-lg">{stats['counts']['month']}</strong> This Month</span>
+                    <!-- Sep 8 2026, Nick's ask: "never sold twice" is the single
+                         biggest thing contractors care about. Promoted to a
+                         proper badge, rephrased to spell out what it actually
+                         means (not just assert exclusivity as a slogan), and
+                         now pulses gently like the other live indicators. -->
+                    <div class="tk-live-badge inline-flex items-center gap-2.5 px-5 py-2.5 rounded-full border border-emerald-500/40 text-emerald-300 font-bold text-sm shadow-[0_0_20px_rgba(16,185,129,0.15)]">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="shrink-0"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        You Buy It, It's Yours — We Never Sell That Lead to Anyone Else
                     </div>
                 </div>
 
@@ -928,15 +974,6 @@ def public_homepage():
                     <p class="text-sm text-slate-400 max-w-md text-center leading-relaxed">
                         Sounds too good to be true? Sign up free and we'll send you one real, fully-unlocked lead from your area today — no card, no commitment.
                     </p>
-                    <!-- Sep 8 2026, Nick's ask: "never sold twice" is the single
-                         biggest thing contractors care about and was previously a
-                         small grey caption easy to miss. Promoted to a proper
-                         badge and rephrased to spell out what it actually means,
-                         not just assert exclusivity as a slogan. -->
-                    <div class="inline-flex items-center gap-2.5 mt-1 px-5 py-2.5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-bold text-sm shadow-[0_0_20px_rgba(16,185,129,0.15)]">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="shrink-0"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                        You Buy It, It's Yours — We Never Sell That Lead to Anyone Else
-                    </div>
                 </div>
 
                 <!-- Aug 30 2026: removed "BS5837 Survey Alignment" and "ArbAC
@@ -1381,17 +1418,25 @@ def public_homepage():
         }});
 
         // Sep 8 2026, Nick's ask: typing in the postcode box reacts live --
-        // debounced ~550ms after the last keystroke so a fast typist doesn't
-        // fire a scan on every letter, but no button press is needed.
+        // debounced so a fast typist doesn't fire a scan on every letter,
+        // but no button press is needed. Shortened from 550ms to 300ms
+        // (Nick: "the radar reacts vs slowly to new input") -- still enough
+        // to skip mid-word keystrokes, but noticeably snappier.
         let _scanDebounceTimer = null;
         function debouncedScanTerritory() {{
             clearTimeout(_scanDebounceTimer);
             const val = (document.getElementById('postcodeInput').value || '').trim();
             if (val.length < 2) return;
-            _scanDebounceTimer = setTimeout(scanTerritory, 550);
+            _scanDebounceTimer = setTimeout(scanTerritory, 300);
         }}
 
-        async function scanTerritory() {{
+        // Sep 8 2026, Nick's ask: the radar was re-zooming/re-centering to
+        // the default B1 view the instant the page loaded, undoing the
+        // zoomed-out Great Britain view it's supposed to start on.
+        // skipZoom=true (used only for the initial auto-populate call below)
+        // still refreshes the real stats/notices/circle for the default
+        // postcode, it just doesn't move or zoom the map to get there.
+        async function scanTerritory(skipZoom) {{
             const input = document.getElementById("postcodeInput").value;
             const radSelect = document.getElementById("radiusSelect");
             const radVal = radSelect ? parseInt(radSelect.value) : 24140;
@@ -1415,7 +1460,7 @@ def public_homepage():
                 const data = await res.json();
 
                 if (data.status === "ok") {{
-                    map.setView([data.lat, data.lng], 10);
+                    if (!skipZoom) {{ map.setView([data.lat, data.lng], 10); }}
                     currentCircle.setLatLng([data.lat, data.lng]);
                     currentCircle.setRadius(radVal);
                     document.getElementById("radiusReadout").innerHTML = `RADIAL BOUNDARY: ${{ (radVal/1609.34).toFixed(1) }} MILES`;
@@ -1450,7 +1495,9 @@ def public_homepage():
         // Sep 8 2026: run once on page load so the radar shows real numbers
         // for the default B1/Birmingham view immediately, instead of the
         // "Awaiting scan..." placeholder until someone interacts with it.
-        scanTerritory();
+        // skipZoom=true so this doesn't undo the zoomed-out Great Britain
+        // starting view (Nick: "reverted back to starting off zoomed in").
+        scanTerritory(true);
 
         // Sep 8 2026, Nick's ask: the "Today / This Week / This Month"
         // counters on the badge above the fold should visibly tick up

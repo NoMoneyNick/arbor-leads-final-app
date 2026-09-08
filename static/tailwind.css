@@ -533,6 +533,9 @@
   .gap-1 {
     gap: var(--spacing);
   }
+  .gap-1\.5 {
+    gap: calc(var(--spacing) * 1.5);
+  }
   .gap-2 {
     gap: calc(var(--spacing) * 2);
   }
@@ -861,6 +864,9 @@
   }
   .py-1\.5 {
     padding-block: calc(var(--spacing) * 1.5);
+  }
+  .py-2 {
+    padding-block: calc(var(--spacing) * 2);
   }
   .py-2\.5 {
     padding-block: calc(var(--spacing) * 2.5);
@@ -1462,11 +1468,43 @@
     .md\:justify-start {
       justify-content: flex-start;
     }
+    .md\:justify-center {
+      justify-content: center;
+    }
     .md\:mx-0 {
       margin-inline: calc(var(--spacing) * 0);
     }
+    .md\:gap-2 {
+      gap: calc(var(--spacing) * 2);
+    }
     .md\:gap-6 {
       gap: calc(var(--spacing) * 6);
+    }
+    .md\:inline-flex {
+      display: inline-flex;
+    }
+    .md\:w-auto {
+      width: auto;
+    }
+    .md\:px-5 {
+      padding-inline: calc(var(--spacing) * 5);
+    }
+    .md\:py-3 {
+      padding-block: calc(var(--spacing) * 3);
+    }
+    .md\:rounded-xl {
+      border-radius: var(--radius-xl);
+    }
+    .md\:text-\[11px\] {
+      font-size: 11px;
+    }
+    .md\:text-sm {
+      font-size: var(--text-sm);
+      line-height: var(--tw-leading, var(--text-sm--line-height));
+    }
+    .md\:text-lg {
+      font-size: var(--text-lg);
+      line-height: var(--tw-leading, var(--text-lg--line-height));
     }
     .md\:p-16 {
       padding: calc(var(--spacing) * 16);
@@ -1784,8 +1822,12 @@
   }
 }
 @keyframes pulse {
+  /* Sep 8 2026, Nick's ask: "all pulses need to be increased in intensity
+     maybe 15%" -- deepened the dip from Tailwind's stock 0.5 to 0.4 so
+     every animate-pulse element sitewide (status dots etc.) reads as a
+     more visible pulse, not just this file's custom ones. */
   50% {
-    opacity: 0.5;
+    opacity: 0.4;
   }
 }
 @layer properties {
@@ -1874,6 +1916,8 @@
   animation: tk-live-dot-pulse 2.6s ease-in-out infinite;
 }
 @keyframes tk-live-dot-pulse {
+  /* Sep 8 2026, Nick's ask: pulse intensity turned up ~15% -- deeper opacity
+     dip and a wider glow ring at the peak. */
   0%, 100% {
     background-color: #10b981; /* emerald-500 */
     box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45);
@@ -1881,8 +1925,8 @@
   }
   50% {
     background-color: #6ee7b7; /* emerald-300, lighter shade */
-    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0);
-    opacity: 0.85;
+    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0);
+    opacity: 0.72;
   }
 }
 
@@ -1894,13 +1938,15 @@
   animation: tk-live-badge-fade 3.2s ease-in-out infinite;
 }
 @keyframes tk-live-badge-fade {
+  /* Sep 8 2026, Nick's ask: pulse intensity turned up ~15% -- wider swing
+     both ends (lower trough, higher peak). */
   0%, 100% {
-    background-color: rgba(16, 185, 129, 0.12);
-    border-color: rgba(16, 185, 129, 0.3);
+    background-color: rgba(16, 185, 129, 0.08);
+    border-color: rgba(16, 185, 129, 0.25);
   }
   50% {
-    background-color: rgba(16, 185, 129, 0.34);
-    border-color: rgba(16, 185, 129, 0.55);
+    background-color: rgba(16, 185, 129, 0.4);
+    border-color: rgba(16, 185, 129, 0.65);
   }
 }
 
