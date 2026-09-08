@@ -571,29 +571,56 @@ def verify_admin_or_secret(request: Request, secret: Optional[str] = None):
 # ---------------------------------------------------------
 @app.get("/sw.js")
 def service_worker():
+    # Sep 8 2026: this was the real cause of Nick's "I update the site, it
+    # deploys, but a normal refresh still shows the old version" report --
+    # the old v1 worker cached "/" itself on install and then served that
+    # cached copy forever on every visit (cache-first, no expiry, no version
+    # bump), completely bypassing the Cache-Control headers added earlier
+    # this session. A hard refresh (Shift+Reload) happens to bypass service
+    # workers in most browsers, which is exactly why that "worked" while a
+    # normal refresh kept reverting -- it wasn't the browser's HTTP cache at
+    # all, it was this file.
+    #
+    # Fixed to network-first: every request goes to the live server first;
+    # the cache is only a fallback if the network request fails outright
+    # (e.g. offline), which is the safe default for a site whose content
+    # changes on every deploy. CACHE_NAME is bumped so the old v1 cache is
+    # wiped on activate, and skipWaiting/clients.claim make the new worker
+    # take over immediately instead of waiting for every tab to be closed.
     sw_code = """
-const CACHE_NAME = 'treekey-v1';
+const CACHE_NAME = 'treekey-v2';
 const urlsToCache = [
-  '/',
   '/static/tailwind.css',
   '/static/icon-192.png',
   '/static/icon-512.png'
 ];
 
 self.addEventListener('install', event => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(urlsToCache))
   );
 });
 
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(names =>
+      Promise.all(names.filter(n => n !== CACHE_NAME).map(n => caches.delete(n)))
+    ).then(() => self.clients.claim())
+  );
+});
+
 self.addEventListener('fetch', event => {
+  if (event.request.method !== 'GET') return;
   event.respondWith(
-    caches.match(event.request)
+    fetch(event.request)
       .then(response => {
-        if (response) return response;
-        return fetch(event.request);
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+        return response;
       })
+      .catch(() => caches.match(event.request))
   );
 });
 """
@@ -756,7 +783,7 @@ def public_homepage():
              purely atmospheric, not a content layer. -->
         <div class="absolute inset-0 z-0" aria-hidden="true">
             <img src="/static/images/hero-climber.jpg" alt="" class="w-full h-full object-cover opacity-25">
-            <div class="absolute inset-0 bg-gradient-to-b from-[#020617]/85 via-[#020617]/92 to-[#020617]"></div>
+            <div class="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(2,6,23,0.85),rgba(2,6,23,0.92),rgba(2,6,23,1))]"></div>
         </div>
         <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
 
@@ -1084,7 +1111,7 @@ def public_homepage():
          favours. -->
     <section class="relative py-20 border-t border-slate-800 overflow-hidden">
         <img src="/static/images/fieldwork-bucking.jpg" alt="A UK tree surgeon at work" class="absolute inset-0 w-full h-full object-cover">
-        <div class="absolute inset-0 bg-gradient-to-r from-[#020617] via-[#020617]/85 to-[#020617]/40"></div>
+        <div class="absolute inset-0 bg-[linear-gradient(to_right,rgba(2,6,23,1),rgba(2,6,23,0.85),rgba(2,6,23,0.4))]"></div>
         <div class="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="max-w-md">
                 <p class="text-[11px] font-mono uppercase tracking-widest text-emerald-400 font-bold mb-3">While You're On The Tools</p>
