@@ -743,8 +743,17 @@ def public_homepage():
     # fresh the feed is at a glance) and a lightly-pulsing, shade-shifting
     # dot at the end of the row instead of a static "Live" pill -- see
     # .tk-live-dot in static/tailwind.css.
+    # Sep 8 2026, Nick's follow-up: the 6-column fixed-width grid (date /
+    # time / ref code / summary / size / dot) doesn't fit a phone screen --
+    # cramming all 6 into ~350px made it unreadable. Rebuilt as two rows per
+    # lead: the original grid stays but only shows sm: and up (hidden on
+    # mobile), and a separate stacked card layout shows only below sm:,
+    # dropping the reference code entirely (Nick: "the code is not the most
+    # important thing... its the date, time, rough address, job type and
+    # job size... the code can go on phone for this table") and showing the
+    # job description in its place so job type is actually visible.
     ticker_rows = "".join([
-        f"""<div class='grid grid-cols-[56px_48px_84px_1fr_80px_28px] gap-3 items-center px-4 py-2.5 border-b border-emerald-900/40 text-xs font-mono'>
+        f"""<div class='hidden sm:grid grid-cols-[56px_48px_84px_1fr_80px_28px] gap-3 items-center px-4 py-2.5 border-b border-emerald-900/40 text-xs font-mono'>
             <span class='text-emerald-700'>{(l['discovered_at'].strftime('%d %b') if l['discovered_at'] else '--')}</span>
             <span class='text-emerald-600'>{(l['discovered_at'].strftime('%H:%M') if l['discovered_at'] else '--:--')}</span>
             <span class='text-emerald-600 truncate'>{((l['reference'] or l['council_source'] or 'TPO'))[:10]}</span>
@@ -753,6 +762,17 @@ def public_homepage():
                 <span class='text-amber-400 font-bold text-[10px] uppercase tracking-wide'>{l['lead_score']} job</span>
             </span>
             <span class='flex justify-end'><span class='tk-live-dot' title='Live'></span></span>
+        </div>
+        <div class='sm:hidden px-4 py-2.5 border-b border-emerald-900/40 text-xs font-mono'>
+            <div class='flex items-center justify-between gap-2 mb-1'>
+                <span class='text-emerald-500'>{(l['discovered_at'].strftime('%d %b') if l['discovered_at'] else '--')} &middot; {(l['discovered_at'].strftime('%H:%M') if l['discovered_at'] else '--:--')}</span>
+                <span class='flex items-center gap-2 shrink-0'>
+                    <span class='text-amber-400 font-bold text-[10px] uppercase tracking-wide'>{l['lead_score']} job</span>
+                    <span class='tk-live-dot' title='Live'></span>
+                </span>
+            </div>
+            <div class='text-slate-200 font-sans text-sm font-semibold truncate'>{l['area_label']}</div>
+            <div class='text-slate-400 font-sans text-[11px] truncate'>{(l['summary'] or 'Tree work notice')[:70]}</div>
         </div>"""
         for l in stats["diverse_leads"]
     ]) or "<div class='px-4 py-8 text-center text-slate-500 font-mono text-xs'>Intercepting live planning data...</div>"
@@ -852,7 +872,7 @@ def public_homepage():
          and the map/radar section below. Trimmed the hero's top padding and
          the live-feed block's bottom margin; left pb/lg values alone since
          those control spacing further down the page, not this gap. -->
-    <main class="relative overflow-hidden pt-8 pb-24 lg:pt-10 lg:pb-32 bg-brand-dark bg-[radial-gradient(ellipse_at_top,rgba(5,150,105,0.10),transparent_60%)]">
+    <main class="relative overflow-hidden pt-4 sm:pt-8 pb-24 lg:pt-10 lg:pb-32 bg-brand-dark bg-[radial-gradient(ellipse_at_top,rgba(5,150,105,0.10),transparent_60%)]">
         <!-- Sep 8 2026, Nick's ask: hero background photo (real UK arborist at
              work, supplied by Nick) -- kept low-opacity with a dark gradient
              on top so the headline and CTAs stay fully legible; this is
@@ -911,7 +931,7 @@ def public_homepage():
                     <!-- Sep 8 2026, Nick's ask: smaller/thinner on mobile, running
                          the full width near the top rather than a padded floating
                          pill -- md: and up restores the original sized box. -->
-                    <div class="flex md:inline-flex flex-col items-center gap-1.5 md:gap-2 w-full md:w-auto px-3 py-2 md:px-5 md:py-3 rounded-lg md:rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-xs md:text-sm shadow-[0_0_15px_rgba(16,185,129,0.15)]">
+                    <div class="flex md:inline-flex flex-col items-center gap-1 md:gap-2 w-full md:w-auto px-3 py-1.5 md:px-5 md:py-3 rounded-lg md:rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-xs md:text-sm shadow-[0_0_15px_rgba(16,185,129,0.15)]">
                         <div class="flex items-center gap-2 text-[10px] md:text-[11px] uppercase tracking-widest">
                             <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
                             Intercepting Live — {_as_of_date}, {_as_of_time}<span class="tk-blink-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
@@ -919,14 +939,16 @@ def public_homepage():
                         <!-- Sep 8 2026, Nick's ask: restored the overall running
                              total (real, from the leads table) above the
                              today/week/month breakdown -- it was dropped when
-                             the 3-counter row was added. -->
-                        <div class="text-emerald-400 font-bold text-base md:text-lg">{display_leads:,} <span class="text-emerald-600 text-[10px] font-normal uppercase tracking-widest">Total Intercepted</span></div>
+                             the 3-counter row was added. Label lightened from
+                             emerald-600 -- it was reading as faint/washed out
+                             against the badge's dark background. -->
+                        <div class="text-emerald-400 font-bold text-sm md:text-lg">{display_leads:,} <span class="text-emerald-300 text-[10px] font-semibold uppercase tracking-wide">Total Intercepted</span></div>
                         <div class="flex items-center gap-3 sm:gap-5">
-                            <span><strong id="countToday" class="text-white text-base md:text-lg">{stats['counts']['today']}</strong> Today</span>
+                            <span><strong id="countToday" class="text-white text-sm md:text-lg">{stats['counts']['today']}</strong> Today</span>
                             <span class="text-emerald-800">/</span>
-                            <span><strong id="countWeek" class="text-white text-base md:text-lg">{stats['counts']['week']}</strong> This Week</span>
+                            <span><strong id="countWeek" class="text-white text-sm md:text-lg">{stats['counts']['week']}</strong> This Week</span>
                             <span class="text-emerald-800">/</span>
-                            <span><strong id="countMonth" class="text-white text-base md:text-lg">{stats['counts']['month']}</strong> This Month</span>
+                            <span><strong id="countMonth" class="text-white text-sm md:text-lg">{stats['counts']['month']}</strong> This Month</span>
                         </div>
                     </div>
                     <!-- Sep 8 2026, Nick's ask: "never sold twice" is the single
@@ -964,15 +986,15 @@ def public_homepage():
                              wanted it as a real, discoverable acquisition path on the
                              site itself, not just a cold-outreach bait link. -->
                         <a href="/free-account" class="flex items-center gap-2 bg-transparent text-emerald-400 border-2 border-emerald-500/50 px-8 py-4 rounded font-bold text-lg hover:bg-emerald-500/10 transition-all duration-300">
-                            Claim a Free Lead — No Card Needed
+                            Claim a <span class="text-amber-400">Free</span> Lead — No Card Needed
                         </a>
                     </div>
                     <!-- Sep 8 2026, Nick's ask: the free-lead CTA was easy to skim
                          past, and its skepticism wasn't addressed anywhere. This
                          directly names the "too good to be true?" objection and
                          answers it in one line, without sounding desperate. -->
-                    <p class="text-sm text-slate-400 max-w-md text-center leading-relaxed">
-                        Sounds too good to be true? Sign up free and we'll send you one real, fully-unlocked lead from your area today — no card, no commitment.
+                    <p class="text-sm text-amber-300 max-w-md text-center leading-relaxed font-medium">
+                        Sounds too good to be true? Sign up free today and we'll send you a real, FREE, fully unlocked lead from your area today — no card, no commitment!
                     </p>
                 </div>
 
@@ -990,19 +1012,27 @@ def public_homepage():
                      top padding right after) as a big empty gap on the live
                      page. Trimmed both -- see the matching note on the Radar
                      section below. -->
-                <div class="mt-8 pt-6 border-t border-slate-800/50 flex flex-wrap justify-center items-center gap-8 opacity-70 grayscale hover:grayscale-0 transition-all duration-500">
-                    <div class="flex items-center gap-2 text-sm font-mono text-slate-300">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-                        Published Under The Open Government Licence
-                    </div>
-                    <div class="flex items-center gap-2 text-sm font-mono text-slate-300">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-                        Sourced Directly From Council Planning Registers
+                <!-- Sep 8 2026 follow-up, Nick's ask: the two licence badges
+                     smaller and tighter (still side by side), and the logo
+                     pulled OUT of the grayscale filter -- it's meant to read
+                     as a real, distinct old trademark, not a washed-out
+                     watermark. Bottom margin added so there's actual
+                     daylight before the live-feed table that follows right
+                     underneath this on mobile (they were butted together
+                     with zero gap). -->
+                <div class="mt-8 pt-6 border-t border-slate-800/50 flex flex-col items-center gap-3 mb-4">
+                    <div class="flex flex-wrap justify-center items-center gap-4 opacity-70 grayscale hover:grayscale-0 transition-all duration-500">
+                        <div class="flex items-center gap-1.5 text-xs font-mono text-slate-300">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500 shrink-0"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+                            Published Under The Open Government Licence
+                        </div>
+                        <div class="flex items-center gap-1.5 text-xs font-mono text-slate-300">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500 shrink-0"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+                            Sourced Directly From Council Planning Registers
+                        </div>
                     </div>
                     <!-- Sep 8 2026, Nick's ask: the original logo he supplied,
-                         kept small and grouped with the other muted credibility
-                         badges here (so its resolution never gets scrutinised)
-                         -- reads as "we've been at this a while," alongside the
+                         reads as "we've been at this a while," alongside the
                          current mark in the nav bar above. -->
                     <img src="/static/images/legacy-mark.png" alt="TreeKey original logo" class="h-8 w-auto" loading="lazy">
                 </div>
@@ -1460,7 +1490,7 @@ def public_homepage():
                 const data = await res.json();
 
                 if (data.status === "ok") {{
-                    if (!skipZoom) {{ map.setView([data.lat, data.lng], 10); }}
+                    if (!skipZoom) {{ map.flyTo([data.lat, data.lng], 10, {{ duration: 1.0 }}); }}
                     currentCircle.setLatLng([data.lat, data.lng]);
                     currentCircle.setRadius(radVal);
                     document.getElementById("radiusReadout").innerHTML = `RADIAL BOUNDARY: ${{ (radVal/1609.34).toFixed(1) }} MILES`;

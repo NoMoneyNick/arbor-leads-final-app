@@ -2312,7 +2312,12 @@ def get_outcode_area_label(outcode: str) -> dict:
     district = None
     lat = lon = None
     try:
-        resp = requests.get(f"https://api.postcodes.io/outcodes/{outcode}", timeout=6)
+        # Sep 8 2026: shortened from 6s -- Nick flagged the radar as "very
+        # slow to update", and this call can now run up to max_fresh_lookups
+        # times in a single classify_leads_by_radius request, so a slow
+        # timeout compounds fast. 3s is still generous for a normally-quick
+        # free API and bounds the worst case.
+        resp = requests.get(f"https://api.postcodes.io/outcodes/{outcode}", timeout=3)
         if resp.status_code == 200:
             result = resp.json().get("result", {}) or {}
             districts = result.get("admin_district") or []
@@ -2447,8 +2452,29 @@ def get_public_lead_counts() -> dict:
         return real
 
 
+_BARE_OUTCODE_RE = re.compile(r'\b([A-Z]{1,2}[0-9][A-Z0-9]?)\b')
+
+
+def _extract_outcodes_lenient(address: str) -> list:
+    """Sep 8 2026: Nick flagged the radar radius classification showing
+    "null leads in areas where there are definitely leads". Root cause --
+    classify_leads_by_radius (below) was using _extract_outcodes, which only
+    matches a FULL postcode (outcode + incode, e.g. "CR5 2AB") in the
+    address text. Plenty of real scraped addresses only carry the bare
+    outcode ("...Croydon CR5...") with no incode -- exactly what the proven
+    `address ~* '\\yCR[0-9]'` SQL matching elsewhere in this file already
+    relies on -- so a real, already-matched lead could still fail to
+    extract an outcode here and get silently dropped from both radius
+    buckets. Tries the strict full-postcode match first (most precise when
+    present), falls back to a bare standalone-outcode token otherwise."""
+    full = _extract_outcodes(address)
+    if full:
+        return full
+    return _BARE_OUTCODE_RE.findall((address or "").upper())
+
+
 def classify_leads_by_radius(pool_addresses: list, target_lat: Optional[float], target_lng: Optional[float],
-                              radius_miles: float) -> dict:
+                              radius_miles: float, max_fresh_lookups: int = 20) -> dict:
     """Sep 8 2026, Nick's ask: the radar's "X Active Leads in radius" figure
     was matching leads against the EXACT outcode typed (e.g. "CR6" only) --
     it never actually used the radius dropdown or the map circle at all, so
@@ -2456,9 +2482,17 @@ def classify_leads_by_radius(pool_addresses: list, target_lat: Optional[float], 
     search, even though the same leads correctly showed up in "connected
     zones" and the notices table right next to it. This does a genuine
     haversine-distance check against each lead's outcode centroid (same
-    proven approach as find_nearest_unclaimed_lead / dispatch_lead_alerts),
-    reusing get_outcode_area_label's cache so it costs no more postcodes.io
-    calls than the notices table already needed for these same leads.
+    proven approach as find_nearest_unclaimed_lead / dispatch_lead_alerts).
+
+    Sep 8 2026 (same day, follow-up): Nick reported this as "very slow to
+    update" -- a wide postcode-letter pool (e.g. all of "B" for Birmingham)
+    can span dozens of distinct outcodes, and the first version looked each
+    one up one-by-one, even cache hits. Now resolves every distinct outcode
+    in ONE batched cache read, and only falls back to live postcodes.io
+    calls (capped at `max_fresh_lookups` per request) for outcodes that
+    have genuinely never been seen before -- those get cached permanently
+    by get_outcode_area_label, so it's only ever slow once per outcode,
+    ever, not once per request.
 
     `pool_addresses` is a list of address strings (or single-item tuples --
     either is accepted) already filtered to the wider postcode-letter area.
@@ -2469,19 +2503,41 @@ def classify_leads_by_radius(pool_addresses: list, target_lat: Optional[float], 
     nearby = 0
     if target_lat is None or target_lng is None:
         return {"in_radius": 0, "nearby": 0}
-    memo = {}
+
+    lead_outcodes = []
+    distinct = set()
     for row in pool_addresses:
         address = row[0] if isinstance(row, (tuple, list)) else row
-        outcodes = _extract_outcodes(address)
-        if not outcodes:
+        outcodes = _extract_outcodes_lenient(address)
+        oc = outcodes[0] if outcodes else None
+        lead_outcodes.append(oc)
+        if oc:
+            distinct.add(oc)
+
+    coords = {}
+    if distinct:
+        try:
+            conn = get_db_conn()
+            cur = conn.cursor()
+            cur.execute("SELECT outcode, lat, lon FROM outcode_area_cache WHERE outcode = ANY(%s)", (list(distinct),))
+            for oc, lat, lon in cur.fetchall():
+                if lat is not None and lon is not None:
+                    coords[oc] = (lat, lon)
+            cur.close()
+            conn.close()
+        except Exception as e:
+            logger.debug(f"[Radar Radius] batch cache read failed: {e}")
+
+        missing = [oc for oc in distinct if oc not in coords]
+        for oc in missing[:max_fresh_lookups]:
+            area = get_outcode_area_label(oc)  # also writes through to outcode_area_cache
+            if area.get("lat") is not None and area.get("lon") is not None:
+                coords[oc] = (area["lat"], area["lon"])
+
+    for oc in lead_outcodes:
+        if not oc or oc not in coords:
             continue
-        oc = outcodes[0]
-        if oc not in memo:
-            area = get_outcode_area_label(oc)
-            memo[oc] = (area.get("lat"), area.get("lon"))
-        lead_lat, lead_lon = memo[oc]
-        if lead_lat is None or lead_lon is None:
-            continue
+        lead_lat, lead_lon = coords[oc]
         dist = haversine_miles(target_lat, target_lng, lead_lat, lead_lon)
         if dist <= radius_miles:
             in_radius += 1
@@ -2515,45 +2571,6 @@ def _size_mix_select(pool: list, limit: int) -> list:
     import datetime
     selected.sort(key=lambda l: l["discovered_at"] or datetime.datetime.min, reverse=True)
     return selected[:limit]
-
-
-def _assign_display_times(selected: list) -> list:
-    """Sep 8 2026, Nick's ask: the ticker and radar notices used to show each
-    lead's REAL discovered_at clock-time -- fine most of the time, but a
-    single batch scan lands several leads within the same few minutes, so by
-    mid-afternoon the feed reads as several hours stale even though it's the
-    same real leads. Nick's own words: "they are real leads, we are just
-    fibbing about the time we got them" -- this never changes WHICH leads
-    are shown, never invents one, and never touches the leads table; it only
-    adjusts the DISPLAYED clock-time of today's real leads so they read as
-    landing steadily across the working day so far, proportionate to how
-    many of today's picks there are. A lead from a previous day keeps its
-    real timestamp untouched -- only today's own leads get smoothed, so
-    nothing ever implies an older lead is fresher than it actually is."""
-    import random
-    import datetime
-    try:
-        from zoneinfo import ZoneInfo
-        now = datetime.datetime.now(ZoneInfo("Europe/London"))
-    except Exception:
-        now = datetime.datetime.now()
-    today = now.date()
-    window_start = now.replace(hour=6, minute=0, second=0, microsecond=0)
-    elapsed = max(300.0, (now - window_start).total_seconds())
-
-    todays = [l for l in selected if l.get("discovered_at") and l["discovered_at"].date() == today]
-    n = len(todays)
-    for i, lead in enumerate(todays):
-        # Rank 0 (truly most-recently-discovered today) gets the smallest
-        # offset so it still reads as the freshest; each next real lead is
-        # spread progressively further back across however much of the
-        # 6am-11pm window has elapsed -- never before 6am, never in the future.
-        frac = (i + 1) / (n + 1)
-        offset = max(60.0, min(elapsed - 30.0, elapsed * frac * random.uniform(0.7, 1.05)))
-        lead["discovered_at"] = now - datetime.timedelta(seconds=offset)
-
-    selected.sort(key=lambda l: l.get("discovered_at") or datetime.datetime.min, reverse=True)
-    return selected
 
 
 def select_diverse_ticker_leads(limit: int = 5, enforce_geo_mix: bool = True,
@@ -2604,7 +2621,7 @@ def select_diverse_ticker_leads(limit: int = 5, enforce_geo_mix: bool = True,
         return []
 
     if not enforce_geo_mix:
-        return _assign_display_times(_size_mix_select(pool, limit))
+        return _size_mix_select(pool, limit)
 
     size_targets = {"small": 2, "medium": 2, "large": 1}
     geo_defs = [
@@ -2658,7 +2675,7 @@ def select_diverse_ticker_leads(limit: int = 5, enforce_geo_mix: bool = True,
 
     import datetime
     selected.sort(key=lambda l: l["discovered_at"] or datetime.datetime.min, reverse=True)
-    return _assign_display_times(selected[:limit])
+    return selected[:limit]
 
 
 def find_nearest_unclaimed_lead(lat: float, lon: float, max_miles: float = 25.0, exclude_refs: list = None) -> Optional[dict]:

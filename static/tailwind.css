@@ -901,6 +901,9 @@
   .pt-3 {
     padding-top: calc(var(--spacing) * 3);
   }
+  .pt-4 {
+    padding-top: calc(var(--spacing) * 4);
+  }
   .pt-8 {
     padding-top: calc(var(--spacing) * 8);
   }
@@ -1019,6 +1022,9 @@
   .tracking-widest {
     --tw-tracking: var(--tracking-widest);
     letter-spacing: var(--tracking-widest);
+  }
+  .text-amber-300 {
+    color: var(--color-amber-300);
   }
   .text-amber-400 {
     color: var(--color-amber-400);
@@ -1413,6 +1419,12 @@
     }
     .sm\:inline-block {
       display: inline-block;
+    }
+    .sm\:grid {
+      display: grid;
+    }
+    .sm\:pt-8 {
+      padding-top: calc(var(--spacing) * 8);
     }
     .sm\:w-1\/2 {
       width: calc(1 / 2 * 100%);
@@ -1938,25 +1950,34 @@
   animation: tk-live-badge-fade 3.2s ease-in-out infinite;
 }
 @keyframes tk-live-badge-fade {
-  /* Sep 8 2026, Nick's ask: pulse intensity turned up ~15% -- wider swing
-     both ends (lower trough, higher peak). */
+  /* Sep 8 2026: turned up ~15% earlier the same day, then Nick asked to
+     tone the "You Buy It, It's Yours" badge's pulse back down a bit --
+     split the difference between the original and the boosted version. */
   0%, 100% {
-    background-color: rgba(16, 185, 129, 0.08);
-    border-color: rgba(16, 185, 129, 0.25);
+    background-color: rgba(16, 185, 129, 0.1);
+    border-color: rgba(16, 185, 129, 0.28);
   }
   50% {
-    background-color: rgba(16, 185, 129, 0.4);
-    border-color: rgba(16, 185, 129, 0.65);
+    background-color: rgba(16, 185, 129, 0.28);
+    border-color: rgba(16, 185, 129, 0.48);
   }
 }
 
 /* Three dots after "Intercepting Live — <date>, <time>" that blink in
    sequence (left to right) to read as "waiting for the next lead". */
 .tk-blink-dots {
+  /* Sep 8 2026, Nick's ask: the dots were sitting off the text baseline --
+     align-items + line-height pin each dot to the middle of the line
+     instead of relying on the "." glyph's own (inconsistent) font metrics. */
   display: inline-flex;
+  align-items: center;
+  line-height: 1;
+  vertical-align: middle;
   margin-left: 1px;
 }
 .tk-blink-dots span {
+  display: inline-block;
+  line-height: 1;
   opacity: 0.2;
   animation: tk-blink-dot 1.4s ease-in-out infinite;
 }
