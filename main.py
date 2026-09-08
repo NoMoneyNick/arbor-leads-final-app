@@ -31,6 +31,27 @@ database.init_db()
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
+
+@app.middleware("http")
+async def _no_cache_dynamic_pages(request: Request, call_next):
+    """Sep 8 2026, Nick's report: after deploying, a normal reload (or a
+    fresh visit from a Google search result) kept showing the OLD page --
+    only Ctrl+Shift+R (hard refresh) showed the new content. Root cause:
+    not one route in this app ever set a Cache-Control header, so every
+    dynamic page was left to the browser's own default caching behaviour,
+    which was clearly caching far more aggressively than intended for a
+    site that changes on every deploy. This forces every non-static
+    response to be revalidated on every request. /static/* (CSS/JS/images
+    served by StaticFiles) is deliberately excluded -- those benefit from
+    normal browser caching and were never the thing going stale."""
+    response = await call_next(request)
+    if not request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 T_SEC      = os.getenv("TRIGGER_SECRET", "").strip()
 basic_auth = HTTPBasic()
 
@@ -3474,13 +3495,48 @@ def logout():
 # ── 5. Free Woodchip & Timber Drop-Spotter Hub ─────────────────────────────────
 
 @app.get("/chip-drop", response_class=HTMLResponse)
-def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all"):
+def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all", find_near: Optional[str] = None):
     """
     Woodchip & Timber Drop-Spotter Directory:
     Connects tree surgeons with nearby allotments, farms, and smallholders wanting free arborist woodchip or logs.
     Saves £60-£120 commercial tipping fees per van load.
+
+    Sep 8 2026, Nick's ask: on top of the registered directory below, an
+    optional `find_near` postcode/outcode search surfaces real-world OSM
+    candidates (farms, allotments, stables, garden centres) nearby that
+    AREN'T confirmed opt-ins -- see database.find_chip_drop_candidates_via_osm
+    for why this deliberately runs on free OpenStreetMap data rather than
+    the app's existing (budget-capped) Google Places integration.
     """
     spots = database.get_chip_drop_spots(outcode=outcode, material=material, limit=40)
+
+    candidates_html = ""
+    if find_near:
+        loc = database.resolve_location(find_near)
+        if loc["lat"] is None:
+            candidates_html = f"<p style='color:#b91c1c; font-size:13px; margin-bottom:20px;'>Couldn't resolve '{find_near}' to a real UK postcode/outcode.</p>"
+        else:
+            candidates = database.find_chip_drop_candidates_via_osm(loc["lat"], loc["lon"], radius_miles=10)
+            if not candidates:
+                candidates_html = f"<p style='color:#64748b; font-size:13px; margin-bottom:20px;'>No candidates found on OpenStreetMap within 10 miles of {loc['outcode']}. OSM coverage varies by area -- try registering sites you already know instead.</p>"
+            else:
+                cand_cards = "".join([
+                    f"""<div style="background:white; border:1px solid #bfdbfe; border-radius:10px; padding:16px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                        <div>
+                            <span style="font-size:11px; background:#eff6ff; color:#1d4ed8; font-weight:bold; padding:3px 8px; border-radius:12px;">🔍 Possible Candidate — Not Registered</span>
+                            <h4 style="margin:6px 0 2px 0; font-size:15px; color:#0f172a;">{c['category']} {c['name']}</h4>
+                            <p style="margin:0; font-size:12px; color:#64748b;">{c['distance_miles']} mi away{' · ' + c['address_hint'] if c['address_hint'] else ''} · <a href="{c['osm_url']}" target="_blank" style="color:#64748b;">view on map</a></p>
+                        </div>
+                        <a href="/register-drop-spot?site_name={urllib.parse.quote(c['name'])}&town={urllib.parse.quote(loc['outcode'])}" style="background:#1d4ed8; color:white; padding:7px 14px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:12px; white-space:nowrap;">Suggest for Registration →</a>
+                    </div>"""
+                    for c in candidates
+                ])
+                candidates_html = f"""
+                <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:14px 18px; margin-bottom:14px; font-size:13px; color:#1e40af;">
+                    <b>ℹ️ Unconfirmed:</b> these are real places found on OpenStreetMap near {loc['outcode']} that often welcome woodchip — nobody has registered them yet, so you'd need to call and ask first. Not the same as the ✅ registered listings below.
+                </div>
+                {cand_cards}
+                """
 
     # Sep 8 2026 FIX: this used to fall back to three entirely fabricated
     # "sample" sites -- invented names, invented contact people, and fake
@@ -3579,6 +3635,16 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
             <b>💡 Pro-Tip for Tree Surgeons:</b> Tipping stations charge £80–£120 + VAT per load plus 45 minutes round-trip driving time. Drop your arborist waste at local community sites for £0.00.
         </div>
 
+        <form method="GET" style="background:white; border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+            <div style="flex:1; min-width:180px;">
+                <label style="display:block; font-size:11px; font-weight:bold; color:#475569; margin-bottom:4px;">🔍 Find nearby candidates (unconfirmed farms/allotments/stables)</label>
+                <input type="text" name="find_near" value="{find_near or ''}" placeholder="e.g. NG22 or CR5 2LE" style="width:100%; box-sizing:border-box; padding:9px; border:1px solid #cbd5e1; border-radius:6px;">
+            </div>
+            <button type="submit" style="background:#1d4ed8; color:white; padding:10px 18px; border:none; border-radius:6px; font-weight:bold; font-size:13px; cursor:pointer;">Search</button>
+        </form>
+        {candidates_html}
+
+        <h2 style="font-size:16px; color:#0f172a; margin:24px 0 12px 0;">✅ Registered Drop Sites</h2>
         {spot_cards or empty_state_html}
 
         <div style="text-align:center; margin-top:32px;">
@@ -3591,11 +3657,27 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
 
 
 @app.get("/register-drop-spot", response_class=HTMLResponse)
-def register_drop_spot_page():
+def register_drop_spot_page(site_name: Optional[str] = None, outcode: Optional[str] = None, town: Optional[str] = None):
     """
     Intake form for UK landowners, allotments, and stables wanting free arborist woodchip or firewood.
+
+    Sep 8 2026: now accepts optional prefill params (site_name/outcode/town)
+    -- the "Suggest for Registration" link on a /chip-drop OSM candidate
+    lands here with the candidate's name and area pre-filled, so turning an
+    unconfirmed OSM find into a real registered listing is a couple of
+    fields, not starting from a blank form.
     """
-    return """
+    site_name_val = html.escape(site_name or "")
+    outcode_val = html.escape(outcode or "")
+    town_val = html.escape(town or "")
+    prefill_note = ""
+    if site_name:
+        prefill_note = (
+            "<div style='background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:10px 14px; margin-bottom:16px; font-size:12px; color:#1e40af;'>"
+            "Pre-filled from an unconfirmed nearby candidate — please double-check every field and only submit once you've actually confirmed with the site."
+            "</div>"
+        )
+    return f"""
     <!DOCTYPE html>
     <html lang="en-GB">
     <head>
@@ -3603,20 +3685,21 @@ def register_drop_spot_page():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Register Free Woodchip Drop Site | TreeKey</title>
         <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; }
-            .box { max-width: 520px; margin: auto; background: white; padding: 32px; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
-            input, select, textarea { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; margin-top: 4px; margin-bottom: 14px; font-family: inherit; }
-            button { background: #044332; color: white; border: none; padding: 12px; border-radius: 8px; font-weight: bold; font-size: 15px; cursor: pointer; width: 100%; }
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; }}
+            .box {{ max-width: 520px; margin: auto; background: white; padding: 32px; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: 0 4px 16px rgba(0,0,0,0.04); }}
+            input, select, textarea {{ width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; margin-top: 4px; margin-bottom: 14px; font-family: inherit; }}
+            button {{ background: #044332; color: white; border: none; padding: 12px; border-radius: 8px; font-weight: bold; font-size: 15px; cursor: pointer; width: 100%; }}
         </style>
     </head>
     <body>
     <div class="box">
         <h2 style="margin-top:0; color:#044332;">🏡 Register Free Woodchip Drop Site</h2>
         <p style="color:#64748b; font-size:13px;">Need free organic woodchip mulch, wood chips, or hardwood logs for your garden, allotment, or stables? Local tree surgeons will drop free loads directly to your property.</p>
+        {prefill_note}
 
         <form action="/api/submit-drop-spot" method="POST">
             <label style="font-size:12px; font-weight:bold;">Property / Site Name:</label>
-            <input type="text" name="site_name" placeholder="e.g. Oak Tree Allotments or Highfield Farm" required>
+            <input type="text" name="site_name" value="{site_name_val}" placeholder="e.g. Oak Tree Allotments or Highfield Farm" required>
 
             <label style="font-size:12px; font-weight:bold;">Contact Name:</label>
             <input type="text" name="contact_name" placeholder="e.g. Dave or Sarah" required>
@@ -3627,11 +3710,11 @@ def register_drop_spot_page():
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
                 <div>
                     <label style="font-size:12px; font-weight:bold;">Postcode Outcode:</label>
-                    <input type="text" name="outcode" placeholder="e.g. LS6 or WF1" required>
+                    <input type="text" name="outcode" value="{outcode_val}" placeholder="e.g. LS6 or WF1" required>
                 </div>
                 <div>
                     <label style="font-size:12px; font-weight:bold;">Town / City:</label>
-                    <input type="text" name="town" placeholder="e.g. Leeds" required>
+                    <input type="text" name="town" value="{town_val}" placeholder="e.g. Leeds" required>
                 </div>
             </div>
 
@@ -6191,10 +6274,14 @@ async def privacy_policy():
     # the business itself (Leads containing real people's names, sourced
     # from public planning/Companies House records, are what customers pay
     # for). That line was a live liability, not just a "too short" problem.
-    # This version separates customer data from Lead data, states the real
-    # lawful basis (legitimate interests), and is honest about what's still
-    # outstanding rather than pretending it's all resolved -- see the
-    # solicitor-review note at the bottom of the page.
+    # This version separates customer data from Lead data and states the
+    # real lawful basis (legitimate interests). Sep 8 2026 follow-up: an
+    # earlier pass of this page also displayed a visible "still needs
+    # solicitor sign-off" notice publicly -- Nick's call, correctly: that's
+    # an internal to-do, not something to advertise to the public or a
+    # regulator on a live legal page. Solicitor review still needs to
+    # happen (flagged to Nick directly, not on-page) -- see the equivalent
+    # note in terms_of_service below for what's still outstanding.
     return """
 <!DOCTYPE html>
 <html lang="en">
@@ -6269,8 +6356,6 @@ async def privacy_policy():
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">14. Contact</h2>
         <p class="mb-6">Questions or requests regarding this policy: <strong>contact@treekey.uk</strong>.</p>
 
-        <p class="mb-4 border-l-4 border-amber-500 pl-4 bg-amber-500/10 py-3 text-slate-300 text-sm">This policy is not a substitute for legal advice. It reflects how the Service actually works today, but two items still need a solicitor's or DPO's sign-off before this is fully complete: (1) a documented Legitimate Interests Assessment backing Section 3, beyond this page's summary of the conclusion; and (2) a working, tested process for someone named in a Lead to actually exercise the erasure/objection rights described in Section 8.</p>
-
         <a href="/" class="text-emerald-500 hover:text-emerald-400 mt-4 inline-block font-bold">&larr; Back to Home</a>
     </div>
 </body>
@@ -6283,8 +6368,16 @@ async def terms_of_service():
     # of service is ridiculously short and needs to look more like a real
     # legal page") with a fuller draft covering accounts, lead-accuracy
     # disclaimers, acceptable use, IP, data protection, liability and
-    # indemnity -- aligned to match the product as it actually works. See
-    # the note at the bottom on what still needs solicitor sign-off.
+    # indemnity -- aligned to match the product as it actually works.
+    # Sep 8 2026 follow-up: dropped the "still needs solicitor sign-off"
+    # notice that used to render publicly on this page -- Nick's call: an
+    # internal to-do doesn't belong on a live legal page. STILL OUTSTANDING
+    # (Nick to action, not shown on-site): (1) a documented Legitimate
+    # Interests Assessment backing Section 8's data-protection basis --
+    # this page states the conclusion, not the assessment itself; (2) an
+    # actual working process for someone named in a Lead to exercise the
+    # erasure/objection rights the Privacy Policy describes; (3) a
+    # solicitor's review of the whole document before relying on it fully.
     return """
 <!DOCTYPE html>
 <html lang="en">
@@ -6358,8 +6451,6 @@ async def terms_of_service():
         <p class="mb-2"><strong class="text-white">Severability.</strong> If any provision of these Terms is found unenforceable, the remaining provisions continue in full force.</p>
         <p class="mb-2"><strong class="text-white">Entire agreement.</strong> These Terms, together with the <a href="/privacy-policy" class="text-emerald-400 underline">Privacy Policy</a> and any order confirmation, constitute the entire agreement between the parties regarding the Service.</p>
         <p class="mb-6"><strong class="text-white">Contact.</strong> Questions about these Terms can be sent to <strong>contact@treekey.uk</strong>.</p>
-
-        <p class="mb-4 border-l-4 border-amber-500 pl-4 bg-amber-500/10 py-3 text-slate-300 text-sm">These Terms are not a substitute for legal advice. Section 8's data-protection basis is the single biggest item still worth a solicitor's review specifically &mdash; whether relying on legitimate interests to process Lead data is sound is a question of lawfulness, not just of who pays if something goes wrong.</p>
 
         <a href="/" class="text-emerald-500 hover:text-emerald-400 mt-4 inline-block font-bold">&larr; Back to Home</a>
     </div>

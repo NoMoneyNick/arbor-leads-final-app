@@ -1846,6 +1846,111 @@ def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float
     return 2 * R * math.asin(math.sqrt(a))
 
 
+_OSM_CHIP_DROP_TAGS = [
+    ("landuse", "farmyard", "🚜 Farm"),
+    ("landuse", "allotments", "🌱 Allotments"),
+    ("leisure", "horse_riding", "🐴 Stables / Equestrian"),
+    ("shop", "garden_centre", "🌳 Garden Centre"),
+]
+
+
+def find_chip_drop_candidates_via_osm(lat: float, lon: float, radius_miles: float = 10.0, limit: int = 15) -> list:
+    """Sep 8 2026, Nick's ask: an automated "find nearby chip-drop
+    candidates" layer on top of the self-registration directory (see
+    get_chip_drop_spots), inspired by the original Gemini Pro brief.
+    Deliberately built on OpenStreetMap's free, keyless Overpass API
+    rather than Google Places -- Nick's explicit instruction was not to
+    spend even a small amount of the existing GOOGLE_PLACES_MONTHLY_PAID_CALL_CAP
+    quota in research.py (that cap is carefully budgeted for the core
+    contractor-enrichment pipeline) on this secondary feature. This is a
+    completely separate API, on a separate free tier, so it cannot touch
+    that budget at all.
+
+    IMPORTANT: unlike get_chip_drop_spots, these are NOT confirmed,
+    opted-in drop sites -- they're real places (farms, allotments,
+    stables, garden centres) tagged in OpenStreetMap near the given point,
+    surfaced as candidates worth a phone call, nothing more. Callers must
+    label them as unconfirmed (main.py's /chip-drop route does this with a
+    distinct badge) -- presenting them as equivalent to a real registered
+    listing would repeat exactly the fabricated-data mistake this
+    session's earlier /chip-drop fix removed, just with real place names
+    attached instead of invented ones.
+
+    Returns a list of {name, category, lat, lon, distance_miles,
+    address_hint, osm_url} dicts, nearest first. Returns [] on any
+    failure (network, no results, bad coords) -- this is an assistive
+    discovery tool, never something a caller should treat as required to
+    succeed."""
+    if lat is None or lon is None:
+        return []
+    radius_m = int(min(radius_miles, 30.0) * 1609.34)  # capped at 30mi -- Overpass gets slow/heavy on huge radii
+
+    clauses = "".join([
+        f'node["{k}"="{v}"]["name"](around:{radius_m},{lat},{lon});\n'
+        f'way["{k}"="{v}"]["name"](around:{radius_m},{lat},{lon});\n'
+        for k, v, _ in _OSM_CHIP_DROP_TAGS
+    ])
+    query = f"[out:json][timeout:20];\n(\n{clauses}\n);\nout center tags {limit * 4};"
+
+    try:
+        # Overpass's fair-use policy asks API consumers to identify
+        # themselves with a real User-Agent rather than a generic client
+        # default -- helps avoid being mistaken for anonymous scraping
+        # traffic and throttled.
+        resp = requests.post(
+            "https://overpass-api.de/api/interpreter",
+            data={"data": query},
+            headers={"User-Agent": "TreeKey/1.0 (treekey.uk; contact@treekey.uk)"},
+            timeout=25,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"[ChipDrop/OSM] Overpass returned {resp.status_code} for ({lat},{lon})")
+            return []
+        elements = resp.json().get("elements", [])
+    except Exception as e:
+        logger.warning(f"[ChipDrop/OSM] Overpass lookup failed for ({lat},{lon}): {e}")
+        return []
+
+    tag_to_label = {(k, v): label for k, v, label in _OSM_CHIP_DROP_TAGS}
+    candidates = []
+    for el in elements:
+        tags = el.get("tags", {}) or {}
+        name = tags.get("name")
+        if not name:
+            continue
+        el_lat = el.get("lat") or (el.get("center") or {}).get("lat")
+        el_lon = el.get("lon") or (el.get("center") or {}).get("lon")
+        if el_lat is None or el_lon is None:
+            continue
+
+        category = "📍 Possible Site"
+        for k, v, label in _OSM_CHIP_DROP_TAGS:
+            if tags.get(k) == v:
+                category = label
+                break
+
+        addr_parts = [tags.get("addr:housenumber", ""), tags.get("addr:street", ""), tags.get("addr:city", "") or tags.get("addr:town", ""), tags.get("addr:postcode", "")]
+        address_hint = " ".join(p for p in addr_parts if p).strip() or None
+
+        dist = haversine_miles(lat, lon, el_lat, el_lon)
+        if dist > radius_miles:
+            continue
+
+        osm_type = el.get("type", "node")  # Overpass always includes "type" ("node"/"way"/"relation") on every element
+        candidates.append({
+            "name": name,
+            "category": category,
+            "lat": el_lat,
+            "lon": el_lon,
+            "distance_miles": round(dist, 1),
+            "address_hint": address_hint,
+            "osm_url": f"https://www.openstreetmap.org/{osm_type}/{el.get('id')}",
+        })
+
+    candidates.sort(key=lambda c: c["distance_miles"])
+    return candidates[:limit]
+
+
 def increment_api_usage(api_name: str = "UK Planning API", increment: int = 1, cap: int = 500) -> dict:
     """
     Increments monthly API counter and runs predictive velocity forecasting.
