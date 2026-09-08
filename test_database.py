@@ -978,5 +978,171 @@ class TestSystemWarningsLogging(unittest.TestCase):
         self.assertEqual(warnings, [])
 
 
+class TestFreeSignupLimboAccounts(unittest.TestCase):
+    """Sep 5 2026, Nick's "limbo account" ask: a free (no-payment) signup
+    gets one real lead immediately, then 1-2x/week teaser emails until they
+    either subscribe or unsubscribe. These tests lock in the DB layer
+    (limbo_accounts table + lead-matching/burning glue) independent of the
+    email-sending decision itself (covered in test_notifications.py)."""
+
+    def _conn_with_execute(self):
+        conn = MagicMock()
+        cur = MagicMock()
+        conn.cursor.return_value = cur
+        return conn, cur
+
+    def test_create_or_update_limbo_account_inserts_and_returns_row(self):
+        conn, cur = self._conn_with_execute()
+        cur.fetchone.return_value = (
+            "id-1", "dave@apex-trees.co.uk", "Dave", "07123456789", "NG22",
+            53.2, -1.1, None, None, "2026-09-05T00:00:00Z", None, False,
+        )
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            account = database.create_or_update_limbo_account(
+                email="Dave@Apex-Trees.co.uk", name="Dave", phone="07123456789",
+                outcode="ng22", lat=53.2, lon=-1.1)
+        self.assertIsNotNone(account)
+        self.assertEqual(account["email"], "dave@apex-trees.co.uk")
+        self.assertEqual(account["center_outcode"], "NG22")
+        self.assertIsNone(account["free_lead_ref"])
+        # Email/outcode normalised to lowercase/uppercase before hitting the DB.
+        args = cur.execute.call_args[0][1]
+        self.assertEqual(args[0], "dave@apex-trees.co.uk")
+        self.assertEqual(args[3], "NG22")
+
+    def test_create_or_update_limbo_account_no_database_returns_none(self):
+        with patch.object(database, "SURL", ""):
+            account = database.create_or_update_limbo_account(email="a@b.com", outcode="NG22")
+        self.assertIsNone(account)
+
+    def test_create_or_update_limbo_account_missing_outcode_returns_none(self):
+        """center_outcode is NOT NULL on the table -- must not even attempt
+        the INSERT with no location, since that would just crash."""
+        with patch.object(database, "SURL", "postgres://fake-for-test"):
+            account = database.create_or_update_limbo_account(email="a@b.com", outcode="")
+        self.assertIsNone(account)
+
+    def test_get_limbo_account_returns_none_when_no_row(self):
+        conn, cur = self._conn_with_execute()
+        cur.fetchone.return_value = None
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            account = database.get_limbo_account("nobody@example.com")
+        self.assertIsNone(account)
+
+    def test_record_free_lead_grant_succeeds_when_not_already_granted(self):
+        conn, cur = self._conn_with_execute()
+        cur.fetchone.return_value = ("id-1",)
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            ok = database.record_free_lead_grant("dave@apex-trees.co.uk", "TREE-REF-1")
+        self.assertTrue(ok)
+        conn.commit.assert_called_once()
+
+    def test_record_free_lead_grant_double_grant_is_blocked(self):
+        """The UPDATE's own `WHERE free_lead_ref IS NULL` guard is what
+        actually prevents a double-submit or retried request from granting
+        a second free lead -- simulated here by the UPDATE matching zero
+        rows (as it would for real once free_lead_ref is already set)."""
+        conn, cur = self._conn_with_execute()
+        cur.fetchone.return_value = None
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            ok = database.record_free_lead_grant("dave@apex-trees.co.uk", "TREE-REF-2")
+        self.assertFalse(ok)
+
+    def test_extract_outcodes_finds_uk_postcode_in_address(self):
+        self.assertEqual(database._extract_outcodes("12 High St, Nottingham, NG22 8AA"), ["NG22"])
+        self.assertEqual(database._extract_outcodes("no postcode here"), [])
+
+    def test_find_nearest_unclaimed_lead_picks_the_closer_of_two(self):
+        conn, cur = self._conn_with_execute()
+        cur.fetchall.return_value = [
+            ("id-far", "REF-FAR", "1 Far Rd, ZZ99 1AA", "Felling", "Council A", "medium", 2900,
+             None, "tree", None, None, None, None),
+            ("id-near", "REF-NEAR", "2 Near Rd, YY11 1AA", "Crown reduction", "Council B", "small", 1900,
+             None, "tree", None, None, None, None),
+        ]
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"), \
+             patch.object(database, "lookup_outcode_centroid", side_effect=lambda oc: {
+                 "ZZ99": (55.0, -3.0), "YY11": (53.01, -1.01),
+             }.get(oc, (None, None))), \
+             patch.object(database, "haversine_miles", side_effect=lambda lat1, lon1, lat2, lon2: {
+                 55.0: 200.0, 53.01: 1.0,
+             }.get(lat2, 999.0)):
+            best = database.find_nearest_unclaimed_lead(53.0, -1.0, max_miles=25.0)
+        self.assertIsNotNone(best)
+        self.assertEqual(best["reference"], "REF-NEAR")
+
+    def test_find_nearest_unclaimed_lead_excludes_given_references(self):
+        conn, cur = self._conn_with_execute()
+        cur.fetchall.return_value = [
+            ("id-1", "ALREADY-GRANTED", "1 A Rd, NG22 8AA", "Felling", "Council A", "medium", 2900,
+             None, "tree", None, None, None, None),
+        ]
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"), \
+             patch.object(database, "lookup_outcode_centroid", return_value=(53.0, -1.0)), \
+             patch.object(database, "haversine_miles", return_value=1.0):
+            best = database.find_nearest_unclaimed_lead(53.0, -1.0, max_miles=25.0, exclude_refs=["ALREADY-GRANTED"])
+        self.assertIsNone(best)
+
+    def test_find_nearest_unclaimed_lead_beyond_max_miles_is_ignored(self):
+        conn, cur = self._conn_with_execute()
+        cur.fetchall.return_value = [
+            ("id-1", "REF-TOO-FAR", "1 A Rd, ZZ99 1AA", "Felling", "Council A", "medium", 2900,
+             None, "tree", None, None, None, None),
+        ]
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"), \
+             patch.object(database, "lookup_outcode_centroid", return_value=(55.0, -3.0)), \
+             patch.object(database, "haversine_miles", return_value=200.0):
+            best = database.find_nearest_unclaimed_lead(53.0, -1.0, max_miles=25.0)
+        self.assertIsNone(best)
+
+    def test_get_limbo_accounts_due_for_teaser_shape(self):
+        conn, cur = self._conn_with_execute()
+        cur.fetchall.return_value = [
+            ("id-1", "dave@apex-trees.co.uk", "Dave", "NG22", 53.0, -1.0, "FREE-REF", None),
+        ]
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            cohort = database.get_limbo_accounts_due_for_teaser(min_hours_since_last=72.0)
+        self.assertEqual(len(cohort), 1)
+        self.assertEqual(cohort[0]["email"], "dave@apex-trees.co.uk")
+        self.assertEqual(cohort[0]["free_lead_ref"], "FREE-REF")
+
+    def test_get_limbo_accounts_due_for_teaser_no_database_returns_empty(self):
+        with patch.object(database, "SURL", ""):
+            cohort = database.get_limbo_accounts_due_for_teaser()
+        self.assertEqual(cohort, [])
+
+    def test_mark_teaser_sent_updates_timestamp_and_ref(self):
+        conn, cur = self._conn_with_execute()
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            database.mark_teaser_sent("dave@apex-trees.co.uk", lead_ref="REF-2")
+        cur.execute.assert_called_once()
+        conn.commit.assert_called_once()
+
+    def test_set_limbo_account_unsubscribed(self):
+        conn, cur = self._conn_with_execute()
+        cur.fetchone.return_value = ("id-1",)
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            ok = database.set_limbo_account_unsubscribed("dave@apex-trees.co.uk")
+        self.assertTrue(ok)
+
+    def test_get_lead_by_reference_returns_none_when_missing(self):
+        conn, cur = self._conn_with_execute()
+        cur.fetchone.return_value = None
+        with patch.object(database, "get_db_conn", return_value=conn), \
+             patch.object(database, "SURL", "postgres://fake-for-test"):
+            lead = database.get_lead_by_reference("NOPE")
+        self.assertIsNone(lead)
+
+
 if __name__ == "__main__":
     unittest.main()

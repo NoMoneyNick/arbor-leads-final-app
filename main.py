@@ -598,6 +598,20 @@ def public_homepage():
     # already cost trust once this session (the "75%/10%/15%" TPO claim).
     display_leads = stats["l"]
 
+    # Sep 8 2026: Nick flagged that the public homepage's "Intercepted
+    # Notices" table and ticker were printing the raw `address` column
+    # straight from the leads table -- i.e. the exact, unpaid-for street
+    # address of every unsold lead was visible to any anonymous visitor,
+    # which is the entire paid product given away for free pre-checkout.
+    # Fixed to show only the outcode-level area (same regex database.py's
+    # _extract_outcodes already uses for geo-matching elsewhere), never
+    # the address itself, on this public page. The full address still
+    # only appears after purchase / on an actual subscriber's own
+    # dashboard leads (see /dashboard, which reads real subscriptions).
+    def _area_label(address):
+        outcodes = database._extract_outcodes(address)
+        return f"{outcodes[0]} area" if outcodes else "UK"
+
     lead_rows = "".join([
         f"""<tr class='border-b border-slate-700/50 hover:bg-slate-800/50 transition-colors'>
             <td class='p-4 text-emerald-400 font-mono text-xs'>
@@ -605,7 +619,7 @@ def public_homepage():
                 <span class='text-slate-400 font-sans'>{l[4]}</span>
             </td>
             <td class='p-4 text-slate-200 text-sm max-w-md'>
-                <b class='text-white'>{l[0]}</b><br>
+                <b class='text-white'>{_area_label(l[0])}</b><br>
                 <span class='text-slate-400 text-xs'>{(l[1] or '')[:120]}...</span>
             </td>
             <td class='p-4 text-right'>
@@ -621,7 +635,7 @@ def public_homepage():
         f"""<div class='grid grid-cols-[56px_92px_1fr_86px_60px] gap-3 items-center px-4 py-2.5 border-b border-emerald-900/40 text-xs font-mono'>
             <span class='text-emerald-600'>{(l[6].strftime('%H:%M') if l[6] else '--:--')}</span>
             <span class='text-emerald-600 truncate'>{((l[5] or l[4] or 'TPO'))[:10]}</span>
-            <span class='text-slate-300 truncate'>{((l[1] or l[0] or ''))[:64]}</span>
+            <span class='text-slate-300 truncate'>{((l[1] or _area_label(l[0])))[:64]}</span>
             <span class='text-right'>
                 <span class='text-amber-400 font-bold text-[10px] uppercase tracking-wide'>{(l[2] or 'medium')} job</span>
             </span>
@@ -680,14 +694,19 @@ def public_homepage():
                         <span class="text-[9px] uppercase tracking-widest text-emerald-500 font-mono font-semibold">Arbor Intelligence</span>
                     </div>
                 </a>
-                <div class="flex items-center gap-3 md:gap-6 font-mono text-xs tracking-wide">
+                <div class="flex items-center gap-3 md:gap-6 font-mono text-sm tracking-wide">
+                    <!-- Sep 5 2026: Nick's feedback -- tabs were too small/thin and
+                         only Storm Radar had any colour, making the others look
+                         inactive/unimportant by comparison. Bumped every tab to
+                         font-bold and gave each its own distinct colour so the
+                         whole bar reads as a set of equally live destinations. -->
                     <div class="hidden lg:flex items-center gap-6 text-slate-300">
-                        <a href="/#radar" class="hover:text-emerald-400 transition-colors">RADAR</a>
-                        <a href="/marketplace" class="hover:text-emerald-400 transition-colors">MARKETPLACE</a>
-                        <a href="/ledger" class="hover:text-emerald-400 transition-colors">LEDGER</a>
-                        <a href="/chip-drop" class="hover:text-emerald-400 transition-colors">CHIP-DROP</a>
-                        <a href="/storm-radar" class="hover:text-emerald-400 transition-colors text-amber-400 font-bold">STORM RADAR</a>
-                        <a href="/pricing" class="hover:text-emerald-400 transition-colors">PACKAGES</a>
+                        <a href="/#radar" class="hover:brightness-125 transition-all text-emerald-400 font-bold">RADAR</a>
+                        <a href="/marketplace" class="hover:brightness-125 transition-all text-sky-400 font-bold">MARKETPLACE</a>
+                        <a href="/ledger" class="hover:brightness-125 transition-all text-violet-400 font-bold">LEDGER</a>
+                        <a href="/chip-drop" class="hover:brightness-125 transition-all text-orange-400 font-bold">CHIP-DROP</a>
+                        <a href="/storm-radar" class="hover:brightness-125 transition-all text-amber-400 font-bold">STORM RADAR</a>
+                        <a href="/pricing" class="hover:brightness-125 transition-all text-rose-400 font-bold">PACKAGES</a>
                     </div>
                     <a href="/login" class="bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 px-3.5 py-1.5 rounded-lg font-bold uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-[0_0_15px_rgba(5,150,105,0.2)]">
                         Contractor Sign In ➔
@@ -698,11 +717,15 @@ def public_homepage():
     </nav>
 
     <!-- Hero Section: Live Signal Console -->
-    <main class="relative overflow-hidden pt-16 pb-24 lg:pt-24 lg:pb-32 bg-brand-dark bg-[radial-gradient(ellipse_at_top,rgba(5,150,105,0.10),transparent_60%)]">
+    <!-- Sep 5 2026: Nick's feedback -- too much dead space between the nav
+         and the map/radar section below. Trimmed the hero's top padding and
+         the live-feed block's bottom margin; left pb/lg values alone since
+         those control spacing further down the page, not this gap. -->
+    <main class="relative overflow-hidden pt-8 pb-24 lg:pt-10 lg:pb-32 bg-brand-dark bg-[radial-gradient(ellipse_at_top,rgba(5,150,105,0.10),transparent_60%)]">
         <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
 
             <!-- Live Console Feed: real intercepted notices, not a decorative graphic -->
-            <div class="bg-[#0A1A12]/80 border border-emerald-900/50 rounded-xl overflow-hidden shadow-2xl mb-10">
+            <div class="bg-[#0A1A12]/80 border border-emerald-900/50 rounded-xl overflow-hidden shadow-2xl mb-6">
                 <div class="flex items-center gap-2 px-4 py-3 border-b border-emerald-900/50">
                     <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
                     <span class="font-mono text-[11px] uppercase tracking-widest text-emerald-400">Live Feed — 360+ UK Council Portals</span>
@@ -737,6 +760,13 @@ def public_homepage():
                         <a href="#radar" class="flex items-center gap-2 bg-brand-green text-white px-8 py-4 rounded font-bold text-lg hover:bg-emerald-500 transition-all duration-300 shadow-[0_0_30px_rgba(5,150,105,0.4)] hover:shadow-[0_0_40px_rgba(5,150,105,0.6)] hover:-translate-y-1 transform">
                             Scan My Postcode Now
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                        </a>
+                        <!-- Sep 5 2026: the free-account signup (get one real lead, no
+                             card) was previously only reachable via cold email -- Nick
+                             wanted it as a real, discoverable acquisition path on the
+                             site itself, not just a cold-outreach bait link. -->
+                        <a href="/free-account" class="flex items-center gap-2 bg-transparent text-emerald-400 border-2 border-emerald-500/50 px-8 py-4 rounded font-bold text-lg hover:bg-emerald-500/10 transition-all duration-300">
+                            Get a Free Lead — No Card Needed
                         </a>
                     </div>
                     <p class="text-xs text-slate-500 font-mono uppercase tracking-widest mt-2">100% Exclusive Leads. Never Sold Twice.</p>
@@ -1005,9 +1035,13 @@ def public_homepage():
             <div class="flex gap-6 text-xs font-mono uppercase tracking-wider flex-wrap justify-center md:justify-end shrink-0 pt-2">
                 <a href="/privacy-policy" class="text-slate-400 hover:text-white transition-colors">Privacy</a>
                 <a href="/terms-of-service" class="text-slate-400 hover:text-white transition-colors">Terms</a>
+                <!-- Sep 5 2026: Nick flagged this as "what is datahub? broken link".
+                     It was never actually broken (real 200 JSON) -- just mislabeled:
+                     it's a live-system-status pulse, not a data hub. Renamed to
+                     match what a visitor actually gets when they click it. -->
                 <a href="/health" class="text-slate-400 hover:text-white transition-colors flex items-center gap-2">
                     <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
-                    Datahub
+                    Status
                 </a>
                 <a href="/admin" class="text-brand-green hover:text-emerald-400 transition-colors">Login</a>
             </div>
@@ -1153,31 +1187,59 @@ def public_homepage():
 # research.py). `locale` is deliberately excluded -- it's open-ended
 # (specific council/town names), so "every possible value" isn't a fixed,
 # meaningful list the way it is for the others.
-LEAD_KNOWN_TAG_VALUES = {
+KNOWN_TAG_VALUES = {
     "job": sorted(set(scanners.JOB_TYPE_KEYWORDS.keys()) | {"other"}),
     "size": ["small", "medium", "large"],
     "agent": ["yes", "no", "unconfirmed"],
+    # Sep 2 2026: Nick's ask -- "not only agent yes/no but rather
+    # none/agent/tree surgeon as the agent ones who are not tree surgeons
+    # are potentially viable leads". Kept as its own prefix alongside
+    # 'agent' above (rather than replacing it) so nothing that already
+    # filters on agent:yes/no/unconfirmed breaks -- this is additive detail,
+    # not a replacement. Only emitted for the tree vertical (see
+    # scanners._generate_tags -- agent_is_tree_surgeon has no equivalent
+    # concept for HMO, so tagging every HMO lead 'type-unconfirmed' would
+    # just be noise, not information).
     "agent_type": ["none", "confirmed-tree-surgeon", "confirmed-other", "type-unconfirmed", "unconfirmed"],
+    # Sep 2 2026: the "third round" educated guess for leads where the
+    # agent status has no hard confirmation at all -- a best-effort read of
+    # the application's own description text (see
+    # mesh_scrapers.classify_agent_as_tree_surgeon). Deliberately has no
+    # 'no signal' value of its own: a lead with nothing to go on simply gets
+    # no agent_guess tag at all and the generic renderer's own gap row
+    # ("no agent_guess tag") shows that honestly, rather than this list
+    # claiming a fixed set of guessable outcomes that don't include "none".
     "agent_guess": ["tree-surgeon", "non-tree-surgeon"],
     "vertical": ["tree", "hmo"],
+    # Sep 2 2026 audit fix: this used to be the raw pretty-printed region
+    # names ("East Midlands", "South East", ...) while every REAL stored
+    # region tag is slugified (region:east-midlands) by
+    # scanners._slugify_tag -- so every one of these known-value rows never
+    # matched a real row and always rendered as a duplicate, permanently-
+    # zero entry next to the real (slugified) one carrying the actual
+    # count. Caught by Nick looking straight at the admin page and asking
+    # "why are the regions empty?" -- they weren't empty, they were just
+    # the wrong (unslugified) rows sitting at zero next to the real ones.
     "region": sorted({scanners._slugify_tag(v) for v in scanners.COUNCIL_TO_REGION.values()}) + ["unclassified"],
-    "locale": []
-}
-
-PARTNER_KNOWN_TAG_VALUES = {
     "business": sorted(set(research.SIC_DIVISION_TO_BUSINESS_KIND.values()) | {research.BUSINESS_KIND_NAME_OVERRIDE}) + ["unclassified"],
+    # Sep 2 2026: the partner-side third-round guess -- see
+    # research._guess_business_kind. Same "no guess tag at all, not a
+    # 'none' value" rule as agent_guess above.
     "business_guess": sorted(set(research._BUSINESS_GUESS_KEYWORDS.keys())),
     "director": ["yes", "no"],
     "phone": ["yes", "no"],
     "email": ["yes", "no"],
     "contact": ["reachable", "dead"],
-    "registration": ["sole_trader", "limited_company"]
 }
+# job is the one genuinely multi-label category (a tree lead can be both
+# crown-work and tpo at once) -- every other category assigns exactly one
+# value per lead/partner, so its counts are held to "should sum to the
+# total" and the gap (if any) is surfaced explicitly rather than silently
+# absorbed.
+MULTI_LABEL_CATEGORIES = {"job"}
 
-_MULTI_LABEL_TAG_CATEGORIES = {"job"}
 
-
-def _render_tag_stat_section(categories: dict, total: int, untagged: int, entity_label: str, known_tags: dict) -> str:
+def _render_tag_stat_section(categories: dict, total: int, untagged: int, entity_label: str) -> str:
     """Generic renderer for the tag-based stats grids on /admin. Any
     category dict shaped like {"prefix": {"prefix:value": n}} (see
     database.get_tag_counts / get_partner_tag_counts) renders automatically
@@ -1190,19 +1252,19 @@ def _render_tag_stat_section(categories: dict, total: int, untagged: int, entity
     'no <category> tag' row for the gap when a single-value category's
     counts don't add up to `total` (a real, visible fact -- e.g. some
     leads have no council_source at all -- not a rendering bug)."""
-    if not categories and not known_tags:
+    if not categories and not KNOWN_TAG_VALUES:
         return "<p style='color:#94a3b8; font-size:13px;'>No data yet.</p>"
-    all_prefixes = sorted(set(categories.keys()) | set(known_tags.keys()))
+    all_prefixes = sorted(set(categories.keys()) | set(KNOWN_TAG_VALUES.keys()))
     cards = []
     for prefix in all_prefixes:
         tag_counts = dict(categories.get(prefix, {}))
-        for known_value in known_tags.get(prefix, []):
+        for known_value in KNOWN_TAG_VALUES.get(prefix, []):
             tag_counts.setdefault(f"{prefix}:{known_value}", 0)
         if not tag_counts:
             continue
         rows = sorted(tag_counts.items(), key=lambda kv: (-kv[1], kv[0]))
         category_sum = sum(n for _, n in rows)
-        is_multi = prefix in _MULTI_LABEL_TAG_CATEGORIES
+        is_multi = prefix in MULTI_LABEL_CATEGORIES
         gap = total - category_sum
         if not is_multi and gap > 0:
             rows.append((f"{prefix}:(no {prefix} tag)", gap))
@@ -1387,11 +1449,11 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
         <hr>
 
         <h3>&#127795; Leads, by Category</h3>
-        {_render_tag_stat_section(lead_tag_stats.get("categories", {}), lead_tag_stats.get("total_leads", 0), lead_tag_stats.get("untagged_leads", 0), "leads", LEAD_KNOWN_TAG_VALUES)}
+        {_render_tag_stat_section(lead_tag_stats.get("categories", {}), lead_tag_stats.get("total_leads", 0), lead_tag_stats.get("untagged_leads", 0), "leads")}
 
         <hr>
         <h3>&#127970; Partners, by Category</h3>
-        {_render_tag_stat_section(partner_tag_stats.get("categories", {}), partner_tag_stats.get("total_partners", 0), partner_tag_stats.get("untagged_partners", 0), "partners", PARTNER_KNOWN_TAG_VALUES)}
+        {_render_tag_stat_section(partner_tag_stats.get("categories", {}), partner_tag_stats.get("total_partners", 0), partner_tag_stats.get("untagged_partners", 0), "partners")}
 
         <hr>
         <h4>Recent Leads (Past 24-48 Hours)</h4>
@@ -2692,14 +2754,19 @@ def login_page(error: Optional[str] = None):
         <div style="text-align:center; margin-bottom:20px;">
             <span style="font-size:32px;">🌲</span>
             <h2 style="margin:8px 0 4px 0; color:#044332;">Contractor Command Center</h2>
-            <p style="color:#64748b; font-size:13px; margin:0;">Zero-Password Sign In • Enter your email or mobile</p>
+            <p style="color:#64748b; font-size:13px; margin:0;">Zero-Password Sign In • Enter your email</p>
         </div>
 
         {err_html}
 
+        <!-- Sep 5 2026: was "Email or Phone" -- there's no SMS sending built
+             (create_magic_auth_token only ever treats this as an email, and
+             nothing here can text a phone number), so it never worked for a
+             phone number in the first place. Copy now matches what actually
+             happens rather than promising a channel that doesn't exist. -->
         <form action="/api/request-magic-link" method="POST">
-            <label style="font-size:12px; font-weight:bold; color:#475569;">Email Address or Phone:</label>
-            <input type="text" name="contact" placeholder="e.g. dave@apex-trees.co.uk" required autofocus>
+            <label style="font-size:12px; font-weight:bold; color:#475569;">Email Address:</label>
+            <input type="email" name="contact" placeholder="e.g. dave@apex-trees.co.uk" required autofocus>
             <button type="submit">Send 1-Tap Login Link ⚡</button>
         </form>
 
@@ -2745,7 +2812,13 @@ async def request_magic_link(request: Request):
         <p style="font-size:11px; color:#94a3b8; margin-top:24px;">This secure link is valid for 15 minutes. If you did not request this, you can safely ignore this email.</p>
     </div>
     """
-    notifications.send_resend_email(subject="🌲 Your TreeKey 1-Tap Login Link", html_body=email_body)
+    # Sep 5 2026 CRITICAL FIX: this used to call send_resend_email(), which
+    # ALWAYS sends to the fixed internal TEST_EMAIL address (built for admin
+    # incident alerts, not customer email) -- meaning no contractor other
+    # than whoever's email happens to be TEST_EMAIL ever actually received
+    # their login link. The whole login flow was silently broken for every
+    # real contractor. Now sends directly to the contractor's own address.
+    notifications.send_transactional_email(to_email=contact, subject="🌲 Your TreeKey 1-Tap Login Link", html_body=email_body)
 
     return HTMLResponse(f"""
     <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#f8fafc;">
@@ -2775,22 +2848,235 @@ def verify_login(request: Request, token: Optional[str] = None, otp: Optional[st
     if not verified_email:
         return RedirectResponse(url="/login?error=Login+link+expired+or+already+used.+Please+request+a+new+one.", status_code=303)
 
-    # Ghost-session guard: only contractors with an active subscription get a dashboard session
-    active_sub = database.get_contractor_subscription(verified_email)
-    if not active_sub or not active_sub.get("active"):
-        return RedirectResponse(url="/pricing?msg=no_subscription", status_code=303)
+    def _session_redirect(url: str) -> RedirectResponse:
+        response = RedirectResponse(url=url, status_code=303)
+        response.set_cookie(
+            key="treekey_contractor_session",
+            value=_sign_session_cookie(verified_email),
+            max_age=86400 * 30,  # 30 days
+            httponly=True,
+            secure=True,
+            samesite="lax"
+        )
+        return response
 
-    # Set secure, signed session cookie and redirect to dashboard
-    response = RedirectResponse(url="/dashboard", status_code=303)
+    # Paying subscribers get the full dashboard, same as always.
+    active_sub = database.get_contractor_subscription(verified_email)
+    if active_sub and active_sub.get("active"):
+        return _session_redirect("/dashboard")
+
+    # Sep 5 2026: a free "limbo account" signup (see /free-account below) is
+    # a real, verified account -- just not a paying one -- so it must NOT
+    # hit the old "no subscription" wall. Ghost-session guard for
+    # everyone else (never signed up either way) is unchanged.
+    if database.get_limbo_account(verified_email):
+        return _session_redirect("/free-dashboard")
+
+    return RedirectResponse(url="/pricing?msg=no_subscription", status_code=303)
+
+
+# ── Free "Limbo Account" Signup (Sep 5 2026, Nick's ask) ─────────────────────
+# Sign up with no card/subscription -> get one real, fully-unlocked free
+# lead near you immediately -> then 1-2x/week teaser emails (address
+# blurred, job details + filed date shown) as an upgrade prompt. Verbatim
+# spec: "sign up for a free account even without a subscription, just
+# login details and normal account sign up details. then you get your
+# free lead... we can then send them emails once or twice a week with
+# specific leads in their area... without the finer details of the
+# address viewable (blurred out or something) but the job details
+# viewable and date it was applied... as a sales prompt."
+
+@app.get("/free-account", response_class=HTMLResponse)
+def free_account_signup_page(error: Optional[str] = None):
+    err_html = f"<div style='background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px; border-radius:6px; margin-bottom:16px; font-size:13px;'>{error}</div>" if error else ""
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Get a Free Lead | TreeKey</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; }}
+            .box {{ max-width:440px; margin:auto; background:white; padding:32px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04); }}
+            input {{ width:100%; box-sizing:border-box; padding:12px; border:1px solid #cbd5e1; border-radius:8px; margin-top:6px; margin-bottom:16px; font-family:inherit; font-size:15px; }}
+            button {{ background:#044332; color:white; border:none; padding:12px; border-radius:8px; font-weight:bold; font-size:15px; cursor:pointer; width:100%; }}
+            label {{ font-size:12px; font-weight:bold; color:#475569; }}
+        </style>
+    </head>
+    <body>
+    <div class="box">
+        <div style="text-align:center; margin-bottom:20px;">
+            <span style="font-size:32px;">🌲</span>
+            <h2 style="margin:8px 0 4px 0; color:#044332;">Get a free tree lead</h2>
+            <p style="color:#64748b; font-size:13px; margin:0;">No card. No subscription. Just a real job near you.</p>
+        </div>
+        {err_html}
+        <form action="/api/free-signup" method="POST">
+            <label>Name:</label>
+            <input type="text" name="name" placeholder="e.g. Dave Smith" required>
+            <label>Email Address:</label>
+            <input type="email" name="email" placeholder="e.g. dave@apex-trees.co.uk" required>
+            <label>Phone (optional):</label>
+            <input type="tel" name="phone" placeholder="e.g. 07123 456789">
+            <label>Your Postcode or Area:</label>
+            <input type="text" name="postcode" placeholder="e.g. NG22" required>
+            <button type="submit">Get My Free Lead ⚡</button>
+        </form>
+        <div style="text-align:center; margin-top:20px; font-size:12px; color:#64748b;">
+            Already have an account? <a href="/login" style="color:#044332; font-weight:bold;">Sign in</a>
+        </div>
+    </div>
+    </body>
+    </html>
+    """
+
+
+@app.post("/api/free-signup")
+async def free_signup(request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        return RedirectResponse(url="/free-account?error=Too+many+attempts.+Please+wait+a+minute+and+try+again.", status_code=303)
+
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    email = (form.get("email") or "").strip().lower()
+    phone = (form.get("phone") or "").strip()
+    postcode_input = (form.get("postcode") or "").strip()
+
+    if not email or "@" not in email or not postcode_input:
+        return RedirectResponse(url="/free-account?error=Please+enter+a+valid+email+and+postcode.", status_code=303)
+
+    # Resolve the typed postcode/area to an outcode + lat/lon the same way
+    # the rest of this app locates a lead or a subscriber -- see
+    # database.lookup_outcode_centroid (postcodes.io outcode centroid).
+    # Kept deliberately simple: take the first "word" typed as the outcode
+    # (e.g. "NG22 8AA" -> "NG22", "NG22" -> "NG22") and let postcodes.io
+    # itself say whether that's real, rather than guessing further here.
+    outcode_guess = postcode_input.strip().upper().split(" ")[0]
+    lat, lon = database.lookup_outcode_centroid(outcode_guess)
+    if lat is None or lon is None:
+        return RedirectResponse(url="/free-account?error=Couldn%27t+recognise+that+postcode+-+please+try+again+(e.g.+NG22).", status_code=303)
+
+    account = database.create_or_update_limbo_account(email=email, name=name or None, phone=phone or None,
+                                                        outcode=outcode_guess, lat=lat, lon=lon)
+    if not account:
+        return RedirectResponse(url="/free-account?error=Something+went+wrong+creating+your+account.+Please+try+again.", status_code=303)
+
+    # Grant the one-off free lead only if this account has never had one --
+    # record_free_lead_grant's own NULL guard makes this safe even under a
+    # double-submit/retry, but checking here too avoids burning a second
+    # lead's worth of postcodes.io lookups for nothing.
+    if not account.get("free_lead_ref"):
+        candidate = database.find_nearest_unclaimed_lead(lat, lon, max_miles=25.0)
+        if candidate:
+            burned = database.burn_lead_inventory(candidate["reference"], email)
+            if burned:
+                database.record_free_lead_grant(email, burned["reference"])
+                import notifications
+                notifications.send_free_account_welcome_email(email, burned)
+
+    response = RedirectResponse(url="/free-dashboard", status_code=303)
     response.set_cookie(
         key="treekey_contractor_session",
-        value=_sign_session_cookie(verified_email),
-        max_age=86400 * 30,  # 30 days
+        value=_sign_session_cookie(email),
+        max_age=86400 * 30,
         httponly=True,
         secure=True,
         samesite="lax"
     )
     return response
+
+
+@app.get("/free-dashboard", response_class=HTMLResponse)
+def free_dashboard(request: Request):
+    email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not email:
+        return RedirectResponse(url="/login", status_code=303)
+
+    # A real paying subscriber shouldn't see the free-tier page even if
+    # they land on this URL directly -- send them to the real dashboard.
+    active_sub = database.get_contractor_subscription(email)
+    if active_sub and active_sub.get("active"):
+        return RedirectResponse(url="/dashboard", status_code=303)
+
+    account = database.get_limbo_account(email)
+    if not account:
+        return RedirectResponse(url="/free-account", status_code=303)
+
+    if account.get("free_lead_ref"):
+        lead = database.get_lead_by_reference(account["free_lead_ref"])
+        if lead:
+            lead_html = f"""
+            <div class="card" style="border-left:4px solid #059669;">
+                <p style="margin:0 0 10px 0;"><strong>Reference:</strong> {lead.get('reference', 'N/A')}</p>
+                <p style="margin:0 0 10px 0;"><strong>Address:</strong> {lead.get('address', 'N/A')}</p>
+                <p style="margin:0 0 10px 0;"><strong>Source:</strong> {lead.get('council_source', 'N/A')}</p>
+                <p style="margin:0;"><strong>Description:</strong><br>
+                   <span style="color:#475569; font-size:14px;">{lead.get('summary', 'No summary available.')}</span></p>
+            </div>
+            """
+        else:
+            lead_html = "<p style='color:#64748b;'>Your free lead is no longer available to display, but it was genuinely yours when granted.</p>"
+    else:
+        lead_html = "<p style='color:#64748b;'>No job was available in your exact area the moment you signed up — we'll email you the first one that appears nearby.</p>"
+
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Your Free Lead | TreeKey</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; }}
+            .container {{ max-width:640px; margin:auto; }}
+            .card {{ background:white; border:1px solid #e2e8f0; border-radius:12px; padding:20px; margin-bottom:20px; }}
+            .btn {{ background:#044332; color:white; padding:12px 20px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block; }}
+        </style>
+    </head>
+    <body>
+    <div class="container">
+        <h2 style="color:#044332;">🌲 Your Free Lead</h2>
+        {lead_html}
+        <div class="card" style="background:#f0fdf4; border-color:#bbf7d0;">
+            <p style="margin:0 0 12px 0; font-size:14px; color:#065f46;">
+                You're on our free list — expect a couple of local jobs a week by email (address blurred until you subscribe).
+                Subscribe any time to unlock full addresses and get jobs the moment they're filed.
+            </p>
+            <a href="/pricing" class="btn">See Subscription Plans →</a>
+        </div>
+    </div>
+    </body>
+    </html>
+    """)
+
+
+@app.get("/unsubscribe-teaser", response_class=HTMLResponse)
+def unsubscribe_teaser(token: Optional[str] = None):
+    email = _verify_session_cookie(token)
+    if not email:
+        return HTMLResponse("<h3>Invalid or expired unsubscribe link.</h3>", status_code=400)
+    database.set_limbo_account_unsubscribed(email)
+    return HTMLResponse(f"<h3>You've been unsubscribed, {email}. You won't receive any more of these emails.</h3>")
+
+
+@app.get("/trigger-teaser-emails")
+def trigger_teaser_emails(secret: Optional[str] = Query(None)):
+    """Sep 5 2026: cron-job.org-triggered, same convention as every other
+    /trigger-* route in this file (verify_cron_secret gate). Intended
+    schedule: 2-3x/week, comfortably above the 72-hour min_hours_since_last
+    default in send_teaser_email_batch so it naturally settles into
+    roughly twice a week per account even if the cron fires more often."""
+    verify_cron_secret(secret)
+    import notifications
+
+    def _make_unsubscribe_url(recipient_email: str) -> str:
+        token = _sign_session_cookie(recipient_email)
+        return f"{payments.PUBLIC_APP_URL}/unsubscribe-teaser?token={token}"
+
+    sent = notifications.send_teaser_email_batch(unsubscribe_url_builder=_make_unsubscribe_url)
+    return {"status": "ok", "teasers_sent": sent}
 
 
 @app.get("/dashboard", response_class=HTMLResponse)

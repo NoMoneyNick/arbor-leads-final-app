@@ -52,6 +52,28 @@ if not hasattr(_database, "increment_api_usage"):
     _database.increment_api_usage = MagicMock(return_value={"warning_needed": False})
 if not hasattr(_database, "create_magic_auth_token"):
     _database.create_magic_auth_token = MagicMock(return_value={"token": "tok", "otp": "000000", "email": "test@example.com"})
+if not hasattr(_database, "verify_magic_auth_token"):
+    _database.verify_magic_auth_token = MagicMock(return_value=None)
+if not hasattr(_database, "lookup_outcode_centroid"):
+    _database.lookup_outcode_centroid = MagicMock(return_value=(53.0, -1.0))
+if not hasattr(_database, "create_or_update_limbo_account"):
+    _database.create_or_update_limbo_account = MagicMock(return_value={
+        "id": "id-1", "email": "dave@apex-trees.co.uk", "customer_name": "Dave", "phone": None,
+        "center_outcode": "NG22", "lat": 53.0, "lon": -1.0, "free_lead_ref": None,
+        "last_teaser_lead_ref": None, "signed_up_at": None, "last_teaser_sent_at": None, "unsubscribed": False,
+    })
+if not hasattr(_database, "find_nearest_unclaimed_lead"):
+    _database.find_nearest_unclaimed_lead = MagicMock(return_value=None)
+if not hasattr(_database, "burn_lead_inventory"):
+    _database.burn_lead_inventory = MagicMock(return_value=None)
+if not hasattr(_database, "record_free_lead_grant"):
+    _database.record_free_lead_grant = MagicMock(return_value=True)
+if not hasattr(_database, "get_limbo_account"):
+    _database.get_limbo_account = MagicMock(return_value=None)
+if not hasattr(_database, "get_lead_by_reference"):
+    _database.get_lead_by_reference = MagicMock(return_value=None)
+if not hasattr(_database, "get_contractor_subscription"):
+    _database.get_contractor_subscription = MagicMock(return_value=None)
 
 if "notifications" not in sys.modules:
     sys.modules["notifications"] = types.ModuleType("notifications")
@@ -66,6 +88,12 @@ if not hasattr(_notifications, "dispatch_lead_alerts"):
     _notifications.dispatch_lead_alerts = MagicMock()
 if not hasattr(_notifications, "send_api_quota_warning_email"):
     _notifications.send_api_quota_warning_email = MagicMock()
+if not hasattr(_notifications, "send_free_account_welcome_email"):
+    _notifications.send_free_account_welcome_email = MagicMock(return_value=True)
+if not hasattr(_notifications, "send_teaser_lead_email"):
+    _notifications.send_teaser_lead_email = MagicMock(return_value=True)
+if not hasattr(_notifications, "send_teaser_email_batch"):
+    _notifications.send_teaser_email_batch = MagicMock(return_value=0)
 
 if "dotenv" not in sys.modules:
     _fake_dotenv = types.ModuleType("dotenv")
@@ -173,8 +201,18 @@ if "fastapi" not in sys.modules:
             pass
 
     class _FakeRedirectResponse:
-        def __init__(self, *a, **k):
-            pass
+        """Sep 5 2026: stores url/status_code (matching real
+        starlette.RedirectResponse's readable attributes) instead of
+        discarding the constructor args -- needed once tests started
+        asserting on where a route redirects to (e.g. the free-account
+        signup flow), not just that some object came back."""
+        def __init__(self, url=None, status_code=307, *a, **k):
+            self.url = url
+            self.status_code = status_code
+            self._cookies = {}
+
+        def set_cookie(self, key=None, value=None, *a, **k):
+            self._cookies[key] = value
 
     class _FakeResponse:
         def __init__(self, *a, **k):
@@ -316,6 +354,138 @@ class TestMagicLinkGoesToTheRealContractorNotTestEmail(unittest.IsolatedAsyncioT
         self.assertEqual(kwargs.get("to_email"), "dave@apex-trees.co.uk")
         # The old admin-only helper (always TEST_EMAIL) must never be used here again.
         mock_old_send.assert_not_called()
+
+
+class TestFreeAccountSignup(unittest.IsolatedAsyncioTestCase):
+    """Sep 5 2026, Nick's "limbo account" ask: sign up free (no card) ->
+    get one real lead immediately -> land on /free-dashboard, logged in.
+    These lock in the route-level wiring; the underlying DB/email logic
+    itself is covered in test_database.py/test_notifications.py."""
+
+    class _FakeRequest:
+        def __init__(self, fields: dict):
+            self.client = MagicMock(host="127.0.0.1")
+            self._fields = fields
+
+        async def form(self):
+            return dict(self._fields)
+
+    def setUp(self):
+        # Sep 5 2026: these are shared MagicMocks on the module-level
+        # database stub (persisting across every test in this file), so
+        # each test here resets the ones it cares about rather than
+        # inheriting call counts/return values left over from another test.
+        for mock_attr in ("find_nearest_unclaimed_lead", "burn_lead_inventory",
+                          "record_free_lead_grant", "create_or_update_limbo_account",
+                          "lookup_outcode_centroid"):
+            getattr(_database, mock_attr).reset_mock(side_effect=True)
+        _database.lookup_outcode_centroid.return_value = (53.0, -1.0)
+        _database.find_nearest_unclaimed_lead.return_value = None
+        _database.burn_lead_inventory.return_value = None
+        _database.record_free_lead_grant.return_value = True
+        _database.create_or_update_limbo_account.return_value = {
+            "id": "id-1", "email": "dave@apex-trees.co.uk", "free_lead_ref": None,
+        }
+
+    async def test_valid_signup_grants_lead_and_sets_session_cookie(self):
+        _database.find_nearest_unclaimed_lead.return_value = {"reference": "TREE-1", "address": "1 A Rd, NG22 8AA"}
+        _database.burn_lead_inventory.return_value = {"reference": "TREE-1", "address": "1 A Rd, NG22 8AA",
+                                                        "summary": "Felling", "council_source": "Test Council"}
+        _database.create_or_update_limbo_account.return_value = {
+            "id": "id-1", "email": "dave@apex-trees.co.uk", "free_lead_ref": None,
+        }
+        fake_request = self._FakeRequest({"name": "Dave", "email": "dave@apex-trees.co.uk",
+                                           "phone": "", "postcode": "NG22"})
+        with patch.object(main, "_check_rate_limit", return_value=True), \
+             patch.object(_notifications, "send_free_account_welcome_email", return_value=True) as mock_welcome:
+            response = await main.free_signup(fake_request)
+
+        _database.find_nearest_unclaimed_lead.assert_called_once()
+        _database.burn_lead_inventory.assert_called_once_with("TREE-1", "dave@apex-trees.co.uk")
+        _database.record_free_lead_grant.assert_called_once_with("dave@apex-trees.co.uk", "TREE-1")
+        mock_welcome.assert_called_once()
+        self.assertEqual(response.url, "/free-dashboard")
+
+    async def test_signup_with_no_nearby_lead_still_creates_account(self):
+        """No lead available near them right now must not block account
+        creation -- they still land on /free-dashboard, just with a
+        "we'll email you one" message there (that page's own concern)."""
+        _database.find_nearest_unclaimed_lead.return_value = None
+        _database.create_or_update_limbo_account.return_value = {
+            "id": "id-2", "email": "nolead@example.com", "free_lead_ref": None,
+        }
+        fake_request = self._FakeRequest({"name": "", "email": "nolead@example.com",
+                                           "phone": "", "postcode": "ZZ1"})
+        with patch.object(main, "_check_rate_limit", return_value=True):
+            response = await main.free_signup(fake_request)
+        _database.burn_lead_inventory.assert_not_called()
+        self.assertEqual(response.url, "/free-dashboard")
+
+    async def test_repeat_signup_does_not_grant_a_second_lead(self):
+        """create_or_update_limbo_account already has a free_lead_ref ->
+        must not call find_nearest_unclaimed_lead/burn_lead_inventory again."""
+        _database.create_or_update_limbo_account.return_value = {
+            "id": "id-1", "email": "dave@apex-trees.co.uk", "free_lead_ref": "TREE-ALREADY-GRANTED",
+        }
+        fake_request = self._FakeRequest({"name": "Dave", "email": "dave@apex-trees.co.uk",
+                                           "phone": "", "postcode": "NG22"})
+        with patch.object(main, "_check_rate_limit", return_value=True):
+            response = await main.free_signup(fake_request)
+        _database.find_nearest_unclaimed_lead.assert_not_called()
+        _database.burn_lead_inventory.assert_not_called()
+        self.assertEqual(response.url, "/free-dashboard")
+
+    async def test_unrecognised_postcode_redirects_with_error_and_creates_no_account(self):
+        _database.lookup_outcode_centroid.return_value = (None, None)
+        fake_request = self._FakeRequest({"name": "Dave", "email": "dave@apex-trees.co.uk",
+                                           "phone": "", "postcode": "NOTAPOSTCODE"})
+        with patch.object(main, "_check_rate_limit", return_value=True):
+            response = await main.free_signup(fake_request)
+        _database.create_or_update_limbo_account.assert_not_called()
+        self.assertIn("/free-account", response.url)
+
+    async def test_missing_email_redirects_with_error(self):
+        fake_request = self._FakeRequest({"name": "Dave", "email": "", "phone": "", "postcode": "NG22"})
+        with patch.object(main, "_check_rate_limit", return_value=True):
+            response = await main.free_signup(fake_request)
+        self.assertIn("/free-account", response.url)
+
+
+class TestVerifyLoginRoutesLimboAccountsToFreeDashboard(unittest.TestCase):
+    """Sep 5 2026: verify_login() used to send anyone without an ACTIVE
+    paid subscription straight to /pricing?msg=no_subscription -- that
+    would have wrongly locked out a legitimate free "limbo account" signup
+    the moment they tried to log back in. Confirms the new branch: a real
+    (but unpaid) limbo account lands on /free-dashboard instead."""
+
+    def test_limbo_account_lands_on_free_dashboard(self):
+        with patch("database.verify_magic_auth_token", return_value="dave@apex-trees.co.uk"), \
+             patch.object(main, "_check_rate_limit", return_value=True), \
+             patch("database.get_contractor_subscription", return_value=None), \
+             patch("database.get_limbo_account", return_value={"email": "dave@apex-trees.co.uk"}):
+            fake_request = MagicMock()
+            fake_request.client = MagicMock(host="127.0.0.1")
+            response = main.verify_login(fake_request, token="tok")
+        self.assertEqual(response.url, "/free-dashboard")
+
+    def test_unknown_email_still_goes_to_pricing(self):
+        with patch("database.verify_magic_auth_token", return_value="stranger@example.com"), \
+             patch.object(main, "_check_rate_limit", return_value=True), \
+             patch("database.get_contractor_subscription", return_value=None), \
+             patch("database.get_limbo_account", return_value=None):
+            fake_request = MagicMock()
+            fake_request.client = MagicMock(host="127.0.0.1")
+            response = main.verify_login(fake_request, token="tok")
+        self.assertIn("/pricing", response.url)
+
+    def test_active_paid_subscriber_still_goes_to_full_dashboard(self):
+        with patch("database.verify_magic_auth_token", return_value="paid@apex-trees.co.uk"), \
+             patch.object(main, "_check_rate_limit", return_value=True), \
+             patch("database.get_contractor_subscription", return_value={"active": True}):
+            fake_request = MagicMock()
+            fake_request.client = MagicMock(host="127.0.0.1")
+            response = main.verify_login(fake_request, token="tok")
+        self.assertEqual(response.url, "/dashboard")
 
 
 if __name__ == "__main__":

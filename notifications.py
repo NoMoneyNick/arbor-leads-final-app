@@ -239,6 +239,109 @@ def send_purchased_lead_email(customer_email: str, lead_data: dict):
     except Exception as e:
         logging.error(f"[Email] Error sending purchased lead to {customer_email}: {e}")
 
+
+def _blur_address_to_area(address: str) -> str:
+    """Sep 5 2026, free-signup teaser emails: shows the general area (the
+    postcode outcode, e.g. "NG22") without the street/house-number detail
+    that would let a non-paying recipient act on the lead directly --
+    that's the entire point of a teaser. Same outcode regex already used
+    for real geo-matching elsewhere in this file/database.py, just for
+    redaction instead of distance calculation."""
+    import re
+    m = re.search(r'\b([A-Z]{1,2}[0-9][A-Z0-9]?)\s*[0-9][A-Z]{2}\b', (address or "").upper())
+    if m:
+        return f"Somewhere in the {m.group(1)} area — exact address unlocks with a subscription"
+    return "Exact address unlocks with a subscription"
+
+
+def send_free_account_welcome_email(email: str, lead_data: dict) -> bool:
+    """Sep 5 2026, Nick's "limbo account" ask: welcomes a brand-new free
+    (no-payment) signup and hands over their one genuinely free, fully
+    unlocked lead -- same level of detail as a paid purchase (see
+    send_purchased_lead_email), just framed as a welcome gift rather than
+    a receipt, since nothing was actually bought here."""
+    subject = f"🌳 Your free TreeKey lead: {lead_data.get('council_source', 'Local')} Tree Surgery"
+    html = f"""
+    <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
+        <h2 style="color: #059669; margin-top: 0;">Welcome to TreeKey — here's your free lead</h2>
+        <p style="color: #374151;">Thanks for signing up. No card, no subscription — here's a real, currently-available job near you.</p>
+        <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
+            <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {lead_data.get('reference', 'N/A')}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {lead_data.get('address', 'N/A')}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source', 'N/A')}</p>
+            <p style="margin: 0;"><strong>Description / Summary:</strong><br/>
+               <span style="color: #475569; font-size: 14px;">{lead_data.get('summary', 'No summary available.')}</span>
+            </p>
+        </div>
+        <p style="font-size: 13px; color: #64748b;">
+            This is a one-off welcome gift, not a subscription — we'll send you a couple of local jobs a week
+            (address blurred until you subscribe) so you can see what TreeKey finds in your area before committing to anything.
+        </p>
+        <p style="font-size: 12px; color: #94a3b8;">
+            Note: UK councils do not publish a homeowner's phone number or email address on planning applications.
+            This lead includes everything that is legally published.
+        </p>
+    </div>
+    """
+    return send_transactional_email(to_email=email, subject=subject, html_body=html)
+
+
+def send_teaser_lead_email(email: str, lead_data: dict, unsubscribe_url: str = "") -> bool:
+    """Sep 5 2026, Nick's ask verbatim: signed-up-but-not-subscribed
+    contractors get "specific leads in their area... without the finer
+    details of the address viewable (blurred out or something) but the
+    job details viewable and date it was applied (has to be super recent)
+    as a sales prompt". Job detail + filed date are real and unredacted;
+    only the address is blurred (see _blur_address_to_area)."""
+    subject = f"A {lead_data.get('vertical', 'tree')} job just filed near you — still unclaimed"
+    registered = lead_data.get("registered_date") or "recently"
+    unsub_html = f'<p style="font-size:11px; color:#94a3b8; margin-top:16px;"><a href="{unsubscribe_url}" style="color:#94a3b8;">Unsubscribe from these emails</a></p>' if unsubscribe_url else ""
+    html = f"""
+    <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
+        <h2 style="color: #059669; margin-top: 0;">Still-unclaimed job near you</h2>
+        <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
+            <p style="margin: 0 0 10px 0;"><strong>Location:</strong> {_blur_address_to_area(lead_data.get('address', ''))}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Filed:</strong> {registered}</p>
+            <p style="margin: 0;"><strong>Job details:</strong><br/>
+               <span style="color: #475569; font-size: 14px;">{lead_data.get('summary', 'No summary available.')}</span>
+            </p>
+        </div>
+        <p style="font-size: 13px; color: #64748b;">
+            Subscribe to unlock the exact address and get jobs like this the moment they're filed, not after we've teased it to you:
+            <a href="https://treekey.uk/pricing" style="color:#059669; font-weight:bold;">See plans →</a>
+        </p>
+        {unsub_html}
+    </div>
+    """
+    return send_transactional_email(to_email=email, subject=subject, html_body=html)
+
+
+def send_teaser_email_batch(min_hours_since_last: float = 72.0, unsubscribe_url_builder=None) -> int:
+    """Sep 5 2026, Nick's "limbo account" ask: 1-2x/week teaser emails to
+    everyone who signed up free but never subscribed. Never burns/claims
+    the lead it shows -- this is a tease, not a delivery, so the lead
+    stays available for a real subscriber or a single-lead purchase.
+    `unsubscribe_url_builder` is a callable(email) -> url, injected from
+    main.py (which owns the session-cookie signing secret) rather than
+    imported here, to avoid a circular import between this module and
+    main.py."""
+    import database
+    cohort = database.get_limbo_accounts_due_for_teaser(min_hours_since_last=min_hours_since_last)
+    sent = 0
+    for account in cohort:
+        if not account.get("lat") or not account.get("lon"):
+            continue
+        exclude_refs = [r for r in (account.get("free_lead_ref"), account.get("last_teaser_lead_ref")) if r]
+        lead = database.find_nearest_unclaimed_lead(account["lat"], account["lon"], max_miles=25.0, exclude_refs=exclude_refs)
+        if not lead:
+            continue
+        unsubscribe_url = unsubscribe_url_builder(account["email"]) if unsubscribe_url_builder else ""
+        if send_teaser_lead_email(account["email"], lead, unsubscribe_url=unsubscribe_url):
+            database.mark_teaser_sent(account["email"], lead_ref=lead["reference"])
+            sent += 1
+    return sent
+
+
 def create_whatsapp_link(lead_ref: str, city: str, address: str, summary: str,
                          lead_score: str = "small", lead_price: int = 25) -> str:
     """Generates a pre-filled WhatsApp message link for a lead."""

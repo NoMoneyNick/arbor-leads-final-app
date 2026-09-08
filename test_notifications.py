@@ -61,6 +61,12 @@ if not hasattr(_database, "log_system_warning"):
     _database.log_system_warning = MagicMock(return_value=True)
 if not hasattr(_database, "get_warning_recurrence_days"):
     _database.get_warning_recurrence_days = MagicMock(return_value=0)
+if not hasattr(_database, "get_limbo_accounts_due_for_teaser"):
+    _database.get_limbo_accounts_due_for_teaser = MagicMock(return_value=[])
+if not hasattr(_database, "find_nearest_unclaimed_lead"):
+    _database.find_nearest_unclaimed_lead = MagicMock(return_value=None)
+if not hasattr(_database, "mark_teaser_sent"):
+    _database.mark_teaser_sent = MagicMock()
 
 _NOTIFICATIONS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "notifications.py")
 _spec = importlib.util.spec_from_file_location("_notifications_under_test", _NOTIFICATIONS_PATH)
@@ -175,6 +181,121 @@ class TestSystemIncidentAlertSeverityRouting(unittest.TestCase):
                 action_required="action",
             )
         mock_send.assert_called_once()
+
+
+class TestTransactionalEmailGoesToTheRealRecipient(unittest.TestCase):
+    """Sep 5 2026 CRITICAL FIX regression test at the notifications.py
+    level (see test_main.py's TestMagicLinkGoesToTheRealContractorNotTestEmail
+    for the main.py call-site half). send_resend_email() always sends to
+    the fixed TEST_EMAIL address -- correct for admin alerts, wrong for
+    anything customer-facing. send_transactional_email() is the fix: it
+    must send to whatever `to_email` it's given, never to TEST_EMAIL."""
+
+    def test_sends_to_the_given_recipient_not_test_email(self):
+        notifications.RESEND_API_KEY = "fake-key"
+        notifications.TEST_EMAIL = "nick@treekey.uk"
+        fake_response = MagicMock(status_code=200)
+        with patch("requests.post", return_value=fake_response) as mock_post:
+            ok = notifications.send_transactional_email(
+                to_email="dave@apex-trees.co.uk", subject="Hi", html_body="<p>hi</p>")
+        self.assertTrue(ok)
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["json"]["to"], ["dave@apex-trees.co.uk"])
+        self.assertNotIn("nick@treekey.uk", kwargs["json"]["to"])
+
+    def test_refuses_to_send_to_something_that_is_not_an_email(self):
+        notifications.RESEND_API_KEY = "fake-key"
+        with patch("requests.post") as mock_post:
+            ok = notifications.send_transactional_email(to_email="not-an-email", subject="Hi", html_body="<p>hi</p>")
+        self.assertFalse(ok)
+        mock_post.assert_not_called()
+
+    def test_no_api_key_returns_false_without_crashing(self):
+        notifications.RESEND_API_KEY = ""
+        ok = notifications.send_transactional_email(to_email="dave@apex-trees.co.uk", subject="Hi", html_body="<p>hi</p>")
+        self.assertFalse(ok)
+
+
+class TestFreeSignupTeaserEmails(unittest.TestCase):
+    """Sep 5 2026, Nick's "limbo account" ask: locks in that the teaser
+    email blurs the address (never shows it verbatim) while still showing
+    real job details and the filed date, and that the batch sender never
+    burns/claims the lead it's teasing (see docstring on
+    send_teaser_email_batch in notifications.py -- a tease must leave the
+    lead purchasable by someone else)."""
+
+    def setUp(self):
+        # Sep 5 2026: sys.modules["database"] is a process-wide singleton
+        # shared with test_main.py's own stub of the same module name (both
+        # idempotently reuse whatever's already registered) -- when the
+        # whole suite runs together, call counts on these MagicMocks
+        # otherwise leak in from whichever test file happened to run
+        # first. Reset before every test in this class rather than assume
+        # a clean slate.
+        for mock_attr in ("get_limbo_accounts_due_for_teaser", "find_nearest_unclaimed_lead", "mark_teaser_sent"):
+            getattr(sys.modules["database"], mock_attr).reset_mock(side_effect=True)
+        sys.modules["database"].get_limbo_accounts_due_for_teaser.return_value = []
+        sys.modules["database"].find_nearest_unclaimed_lead.return_value = None
+
+    def test_blur_address_to_area_keeps_only_the_outcode(self):
+        blurred = notifications._blur_address_to_area("12 High St, Nottingham, NG22 8AA")
+        self.assertIn("NG22", blurred)
+        self.assertNotIn("12 High St", blurred)
+
+    def test_blur_address_with_no_recognisable_postcode_still_returns_something_safe(self):
+        blurred = notifications._blur_address_to_area("")
+        self.assertNotIn("12 High St", blurred)
+        self.assertTrue(len(blurred) > 0)
+
+    def test_teaser_email_body_shows_job_details_and_date_but_not_address(self):
+        notifications.RESEND_API_KEY = "fake-key"
+        fake_response = MagicMock(status_code=200)
+        lead = {"address": "12 High St, Nottingham, NG22 8AA", "summary": "Crown reduction of oak tree",
+                "registered_date": "2026-09-04", "vertical": "tree"}
+        with patch("requests.post", return_value=fake_response) as mock_post:
+            ok = notifications.send_teaser_lead_email("dave@apex-trees.co.uk", lead, unsubscribe_url="https://treekey.uk/unsubscribe-teaser?token=abc")
+        self.assertTrue(ok)
+        html = mock_post.call_args[1]["json"]["html"]
+        self.assertIn("Crown reduction of oak tree", html)
+        self.assertIn("2026-09-04", html)
+        self.assertIn("NG22", html)
+        self.assertNotIn("12 High St", html)
+        self.assertIn("unsubscribe-teaser", html)
+
+    def test_batch_sender_never_burns_the_lead_it_teases(self):
+        """find_nearest_unclaimed_lead is a read-only lookup -- there must
+        be no call anywhere in the batch path to burn_lead_inventory or
+        any other status-changing function. Asserted here by simply
+        confirming database.find_nearest_unclaimed_lead (not a burn
+        function) is what gets called."""
+        sys.modules["database"].get_limbo_accounts_due_for_teaser.return_value = [
+            {"email": "dave@apex-trees.co.uk", "lat": 53.0, "lon": -1.0,
+             "free_lead_ref": "FREE-1", "last_teaser_lead_ref": None},
+        ]
+        sys.modules["database"].find_nearest_unclaimed_lead.return_value = {
+            "reference": "TEASE-1", "address": "1 A Rd, NG22 8AA", "summary": "Felling",
+            "registered_date": "2026-09-05", "vertical": "tree",
+        }
+        with patch.object(notifications, "send_teaser_lead_email", return_value=True) as mock_send:
+            sent = notifications.send_teaser_email_batch(unsubscribe_url_builder=lambda email: f"https://x/{email}")
+        self.assertEqual(sent, 1)
+        mock_send.assert_called_once()
+        sys.modules["database"].find_nearest_unclaimed_lead.assert_called_once()
+        # Must exclude both their granted free lead and whatever was last teased.
+        args, kwargs = sys.modules["database"].find_nearest_unclaimed_lead.call_args
+        self.assertIn("FREE-1", kwargs.get("exclude_refs", args[-1] if args else []))
+        sys.modules["database"].mark_teaser_sent.assert_called_once_with("dave@apex-trees.co.uk", lead_ref="TEASE-1")
+
+    def test_batch_sender_skips_accounts_with_no_nearby_lead(self):
+        sys.modules["database"].get_limbo_accounts_due_for_teaser.return_value = [
+            {"email": "dave@apex-trees.co.uk", "lat": 53.0, "lon": -1.0,
+             "free_lead_ref": None, "last_teaser_lead_ref": None},
+        ]
+        sys.modules["database"].find_nearest_unclaimed_lead.return_value = None
+        with patch.object(notifications, "send_teaser_lead_email") as mock_send:
+            sent = notifications.send_teaser_email_batch()
+        self.assertEqual(sent, 0)
+        mock_send.assert_not_called()
 
 
 if __name__ == "__main__":

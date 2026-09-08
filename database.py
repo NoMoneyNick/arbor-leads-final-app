@@ -347,6 +347,32 @@ def init_db():
                 used BOOLEAN DEFAULT FALSE
             );
 
+            -- Sep 5 2026, Nick's "limbo account" ask: a free account (no
+            -- Stripe subscription) created via /free-account -- gets ONE
+            -- real free lead on signup (see burn_lead_inventory), then
+            -- 1-2x/week teaser emails with the address blurred out, as an
+            -- upgrade prompt. Deliberately a SEPARATE table from
+            -- contractor_subscriptions rather than a fake "active=False"
+            -- row there -- that table's `active` flag already means
+            -- something specific elsewhere (a real subscription that
+            -- lapsed/was cancelled), and conflating "never paid" with
+            -- "used to pay" would corrupt every quota/seniority/cancellation
+            -- check built around it.
+            CREATE TABLE IF NOT EXISTS limbo_accounts (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                email TEXT UNIQUE NOT NULL,
+                customer_name TEXT,
+                phone TEXT,
+                center_outcode TEXT NOT NULL,
+                lat FLOAT,
+                lon FLOAT,
+                free_lead_ref TEXT,
+                last_teaser_lead_ref TEXT,
+                signed_up_at TIMESTAMPTZ DEFAULT NOW(),
+                last_teaser_sent_at TIMESTAMPTZ,
+                unsubscribed BOOLEAN DEFAULT FALSE
+            );
+
             CREATE TABLE IF NOT EXISTS chip_drop_spots (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 site_name TEXT NOT NULL,
@@ -475,6 +501,8 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_assets_contractor ON machinery_assets(contractor_email);",
             "CREATE INDEX IF NOT EXISTS idx_auth_token ON contractor_auth_tokens(token);",
             "CREATE INDEX IF NOT EXISTS idx_auth_otp ON contractor_auth_tokens(otp_code, customer_email);",
+            "CREATE INDEX IF NOT EXISTS idx_limbo_accounts_email ON limbo_accounts(email);",
+            "CREATE INDEX IF NOT EXISTS idx_limbo_accounts_teaser_due ON limbo_accounts(unsubscribed, last_teaser_sent_at);",
             "CREATE INDEX IF NOT EXISTS idx_chip_drop_outcode ON chip_drop_spots(outcode, active);",
             "CREATE INDEX IF NOT EXISTS idx_storm_alerts_active ON storm_weather_alerts(valid_to, warning_level);",
             "CREATE INDEX IF NOT EXISTS idx_partners_city ON potential_partners(target_city);",
@@ -1919,6 +1947,273 @@ def burn_lead_inventory(lead_id: str, buyer_email: str) -> dict:
             conn.close()
     except Exception as e:
         logger.error(f"[Inventory Burn] Error burning lead {lead_id}: {e}")
+        return None
+
+
+def _extract_outcodes(address: str) -> list:
+    """Sep 5 2026: pulled out of notifications.dispatch_lead_alerts' inline
+    regex so the free-signup lead-matching code below can find a lead's
+    rough location the exact same way the paid-subscriber dispatch path
+    already does, instead of inventing a second, possibly-inconsistent
+    way of reading a UK outcode out of a free-text address."""
+    import re
+    return [m.group(1) for m in re.finditer(r'\b([A-Z]{1,2}[0-9][A-Z0-9]?)\s*([0-9][A-Z]{2})\b', (address or "").upper())]
+
+
+def find_nearest_unclaimed_lead(lat: float, lon: float, max_miles: float = 25.0, exclude_refs: list = None) -> Optional[dict]:
+    """Sep 5 2026, free-signup feature: given a signup's lat/lon, finds the
+    single closest still-available ('new') lead, using the same outcode-
+    extraction + postcodes.io-centroid + haversine approach already proven
+    in notifications.dispatch_lead_alerts -- just run once, ad hoc, for one
+    person, instead of against a whole batch of freshly-scraped leads.
+    Bounded to the 60 most recently discovered unclaimed leads so this
+    doesn't hammer postcodes.io on every signup."""
+    if not SURL or lat is None or lon is None:
+        return None
+    exclude_refs = set(exclude_refs or [])
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT id, reference, address, summary, council_source, lead_score, lead_price,
+                       registered_date, vertical, applicant_name, agent_name, agent_company, has_agent
+                FROM leads
+                WHERE (status = 'new' OR status IS NULL)
+                ORDER BY discovered_at DESC
+                LIMIT 60;
+            """)
+            rows = cur.fetchall()
+        finally:
+            cur.close()
+            conn.close()
+
+        best = None
+        best_dist = None
+        for row in rows:
+            reference = row[1]
+            if reference in exclude_refs:
+                continue
+            address = row[2]
+            for oc in _extract_outcodes(address):
+                lead_lat, lead_lon = lookup_outcode_centroid(oc)
+                if lead_lat is None or lead_lon is None:
+                    continue
+                dist = haversine_miles(lat, lon, lead_lat, lead_lon)
+                if dist <= max_miles and (best_dist is None or dist < best_dist):
+                    best_dist = dist
+                    best = {
+                        "id": row[0], "reference": row[1], "address": row[2], "summary": row[3],
+                        "council_source": row[4], "lead_score": row[5], "lead_price": row[6],
+                        "registered_date": row[7], "vertical": row[8], "applicant_name": row[9],
+                        "agent_name": row[10], "agent_company": row[11], "has_agent": row[12],
+                    }
+                break  # first extractable outcode on this address is enough
+        return best
+    except Exception as e:
+        logger.error(f"[Free Signup] Error finding nearest lead for ({lat}, {lon}): {e}")
+        return None
+
+
+def create_or_update_limbo_account(email: str, name: str = None, phone: str = None,
+                                    outcode: str = None, lat: float = None, lon: float = None) -> Optional[dict]:
+    """Sep 5 2026: creates (or refreshes contact details on) a free,
+    no-subscription account row. Deliberately never touches free_lead_ref
+    or last_teaser_lead_ref on conflict -- a repeat visit to the signup
+    form must never re-arm or reset either of those."""
+    if not SURL or not email or not outcode:
+        return None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                INSERT INTO limbo_accounts (email, customer_name, phone, center_outcode, lat, lon)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (email) DO UPDATE SET
+                    customer_name = EXCLUDED.customer_name,
+                    phone = EXCLUDED.phone,
+                    center_outcode = EXCLUDED.center_outcode,
+                    lat = EXCLUDED.lat,
+                    lon = EXCLUDED.lon
+                RETURNING id, email, customer_name, phone, center_outcode, lat, lon,
+                          free_lead_ref, last_teaser_lead_ref, signed_up_at, last_teaser_sent_at, unsubscribed;
+            """, (email.strip().lower(), name, phone, outcode.strip().upper(), lat, lon))
+            row = cur.fetchone()
+            conn.commit()
+            if not row:
+                return None
+            return {
+                "id": row[0], "email": row[1], "customer_name": row[2], "phone": row[3],
+                "center_outcode": row[4], "lat": row[5], "lon": row[6], "free_lead_ref": row[7],
+                "last_teaser_lead_ref": row[8], "signed_up_at": row[9], "last_teaser_sent_at": row[10],
+                "unsubscribed": row[11],
+            }
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Signup] Error creating/updating limbo account for {email}: {e}")
+        return None
+
+
+def get_limbo_account(email: str) -> Optional[dict]:
+    if not SURL or not email:
+        return None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT id, email, customer_name, phone, center_outcode, lat, lon,
+                       free_lead_ref, last_teaser_lead_ref, signed_up_at, last_teaser_sent_at, unsubscribed
+                FROM limbo_accounts WHERE email = %s;
+            """, (email.strip().lower(),))
+            row = cur.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0], "email": row[1], "customer_name": row[2], "phone": row[3],
+                "center_outcode": row[4], "lat": row[5], "lon": row[6], "free_lead_ref": row[7],
+                "last_teaser_lead_ref": row[8], "signed_up_at": row[9], "last_teaser_sent_at": row[10],
+                "unsubscribed": row[11],
+            }
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Signup] Error fetching limbo account for {email}: {e}")
+        return None
+
+
+def record_free_lead_grant(email: str, lead_ref: str) -> bool:
+    """Guarded so a double-submit or a retried request can never grant a
+    second free lead to the same account -- only writes if free_lead_ref
+    is still NULL."""
+    if not SURL or not email or not lead_ref:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE limbo_accounts SET free_lead_ref = %s
+                WHERE email = %s AND free_lead_ref IS NULL
+                RETURNING id;
+            """, (lead_ref, email.strip().lower()))
+            row = cur.fetchone()
+            conn.commit()
+            return row is not None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Signup] Error recording free lead grant for {email}: {e}")
+        return False
+
+
+def get_limbo_accounts_due_for_teaser(min_hours_since_last: float = 72.0) -> list:
+    """Sep 5 2026: the weekly/twice-weekly teaser-email cohort. Excludes
+    anyone who has since become a real paying subscriber (checked live
+    against contractor_subscriptions.active rather than a stored flag on
+    this table, so it can never drift out of sync with a Stripe webhook)
+    and anyone who unsubscribed."""
+    if not SURL:
+        return []
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT la.id, la.email, la.customer_name, la.center_outcode, la.lat, la.lon,
+                       la.free_lead_ref, la.last_teaser_lead_ref
+                FROM limbo_accounts la
+                LEFT JOIN contractor_subscriptions cs ON cs.customer_email = la.email AND cs.active = TRUE
+                WHERE la.unsubscribed = FALSE
+                  AND cs.id IS NULL
+                  AND (la.last_teaser_sent_at IS NULL OR la.last_teaser_sent_at < NOW() - (%s || ' hours')::interval);
+            """, (min_hours_since_last,))
+            rows = cur.fetchall()
+            return [{
+                "id": r[0], "email": r[1], "customer_name": r[2], "center_outcode": r[3],
+                "lat": r[4], "lon": r[5], "free_lead_ref": r[6], "last_teaser_lead_ref": r[7],
+            } for r in rows]
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Signup] Error fetching teaser cohort: {e}")
+        return []
+
+
+def set_limbo_account_unsubscribed(email: str) -> bool:
+    if not SURL or not email:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("UPDATE limbo_accounts SET unsubscribed = TRUE WHERE email = %s RETURNING id;", (email.strip().lower(),))
+            row = cur.fetchone()
+            conn.commit()
+            return row is not None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Signup] Error unsubscribing {email}: {e}")
+        return False
+
+
+def mark_teaser_sent(email: str, lead_ref: str = None) -> None:
+    if not SURL or not email:
+        return
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE limbo_accounts SET last_teaser_sent_at = NOW(), last_teaser_lead_ref = COALESCE(%s, last_teaser_lead_ref)
+                WHERE email = %s;
+            """, (lead_ref, email.strip().lower()))
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Signup] Error marking teaser sent for {email}: {e}")
+
+
+def get_lead_by_reference(reference: str) -> Optional[dict]:
+    """Sep 5 2026, free-signup feature: read-only lookup (no status change)
+    for re-displaying a lead someone was already granted -- e.g. a free
+    signup returning to /free-dashboard, or re-submitting the signup form
+    a second time. Same field shape as burn_lead_inventory's return so
+    callers can treat both interchangeably."""
+    if not SURL or not reference:
+        return None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT id, reference, address, summary, council_source, lead_score, lead_price,
+                       applicant_name, agent_name, agent_company, has_agent
+                FROM leads WHERE reference = %s;
+            """, (reference,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0], "reference": row[1], "address": row[2], "summary": row[3],
+                "council_source": row[4], "lead_score": row[5], "lead_price": row[6],
+                "applicant_name": row[7], "agent_name": row[8], "agent_company": row[9], "has_agent": row[10],
+            }
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Signup] Error looking up lead {reference}: {e}")
         return None
 
 
