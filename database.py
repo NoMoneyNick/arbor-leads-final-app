@@ -1,4 +1,5 @@
 import os
+import re
 import psycopg2
 import logging
 from typing import Optional, Dict, Any, Tuple, List
@@ -614,6 +615,21 @@ def init_db():
             # convenience link (create_whatsapp_link), not push delivery via WhatsApp's
             # Business API — no such integration exists in this codebase.
             "ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS notification_preference TEXT DEFAULT 'email';",
+            # Sep 8 2026, Nick's proximity-system rework: a subscriber previously
+            # only ever gave a bare outcode (e.g. "CR5"), geocoded to that
+            # outcode's centroid -- fine for matching, but not precise enough to
+            # honestly say "this job is 4.2 miles from you". full_postcode
+            # stores the exact postcode when the customer gave one (e.g. "CR5
+            # 2LE"); lat/lon above then get the exact postcodes.io pin instead
+            # of just the outcode centroid when it's present. center_outcode is
+            # still always kept as the bare outcode (derived even from a full
+            # postcode) since territory_claims and the existing prefix-matching
+            # logic in dispatch_lead_alerts are keyed on outcode, not full
+            # postcode -- this only adds precision, it doesn't change what
+            # "your territory" means. job_size_preference lets a contractor
+            # only be matched to jobs at the scale they actually want.
+            "ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS full_postcode TEXT;",
+            "ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS job_size_preference TEXT DEFAULT 'all';",
         ]
         failed_ddl = _run_ddl_statements_resiliently(conn, resilience_cols, phase_label="Phase1-columns")
 
@@ -952,6 +968,49 @@ def get_warning_recurrence_days(category: str, title: str, window_days: int = 7)
     except Exception as e:
         logger.error(f"[SystemWarnings] Error counting recurrence for {category}:{title}: {e}")
         return 0
+
+
+def get_all_recurring_warnings(window_days: int = 7, min_days: int = 3, active_within_hours: int = 24) -> list:
+    """Sep 8 2026: Nick's ask -- too many separate WARNING emails (a dozen+
+    council portals all independently crossing the 3-of-7-day recurrence
+    threshold on the same morning, each firing its own email under the old
+    per-title escalation in send_system_incident_alert). This is the one
+    query behind the new daily digest (notifications.send_daily_warning_
+    digest): every (category, title) pair that is CURRENTLY a real,
+    sustained problem -- recurred on min_days+ distinct days in the
+    trailing window AND has fired at least once in the last
+    active_within_hours (so a warning that recurred 3+ days last week but
+    hasn't happened since doesn't keep appearing forever). Returns [] on
+    any DB error, same failsafe pattern as this file's other health checks
+    -- a broken health check must never itself become an incident."""
+    if not SURL:
+        return []
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT category, title, MAX(description) AS description,
+                       COUNT(DISTINCT occurred_at::date) AS days_seen,
+                       MAX(occurred_at) AS last_seen
+                FROM system_warnings
+                WHERE occurred_at >= NOW() - (%s || ' days')::interval
+                GROUP BY category, title
+                HAVING COUNT(DISTINCT occurred_at::date) >= %s
+                   AND MAX(occurred_at) >= NOW() - (%s || ' hours')::interval
+                ORDER BY category, days_seen DESC;
+                """,
+                (window_days, min_days, active_within_hours),
+            )
+            cols = ["category", "title", "description", "days_seen", "last_seen"]
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[SystemWarnings] Error fetching recurring warnings: {e}")
+        return []
 
 
 def get_recent_warnings(hours: int = 24) -> list:
@@ -1683,6 +1742,71 @@ def lookup_outcode_centroid(outcode: str) -> tuple:
     return (None, None)
 
 
+_FULL_POSTCODE_RE = re.compile(r'^([A-Z]{1,2}[0-9][A-Z0-9]?)\s*([0-9][A-Z]{2})$')
+
+
+def lookup_full_postcode_centroid(postcode: str) -> tuple:
+    """Sep 8 2026: exact-pin counterpart to lookup_outcode_centroid above --
+    same free postcodes.io API, but /postcodes/{full postcode} instead of
+    /outcodes/{outcode}, so this returns the real point for that address's
+    postcode unit rather than the centroid of its whole outcode (which can
+    span several miles in rural areas). Returns (None, None) if not a real,
+    resolvable full postcode."""
+    try:
+        clean = postcode.strip().upper().replace(" ", "")
+        resp = requests.get(f"https://api.postcodes.io/postcodes/{clean}", timeout=5)
+        if resp.status_code == 200:
+            result = resp.json().get("result", {})
+            lat = result.get("latitude")
+            lon = result.get("longitude")
+            if lat and lon:
+                return (float(lat), float(lon))
+    except Exception as e:
+        logger.debug(f"[postcodes.io] Full postcode lookup failed for {postcode}: {e}")
+    return (None, None)
+
+
+def resolve_location(raw_input: str) -> dict:
+    """Sep 8 2026, Nick's proximity-system rework: one place that decides
+    whether a customer typed a full UK postcode ("CR5 2LE") or just an
+    outcode ("CR5" / "B1"), and geocodes it the right way either way --
+    exact pin for a full postcode, outcode centroid otherwise. Used by
+    checkout signup (register_or_update_subscription) so a customer who
+    gives their full postcode gets an exact-distance pin, while one who
+    only gives an outcode still works exactly as before (nothing regresses
+    for the common case). Mirrors the dual-format handling already proven
+    in api_check_postcode's map-search box, so there's one consistent
+    definition of "postcode or outcode" across the whole app.
+
+    Returns {"outcode": str, "full_postcode": str|None, "lat": float|None,
+    "lon": float|None, "precision": "exact"|"area"|"none"}."""
+    cleaned = (raw_input or "").strip().upper()
+    no_space = cleaned.replace(" ", "")
+    # _FULL_POSTCODE_RE's `\s*` already tolerates "CR5 2LE", "CR5  2LE" or
+    # "CR52LE" typed with no space at all -- match against the raw cleaned
+    # string first (keeps any space the customer typed), falling back to
+    # the space-stripped form for the no-space case.
+    m = _FULL_POSTCODE_RE.match(cleaned) or _FULL_POSTCODE_RE.match(no_space)
+    if m:
+        outcode = m.group(1)
+        lat, lon = lookup_full_postcode_centroid(no_space)
+        if lat is not None:
+            return {"outcode": outcode, "full_postcode": f"{m.group(1)} {m.group(2)}",
+                    "lat": lat, "lon": lon, "precision": "exact"}
+        # Looked like a full postcode but postcodes.io couldn't resolve it
+        # (typo, or a real-but-unlisted postcode) -- fall back to treating
+        # just the outcode part as the area, same as if they'd only typed that.
+        lat, lon = lookup_outcode_centroid(outcode)
+        return {"outcode": outcode, "full_postcode": None, "lat": lat, "lon": lon,
+                "precision": "area" if lat is not None else "none"}
+
+    # Not a full-postcode shape -- treat the whole thing as an outcode.
+    outcode = no_space[:4] if no_space else ""
+    lat, lon = lookup_outcode_centroid(outcode) if outcode else (None, None)
+    return {"outcode": outcode, "full_postcode": None, "lat": lat, "lon": lon,
+            "precision": "area" if lat is not None else "none"}
+
+
 def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Returns great-circle distance in miles between two lat/lon points."""
     import math
@@ -2015,6 +2139,129 @@ def find_nearest_unclaimed_lead(lat: float, lon: float, max_miles: float = 25.0,
         return None
 
 
+def lead_distance_miles(sub_lat: float, sub_lon: float, lead_address: str) -> Optional[float]:
+    """Sep 8 2026: honest "X.X miles from you" distance for display (dashboard,
+    dispatch emails), reusing the exact same outcode-extraction + centroid +
+    haversine approach already proven in dispatch_lead_alerts / find_nearest_
+    unclaimed_lead -- not a new way of measuring distance, just exposing the
+    number instead of only using it internally for a yes/no radius check.
+    Returns None (never a wrong number) if either side can't be resolved."""
+    if sub_lat is None or sub_lon is None or not lead_address:
+        return None
+    for oc in _extract_outcodes(lead_address):
+        lead_lat, lead_lon = lookup_outcode_centroid(oc)
+        if lead_lat is not None and lead_lon is not None:
+            return round(haversine_miles(sub_lat, sub_lon, lead_lat, lead_lon), 1)
+    return None
+
+
+def simulate_customer_leads(location_input: str, tier: str = "climber_domestic", job_size: str = "all",
+                             radius: float = None, limit: int = 10) -> dict:
+    """Sep 8 2026, Nick's ask: "let's do some dummy runs ... you tell me what
+    exactly I would receive by email". A read-only simulation of the real
+    dispatch_lead_alerts matching logic (exact outcode / haversine radius /
+    regional-prefix fallback) for a hypothetical subscriber at a given
+    location, tier and job-size preference -- against real, currently-
+    unclaimed leads, but WITHOUT burning, dispatching or emailing anything.
+    Safe to run any number of times for testing/demoing what a given
+    postcode + package would actually receive.
+
+    Returns {"location": {...resolve_location output...}, "radius_miles": N,
+    "matches": [ {reference, address_area, summary, lead_score, distance_miles,
+    match_reason}, ... ] } -- address is deliberately reduced to its area
+    (same _area_label-style redaction as the public homepage fix) rather
+    than the real street address, since this is a sales/ops tool, not a
+    reason to expose an unclaimed lead's exact address outside a real sale."""
+    location = resolve_location(location_input)
+    lat, lon = location["lat"], location["lon"]
+    effective_radius = radius if radius is not None else TIER_MAX_RADIUS.get(tier, 15)
+    job_size = (job_size or "all").strip().lower()
+    if job_size not in ("small", "medium", "large", "all"):
+        job_size = "all"
+
+    result = {"location": location, "radius_miles": effective_radius, "tier": tier,
+              "job_size_preference": job_size, "matches": []}
+    if lat is None or lon is None:
+        return result
+
+    if not SURL:
+        return result
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT reference, address, summary, council_source, lead_score, discovered_at
+                FROM leads
+                WHERE (status = 'new' OR status IS NULL)
+                ORDER BY discovered_at DESC
+                LIMIT 300;
+            """)
+            rows = cur.fetchall()
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Simulate] Error fetching candidate leads: {e}")
+        return result
+
+    sub_outcode = location["outcode"]
+    matches = []
+    for reference, address, summary, council_source, lead_score, discovered_at in rows:
+        if job_size != "all" and (lead_score or "small") != job_size:
+            continue
+        addr_upper = (address or "").upper()
+        extracted = _extract_outcodes(addr_upper)
+        match_reason = None
+
+        if sub_outcode and (sub_outcode in extracted or re.search(r'\b' + re.escape(sub_outcode) + r'\b', addr_upper)):
+            match_reason = "exact_outcode"
+
+        dist = None
+        if not match_reason:
+            for oc in extracted:
+                lead_lat, lead_lon = lookup_outcode_centroid(oc)
+                if lead_lat is not None and lead_lon is not None:
+                    d = haversine_miles(lat, lon, lead_lat, lead_lon)
+                    if dist is None or d < dist:
+                        dist = d
+                    if d <= effective_radius:
+                        match_reason = "within_radius"
+                        break
+
+        if not match_reason:
+            prefix_m = re.match(r'^([A-Z]{1,2})', sub_outcode or "")
+            if prefix_m:
+                prefix = prefix_m.group(1)
+                for oc in extracted:
+                    oc_prefix_m = re.match(r'^([A-Z]{1,2})', oc)
+                    if oc_prefix_m and oc_prefix_m.group(1) == prefix:
+                        match_reason = "regional_prefix"
+                        break
+
+        if not match_reason:
+            continue
+
+        if dist is None:
+            dist = lead_distance_miles(lat, lon, address)
+
+        matches.append({
+            "reference": reference,
+            "area": f"{extracted[0]} area" if extracted else (council_source or "UK"),
+            "summary": summary,
+            "lead_score": lead_score or "small",
+            "distance_miles": dist,
+            "match_reason": match_reason,
+            "discovered_at": discovered_at,
+        })
+        if len(matches) >= limit:
+            break
+
+    matches.sort(key=lambda m: (m["distance_miles"] is None, m["distance_miles"] if m["distance_miles"] is not None else 0))
+    result["matches"] = matches
+    return result
+
+
 def create_or_update_limbo_account(email: str, name: str = None, phone: str = None,
                                     outcode: str = None, lat: float = None, lon: float = None) -> Optional[dict]:
     """Sep 5 2026: creates (or refreshes contact details on) a free,
@@ -2218,13 +2465,29 @@ def get_lead_by_reference(reference: str) -> Optional[dict]:
 
 
 def register_or_update_subscription(customer_email: str, outcode: str, tier: str = "climber_domestic",
-                                     stripe_sub_id: str = None, radius: int = 15, name: str = None, phone: str = None) -> bool:
-    """Registers or updates a contractor subscription with seniority timestamp, lat/lon centroid, and tier quota."""
+                                     stripe_sub_id: str = None, radius: int = 15, name: str = None, phone: str = None,
+                                     job_size_preference: str = "all") -> bool:
+    """Registers or updates a contractor subscription with seniority timestamp, lat/lon pin, and tier quota.
+
+    Sep 8 2026: `outcode` here is actually "whatever the customer typed" --
+    resolve_location works out whether that's a full postcode ("CR5 2LE",
+    giving an exact pin) or just a bare outcode ("CR5", the pre-existing
+    centroid-only behaviour) and geocodes accordingly. center_outcode is
+    always stored as the plain outcode either way, since territory_claims
+    and dispatch_lead_alerts' prefix-matching are keyed on outcode -- this
+    only makes the stored lat/lon more precise, it doesn't change what
+    "your territory" means."""
     if not SURL or not customer_email or not outcode:
         return False
 
-    # Look up geographic centroid for radius matching at dispatch time
-    lat, lon = lookup_outcode_centroid(outcode)
+    location = resolve_location(outcode)
+    resolved_outcode = location["outcode"] or outcode.strip().upper()[:4]
+    lat, lon = location["lat"], location["lon"]
+    full_postcode = location["full_postcode"]
+
+    job_size_preference = (job_size_preference or "all").strip().lower()
+    if job_size_preference not in ("small", "medium", "large", "all"):
+        job_size_preference = "all"
 
     # Set realistic monthly quota based on tier
     quota = TIER_QUOTAS.get(tier, 5)
@@ -2236,8 +2499,9 @@ def register_or_update_subscription(customer_email: str, outcode: str, tier: str
             cur.execute("""
                 INSERT INTO contractor_subscriptions (
                     customer_email, customer_name, phone, tier, center_outcode, radius_miles,
-                    stripe_subscription_id, active, subscribed_at, monthly_quota, lat, lon
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, NOW(), %s, %s, %s)
+                    stripe_subscription_id, active, subscribed_at, monthly_quota, lat, lon,
+                    full_postcode, job_size_preference
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, NOW(), %s, %s, %s, %s, %s)
                 ON CONFLICT (customer_email) DO UPDATE SET
                     tier = EXCLUDED.tier,
                     center_outcode = EXCLUDED.center_outcode,
@@ -2246,13 +2510,18 @@ def register_or_update_subscription(customer_email: str, outcode: str, tier: str
                     monthly_quota = EXCLUDED.monthly_quota,
                     lat = EXCLUDED.lat,
                     lon = EXCLUDED.lon,
+                    full_postcode = EXCLUDED.full_postcode,
+                    job_size_preference = EXCLUDED.job_size_preference,
                     active = TRUE
                 RETURNING id;
             """, (customer_email.strip().lower(), name, phone, tier,
-                  outcode.strip().upper(), radius, stripe_sub_id, quota, lat, lon))
+                  resolved_outcode, radius, stripe_sub_id, quota, lat, lon,
+                  full_postcode, job_size_preference))
             row = cur.fetchone()
             conn.commit()
-            logger.info(f"[Subscription] Registered {customer_email} — {tier} | {outcode} ±{radius}mi | quota={quota} | coords=({lat},{lon})")
+            logger.info(f"[Subscription] Registered {customer_email} — {tier} | {resolved_outcode}"
+                        f"{' (' + full_postcode + ')' if full_postcode else ''} ±{radius}mi | "
+                        f"job_size={job_size_preference} | quota={quota} | coords=({lat},{lon})")
             return bool(row)
         finally:
             cur.close()
@@ -2362,7 +2631,8 @@ def get_active_subscribers_by_seniority(outcode: str = None) -> list:
         try:
             base_sql = """
                 SELECT id, customer_email, customer_name, phone, tier, center_outcode, radius_miles,
-                       monthly_quota, delivered_this_month, subscribed_at, lat, lon, notification_preference
+                       monthly_quota, delivered_this_month, subscribed_at, lat, lon, notification_preference,
+                       full_postcode, job_size_preference
                 FROM contractor_subscriptions
                 WHERE active = TRUE
             """
@@ -2371,7 +2641,8 @@ def get_active_subscribers_by_seniority(outcode: str = None) -> list:
                             (outcode.strip().upper(),))
             else:
                 cur.execute(base_sql + " ORDER BY subscribed_at ASC;")
-            cols = ["id", "email", "name", "phone", "tier", "outcode", "radius", "quota", "delivered", "subscribed_at", "lat", "lon", "notification_preference"]
+            cols = ["id", "email", "name", "phone", "tier", "outcode", "radius", "quota", "delivered", "subscribed_at", "lat", "lon", "notification_preference",
+                    "full_postcode", "job_size_preference"]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
             # Higher-tier subscribers get first look (sold as "priority routing"); within
             # the same tier band, longest-tenured subscriber still wins (stable sort).

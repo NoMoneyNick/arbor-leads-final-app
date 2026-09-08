@@ -2160,12 +2160,12 @@ def checkout(plan_key: str, request: Request):
     </div>
 
     <form method="POST" action="/checkout/{plan_key}">
-        <label for="outcode">Your Base Postcode or Outcode</label>
-        <input type="text" id="outcode" name="outcode" placeholder="e.g. NG22, B1, SW1, EX4"
-               maxlength="6" required autocomplete="postal-code"
+        <label for="outcode">Your Postcode or Outcode</label>
+        <input type="text" id="outcode" name="outcode" placeholder="e.g. CR5 2LE, NG22, B1"
+               maxlength="8" required autocomplete="postal-code"
                style="text-transform:uppercase;"
                oninput="this.value=this.value.toUpperCase()">
-        <div class="hint">The postcode area you operate from — e.g. NG for Nottingham, B for Birmingham</div>
+        <div class="hint">Give your full postcode (e.g. CR5 2LE) for the most accurate job distances — just an outcode (e.g. CR5) works too, but is less precise</div>
 
         <label for="radius">Working Radius</label>
         <select id="radius" name="radius">
@@ -2175,6 +2175,15 @@ def checkout(plan_key: str, request: Request):
             <option value="30">30 miles — Wide regional reach</option>
             <option value="50">50 miles — Full county coverage</option>
         </select>
+
+        <label for="job_size">Job Sizes You Want</label>
+        <select id="job_size" name="job_size">
+            <option value="all" selected>All sizes — small, medium & large</option>
+            <option value="small">Small jobs only</option>
+            <option value="medium">Medium jobs only</option>
+            <option value="large">Large jobs only</option>
+        </select>
+        <div class="hint">You'll only be matched to jobs at the size(s) you choose — change this any time from your dashboard</div>
 
         <button type="submit">Continue to Secure Payment →</button>
     </form>
@@ -2187,7 +2196,7 @@ def checkout(plan_key: str, request: Request):
 
 
 @app.post("/checkout/{plan_key}")
-async def checkout_post(plan_key: str, outcode: str = Form(...), radius: int = Form(15)):
+async def checkout_post(plan_key: str, outcode: str = Form(...), radius: int = Form(15), job_size: str = Form("all")):
     """Handles the area form submission, then redirects to Stripe with outcode in metadata."""
     plan = payments.PLANS.get(plan_key)
     if not plan:
@@ -2199,8 +2208,22 @@ async def checkout_post(plan_key: str, outcode: str = Form(...), radius: int = F
     max_radius = database.TIER_MAX_RADIUS.get(plan_key, 15)
     radius = min(radius, max_radius)
 
-    clean_outcode = outcode.strip().upper()[:6] or "GB"
-    url = payments.create_checkout_session(plan_key, clean_outcode, radius=radius)
+    job_size = (job_size or "all").strip().lower()
+    if job_size not in ("small", "medium", "large", "all"):
+        job_size = "all"
+
+    # Sep 8 2026, proximity-system rework: resolve here (not just at webhook
+    # time) so a full postcode ("CR5 2LE") is captured and passed through
+    # Stripe metadata as full_postcode -- register_or_update_subscription
+    # geocodes that to an exact pin. The territory-keying outcode
+    # (client_reference_id) still only ever carries the bare outcode.
+    raw_input = outcode.strip().upper()[:8]
+    location = database.resolve_location(raw_input)
+    clean_outcode = location["outcode"] or raw_input[:4] or "GB"
+    full_postcode = location["full_postcode"]
+
+    url = payments.create_checkout_session(plan_key, clean_outcode, radius=radius,
+                                            full_postcode=full_postcode, job_size=job_size)
     if not url:
         return HTMLResponse(
             "<html><body style='font-family:sans-serif; text-align:center; padding:60px;'>"
@@ -2211,6 +2234,80 @@ async def checkout_post(plan_key: str, outcode: str = Form(...), radius: int = F
             status_code=503
         )
     return RedirectResponse(url=url, status_code=303)
+
+
+@app.get("/admin/simulate-leads", response_class=HTMLResponse)
+def admin_simulate_leads(request: Request, secret: Optional[str] = Query(None),
+                          location: Optional[str] = None, tier: str = "climber_domestic",
+                          job_size: str = "all", radius: Optional[float] = None):
+    """Sep 8 2026, Nick's ask (verbatim: "let's do some dummy runs, i will
+    pretend i from a specific location and package and you would tell me
+    what exactly i would receive by email"): a real, reusable dummy-run
+    tool instead of a one-off manual exercise -- pick a postcode/outcode,
+    a tier and a job-size preference, and see exactly which currently-
+    unclaimed leads that hypothetical subscriber would be matched to right
+    now, using the exact same matching logic as a real dispatch
+    (database.simulate_customer_leads mirrors notifications.
+    dispatch_lead_alerts's own exact-outcode / haversine-radius / regional-
+    prefix rules). Entirely read-only -- nothing is burned, dispatched or
+    emailed. Addresses are shown at area-level only (same redaction as the
+    public homepage fix), matching this being an ops/sales tool, not a
+    reason to expose an unclaimed lead's exact address."""
+    verify_admin_or_secret(request, secret)
+
+    tier_options = "".join([
+        f"<option value='{k}' {'selected' if k == tier else ''}>{k}</option>"
+        for k in database.TIER_MAX_RADIUS.keys()
+    ])
+    job_size_options = "".join([
+        f"<option value='{v}' {'selected' if v == job_size else ''}>{v.title()}</option>"
+        for v in ("all", "small", "medium", "large")
+    ])
+
+    results_html = ""
+    if location:
+        sim = database.simulate_customer_leads(location, tier=tier, job_size=job_size, radius=radius, limit=15)
+        loc = sim["location"]
+        if loc["lat"] is None:
+            results_html = f"<p style='color:#b91c1c;'>Couldn't resolve '{location}' to a real UK postcode/outcode — nothing to simulate.</p>"
+        else:
+            precision_note = "exact postcode pin" if loc["precision"] == "exact" else "outcode-centroid area (less precise — try a full postcode for a tighter pin)"
+            rows = "".join([
+                f"<tr><td style='padding:8px; border-bottom:1px solid #e2e8f0;'>{m['area']}</td>"
+                f"<td style='padding:8px; border-bottom:1px solid #e2e8f0;'>{m['distance_miles']} mi</td>"
+                f"<td style='padding:8px; border-bottom:1px solid #e2e8f0;'>{m['lead_score']}</td>"
+                f"<td style='padding:8px; border-bottom:1px solid #e2e8f0;'>{(m['summary'] or '')[:100]}</td>"
+                f"<td style='padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px; color:#64748b;'>{m['match_reason']}</td></tr>"
+                for m in sim["matches"]
+            ]) or "<tr><td colspan='5' style='padding:16px; text-align:center; color:#64748b;'>No currently-unclaimed leads would match this location/tier/job-size right now.</td></tr>"
+            results_html = f"""
+            <p style='color:#475569; font-size:13px;'>Resolved to outcode <b>{loc['outcode']}</b>{' (' + loc['full_postcode'] + ')' if loc['full_postcode'] else ''} — {precision_note}. Radius: {sim['radius_miles']} miles.</p>
+            <table style='width:100%; border-collapse:collapse; font-size:13px;'>
+                <tr style='background:#f8fafc;'><th style='padding:8px; text-align:left;'>Area</th><th style='padding:8px; text-align:left;'>Distance</th><th style='padding:8px; text-align:left;'>Size</th><th style='padding:8px; text-align:left;'>Summary</th><th style='padding:8px; text-align:left;'>Match reason</th></tr>
+                {rows}
+            </table>
+            """
+
+    return HTMLResponse(f"""
+    <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:900px; margin:auto;">
+        <h2 style="color:#044332;">🧪 Dummy Run: Simulate Customer Leads</h2>
+        <p style="color:#64748b; font-size:13px;">Read-only — no leads are burned or emailed. Shows exactly what a subscriber at this location/tier/job-size would currently receive.</p>
+        <form method="GET" style="background:white; padding:20px; border-radius:10px; border:1px solid #e2e8f0; display:flex; gap:12px; flex-wrap:wrap; align-items:end; margin-bottom:24px;">
+            <input type="hidden" name="secret" value="{secret or ''}">
+            <div><label style="display:block; font-size:12px; font-weight:bold; margin-bottom:4px;">Postcode or Outcode</label>
+                <input type="text" name="location" value="{location or ''}" placeholder="e.g. CR5 2LE" style="padding:8px; border:1px solid #cbd5e1; border-radius:6px;"></div>
+            <div><label style="display:block; font-size:12px; font-weight:bold; margin-bottom:4px;">Tier</label>
+                <select name="tier" style="padding:8px; border:1px solid #cbd5e1; border-radius:6px;">{tier_options}</select></div>
+            <div><label style="display:block; font-size:12px; font-weight:bold; margin-bottom:4px;">Job Size</label>
+                <select name="job_size" style="padding:8px; border:1px solid #cbd5e1; border-radius:6px;">{job_size_options}</select></div>
+            <div><label style="display:block; font-size:12px; font-weight:bold; margin-bottom:4px;">Radius override (optional)</label>
+                <input type="number" name="radius" value="{radius or ''}" placeholder="tier default" style="padding:8px; border:1px solid #cbd5e1; border-radius:6px; width:120px;"></div>
+            <button type="submit" style="background:#044332; color:white; padding:9px 18px; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">Run</button>
+        </form>
+        {results_html}
+        <p style="margin-top:24px;"><a href="/admin?secret={secret or ''}" style="color:#044332;">← Back to Admin</a></p>
+    </body></html>
+    """)
 
 
 @app.get("/marketplace", response_class=HTMLResponse)
@@ -5051,6 +5148,18 @@ def run_full_autonomous_cycle():
         logger.error(f"[AUTO] enrich_existing_partners error: {e}")
 
     _check_for_silent_source_failures()
+
+    # Sep 8 2026, Nick's ask: replaces what used to be a dozen+ separate
+    # per-council WARNING escalation emails hitting his inbox within the
+    # same hour with exactly one daily digest (or none, on a quiet day).
+    # Rides this existing once-a-day cycle rather than needing a new
+    # cron-job.org entry -- see notifications.send_daily_warning_digest's
+    # own docstring for the full reasoning.
+    try:
+        import notifications
+        notifications.send_daily_warning_digest()
+    except Exception as e:
+        logger.error(f"[AUTO] Daily warning digest error: {e}")
 
     database.set_system_state("last_autonomous_cycle_at", datetime.datetime.utcnow().isoformat() + "Z")
     logger.info("[AUTO] Autonomous daily cycle fully complete.")

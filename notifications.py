@@ -379,15 +379,26 @@ def dispatch_lead_alerts(city: str, leads: list):
     customer_leads = {}       # {email: [leads]}
     overflow_notices = {}     # {email: bool}
     customer_prefs = {}       # {email: notification_preference} — Contractor Portal Upgrades (Phase 2)
-    
+    customer_coords = {}      # {email: (lat, lon)} — Sep 8 2026, so the dispatch email can show "X.X miles away"
+
     for lead in leads:
         addr = lead.get("addr", "").upper()
         lead_id = lead.get("id") or lead.get("ref") or lead.get("reference")
+        lead_size = lead.get("lead_score") or "small"
         extracted_outcodes = [m.group(1) for m in re.finditer(r'\b([A-Z]{1,2}[0-9][A-Z0-9]?)\s*([0-9][A-Z]{2})\b', addr)]
-        
+
         # Find matching subscribers for this lead's geographic area
         matching_subs = []
         for sub in subscribers:
+            # Sep 8 2026, Nick's proximity-system rework: a contractor who set
+            # a job-size preference (small/medium/large) at signup should
+            # only ever be matched to jobs at that size -- 'all' (the
+            # default, and every pre-existing subscriber before this field
+            # existed) keeps matching everything exactly as before.
+            sub_job_size = (sub.get("job_size_preference") or "all").lower()
+            if sub_job_size != "all" and sub_job_size != lead_size:
+                continue
+
             sub_outcode = sub["outcode"].upper()
             sub_lat = sub.get("lat")
             sub_lon = sub.get("lon")
@@ -452,6 +463,7 @@ def dispatch_lead_alerts(city: str, leads: list):
                 if email not in customer_leads:
                     customer_leads[email] = []
                     customer_prefs[email] = sub.get("notification_preference") or "email"
+                    customer_coords[email] = (sub.get("lat"), sub.get("lon"))
                 customer_leads[email].append(lead)
                 break  # Lead burned and dispatched to #1 senior subscriber; do NOT give to anyone else
 
@@ -470,6 +482,7 @@ def dispatch_lead_alerts(city: str, leads: list):
                         if email not in customer_leads:
                             customer_leads[email] = []
                             customer_prefs[email] = sub.get("notification_preference") or "email"
+                            customer_coords[email] = (sub.get("lat"), sub.get("lon"))
                         customer_leads[email].append(ol)
                         overflow_notices[email] = True
 
@@ -495,6 +508,20 @@ def dispatch_lead_alerts(city: str, leads: list):
         # delivery via WhatsApp's Business API — no such integration exists here.
         wants_whatsapp = customer_prefs.get(email, "email") in ("whatsapp", "both")
 
+        # Sep 8 2026, Nick's proximity-system ask ("we have a large job 4.2
+        # miles from your location"): reuses database.lead_distance_miles,
+        # the same outcode-extraction + centroid + haversine approach
+        # already proven elsewhere in this file. sub_lat/sub_lon come from
+        # customer_coords, captured at dispatch time above; either can be
+        # None (older subscriber pre-dating lat/lon, or an unresolvable
+        # postcode), in which case the column just shows "—" rather than a
+        # wrong number.
+        c_lat, c_lon = customer_coords.get(email, (None, None))
+
+        def _distance_cell(l):
+            dist = database.lead_distance_miles(c_lat, c_lon, l.get("addr", ""))
+            return f"{dist} mi" if dist is not None else "—"
+
         def _wa_button(l):
             if not wants_whatsapp:
                 return ""
@@ -508,6 +535,7 @@ def dispatch_lead_alerts(city: str, leads: list):
             f"<tr>"
             f"<td style='padding:8px;'>{SCORE_EMOJI.get(l.get('lead_score','small'), '🌳')}</td>"
             f"<td style='padding:8px;'><b>{l['addr']}</b></td>"
+            f"<td style='padding:8px; white-space:nowrap; color:#044332; font-weight:bold;'>{_distance_cell(l)}</td>"
             f"<td style='padding:8px;'>{l['summary'][:90]}...</td>"
             f"<td style='padding:8px; font-size:11px; white-space:nowrap;'>{_agent_status_badge(l)}</td>"
             f"<td style='padding:8px; white-space:nowrap;'>"
@@ -529,6 +557,7 @@ def dispatch_lead_alerts(city: str, leads: list):
                     <tr style='background:#f8fafc;'>
                         <th style='padding:8px; text-align:left;'>Type</th>
                         <th style='padding:8px; text-align:left;'>Location</th>
+                        <th style='padding:8px; text-align:left;'>Distance</th>
                         <th style='padding:8px; text-align:left;'>Description</th>
                         <th style='padding:8px; text-align:left;'>Agent</th>
                         <th style='padding:8px; text-align:left;'>Tool</th>
@@ -724,16 +753,25 @@ def send_system_incident_alert(
     and mesh_scrapers.py's own alert functions for the detail).
 
     New behaviour: CRITICAL and SECURITY are unchanged -- always an
-    immediate email, still deduped by the throttle below. WARNING no
-    longer emails immediately at all -- it's logged to the system_warnings
-    table (database.log_system_warning) and only escalates to a real email
-    once the SAME category+title has recurred on 3+ distinct calendar days
-    within a trailing 7-day window (database.get_warning_recurrence_days)
-    -- a genuinely sustained/worsening problem, not a one-off blip or a
-    burst of stale per-key throttles re-firing after a deploy wipes them.
-    The escalation email is a separately-throttled (48h), distinctly
-    titled "RECURRING" alert, so Nick can tell it apart from a fresh
-    CRITICAL and it doesn't re-nag daily once he's already seen it.
+    immediate email, still deduped by the throttle below. WARNING NEVER
+    emails individually at all any more -- it's only logged to the
+    system_warnings table (database.log_system_warning).
+
+    Sep 8 2026 (Nick, verbatim: "everyday i am getting emails ... this is
+    extremely serious and needs a permanent fix not a temporary [one]"):
+    the previous version of this got the "don't email every WARNING"
+    principle right but the wrong unit of consolidation -- it stopped
+    emailing on every OCCURRENCE, but still emailed individually per
+    (category, title), i.e. per council/domain. The morning ~20 different
+    council portals all crossed the 3-of-7-days threshold within the same
+    hour, that was 20 separate emails, each one individually "correctly"
+    throttled to 48h but with no throttle shared across THEM. Emailing
+    WARNINGs is now handled entirely by send_daily_warning_digest() below
+    (wired into the once-daily autonomous cycle in main.py) -- ONE email,
+    at most once a day, listing everything currently recurring, or no
+    email at all on a quiet day. This function's job for a WARNING is now
+    only to log; database.get_all_recurring_warnings() is what the digest
+    reads to decide what's actually worth Nick's attention.
     """
     cache_key = f"{category}:{title}"
     now_ts = time.time()
@@ -742,25 +780,10 @@ def send_system_incident_alert(
         try:
             import database
             database.log_system_warning(category, title, description)
-            recurrence_days = database.get_warning_recurrence_days(category, title, window_days=7)
         except Exception as e:
-            logging.error(f"[SYSTEM WARNING] Failed to log/check recurrence for {cache_key}: {e}")
-            recurrence_days = 0
-
-        if recurrence_days < 3:
-            logging.info(
-                f"[SYSTEM WARNING LOGGED] {cache_key} logged, not emailed "
-                f"(recurred on {recurrence_days} distinct day(s) in the last 7 -- needs 3+ to escalate)."
-            )
-            return
-
-        # Escalate: recurring on 3+ distinct days is a real, sustained
-        # trend -- worth an actual email, but kept clearly labelled and
-        # throttled far more loosely (48h) than a CRITICAL, since it's
-        # already been true for days and won't stop being true in an hour.
-        cache_key = f"ESCALATED:{category}:{title}"
-        throttle_hours = 48.0
-        title = f"RECURRING — {title} (seen on {recurrence_days} of the last 7 days)"
+            logging.error(f"[SYSTEM WARNING] Failed to log warning {cache_key}: {e}")
+        logging.info(f"[SYSTEM WARNING LOGGED] {cache_key} logged (see send_daily_warning_digest for emailing).")
+        return
 
     last_sent = _ALERT_THROTTLE_CACHE.get(cache_key, 0)
     if (now_ts - last_sent) < (throttle_hours * 3600):
@@ -836,3 +859,107 @@ def send_system_incident_alert(
         logging.warning(f"[SYSTEM INCIDENT ALERT] Sent {severity} email for {category}: {title} to {TEST_EMAIL}")
     else:
         logging.error(f"[SYSTEM INCIDENT ALERT] FAILED to send {severity} email for {category}: {title} — not throttling, will retry on next occurrence.")
+
+
+# Category-specific plain-English context for the digest below -- so each
+# entry says what kind of problem it actually is, not just its raw title.
+_WARNING_CATEGORY_CONTEXT = {
+    "SCRAPER TLS FALLBACK": (
+        "Not actionable, not costing you leads — the scrape still succeeded, "
+        "it just had to skip certificate verification for this portal (their "
+        "cert is expired/self-signed/misconfigured, not something we control). "
+        "Shown here for visibility only; expect this to keep recurring for the "
+        "same handful of portals indefinitely unless the council fixes their cert."
+    ),
+    "SCRAPER PAGE STRUCTURE": (
+        "Worth checking — this usually means a council changed their portal's "
+        "page layout and we may be silently missing leads from them until the "
+        "parser is updated."
+    ),
+    "SILENT SOURCE FAILURE": (
+        "Worth checking — this source normally produces leads and has gone to "
+        "zero with no error raised, which is the exact failure shape the Leeds "
+        "ArcGIS bug had before it was found."
+    ),
+}
+_DIGEST_THROTTLE_HOURS = 20.0
+_last_digest_sent_ts = 0.0
+
+
+def send_daily_warning_digest() -> bool:
+    """Sep 8 2026, Nick's ask (verbatim: "everyday i am getting emails ...
+    this is extremely serious and needs a permanent fix not a temporary
+    [one] ... build fail safe systems that put the whole thing back on
+    track automatically"): the single daily email that replaced individual
+    per-council WARNING escalation emails. Reads database.
+    get_all_recurring_warnings() (every category+title that's recurred 3+
+    of the last 7 days AND fired within the last 24h) and sends ONE email
+    listing all of them, grouped by category with plain-English context on
+    what each category actually means (see _WARNING_CATEGORY_CONTEXT) --
+    instead of a dozen+ separate "RECURRING" emails hitting his inbox
+    within the same hour. Sends nothing at all on a quiet day (empty
+    list). Called once per autonomous daily cycle (main.py's
+    _check_for_silent_source_failures neighbour) -- not a new cron entry
+    Nick has to remember to set up, it rides the existing once-a-day
+    cycle. Throttled to 20h independently of that cycle's own timing as a
+    safety net against ever double-sending in one day."""
+    global _last_digest_sent_ts
+    now_ts = time.time()
+    if (now_ts - _last_digest_sent_ts) < (_DIGEST_THROTTLE_HOURS * 3600):
+        logging.info("[WARNING DIGEST] Skipped — already sent within the last %.0fh.", _DIGEST_THROTTLE_HOURS)
+        return False
+
+    try:
+        import database
+        recurring = database.get_all_recurring_warnings(window_days=7, min_days=3, active_within_hours=24)
+    except Exception as e:
+        logging.error(f"[WARNING DIGEST] Failed to fetch recurring warnings: {e}")
+        return False
+
+    if not recurring:
+        logging.info("[WARNING DIGEST] Nothing currently recurring — no email sent.")
+        return False
+
+    by_category = {}
+    for w in recurring:
+        by_category.setdefault(w["category"], []).append(w)
+
+    sections_html = ""
+    for category, items in sorted(by_category.items()):
+        context = _WARNING_CATEGORY_CONTEXT.get(category, "")
+        rows = "".join([
+            f"<tr><td style='padding:6px 0; color:#0f172a; font-weight:700;'>{w['title']}</td>"
+            f"<td style='padding:6px 0; text-align:right; color:#64748b; white-space:nowrap;'>{w['days_seen']}/7 days</td></tr>"
+            for w in sorted(items, key=lambda w: -w["days_seen"])
+        ])
+        sections_html += f"""
+        <div style="margin-bottom:22px;">
+            <div style="font-size:13px; font-weight:800; color:#0f172a; text-transform:uppercase; margin-bottom:4px;">{category} ({len(items)})</div>
+            {f'<p style="font-size:12px; color:#64748b; margin:0 0 8px 0;">{context}</p>' if context else ''}
+            <table style="width:100%; border-collapse:collapse; font-size:13px; border-top:1px solid #e2e8f0;">{rows}</table>
+        </div>
+        """
+
+    total = len(recurring)
+    subject = f"📋 Daily warning digest — {total} recurring issue{'s' if total != 1 else ''}"
+    html_body = f"""
+    <div style="font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width:640px; margin:auto; padding:0; border:2px solid #cbd5e1; border-radius:14px; overflow:hidden; background:#ffffff;">
+        <div style="background:#0f172a; color:#ffffff; padding:20px; text-align:center;">
+            <h1 style="margin:0; font-size:18px; font-weight:800;">📋 Daily Warning Digest</h1>
+            <p style="margin:6px 0 0 0; font-size:13px; opacity:0.85;">{total} issue{'s' if total != 1 else ''} currently recurring across the last 7 days — one email, not one per issue.</p>
+        </div>
+        <div style="padding:24px 22px;">
+            {sections_html}
+            <p style="font-size:12px; color:#94a3b8; text-align:center; margin-top:8px;">
+                Vector Data Labs Automated Resilience Sentry • Host: Render Production
+            </p>
+        </div>
+    </div>
+    """
+    sent_ok = send_resend_email(subject, html_body)
+    if sent_ok:
+        _last_digest_sent_ts = now_ts
+        logging.warning(f"[WARNING DIGEST] Sent digest covering {total} recurring issue(s) to {TEST_EMAIL}.")
+    else:
+        logging.error("[WARNING DIGEST] FAILED to send — not throttling, will retry on next cycle.")
+    return sent_ok

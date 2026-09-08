@@ -642,7 +642,7 @@ class IdoxScraper:
             logger.debug(f"[MESH] Could not fetch applicant/agent detail for keyVal={key_val} on {self.base_url}: {e}")
         return out
 
-    def search_tree_applications(self, days_back: int = 30, search_term: str = "tree") -> List[Dict]:
+    def search_tree_applications(self, days_back: int = 30, search_term: str = "tree", _retry_depth: int = 0) -> List[Dict]:
         # Sep 2 2026: name kept as-is (only internal caller is scrape_mesh_council
         # below, plus test_scrapers.py references it by this name) but the filter
         # inside is no longer tree-only -- it now tags each lead with whichever
@@ -774,6 +774,28 @@ class IdoxScraper:
                     )
                 )
                 if looks_like_too_many_results:
+                    # Sep 8 2026: this used to just log and give up -- the code
+                    # comment above even said "a future improvement (narrower
+                    # date range...) could recover them" but nothing ever did
+                    # it. Auto-recovery, bounded to one retry (_retry_depth
+                    # guards against runaway recursion/request volume on an
+                    # already-struggling council): halve the window and try
+                    # again. This recovers the more recent, more urgent half
+                    # of the leads immediately; the older half isn't lost
+                    # forever either -- it was already covered by a previous
+                    # day's run before this council started overflowing (the
+                    # dedup cache is what stops it being re-inserted), and a
+                    # daily re-run keeps re-covering the recent end going
+                    # forward. Floors at 5 days so this can't spiral into
+                    # dozens of tiny requests against one struggling portal.
+                    narrower = days_back // 2
+                    if _retry_depth == 0 and narrower >= 5:
+                        logger.info(
+                            f"[{self.base_url}] Idox search for '{search_term}' matched too many "
+                            f"results over {days_back} days -- auto-retrying with a {narrower}-day "
+                            f"window instead of dropping this council's leads for today."
+                        )
+                        return self.search_tree_applications(days_back=narrower, search_term=search_term, _retry_depth=1)
                     logger.info(
                         f"[{self.base_url}] Idox search for '{search_term}' matched too many "
                         f"results and was not returned -- consider a narrower search term or "

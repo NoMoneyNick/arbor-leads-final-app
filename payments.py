@@ -171,7 +171,8 @@ PLANS = {
 }
 
 
-def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = None, radius: int = 15) -> Optional[str]:
+def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = None, radius: int = 15,
+                             full_postcode: str = None, job_size: str = None) -> Optional[str]:
     """
     Creates a Stripe Checkout session for the given plan or single lead purchase.
     Returns the checkout URL to redirect the customer to.
@@ -212,6 +213,17 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
             session_params["client_reference_id"] = outcode
             session_params["metadata"]["outcode"] = outcode
             session_params["metadata"]["radius_miles"] = str(radius)
+
+        # Sep 8 2026, proximity-system rework: carry the customer's raw
+        # postcode input (may be a full postcode, more precise than the
+        # bare outcode above) and job-size preference through Stripe
+        # metadata so the webhook can pass them straight to
+        # database.register_or_update_subscription. Both optional --
+        # nothing here changes for a customer who only gives an outcode.
+        if full_postcode:
+            session_params["metadata"]["full_postcode"] = full_postcode
+        if job_size:
+            session_params["metadata"]["job_size"] = job_size
 
         if lead_id:
             session_params["metadata"]["lead_id"] = lead_id
@@ -340,16 +352,23 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
         # 2. If this was a subscription, register with seniority timestamp
         if not lead_id:
             sub_tier = metadata.get("tier", "climber_domestic")
-            sub_outcode = outcode or "GB"
+            # Sep 8 2026: prefer the full postcode when the customer gave one
+            # (metadata.full_postcode) -- register_or_update_subscription's
+            # resolve_location geocodes that to an exact pin instead of just
+            # the outcode centroid. Falls back to the outcode exactly as
+            # before when no full postcode was captured.
+            sub_location_input = metadata.get("full_postcode") or outcode or "GB"
             sub_radius = int(metadata.get("radius_miles", 15))
+            sub_job_size = metadata.get("job_size", "all")
             reg_ok = database.register_or_update_subscription(
                 customer_email=customer_email,
-                outcode=sub_outcode,
+                outcode=sub_location_input,
                 tier=sub_tier,
                 stripe_sub_id=data.get("subscription", ""),
-                radius=sub_radius
+                radius=sub_radius,
+                job_size_preference=sub_job_size
             )
-            logger.info(f"[Stripe] Subscription registered for {mask(customer_email)} ({sub_tier} in {sub_outcode} ±{sub_radius}mi): {reg_ok}")
+            logger.info(f"[Stripe] Subscription registered for {mask(customer_email)} ({sub_tier} in {sub_location_input} ±{sub_radius}mi, job_size={sub_job_size}): {reg_ok}")
             if reg_ok:
                 _mark_stripe_event_fulfilled(event_id)
 
