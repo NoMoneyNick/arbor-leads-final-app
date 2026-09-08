@@ -278,6 +278,17 @@ def _council_source_issue(district: Optional[str]) -> Optional[str]:
     return None
 
 
+@app.get("/api/live-counts")
+def api_live_counts():
+    """Sep 8 2026, Nick's ask: real, current today/week/month lead counts for
+    the homepage's "Intercepting Live" badge to poll -- see the JS at the
+    bottom of public_homepage(). Deliberately no auth (aggregate counts
+    only, no addresses or names) and no rate limit beyond the existing
+    global one, since this is meant to be polled every 8-30 seconds by
+    anyone with the homepage open."""
+    return database.get_lead_discovery_counts()
+
+
 @app.get("/api/check-postcode")
 @app.get("/check-postcode")
 @app.get("/check-postcode/{postcode}")
@@ -436,26 +447,61 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
     # A visitor with zero real leads in their area was shown a fabricated
     # 12-40 "active leads" figure. Fixed: every number below is now derived
     # from the actual leads table -- if there's nothing there, we say so.
-    prefix_alpha = "".join([c for c in display_pc if c.isalpha()])[:3]
-    area_alpha = prefix_alpha[:2] if len(prefix_alpha) >= 2 else prefix_alpha
+    # Sep 8 2026: Nick flagged "Connected Areas always shows 0". Root cause --
+    # `prefix_alpha` stripped ALL digits out of the outcode before it was
+    # ever used (e.g. "CR5" became just "CR"), and `area_alpha` was then
+    # computed FROM that already-digit-free string, so for any normal 2-letter
+    # outcode (CR5, SW1, NW3...) the two queries below ended up searching for
+    # the exact same pattern -- direct_leads and area_leads were always
+    # identical, so connected_leads = max(area - direct, 0) was always 0. The
+    # "exact catchment" query was also silently matching the WHOLE postcode
+    # area (any CR-outcode), not the specific outcode typed, compounding it.
+    # Fixed: match the real, full outcode (digits included) for the exact
+    # count, and just the postcode-area letters for the wider count.
+    display_pc_clean = re.sub(r'[^A-Z0-9]', '', display_pc.upper())
+    area_letters = "".join([c for c in display_pc_clean if c.isalpha()])[:2]
     conn = database.get_db_conn()
     cur = conn.cursor()
-    if len(prefix_alpha) > 1:
-        # Exact catchment: this specific outcode/district.
+    if display_pc_clean and area_letters:
+        # Exact catchment: this specific outcode (e.g. "CR5", not just "CR").
         cur.execute("SELECT count(*) FROM leads WHERE (status = 'new' OR status IS NULL) AND (address ~* %s OR council_source ILIKE %s)",
-        (f"\\y{prefix_alpha}[0-9]", f"%{district[:6]}%"))
+        (rf"\y{display_pc_clean}\y", f"%{district[:6]}%"))
         direct_leads = cur.fetchone()[0]
 
-        # Wider catchment: the broader postcode area (e.g. "B" for "B1"),
-        # so we can honestly report "+N more in the surrounding area"
-        # without pretending it's a made-up multiple of the exact count.
+        # Wider catchment: the whole postcode area (e.g. "CR" covers every
+        # CR0-CR9 outcode), so "+N more in connected zones" is an honest,
+        # genuinely larger real number when there is more nearby -- not
+        # silently forced equal to the exact count.
         cur.execute("SELECT count(*) FROM leads WHERE (status = 'new' OR status IS NULL) AND address ~* %s",
-        (f"\\y{area_alpha}[0-9]",))
+        (rf"\y{area_letters}[0-9]",))
         area_leads = cur.fetchone()[0]
     else:
         cur.execute("SELECT count(*) FROM leads WHERE (status = 'new' OR status IS NULL) AND council_source ILIKE %s", (f"%{district[:6]}%",))
         direct_leads = cur.fetchone()[0]
         area_leads = direct_leads
+
+    # Sep 8 2026, Nick's ask: the radar's "Intercepted Notices" panel should
+    # follow wherever the radar is currently pointed, not always show the
+    # sitewide last-5. Pull real leads from this same wider postcode area,
+    # diverse-selected by job size (never geography here -- the pool is
+    # already local by definition), anonymised the same way the public
+    # homepage table already is (outcode-level area, never the street
+    # address).
+    area_notices = []
+    if display_pc_clean and area_letters:
+        cur.execute("""SELECT address, summary, lead_score, lead_price, council_source, reference, discovered_at
+                       FROM leads WHERE (status = 'new' OR status IS NULL) AND address ~* %s
+                       ORDER BY discovered_at DESC LIMIT 40""", (rf"\y{area_letters}[0-9]",))
+        area_pool_rows = cur.fetchall()
+        picked = database.select_diverse_ticker_leads(limit=5, enforce_geo_mix=False, pool_rows=area_pool_rows)
+        for l in picked:
+            area_notices.append({
+                "area_label": l["area_label"],
+                "summary": (l["summary"] or "")[:120],
+                "size": l["lead_score"],
+                "time": l["discovered_at"].strftime("%H:%M") if l["discovered_at"] else "--:--",
+                "date": l["discovered_at"].strftime("%d %b") if l["discovered_at"] else "",
+            })
     cur.close()
     conn.close()
 
@@ -497,7 +543,8 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
         "est_min_val": f"{min_val:,}",
         "est_max_val": f"{max_val:,}",
         "exclusivity_status": exclusivity_label,
-        "council_source_issue": council_source_issue
+        "council_source_issue": council_source_issue,
+        "area_notices": area_notices
     }
 
 
@@ -628,15 +675,19 @@ self.addEventListener('fetch', event => {
 
 @app.get("/", response_class=HTMLResponse)
 def public_homepage():
-    stats = {"p": 0, "l": 0, "sample_leads": []}
+    stats = {"p": 0, "l": 0, "diverse_leads": [], "counts": {"today": 0, "week": 0, "month": 0}}
     try:
         conn = database.get_db_conn(); cur = conn.cursor()
         cur.execute("SELECT count(*) FROM potential_partners"); stats["p"] = cur.fetchone()[0]
         cur.execute("SELECT count(*) FROM leads"); stats["l"] = cur.fetchone()[0]
-        cur.execute("""SELECT address, summary, lead_score, lead_price, council_source, reference, discovered_at
-                       FROM leads ORDER BY discovered_at DESC LIMIT 5""")
-        stats["sample_leads"] = cur.fetchall()
         cur.close(); conn.close()
+        # Sep 8 2026, Nick's ask: don't just show the last 5 leads discovered
+        # -- a busy scan of one council could fill the whole ticker with
+        # near-identical entries from a single area. This is a genuinely
+        # diverse, still 100% real selection (size + geography mix). See
+        # database.select_diverse_ticker_leads.
+        stats["diverse_leads"] = database.select_diverse_ticker_leads(limit=5, enforce_geo_mix=True)
+        stats["counts"] = database.get_lead_discovery_counts()
     except Exception as e:
         logger.error(f"[HOMEPAGE] DB error: {e}")
 
@@ -646,29 +697,36 @@ def public_homepage():
     # already cost trust once this session (the "75%/10%/15%" TPO claim).
     display_leads = stats["l"]
 
+    # Sep 8 2026: real UK wall-clock date/time for the "Intercepting Live"
+    # badge, so it visibly shows how fresh the page is -- zoneinfo (stdlib,
+    # no new dependency) so it's correct across the GMT/BST switch.
+    try:
+        from zoneinfo import ZoneInfo
+        _now_uk = datetime.datetime.now(ZoneInfo("Europe/London"))
+    except Exception:
+        _now_uk = datetime.datetime.utcnow()
+    _as_of_date = _now_uk.strftime("%-d %b")
+    _as_of_time = _now_uk.strftime("%H:%M")
+
     # Sep 8 2026: Nick flagged that the public homepage's "Intercepted
     # Notices" table and ticker were printing the raw `address` column
     # straight from the leads table -- i.e. the exact, unpaid-for street
     # address of every unsold lead was visible to any anonymous visitor,
     # which is the entire paid product given away for free pre-checkout.
-    # Fixed to show only the outcode-level area (same regex database.py's
-    # _extract_outcodes already uses for geo-matching elsewhere), never
-    # the address itself, on this public page. The full address still
-    # only appears after purchase / on an actual subscriber's own
-    # dashboard leads (see /dashboard, which reads real subscriptions).
-    def _area_label(address):
-        outcodes = database._extract_outcodes(address)
-        return f"{outcodes[0]} area" if outcodes else "UK"
-
+    # Fixed to show only the outcode-level area, never the address itself --
+    # now a real place name ("CR5, Croydon, London") via
+    # database.get_outcode_area_label instead of a generic "X area"
+    # placeholder. The full address still only appears after purchase / on
+    # an actual subscriber's own dashboard leads (see /dashboard).
     lead_rows = "".join([
         f"""<tr class='border-b border-slate-700/50 hover:bg-slate-800/50 transition-colors'>
             <td class='p-4 text-emerald-400 font-mono text-xs'>
-                {l[5] or 'TPO-STATUTORY'}<br>
-                <span class='text-slate-400 font-sans'>{l[4]}</span>
+                {l['reference'] or 'TPO-STATUTORY'}<br>
+                <span class='text-slate-400 font-sans'>{l['council_source'] or ''}</span>
             </td>
             <td class='p-4 text-slate-200 text-sm max-w-md'>
-                <b class='text-white'>{_area_label(l[0])}</b><br>
-                <span class='text-slate-400 text-xs'>{(l[1] or '')[:120]}...</span>
+                <b class='text-white'>{l['area_label']}</b><br>
+                <span class='text-slate-400 text-xs'>{(l['summary'] or '')[:120]}...</span>
             </td>
             <td class='p-4 text-right'>
                 <span class='bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full text-xs font-bold border border-emerald-500/20 uppercase tracking-wider shadow-[0_0_10px_rgba(16,185,129,0.2)]'>
@@ -676,20 +734,25 @@ def public_homepage():
                 </span>
             </td>
         </tr>"""
-        for l in stats["sample_leads"]
+        for l in stats["diverse_leads"]
     ]) or "<tr><td colspan='3' class='p-8 text-center text-slate-500 font-mono'>Intercepting live planning data...</td></tr>"
 
+    # Sep 8 2026, Nick's ask: date next to the time (so it's obvious how
+    # fresh the feed is at a glance) and a lightly-pulsing, shade-shifting
+    # dot at the end of the row instead of a static "Live" pill -- see
+    # .tk-live-dot in static/tailwind.css.
     ticker_rows = "".join([
-        f"""<div class='grid grid-cols-[56px_92px_1fr_86px_60px] gap-3 items-center px-4 py-2.5 border-b border-emerald-900/40 text-xs font-mono'>
-            <span class='text-emerald-600'>{(l[6].strftime('%H:%M') if l[6] else '--:--')}</span>
-            <span class='text-emerald-600 truncate'>{((l[5] or l[4] or 'TPO'))[:10]}</span>
-            <span class='text-slate-300 truncate'>{((l[1] or _area_label(l[0])))[:64]}</span>
+        f"""<div class='grid grid-cols-[56px_48px_84px_1fr_80px_28px] gap-3 items-center px-4 py-2.5 border-b border-emerald-900/40 text-xs font-mono'>
+            <span class='text-emerald-700'>{(l['discovered_at'].strftime('%d %b') if l['discovered_at'] else '--')}</span>
+            <span class='text-emerald-600'>{(l['discovered_at'].strftime('%H:%M') if l['discovered_at'] else '--:--')}</span>
+            <span class='text-emerald-600 truncate'>{((l['reference'] or l['council_source'] or 'TPO'))[:10]}</span>
+            <span class='text-slate-300 truncate'>{l['area_label']}</span>
             <span class='text-right'>
-                <span class='text-amber-400 font-bold text-[10px] uppercase tracking-wide'>{(l[2] or 'medium')} job</span>
+                <span class='text-amber-400 font-bold text-[10px] uppercase tracking-wide'>{l['lead_score']} job</span>
             </span>
-            <span class='text-right'><span class='bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border border-emerald-500/20'>Live</span></span>
+            <span class='flex justify-end'><span class='tk-live-dot' title='Live'></span></span>
         </div>"""
-        for l in stats["sample_leads"][:5]
+        for l in stats["diverse_leads"]
     ]) or "<div class='px-4 py-8 text-center text-slate-500 font-mono text-xs'>Intercepting live planning data...</div>"
 
     return f"""<!DOCTYPE html>
@@ -785,28 +848,54 @@ def public_homepage():
             <img src="/static/images/hero-climber.jpg" alt="" class="w-full h-full object-cover opacity-25">
             <div class="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(2,6,23,0.3),rgba(2,6,23,0.5),rgba(2,6,23,0.7))]"></div>
         </div>
-        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 flex flex-col">
+
+            <!-- Sep 8 2026, Nick's ask ("critical"): the postcode-scan CTA,
+                 free-lead CTA and "we never sell" badge all live in the block
+                 below, but on a phone screen the live-feed ticker above them
+                 was tall enough to push all three below the fold on landing.
+                 Reordered with flex order so mobile sees the headline + CTAs
+                 + never-sell badge FIRST, ticker feed second; sm: and up
+                 (tablet/desktop, where there's room for both) restores the
+                 original ticker-first layout untouched. -->
 
             <!-- Live Console Feed: real intercepted notices, not a decorative graphic -->
-            <div class="bg-[#0A1A12]/80 border border-emerald-900/50 rounded-xl overflow-hidden shadow-2xl mb-6">
+            <div class="order-2 sm:order-1 bg-[#0A1A12]/80 border border-emerald-900/50 rounded-xl overflow-hidden shadow-2xl mb-6">
                 <div class="flex items-center gap-2 px-4 py-3 border-b border-emerald-900/50">
                     <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
                     <span class="font-mono text-[11px] uppercase tracking-widest text-emerald-400">Live Feed — 360+ UK Council Portals</span>
                 </div>
                 <p class="px-4 pt-3 pb-1 text-[11px] font-mono text-slate-500 leading-relaxed">Real notices from our scan, sized by job scope — not anything you pay TreeKey.</p>
-                <div class="mt-1">
+                <div class="mt-1" id="heroTicker">
                     {ticker_rows}
                 </div>
             </div>
 
-            <div class="text-center">
-                <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-sm shadow-[0_0_15px_rgba(16,185,129,0.15)] mb-6">
-                    <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
-                    <strong>{display_leads:,}</strong> Active Commercial Notices Intercepted
+            <div class="order-1 sm:order-2 text-center">
+                <!-- Sep 8 2026, Nick's ask: date+time so it's obvious how
+                     fresh this is, and real today/week/month counts instead
+                     of one static lifetime figure. The counters "tick" via
+                     JS (see the script block at the bottom of this page) --
+                     it polls /api/live-counts every 8-30s between 6am-11pm
+                     and animates any REAL increase; it never invents a
+                     number, so it only visibly moves as often as a real
+                     lead actually lands. -->
+                <div class="inline-flex flex-col items-center gap-2 px-5 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-sm shadow-[0_0_15px_rgba(16,185,129,0.15)] mb-4 sm:mb-6">
+                    <div class="flex items-center gap-2 text-[11px] uppercase tracking-widest">
+                        <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
+                        Intercepting Live — {_as_of_date}, {_as_of_time}<span class="tk-blink-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+                    </div>
+                    <div class="flex items-center gap-3 sm:gap-5">
+                        <span><strong id="countToday" class="text-white text-lg">{stats['counts']['today']}</strong> Today</span>
+                        <span class="text-emerald-800">/</span>
+                        <span><strong id="countWeek" class="text-white text-lg">{stats['counts']['week']}</strong> This Week</span>
+                        <span class="text-emerald-800">/</span>
+                        <span><strong id="countMonth" class="text-white text-lg">{stats['counts']['month']}</strong> This Month</span>
+                    </div>
                 </div>
 
                 <!-- The Big Claim -->
-                <h1 class="text-4xl md:text-6xl font-extrabold text-white tracking-tight mb-6 leading-tight">
+                <h1 class="text-4xl md:text-6xl font-extrabold text-white tracking-tight mb-4 sm:mb-6 leading-tight">
                     Every job, the moment the council files it.<br>
                     <span class="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-amber-500">Not the moment your rivals hear about it.</span>
                 </h1>
@@ -818,7 +907,7 @@ def public_homepage():
                 </p>
 
                 <!-- Cognitive Ease & Action Cues -->
-                <div class="mt-10 flex flex-col items-center gap-5">
+                <div class="mt-6 sm:mt-10 flex flex-col items-center gap-3 sm:gap-5">
                     <div class="flex flex-wrap justify-center gap-4">
                         <a href="#radar" class="flex items-center gap-2 bg-brand-green text-white px-8 py-4 rounded font-bold text-lg hover:bg-emerald-500 transition-all duration-300 shadow-[0_0_30px_rgba(5,150,105,0.4)] hover:shadow-[0_0_40px_rgba(5,150,105,0.6)] hover:-translate-y-1 transform">
                             Scan My Postcode Now
@@ -864,7 +953,7 @@ def public_homepage():
                      top padding right after) as a big empty gap on the live
                      page. Trimmed both -- see the matching note on the Radar
                      section below. -->
-                <div class="mt-8 pt-6 border-t border-slate-800/50 flex flex-wrap justify-center gap-8 opacity-70 grayscale hover:grayscale-0 transition-all duration-500">
+                <div class="mt-8 pt-6 border-t border-slate-800/50 flex flex-wrap justify-center items-center gap-8 opacity-70 grayscale hover:grayscale-0 transition-all duration-500">
                     <div class="flex items-center gap-2 text-sm font-mono text-slate-300">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
                         Published Under The Open Government Licence
@@ -873,6 +962,12 @@ def public_homepage():
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
                         Sourced Directly From Council Planning Registers
                     </div>
+                    <!-- Sep 8 2026, Nick's ask: the original logo he supplied,
+                         kept small and grouped with the other muted credibility
+                         badges here (so its resolution never gets scrutinised)
+                         -- reads as "we've been at this a while," alongside the
+                         current mark in the nav bar above. -->
+                    <img src="/static/images/legacy-mark.png" alt="TreeKey original logo" class="h-8 w-auto" loading="lazy">
                 </div>
             </div>
         </div>
@@ -890,27 +985,30 @@ def public_homepage():
                     <span class="relative flex h-3 w-3"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span></span>
                     Live Territory Radar
                 </h2>
-                <p class="mt-4 text-lg text-slate-400 max-w-2xl mx-auto">Enter your postcode to intercept active commercial and residential planning applications filed within a 15-mile radius of your yard.</p>
+                <p class="mt-4 text-lg text-slate-400 max-w-2xl mx-auto">Type your postcode or region below — the map, radius and live counts react as you go, no button to press.</p>
             </div>
 
             <div class="grid lg:grid-cols-2 gap-8 items-start">
-                
+
                 <!-- Radar UI -->
                 <div class="bg-[#020617] border border-slate-700 rounded-xl p-6 shadow-[0_0_40px_rgba(0,0,0,0.5)]">
+                    <!-- Sep 8 2026, Nick's ask: removed the "Run Scan" button --
+                         everything now reacts live: typing in the postcode box
+                         (debounced ~550ms so it doesn't fire on every
+                         keystroke) and changing the radius dropdown both
+                         immediately re-run the scan, resize the map circle,
+                         and refresh both lead counts. See scanTerritory() /
+                         debouncedScanTerritory() in the script block below. -->
                     <form onsubmit="event.preventDefault(); scanTerritory();" class="flex flex-col sm:flex-row gap-4 mb-6">
-                        <input type="text" id="postcodeInput" placeholder="Enter your Region or Postcode (e.g., Nottingham or NG22)..." onkeydown="if(event.key === 'Enter') scanTerritory()" value="B1" required class="flex-1 bg-slate-800 border-2 border-slate-600 text-white font-mono rounded px-4 py-3 focus:outline-none focus:border-brand-green focus:bg-slate-900 transition-colors uppercase text-lg shadow-inner">
-                        <select id="radiusSelect" class="bg-slate-800 border-2 border-slate-600 text-white font-mono rounded px-4 py-3 focus:outline-none focus:border-brand-green">
+                        <input type="text" id="postcodeInput" placeholder="Enter your Region or Postcode (e.g., Nottingham or NG22)..." oninput="debouncedScanTerritory()" onkeydown="if(event.key === 'Enter') {{ event.preventDefault(); scanTerritory(); }}" value="B1" required class="flex-1 bg-slate-800 border-2 border-slate-600 text-white font-mono rounded px-4 py-3 focus:outline-none focus:border-brand-green focus:bg-slate-900 transition-colors uppercase text-lg shadow-inner">
+                        <select id="radiusSelect" onchange="scanTerritory()" class="bg-slate-800 border-2 border-slate-600 text-white font-mono rounded px-4 py-3 focus:outline-none focus:border-brand-green">
                             <option value="16093">10 Miles</option>
                             <option value="24140" selected>15 Miles</option>
                             <option value="32186">20 Miles</option>
                             <option value="40233">25 Miles</option>
                         </select>
-                        <button type="submit" id="scanBtn" class="bg-brand-green text-white font-bold px-8 py-3 rounded hover:bg-emerald-500 transition-colors uppercase font-mono tracking-wider shadow-lg flex justify-center items-center gap-2">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                            Run Scan
-                        </button>
                     </form>
-                    
+
                     <div class="relative">
                         <div id="map" class="h-[400px] w-full rounded border border-slate-700 z-10 grayscale contrast-125 sepia-[.2] hue-rotate-[140deg]"></div>
                     </div>
@@ -939,14 +1037,18 @@ def public_homepage():
                 <div class="bg-brand-dark border border-slate-700 rounded-xl overflow-hidden shadow-2xl flex flex-col h-[565px]">
                     <div class="bg-slate-800/80 border-b border-slate-700 p-5 flex justify-between items-center">
                         <h3 class="font-mono text-emerald-400 font-bold uppercase tracking-wider text-sm flex items-center gap-2">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
-                            Intercepted Notices
+                            <!-- Sep 8 2026, Nick's ask: replaced the static
+                                 half-circle icon with the same pulsing
+                                 liveness dot used elsewhere on the page --
+                                 signals "active/live", not an alert. -->
+                            <span class="relative flex h-3 w-3" aria-hidden="true"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span></span>
+                            <span id="noticesAreaLabel">Intercepted Notices</span>
                         </h3>
-                        <span class="text-xs text-white font-mono bg-emerald-500/20 px-2 py-1 rounded border border-emerald-500/30">Live Feed Active</span>
+                        <span class="tk-live-badge text-xs text-white font-mono px-2 py-1 rounded border border-emerald-500/30">Live Feed Active</span>
                     </div>
                     <div class="overflow-y-auto flex-1 bg-slate-900/50">
                         <table class="w-full text-left border-collapse">
-                            <tbody>
+                            <tbody id="noticesTableBody">
                                 {lead_rows}
                             </tbody>
                         </table>
@@ -1152,6 +1254,11 @@ def public_homepage():
     <footer class="border-t border-slate-800 bg-[#020617] py-12">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-start gap-8">
             <div class="text-slate-500 text-xs text-center md:text-left max-w-2xl">
+                <!-- Sep 8 2026, Nick's ask: the second supplied logo mark,
+                     small and muted into the small print rather than
+                     displayed as a real logo -- deliberately tiny given the
+                     source image's resolution. -->
+                <img src="/static/images/footer-mark.png" alt="" class="h-7 w-auto opacity-50 mb-2 mx-auto md:mx-0" loading="lazy">
                 <div class="mb-3">
                     <b class="text-slate-300 text-sm">Tree Key</b> by Vector Data Labs.<br>
                 </div>
@@ -1188,12 +1295,12 @@ def public_homepage():
         // Default to zoomed out Great Britain view
         let map = L.map('map', {{ zoomControl: false }}).setView([54.5, -4.0], 6);
         L.control.zoom({{ position: 'bottomright' }}).addTo(map);
-        
+
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
             attribution: '&copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
             maxZoom: 16
         }}).addTo(map);
-        
+
         // Pin defaults to Birmingham (center of England)
         let currentCircle = L.circle([52.4862, -1.8904], {{
             color: '#10b981',
@@ -1203,22 +1310,45 @@ def public_homepage():
             weight: 2,
             className: 'radar-circle'
         }}).addTo(map);
-        
+
+        // Sep 8 2026, Nick's ask: the "Intercepted Notices" table follows
+        // wherever the radar is currently pointed, sourced from the same
+        // /api/check-postcode response (area_notices) rather than a
+        // sitewide list -- same anonymised outcode-level area, never a
+        // street address.
+        function renderAreaNotices(notices, areaLabel) {{
+            const label = document.getElementById('noticesAreaLabel');
+            if (label) label.textContent = areaLabel ? `Intercepted Notices — ${{areaLabel}}` : 'Intercepted Notices';
+            const tbody = document.getElementById('noticesTableBody');
+            if (!tbody) return;
+            if (!notices || notices.length === 0) {{
+                tbody.innerHTML = `<tr><td colspan="3" class="p-8 text-center text-slate-500 font-mono">No open notices currently on file for this area.</td></tr>`;
+                return;
+            }}
+            tbody.innerHTML = notices.map(n => `
+                <tr class="border-b border-slate-700/50 hover:bg-slate-800/50 transition-colors">
+                    <td class="p-4 text-emerald-400 font-mono text-xs">${{n.date}}<br><span class="text-slate-400 font-sans">${{n.time}}</span></td>
+                    <td class="p-4 text-slate-200 text-sm max-w-md"><b class="text-white">${{n.area_label}}</b><br><span class="text-slate-400 text-xs">${{n.summary}}...</span></td>
+                    <td class="p-4 text-right"><span class="bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full text-xs font-bold border border-emerald-500/20 uppercase tracking-wider">${{n.size}}</span></td>
+                </tr>
+            `).join('');
+        }}
+
         // Allow moving the pin with a map click
         map.on('click', async function(e) {{
             const radSelect = document.getElementById("radiusSelect");
             const rad = radSelect ? parseInt(radSelect.value) : 24140;
             currentCircle.setLatLng(e.latlng);
             currentCircle.setRadius(rad);
-            
+
             document.getElementById('statusBadge').innerHTML = `
                 <div class="flex items-center gap-2 text-emerald-400 mb-1 sm:justify-end">
-                    <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse sm:hidden"></span> 
+                    <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse sm:hidden"></span>
                     Manual Lock: ${{e.latlng.lat.toFixed(4)}}, ${{e.latlng.lng.toFixed(4)}}
                     <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse hidden sm:inline-block"></span>
                 </div>
             `;
-            
+
             try {{
                 const res = await fetch(`/api/check-postcode?lat=${{e.latlng.lat}}&lng=${{e.latlng.lng}}&radius=${{Math.round(rad/1609.34)}}`);
                 const data = await res.json();
@@ -1230,6 +1360,7 @@ def public_homepage():
                     document.getElementById('btn-checkout-elite').href = `/checkout/regional_elite?outcode=${{data.postcode}}`;
                     const issueNoticeA = data.council_source_issue ? `<div class="text-amber-400 text-xs border border-amber-700/50 bg-amber-900/20 rounded px-2 py-1 mb-2">&#9888; ${{data.council_source_issue}}</div>` : '';
                     document.getElementById('targetIntel').innerHTML = `${{issueNoticeA}}<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>`;
+                    renderAreaNotices(data.area_notices, data.postcode);
 
                     document.getElementById('statusBadge').innerHTML = `
                         <div class="flex items-center gap-2 text-emerald-400 mb-1 sm:justify-end">
@@ -1249,28 +1380,40 @@ def public_homepage():
             }} catch(err) {{}}
         }});
 
+        // Sep 8 2026, Nick's ask: typing in the postcode box reacts live --
+        // debounced ~550ms after the last keystroke so a fast typist doesn't
+        // fire a scan on every letter, but no button press is needed.
+        let _scanDebounceTimer = null;
+        function debouncedScanTerritory() {{
+            clearTimeout(_scanDebounceTimer);
+            const val = (document.getElementById('postcodeInput').value || '').trim();
+            if (val.length < 2) return;
+            _scanDebounceTimer = setTimeout(scanTerritory, 550);
+        }}
+
         async function scanTerritory() {{
-            const btn = document.getElementById("scanBtn");
             const input = document.getElementById("postcodeInput").value;
             const radSelect = document.getElementById("radiusSelect");
             const radVal = radSelect ? parseInt(radSelect.value) : 24140;
             const status = document.getElementById("statusBadge");
-            
-            btn.innerHTML = `<svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> SCANNING...`;
-            btn.disabled = true;
-            btn.classList.add("opacity-80");
-            
+
+            // Sep 8 2026: instant visual feedback on the radius dropdown --
+            // resize the circle immediately, don't wait on the network round
+            // trip, then confirm/refresh the real numbers below.
+            currentCircle.setRadius(radVal);
+            document.getElementById("radiusReadout").innerHTML = `RADIAL BOUNDARY: ${{ (radVal/1609.34).toFixed(1) }} MILES`;
+
             status.innerHTML = `
                 <div class="flex items-center gap-2 text-amber-500 mb-1">
                     <span class="h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span> Triangulating Postcode...
                 </div>
                 <span class="text-xs text-slate-500">Querying Open Government Licence APIs...</span>
             `;
-            
+
             try {{
                 const res = await fetch(`/api/check-postcode?postcode=${{encodeURIComponent(input)}}&radius=${{Math.round(radVal/1609.34)}}`);
                 const data = await res.json();
-                
+
                 if (data.status === "ok") {{
                     map.setView([data.lat, data.lng], 10);
                     currentCircle.setLatLng([data.lat, data.lng]);
@@ -1281,6 +1424,7 @@ def public_homepage():
                     document.getElementById('btn-checkout-elite').href = `/checkout/regional_elite?outcode=${{data.postcode}}`;
                     const issueNoticeB = data.council_source_issue ? `<div class="text-amber-400 text-xs border border-amber-700/50 bg-amber-900/20 rounded px-2 py-1 mb-2">&#9888; ${{data.council_source_issue}}</div>` : '';
                     document.getElementById("targetIntel").innerHTML = `${{issueNoticeB}}<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>`;
+                    renderAreaNotices(data.area_notices, data.postcode);
 
                     setTimeout(() => {{
                         status.innerHTML = `
@@ -1291,7 +1435,7 @@ def public_homepage():
                             </div>
                         `;
                     }}, 300);
-                    
+
                 }} else if (data.status === "out_of_bounds") {{
                     document.getElementById('targetIntel').innerHTML = `<span class="text-red-500 font-bold text-sm">Out of Bounds</span><br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">${{data.message}}</span>`;
                     status.innerHTML = `<div class="flex items-center gap-2 text-red-500 sm:justify-end">Outside Coverage Area</div>`;
@@ -1301,13 +1445,56 @@ def public_homepage():
             }} catch(e) {{
                 status.innerHTML = `<div class="flex items-center gap-2 text-red-500"><span class="h-2 w-2 rounded-full bg-red-500"></span> Network Error</div>`;
             }}
-            
-            setTimeout(() => {{
-                btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg> RUN SCAN`;
-                btn.disabled = false;
-                btn.classList.remove("opacity-80");
-            }}, 600);
         }}
+
+        // Sep 8 2026: run once on page load so the radar shows real numbers
+        // for the default B1/Birmingham view immediately, instead of the
+        // "Awaiting scan..." placeholder until someone interacts with it.
+        scanTerritory();
+
+        // Sep 8 2026, Nick's ask: the "Today / This Week / This Month"
+        // counters on the badge above the fold should visibly tick up
+        // through the day. This polls the REAL current counts from
+        // /api/live-counts every 8-30s while it's between 6am-11pm, and
+        // animates the on-screen number up to match in small irregular
+        // steps -- it never invents a number, so the counter only actually
+        // moves as often as a real lead lands. Outside 6am-11pm it just
+        // checks back every 5 minutes without animating.
+        (function() {{
+            const todayEl = document.getElementById('countToday');
+            const weekEl = document.getElementById('countWeek');
+            const monthEl = document.getElementById('countMonth');
+            if (!todayEl) return;
+
+            function animateTo(el, newVal) {{
+                const oldVal = parseInt((el.textContent || '0').replace(/[^0-9]/g, ''), 10) || 0;
+                if (newVal <= oldVal) {{ el.textContent = newVal; return; }}
+                let cur = oldVal;
+                const step = () => {{
+                    const bump = [1, 1, 2, 2, 3][Math.floor(Math.random() * 5)];
+                    cur = Math.min(newVal, cur + bump);
+                    el.textContent = cur;
+                    if (cur < newVal) setTimeout(step, 200 + Math.random() * 500);
+                }};
+                step();
+            }}
+
+            function pollCounts() {{
+                fetch('/api/live-counts').then(r => r.json()).then(data => {{
+                    animateTo(todayEl, data.today);
+                    animateTo(weekEl, data.week);
+                    animateTo(monthEl, data.month);
+                }}).catch(() => {{}});
+            }}
+
+            function scheduleNext() {{
+                const hour = new Date().getHours();
+                const active = hour >= 6 && hour < 23;
+                const delay = active ? (8000 + Math.random() * 22000) : (5 * 60 * 1000);
+                setTimeout(() => {{ if (active) pollCounts(); scheduleNext(); }}, delay);
+            }}
+            scheduleNext();
+        }})();
     </script>
 </body>
 </html>

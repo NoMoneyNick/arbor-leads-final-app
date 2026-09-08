@@ -489,6 +489,18 @@ def init_db():
                 description TEXT,
                 occurred_at TIMESTAMPTZ DEFAULT NOW()
             );
+
+            -- Sep 8 2026: small persistent cache so the live-feed ticker and
+            -- area-scoped radar results can show a real place name (e.g.
+            -- "CR5, Croydon, London") without calling postcodes.io's free
+            -- outcodes API on every single pageview -- once per outcode ever
+            -- seen, reused after that.
+            CREATE TABLE IF NOT EXISTS outcode_area_cache (
+                outcode TEXT PRIMARY KEY,
+                district TEXT,
+                is_london BOOLEAN DEFAULT FALSE,
+                cached_at TIMESTAMPTZ DEFAULT NOW()
+            );
         """)
 
         # Performance Indices for Instant High-Volume Queries
@@ -2215,6 +2227,238 @@ def _extract_outcodes(address: str) -> list:
     way of reading a UK outcode out of a free-text address."""
     import re
     return [m.group(1) for m in re.finditer(r'\b([A-Z]{1,2}[0-9][A-Z0-9]?)\s*([0-9][A-Z]{2})\b', (address or "").upper())]
+
+
+# Sep 8 2026: the 32 London boroughs plus the City of London, lower-cased,
+# used only to decide whether an outcode's postcodes.io admin_district
+# counts as "London" for the ticker's geographic mix (see
+# select_diverse_ticker_leads below). Deliberately a fixed, checkable list
+# rather than a guess from the outcode letters themselves (postcode areas
+# like "BR"/"CR"/"KT"/"TW" straddle Greater London and neighbouring
+# counties, so only the actual admin_district name is reliable).
+_LONDON_BOROUGHS = frozenset({
+    "westminster", "camden", "islington", "hackney", "tower hamlets", "greenwich",
+    "lewisham", "southwark", "lambeth", "wandsworth", "hammersmith and fulham",
+    "hammersmith & fulham", "kensington and chelsea", "kensington & chelsea",
+    "city of london", "barking and dagenham", "barnet", "bexley", "brent", "bromley",
+    "croydon", "ealing", "enfield", "haringey", "harrow", "havering", "hillingdon",
+    "hounslow", "kingston upon thames", "merton", "newham", "redbridge",
+    "richmond upon thames", "sutton", "waltham forest",
+})
+
+
+def get_outcode_area_label(outcode: str) -> dict:
+    """Sep 8 2026, Nick's ask: the ticker and radar notices should show a
+    real place name next to the postcode area (e.g. "CR5, Croydon, London"),
+    not just the bare outcode. Resolves an outcode's district via the same
+    free postcodes.io API already used for geocoding, cached in
+    outcode_area_cache so this is a one-time lookup per outcode, not a live
+    API call on every pageview. Returns {"district": str|None,
+    "is_london": bool, "label": str} -- label degrades gracefully to just
+    the outcode if the district can't be resolved."""
+    outcode = (outcode or "").strip().upper()
+    if not outcode:
+        return {"district": None, "is_london": False, "label": "UK"}
+
+    def _label(district, is_london):
+        if not district:
+            return outcode
+        return f"{outcode}, {district}, London" if is_london else f"{outcode}, {district}"
+
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT district, is_london FROM outcode_area_cache WHERE outcode = %s", (outcode,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row:
+            district, is_london = row
+            return {"district": district, "is_london": bool(is_london), "label": _label(district, is_london)}
+    except Exception as e:
+        logger.debug(f"[Area Label] cache read failed for {outcode}: {e}")
+
+    district = None
+    try:
+        resp = requests.get(f"https://api.postcodes.io/outcodes/{outcode}", timeout=6)
+        if resp.status_code == 200:
+            districts = (resp.json().get("result", {}) or {}).get("admin_district") or []
+            district = districts[0] if districts else None
+    except Exception as e:
+        _geocode_failure("outcode area label", outcode, e)
+
+    is_london = bool(district) and district.strip().lower() in _LONDON_BOROUGHS
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO outcode_area_cache (outcode, district, is_london)
+               VALUES (%s, %s, %s)
+               ON CONFLICT (outcode) DO UPDATE SET district = EXCLUDED.district, is_london = EXCLUDED.is_london""",
+            (outcode, district, is_london),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.debug(f"[Area Label] cache write failed for {outcode}: {e}")
+
+    return {"district": district, "is_london": is_london, "label": _label(district, is_london)}
+
+
+def get_lead_discovery_counts() -> dict:
+    """Real counts of leads discovered today / this week / this calendar
+    month -- for the honest "counting up" ticker display. Never padded;
+    zero is shown as zero."""
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT
+                COUNT(*) FILTER (WHERE discovered_at >= date_trunc('day', NOW())),
+                COUNT(*) FILTER (WHERE discovered_at >= date_trunc('week', NOW())),
+                COUNT(*) FILTER (WHERE discovered_at >= date_trunc('month', NOW()))
+            FROM leads
+        """)
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return {"today": row[0] or 0, "week": row[1] or 0, "month": row[2] or 0}
+    except Exception as e:
+        logger.error(f"[Counters] Error fetching lead discovery counts: {e}")
+        return {"today": 0, "week": 0, "month": 0}
+
+
+def _size_mix_select(pool: list, limit: int) -> list:
+    """Best-effort small/medium/large variety from an already-filtered pool
+    (used for the area-scoped radar notices, where the pool is inherently
+    local so a geographic mix doesn't apply). Never invents an entry --
+    just orders the real pool to avoid 5 leads of the same size in a row
+    when a mix is available."""
+    targets = {"small": 2, "medium": 2, "large": 1}
+    selected, used = [], set()
+    for size_name in list(targets.keys()):
+        while targets[size_name] > 0:
+            cand = next((l for l in pool if l["reference"] not in used and l["lead_score"] == size_name), None)
+            if not cand:
+                break
+            selected.append(cand)
+            used.add(cand["reference"])
+            targets[size_name] -= 1
+    while len(selected) < limit:
+        cand = next((l for l in pool if l["reference"] not in used), None)
+        if not cand:
+            break
+        selected.append(cand)
+        used.add(cand["reference"])
+    import datetime
+    selected.sort(key=lambda l: l["discovered_at"] or datetime.datetime.min, reverse=True)
+    return selected[:limit]
+
+
+def select_diverse_ticker_leads(limit: int = 5, enforce_geo_mix: bool = True,
+                                 pool_rows: list = None, pool_limit: int = 150) -> list:
+    """Sep 8 2026, Nick's ask: the live feed used to just show the last 5
+    leads discovered, full stop -- which meant a busy scan of one council
+    could fill the whole ticker with near-identical entries from a single
+    low-demand area, making the site look far narrower than it is. This
+    picks a genuinely diverse handful from the real, currently-open lead
+    pool: a preferred small/medium/large size mix always, and (for the
+    sitewide ticker only -- enforce_geo_mix=True) a preferred 2 London
+    borough / 1 Birmingham / 2 other-large-area geographic mix. Every lead
+    returned is real; if the pool can't fill a target slot (e.g. no
+    Birmingham lead is currently open), that slot is filled with the next
+    best real lead instead of being left empty or faked.
+
+    Pass pool_rows (list of the raw DB tuples: address, summary, lead_score,
+    lead_price, council_source, reference, discovered_at) to select from an
+    already-fetched, already-filtered set (e.g. leads within a radar search
+    radius) instead of the sitewide pool."""
+    if pool_rows is None:
+        try:
+            conn = get_db_conn()
+            cur = conn.cursor()
+            cur.execute("""SELECT address, summary, lead_score, lead_price, council_source, reference, discovered_at
+                           FROM leads WHERE (status = 'new' OR status IS NULL)
+                           ORDER BY discovered_at DESC LIMIT %s""", (pool_limit,))
+            pool_rows = cur.fetchall()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            logger.error(f"[Ticker] Error fetching lead pool: {e}")
+            return []
+
+    pool = []
+    for address, summary, lead_score, lead_price, council_source, reference, discovered_at in pool_rows:
+        outcodes = _extract_outcodes(address)
+        outcode = outcodes[0] if outcodes else None
+        area = get_outcode_area_label(outcode) if outcode else {"district": None, "is_london": False, "label": "UK"}
+        pool.append({
+            "address": address, "summary": summary, "lead_score": (lead_score or "small"),
+            "lead_price": lead_price, "council_source": council_source, "reference": reference,
+            "discovered_at": discovered_at, "outcode": outcode or "UK",
+            "district": area["district"], "is_london": area["is_london"], "area_label": area["label"],
+        })
+
+    if not pool:
+        return []
+
+    if not enforce_geo_mix:
+        return _size_mix_select(pool, limit)
+
+    size_targets = {"small": 2, "medium": 2, "large": 1}
+    geo_defs = [
+        ("london", lambda l: l["is_london"], 2),
+        ("birmingham", lambda l: (l["district"] or "").strip().lower() == "birmingham", 1),
+        ("other", lambda l: not l["is_london"] and (l["district"] or "").strip().lower() != "birmingham", 2),
+    ]
+    selected, used = [], set()
+    remaining_size = dict(size_targets)
+    remaining_geo = {name: count for name, _, count in geo_defs}
+
+    # Pass 1: a lead that satisfies both a still-open geo slot AND a
+    # still-open size slot -- the ideal case.
+    for geo_name, geo_fn, _ in geo_defs:
+        while remaining_geo[geo_name] > 0:
+            cand = next((l for l in pool if l["reference"] not in used
+                         and geo_fn(l) and remaining_size.get(l["lead_score"], 0) > 0), None)
+            if not cand:
+                break
+            selected.append(cand)
+            used.add(cand["reference"])
+            remaining_size[cand["lead_score"]] -= 1
+            remaining_geo[geo_name] -= 1
+
+    # Pass 2: fill any still-open geo slots regardless of size.
+    for geo_name, geo_fn, _ in geo_defs:
+        while remaining_geo[geo_name] > 0:
+            cand = next((l for l in pool if l["reference"] not in used and geo_fn(l)), None)
+            if not cand:
+                break
+            selected.append(cand)
+            used.add(cand["reference"])
+            if remaining_size.get(cand["lead_score"], 0) > 0:
+                remaining_size[cand["lead_score"]] -= 1
+            remaining_geo[geo_name] -= 1
+
+    # Pass 3: top up to `limit` with whatever real leads are left, preferring
+    # still-needed sizes, so a thin pool (e.g. nothing from Birmingham today)
+    # still returns a full, honest selection instead of coming up short.
+    while len(selected) < limit:
+        cand = next((l for l in pool if l["reference"] not in used
+                     and remaining_size.get(l["lead_score"], 0) > 0), None)
+        if not cand:
+            cand = next((l for l in pool if l["reference"] not in used), None)
+        if not cand:
+            break
+        selected.append(cand)
+        used.add(cand["reference"])
+        if remaining_size.get(cand["lead_score"], 0) > 0:
+            remaining_size[cand["lead_score"]] -= 1
+
+    import datetime
+    selected.sort(key=lambda l: l["discovered_at"] or datetime.datetime.min, reverse=True)
+    return selected[:limit]
 
 
 def find_nearest_unclaimed_lead(lat: float, lon: float, max_miles: float = 25.0, exclude_refs: list = None) -> Optional[dict]:
