@@ -782,8 +782,8 @@ def public_homepage():
              on top so the headline and CTAs stay fully legible; this is
              purely atmospheric, not a content layer. -->
         <div class="absolute inset-0 z-0" aria-hidden="true">
-            <img src="/static/images/hero-climber.jpg" alt="" class="w-full h-full object-cover opacity-45">
-            <div class="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(2,6,23,0.55),rgba(2,6,23,0.8),rgba(2,6,23,0.95))]"></div>
+            <img src="/static/images/hero-climber.jpg" alt="" class="w-full h-full object-cover opacity-25">
+            <div class="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(2,6,23,0.3),rgba(2,6,23,0.5),rgba(2,6,23,0.7))]"></div>
         </div>
         <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
 
