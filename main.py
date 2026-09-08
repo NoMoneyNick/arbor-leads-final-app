@@ -750,6 +750,14 @@ def public_homepage():
          the live-feed block's bottom margin; left pb/lg values alone since
          those control spacing further down the page, not this gap. -->
     <main class="relative overflow-hidden pt-8 pb-24 lg:pt-10 lg:pb-32 bg-brand-dark bg-[radial-gradient(ellipse_at_top,rgba(5,150,105,0.10),transparent_60%)]">
+        <!-- Sep 8 2026, Nick's ask: hero background photo (real UK arborist at
+             work, supplied by Nick) -- kept low-opacity with a dark gradient
+             on top so the headline and CTAs stay fully legible; this is
+             purely atmospheric, not a content layer. -->
+        <div class="absolute inset-0 z-0" aria-hidden="true">
+            <img src="/static/images/hero-climber.jpg" alt="" class="w-full h-full object-cover opacity-25">
+            <div class="absolute inset-0 bg-gradient-to-b from-[#020617]/85 via-[#020617]/92 to-[#020617]"></div>
+        </div>
         <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
 
             <!-- Live Console Feed: real intercepted notices, not a decorative graphic -->
@@ -783,7 +791,7 @@ def public_homepage():
                 </p>
 
                 <!-- Cognitive Ease & Action Cues -->
-                <div class="mt-10 flex flex-col items-center gap-4">
+                <div class="mt-10 flex flex-col items-center gap-5">
                     <div class="flex flex-wrap justify-center gap-4">
                         <a href="#radar" class="flex items-center gap-2 bg-brand-green text-white px-8 py-4 rounded font-bold text-lg hover:bg-emerald-500 transition-all duration-300 shadow-[0_0_30px_rgba(5,150,105,0.4)] hover:shadow-[0_0_40px_rgba(5,150,105,0.6)] hover:-translate-y-1 transform">
                             Scan My Postcode Now
@@ -794,10 +802,25 @@ def public_homepage():
                              wanted it as a real, discoverable acquisition path on the
                              site itself, not just a cold-outreach bait link. -->
                         <a href="/free-account" class="flex items-center gap-2 bg-transparent text-emerald-400 border-2 border-emerald-500/50 px-8 py-4 rounded font-bold text-lg hover:bg-emerald-500/10 transition-all duration-300">
-                            Get a Free Lead — No Card Needed
+                            Claim a Free Lead — No Card Needed
                         </a>
                     </div>
-                    <p class="text-xs text-slate-500 font-mono uppercase tracking-widest mt-2">100% Exclusive Leads. Never Sold Twice.</p>
+                    <!-- Sep 8 2026, Nick's ask: the free-lead CTA was easy to skim
+                         past, and its skepticism wasn't addressed anywhere. This
+                         directly names the "too good to be true?" objection and
+                         answers it in one line, without sounding desperate. -->
+                    <p class="text-sm text-slate-400 max-w-md text-center leading-relaxed">
+                        Sounds too good to be true? Sign up free and we'll send you one real, fully-unlocked lead from your area today — no card, no commitment.
+                    </p>
+                    <!-- Sep 8 2026, Nick's ask: "never sold twice" is the single
+                         biggest thing contractors care about and was previously a
+                         small grey caption easy to miss. Promoted to a proper
+                         badge and rephrased to spell out what it actually means,
+                         not just assert exclusivity as a slogan. -->
+                    <div class="inline-flex items-center gap-2.5 mt-1 px-5 py-2.5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-bold text-sm shadow-[0_0_20px_rgba(16,185,129,0.15)]">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="shrink-0"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        You Buy It, It's Yours — We Never Sell That Lead to Anyone Else
+                    </div>
                 </div>
 
                 <!-- Aug 30 2026: removed "BS5837 Survey Alignment" and "ArbAC
@@ -809,7 +832,12 @@ def public_homepage():
                      doesn't actually have. TreeKey aggregates public planning
                      data; it isn't a surveyor or an accredited contractor.
                      Left only the one badge that's a plain, checkable fact. -->
-                <div class="mt-14 pt-8 border-t border-slate-800/50 flex flex-wrap justify-center gap-8 opacity-70 grayscale hover:grayscale-0 transition-all duration-500">
+                <!-- Sep 8 2026: Nick flagged the dead space stacking up here (this
+                     row's own top margin/padding, plus the Radar section's own
+                     top padding right after) as a big empty gap on the live
+                     page. Trimmed both -- see the matching note on the Radar
+                     section below. -->
+                <div class="mt-8 pt-6 border-t border-slate-800/50 flex flex-wrap justify-center gap-8 opacity-70 grayscale hover:grayscale-0 transition-all duration-500">
                     <div class="flex items-center gap-2 text-sm font-mono text-slate-300">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
                         Published Under The Open Government Licence
@@ -824,7 +852,11 @@ def public_homepage():
     </main>
 
     <!-- Radar Section (The Micro-Commitment & Zeigarnik Effect Hook) -->
-    <section id="radar" class="py-24 border-t border-slate-800 bg-brand-slate">
+    <!-- Sep 8 2026: top padding trimmed from py-24 to pt-10 pb-24 -- paired
+         with the badges row's own trimmed margin above, this removes the
+         stacked empty-space gap Nick flagged between the licence badges and
+         this heading, without touching the section's bottom spacing. -->
+    <section id="radar" class="pt-10 pb-24 border-t border-slate-800 bg-brand-slate">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center mb-12">
                 <h2 class="text-3xl font-extrabold text-white font-mono tracking-tight uppercase flex items-center justify-center gap-3">
@@ -1027,17 +1059,37 @@ def public_homepage():
                 <h2 class="text-2xl font-extrabold text-white font-mono uppercase tracking-tight">Every Subscription Also Includes</h2>
                 <p class="text-slate-400 mt-2 text-sm">Free tools built for running a tree surgery business day-to-day, not just leads.</p>
             </div>
+            <!-- Sep 8 2026: dropped the emoji icons here per Nick ("look
+                 cheap") -- a slim colour-coded accent bar reads cleaner and
+                 more professional. -->
             <div class="grid md:grid-cols-2 gap-6">
-                <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
-                    <div class="text-2xl mb-2">📊</div>
+                <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700 border-t-2 border-t-violet-400">
+                    <div class="text-[11px] font-mono uppercase tracking-widest text-violet-400 font-bold mb-2">Financial Tool</div>
                     <h3 class="text-lg font-bold text-white mb-2">TreeKey Ledger</h3>
                     <p class="text-slate-400 text-sm leading-relaxed">A financial dashboard built for sole-trader and small-crew tree surgeons: tracks your rolling 12-month turnover against the £90,000 UK VAT threshold, holds a running CIS developer-tax tracker, and includes a van/crew-day cost calculator so you never underquote a job. Free in your dashboard once you subscribe.</p>
                 </div>
-                <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
-                    <div class="text-2xl mb-2">🚜</div>
+                <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700 border-t-2 border-t-orange-400">
+                    <div class="text-[11px] font-mono uppercase tracking-widest text-orange-400 font-bold mb-2">Site Network</div>
                     <h3 class="text-lg font-bold text-white mb-2">Chip-Drop Network</h3>
                     <p class="text-slate-400 text-sm leading-relaxed">A directory of local allotments, farms and stables who want your arborist woodchip and logs for free — skip the £60–£120 commercial tipping fee and the round trip on every job. Landowners register their own site; you just turn up.</p>
                 </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Sep 8 2026, Nick's ask: a real photo of UK tree work, supplied by
+         Nick, breaking up the page per his long-standing "need pictures"
+         feedback -- placed as its own band rather than forced into the
+         cards above, since a photo crop that small does the picture no
+         favours. -->
+    <section class="relative py-20 border-t border-slate-800 overflow-hidden">
+        <img src="/static/images/fieldwork-bucking.jpg" alt="A UK tree surgeon at work" class="absolute inset-0 w-full h-full object-cover">
+        <div class="absolute inset-0 bg-gradient-to-r from-[#020617] via-[#020617]/85 to-[#020617]/40"></div>
+        <div class="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="max-w-md">
+                <p class="text-[11px] font-mono uppercase tracking-widest text-emerald-400 font-bold mb-3">While You're On The Tools</p>
+                <h2 class="text-2xl md:text-3xl font-extrabold text-white leading-tight mb-4">We watch the portals. You keep the chainsaw running.</h2>
+                <p class="text-slate-300 text-sm leading-relaxed">No app to check between jobs, no portals to refresh. The moment a real notice lands in your patch, it's in your inbox — chainsaw still in the van.</p>
             </div>
         </div>
     </section>
@@ -2633,7 +2685,7 @@ def ledger_dashboard(request: Request):
     <div class="container">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; flex-wrap:wrap; gap:10px;">
             <div>
-                <h1 style="margin:0; font-size:28px; color:#044332;">📊 TreeKey Ledger</h1>
+                <h1 style="margin:0; font-size:28px; color:#044332;">TreeKey Ledger</h1>
                 <p style="margin:4px 0 0 0; color:#64748b; font-size:14px;">Verticalized Arborist Financial Engine • Van-Day Costing & CIS Tax Tracker</p>
             </div>
             <a href="/" style="background:#0f172a; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold;">← Live Radar Map</a>
@@ -3439,13 +3491,11 @@ def contractor_dashboard(request: Request):
 
         <!-- Quick Access Operational Tools -->
         <div class="quick-grid">
-            <a href="/ledger" class="quick-card">
-                <div style="font-size:20px;">📊</div>
+            <a href="/ledger" class="quick-card" style="border-top:2px solid #8b5cf6;">
                 <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">TreeKey Ledger</div>
                 <div style="font-size:11px; color:#64748b;">Van-Day Costing & £90k VAT Gauge</div>
             </a>
-            <a href="/chip-drop" class="quick-card">
-                <div style="font-size:20px;">🚜</div>
+            <a href="/chip-drop" class="quick-card" style="border-top:2px solid #fb923c;">
                 <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Chip-Drop Network</div>
                 <div style="font-size:11px; color:#64748b;">Skip £60-£120 Tipping Fees Free</div>
             </a>
@@ -3625,7 +3675,7 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
     <div class="container">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
             <div>
-                <h1 style="margin:0; font-size:28px; color:#044332;">🚜 Free Woodchip & Timber Drop-Spotter</h1>
+                <h1 style="margin:0; font-size:28px; color:#044332;">Free Woodchip & Timber Drop-Spotter</h1>
                 <p style="margin:4px 0 0 0; color:#64748b; font-size:14px;">Drop fresh arborist chips and timber rings within minutes of your job site. Save £60–£120 tipping fees.</p>
             </div>
             <a href="/register-drop-spot" style="background:#044332; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">+ Register a Drop Site</a>
