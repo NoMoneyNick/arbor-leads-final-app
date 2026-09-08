@@ -881,6 +881,13 @@ _WARNING_CATEGORY_CONTEXT = {
         "zero with no error raised, which is the exact failure shape the Leeds "
         "ArcGIS bug had before it was found."
     ),
+    "GEOCODING API FAILURE": (
+        "Worth checking — a postcode/outcode distance lookup (via the free "
+        "postcodes.io API) is erroring rather than just returning 'not found'. "
+        "While this recurs, radius-based lead matching for affected customers "
+        "silently falls back to exact-outcode/regional matches only, which can "
+        "mean fewer leads reaching them than they should get."
+    ),
 }
 _DIGEST_THROTTLE_HOURS = 20.0
 _last_digest_sent_ts = 0.0

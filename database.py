@@ -1,5 +1,6 @@
 import os
 import re
+import requests
 import psycopg2
 import logging
 from typing import Optional, Dict, Any, Tuple, List
@@ -1719,17 +1720,42 @@ TIER_PRIORITY = {
 }
 
 
+def _geocode_failure(kind: str, value: str, err: Exception) -> None:
+    """Sep 8 2026: shared handler for genuine (non-'not found') geocoding
+    errors -- network failures, timeouts, or bugs in this process itself.
+    Previously these were swallowed at logger.debug (invisible in
+    production) which is exactly how a missing `import requests` at the
+    top of this file went unnoticed: every single call to
+    lookup_outcode_centroid/lookup_full_postcode_centroid was raising
+    NameError, silently caught here, always returning (None, None) --
+    meaning haversine-radius matching (a core tier of dispatch_lead_alerts'
+    matching logic, not just the new full-postcode feature) had been
+    silently non-functional. Now logged at ERROR (visible in Render logs)
+    AND recorded as a WARNING-severity system incident so a recurrence
+    surfaces in the daily digest automatically, per Nick's "build fail-safe
+    systems... a different auto fix system for every unique issue" ask --
+    this is the geocoding-specific one."""
+    logger.error(f"[postcodes.io] {kind} lookup failed for '{value}': {err}")
+    try:
+        log_system_warning(
+            "GEOCODING API FAILURE",
+            f"postcodes.io {kind} lookup error",
+            f"{kind} lookup for '{value}' raised {type(err).__name__}: {err}",
+        )
+    except Exception:
+        pass  # never let incident logging itself become the incident
+
+
 def lookup_outcode_centroid(outcode: str) -> tuple:
     """
     Returns (lat, lon) centroid for a UK outcode via the free postcodes.io API.
     Returns (None, None) if not found or API unavailable.
     """
-    import math as _math  # noqa — math imported at module level but repeated for clarity
     try:
         clean = outcode.strip().upper().replace(" ", "")
         resp = requests.get(
             f"https://api.postcodes.io/outcodes/{clean}",
-            timeout=5
+            timeout=8
         )
         if resp.status_code == 200:
             result = resp.json().get("result", {})
@@ -1737,8 +1763,10 @@ def lookup_outcode_centroid(outcode: str) -> tuple:
             lon = result.get("longitude")
             if lat and lon:
                 return (float(lat), float(lon))
+        # A non-200 (typically 404 "not a real outcode") is normal, expected
+        # behaviour for bad user input -- not an incident, just no result.
     except Exception as e:
-        logger.debug(f"[postcodes.io] Centroid lookup failed for {outcode}: {e}")
+        _geocode_failure("outcode centroid", outcode, e)
     return (None, None)
 
 
@@ -1754,7 +1782,7 @@ def lookup_full_postcode_centroid(postcode: str) -> tuple:
     resolvable full postcode."""
     try:
         clean = postcode.strip().upper().replace(" ", "")
-        resp = requests.get(f"https://api.postcodes.io/postcodes/{clean}", timeout=5)
+        resp = requests.get(f"https://api.postcodes.io/postcodes/{clean}", timeout=8)
         if resp.status_code == 200:
             result = resp.json().get("result", {})
             lat = result.get("latitude")
@@ -1762,7 +1790,7 @@ def lookup_full_postcode_centroid(postcode: str) -> tuple:
             if lat and lon:
                 return (float(lat), float(lon))
     except Exception as e:
-        logger.debug(f"[postcodes.io] Full postcode lookup failed for {postcode}: {e}")
+        _geocode_failure("full postcode", postcode, e)
     return (None, None)
 
 

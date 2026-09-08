@@ -700,16 +700,23 @@ def public_homepage():
                          inactive/unimportant by comparison. Bumped every tab to
                          font-bold and gave each its own distinct colour so the
                          whole bar reads as a set of equally live destinations. -->
+                    <!-- Sep 8 2026: LEDGER and CHIP-DROP were sitting in this
+                         top-level PUBLIC nav even though both are logged-in
+                         contractor tools with zero context for a stranger
+                         landing on the site -- Nick's own reaction testing it
+                         himself was "what is ledger?". Both already have a
+                         properly-explained home in the dashboard's Quick
+                         Access grid below; removed from here, kept only the
+                         actual public/marketing destinations. -->
                     <div class="hidden lg:flex items-center gap-6 text-slate-300">
                         <a href="/#radar" class="hover:brightness-125 transition-all text-emerald-400 font-bold">RADAR</a>
                         <a href="/marketplace" class="hover:brightness-125 transition-all text-sky-400 font-bold">MARKETPLACE</a>
-                        <a href="/ledger" class="hover:brightness-125 transition-all text-violet-400 font-bold">LEDGER</a>
-                        <a href="/chip-drop" class="hover:brightness-125 transition-all text-orange-400 font-bold">CHIP-DROP</a>
                         <a href="/storm-radar" class="hover:brightness-125 transition-all text-amber-400 font-bold">STORM RADAR</a>
                         <a href="/pricing" class="hover:brightness-125 transition-all text-rose-400 font-bold">PACKAGES</a>
+                        <a href="/faq" class="hover:brightness-125 transition-all text-violet-400 font-bold">FAQ</a>
                     </div>
                     <a href="/login" class="bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 px-3.5 py-1.5 rounded-lg font-bold uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-[0_0_15px_rgba(5,150,105,0.2)]">
-                        Contractor Sign In ➔
+                        Sign Up / Log In ➔
                     </a>
                 </div>
             </div>
@@ -986,11 +993,40 @@ def public_homepage():
         </div>
     </section>
 
+    <!-- Sep 8 2026: LEDGER and CHIP-DROP used to live in the top public nav
+         with zero explanation ("what is ledger?" was Nick's own reaction
+         testing the live site). Both are real, free contractor tools --
+         this section explains them where a visitor actually has the
+         context (right after seeing the pricing) instead of as unlabelled
+         nav items, and doubles as the "mention Chip-Drop on the main page"
+         fix. -->
+    <section class="section py-16 bg-[#0b1220] border-t border-slate-800">
+        <div class="container mx-auto px-4 max-w-5xl">
+            <div class="text-center mb-10">
+                <h2 class="text-2xl font-extrabold text-white font-mono uppercase tracking-tight">Every Subscription Also Includes</h2>
+                <p class="text-slate-400 mt-2 text-sm">Free tools built for running a tree surgery business day-to-day, not just leads.</p>
+            </div>
+            <div class="grid md:grid-cols-2 gap-6">
+                <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
+                    <div class="text-2xl mb-2">📊</div>
+                    <h3 class="text-lg font-bold text-white mb-2">TreeKey Ledger</h3>
+                    <p class="text-slate-400 text-sm leading-relaxed">A financial dashboard built for sole-trader and small-crew tree surgeons: tracks your rolling 12-month turnover against the £90,000 UK VAT threshold, holds a running CIS developer-tax tracker, and includes a van/crew-day cost calculator so you never underquote a job. Free in your dashboard once you subscribe.</p>
+                </div>
+                <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
+                    <div class="text-2xl mb-2">🚜</div>
+                    <h3 class="text-lg font-bold text-white mb-2">Chip-Drop Network</h3>
+                    <p class="text-slate-400 text-sm leading-relaxed">A directory of local allotments, farms and stables who want your arborist woodchip and logs for free — skip the £60–£120 commercial tipping fee and the round trip on every job. Landowners register their own site; you just turn up.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- FAQ Section (Objection Handling) -->
     <section class="section py-20 bg-[#020617] border-t border-slate-800">
         <div class="container mx-auto px-4 max-w-3xl">
             <div class="text-center mb-12">
                 <h2 class="text-3xl font-extrabold text-white font-mono uppercase tracking-tight">Contractor FAQ</h2>
+                <p class="text-slate-500 text-sm mt-2">Full answers on pricing, data sources, and how everything works: <a href="/faq" class="text-emerald-400 hover:text-emerald-300 underline">see the complete FAQ →</a></p>
             </div>
             
             <div class="space-y-6">
@@ -1555,7 +1591,12 @@ def pricing(request: Request):
     msg = request.query_params.get("msg", "")
     msg_banner = ""
     if msg == "no_subscription":
-        msg_banner = "<div style='background:#fef2f2; border:1px solid #fca5a5; border-radius:8px; padding:14px; margin-bottom:20px; color:#991b1b;'><b>No active subscription found</b> for that email. Please subscribe below to access your dashboard.</div>"
+        msg_banner = (
+            "<div style='background:#fef2f2; border:1px solid #fca5a5; border-radius:8px; padding:16px; margin-bottom:20px; color:#991b1b;'>"
+            "<b>No active subscription found</b> for that email. Pick a tier below to unlock your dashboard —"
+            " or, if you're not ready to subscribe yet, <a href='/free-account' style='color:#991b1b; font-weight:bold;'>get one free lead first, no card needed</a>."
+            "</div>"
+        )
 
     # Separate subscriptions and single purchase plans
     sub_cards = ""
@@ -1666,13 +1707,6 @@ def pricing(request: Request):
 
         {msg_banner}
 
-        <div class="creed-banner">
-            <h3>🌲 The TreeKey Creed: "Your Prosperity is Our Business"</h3>
-            <p style="font-size:14px; line-height:1.6; margin:0;">
-                We are not a faceless directory. We do NOT sell your leads to 5 competitors, we do not take a percentage of your hard-earned invoices, and we don't trap you in long contracts. Every lead on TreeKey is a <b>single-sale asset</b>—the second you receive it, it is burned from our system forever.
-            </p>
-        </div>
-
         <h2 style="font-size:22px; margin-bottom:16px; color:#0f172a;">1. Select Your Dedicated Subscription Tier</h2>
         <div class="grid">
             {sub_cards}
@@ -1683,6 +1717,13 @@ def pricing(request: Request):
             Subscribers get priority allocation. Any unallocated leads flow into our single-purchase marketplace. Once bought, a lead is burned and never resold.
         </p>
         {single_cards}
+
+        <div class="creed-banner" style="margin-top:32px;">
+            <h3>🌲 The TreeKey Creed: "Your Prosperity is Our Business"</h3>
+            <p style="font-size:14px; line-height:1.6; margin:0;">
+                We are not a faceless directory. We do NOT sell your leads to 5 competitors, we do not take a percentage of your hard-earned invoices, and we don't trap you in long contracts. Every lead on TreeKey is a <b>single-sale asset</b>—the second you receive it, it is burned from our system forever.
+            </p>
+        </div>
 
         <h2 style="font-size:22px; margin:40px 0 16px 0; color:#0f172a;">⚖️ Why TreeKey is the Opposite of Directories</h2>
         <table class="comparison-table">
@@ -2269,7 +2310,14 @@ def admin_simulate_leads(request: Request, secret: Optional[str] = Query(None),
         sim = database.simulate_customer_leads(location, tier=tier, job_size=job_size, radius=radius, limit=15)
         loc = sim["location"]
         if loc["lat"] is None:
-            results_html = f"<p style='color:#b91c1c;'>Couldn't resolve '{location}' to a real UK postcode/outcode — nothing to simulate.</p>"
+            results_html = (
+                f"<p style='color:#b91c1c;'>Couldn't resolve '{location}' to a real UK postcode/outcode — nothing to simulate.</p>"
+                f"<p style='color:#64748b; font-size:12px;'>This means the free postcodes.io lookup service returned no match "
+                f"for that exact text. Double-check: (1) it's a real UK postcode or outcode, e.g. <code>M1 1AE</code> or just "
+                f"<code>M1</code> — not a town/city name; (2) there's no stray punctuation. If a postcode you know is real also "
+                f"fails, that's a service/network issue rather than a typo — check the Render logs or the admin health page for "
+                f"a recent <b>GEOCODING API FAILURE</b> entry, which now gets logged automatically whenever this happens.</p>"
+            )
         else:
             precision_note = "exact postcode pin" if loc["precision"] == "exact" else "outcode-centroid area (less precise — try a full postcode for a tighter pin)"
             rows = "".join([
@@ -2828,30 +2876,75 @@ async def save_settings(request: Request):
 
 
 # ── 4. Passwordless Contractor Auth & Mobile Command Center ───────────────────
+# Sep 8 2026 rework, per Nick's live-tested feedback ("the whole thing is
+# broken and needs a rework... modern professional secure slick and
+# simple"): three real bugs fixed here --
+#   1. The 6-digit OTP was displayed on the confirmation webpage itself
+#      (as well as emailed), defeating its entire purpose as a second
+#      factor. It's now ONLY ever emailed.
+#   2. That OTP had no entry form anywhere in the app -- it was emailed
+#      but unusable dead functionality. It now has a real purpose: log in
+#      from a second device (e.g. you read the email on your phone but
+#      need the dashboard open on your laptop) by typing the code instead
+#      of clicking the link. /api/verify-otp below is the new endpoint.
+#   3. Landing on "no active subscription" after clicking the login link
+#      was a dead end with nothing else offered -- the confirmation page,
+#      the login page, and the pricing redirect below all now surface the
+#      free-lead-first path (/free-account) as an explicit alternative.
+
+def _login_session_response(verified_email: str) -> RedirectResponse:
+    """Shared by both ways a login can be verified -- clicking the magic
+    link (verify_login, GET) or typing the emailed OTP (verify_otp_route,
+    POST) -- so the "which dashboard does this email land on" decision
+    and session-cookie issuance lives in exactly one place instead of two
+    copies quietly drifting apart."""
+    def _session_redirect(url: str) -> RedirectResponse:
+        response = RedirectResponse(url=url, status_code=303)
+        response.set_cookie(
+            key="treekey_contractor_session",
+            value=_sign_session_cookie(verified_email),
+            max_age=86400 * 30,  # 30 days
+            httponly=True,
+            secure=True,
+            samesite="lax"
+        )
+        return response
+
+    active_sub = database.get_contractor_subscription(verified_email)
+    if active_sub and active_sub.get("active"):
+        return _session_redirect("/dashboard")
+
+    if database.get_limbo_account(verified_email):
+        return _session_redirect("/free-dashboard")
+
+    return RedirectResponse(url="/pricing?msg=no_subscription", status_code=303)
+
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(error: Optional[str] = None):
-    err_html = f"<div style='background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px; border-radius:6px; margin-bottom:16px; font-size:13px;'>{error}</div>" if error else ""
+    err_html = f"<div style='background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px 14px; border-radius:8px; margin-bottom:18px; font-size:13px;'>{error}</div>" if error else ""
     return f"""
     <!DOCTYPE html>
     <html lang="en-GB">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Contractor Sign In | TreeKey</title>
+        <title>Sign Up / Log In | TreeKey</title>
         <style>
             body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; }}
             .box {{ max-width:420px; margin:auto; background:white; padding:32px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04); }}
             input {{ width:100%; box-sizing:border-box; padding:12px; border:1px solid #cbd5e1; border-radius:8px; margin-top:6px; margin-bottom:16px; font-family:inherit; font-size:15px; }}
-            button {{ background:#044332; color:white; border:none; padding:12px; border-radius:8px; font-weight:bold; font-size:15px; cursor:pointer; width:100%; }}
+            input:focus {{ outline:none; border-color:#044332; box-shadow:0 0 0 3px rgba(4,67,50,0.1); }}
+            button {{ background:#044332; color:white; border:none; padding:13px; border-radius:8px; font-weight:bold; font-size:15px; cursor:pointer; width:100%; transition:background 0.15s; }}
+            button:hover {{ background:#065f46; }}
         </style>
     </head>
     <body>
     <div class="box">
         <div style="text-align:center; margin-bottom:20px;">
             <span style="font-size:32px;">🌲</span>
-            <h2 style="margin:8px 0 4px 0; color:#044332;">Contractor Command Center</h2>
-            <p style="color:#64748b; font-size:13px; margin:0;">Zero-Password Sign In • Enter your email</p>
+            <h2 style="margin:8px 0 4px 0; color:#044332;">Sign Up / Log In</h2>
+            <p style="color:#64748b; font-size:13px; margin:0;">Zero-Password • Enter your email, we'll send you a secure link</p>
         </div>
 
         {err_html}
@@ -2864,11 +2957,17 @@ def login_page(error: Optional[str] = None):
         <form action="/api/request-magic-link" method="POST">
             <label style="font-size:12px; font-weight:bold; color:#475569;">Email Address:</label>
             <input type="email" name="contact" placeholder="e.g. dave@apex-trees.co.uk" required autofocus>
-            <button type="submit">Send 1-Tap Login Link ⚡</button>
+            <button type="submit">Send Secure Login Link ⚡</button>
         </form>
+        <p style="text-align:center; font-size:12px; color:#94a3b8; margin:-8px 0 0 0;">Works whether you're an existing subscriber or signing up for the first time.</p>
 
-        <div style="text-align:center; margin-top:24px; font-size:12px; color:#64748b; border-top:1px solid #f1f5f9; padding-top:16px;">
-            🔒 <b>Zero-Password Security Vault:</b> No passwords to leak or remember. We dispatch an encrypted 15-minute access token.
+        <div style="text-align:center; margin-top:22px; padding-top:18px; border-top:1px solid #f1f5f9;">
+            <p style="font-size:12px; color:#64748b; margin:0 0 8px 0;">New here and not ready to subscribe?</p>
+            <a href="/free-account" style="font-size:13px; font-weight:bold; color:#044332; text-decoration:none;">Get a free lead first, no card needed →</a>
+        </div>
+
+        <div style="text-align:center; margin-top:18px; font-size:12px; color:#64748b;">
+            🔒 <b>No passwords to leak or remember.</b> We email you a one-tap, 15-minute access link.
         </div>
     </div>
     </body>
@@ -2905,8 +3004,8 @@ async def request_magic_link(request: Request):
         <div style="text-align:center; margin:24px 0;">
             <a href="{magic_url}" style="background:#044332; color:white; padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; display:inline-block;">Sign In to Dashboard ➔</a>
         </div>
-        <p style="font-size:13px; color:#64748b;">Or enter this 6-digit confirmation code: <b style="font-size:16px; color:#0f172a;">{otp_code}</b></p>
-        <p style="font-size:11px; color:#94a3b8; margin-top:24px;">This secure link is valid for 15 minutes. If you did not request this, you can safely ignore this email.</p>
+        <p style="font-size:13px; color:#64748b;">Logging in on a different device than this email is on? Enter this 6-digit code there instead: <b style="font-size:16px; color:#0f172a; letter-spacing:1px;">{otp_code}</b></p>
+        <p style="font-size:11px; color:#94a3b8; margin-top:24px;">This secure link and code are valid for 15 minutes. If you did not request this, you can safely ignore this email -- nothing happens unless the link is clicked or the code is entered.</p>
     </div>
     """
     # Sep 5 2026 CRITICAL FIX: this used to call send_resend_email(), which
@@ -2917,18 +3016,51 @@ async def request_magic_link(request: Request):
     # real contractor. Now sends directly to the contractor's own address.
     notifications.send_transactional_email(to_email=contact, subject="🌲 Your TreeKey 1-Tap Login Link", html_body=email_body)
 
+    # Sep 8 2026 SECURITY FIX: the OTP used to be echoed right back onto
+    # this confirmation page -- meaning anyone with access to this browser
+    # tab (or a shoulder-surfer) had the "second factor" without ever
+    # touching the recipient's inbox, which defeats the entire point of a
+    # code that's supposed to prove email access. The code is now ONLY
+    # ever sent in the email. This page instead offers a real, working
+    # entry form for it (previously there was no OTP-entry UI anywhere in
+    # the app at all, so the emailed code was unusable dead functionality)
+    # -- genuinely useful for exactly the "read the email on your phone,
+    # need the dashboard on your laptop" case.
     return HTMLResponse(f"""
-    <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#f8fafc;">
-        <div style="max-width:480px; margin:auto; background:white; padding:32px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04);">
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Check Your Inbox | TreeKey</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:60px 16px; }}
+            .box {{ max-width:440px; margin:auto; background:white; padding:32px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04); text-align:center; }}
+            input {{ width:100%; box-sizing:border-box; padding:11px; border:1px solid #cbd5e1; border-radius:8px; font-family:inherit; font-size:16px; letter-spacing:3px; text-align:center; }}
+            input:focus {{ outline:none; border-color:#044332; box-shadow:0 0 0 3px rgba(4,67,50,0.1); }}
+            button {{ background:#044332; color:white; border:none; padding:11px; border-radius:8px; font-weight:bold; font-size:14px; cursor:pointer; width:100%; margin-top:10px; }}
+        </style>
+    </head>
+    <body>
+        <div class="box">
             <span style="font-size:40px;">✉️</span>
-            <h2 style="color:#044332; margin:12px 0 6px 0;">Check Your Inbox!</h2>
-            <p style="color:#64748b; font-size:14px; line-height:1.5;">We dispatched a secure 1-tap login link to <b>{contact}</b>.</p>
-            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:12px; margin:20px 0; font-size:13px; color:#065f46;">
-                Your 6-digit backup code: <b style="font-size:18px; letter-spacing:2px;">{otp_code}</b>
+            <h2 style="color:#044332; margin:12px 0 6px 0;">Check Your Inbox</h2>
+            <p style="color:#64748b; font-size:14px; line-height:1.5;">We just sent a secure login link to <b>{contact}</b>. Click it and you're in.</p>
+            <a href="{magic_url}" style="display:inline-block; background:#044332; color:white; padding:11px 22px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px; margin-top:8px;">Open on This Device Instead ➔</a>
+
+            <div style="text-align:left; margin-top:26px; padding-top:20px; border-top:1px solid #f1f5f9;">
+                <p style="font-size:12px; color:#64748b; margin:0 0 10px 0;"><b>On a different device than your inbox?</b> Enter the 6-digit code from the email:</p>
+                <form action="/api/verify-otp" method="POST">
+                    <input type="hidden" name="email" value="{contact}">
+                    <input type="text" name="otp" inputmode="numeric" pattern="[0-9]{{6}}" maxlength="6" placeholder="------" required autocomplete="one-time-code">
+                    <button type="submit">Verify Code</button>
+                </form>
             </div>
-            <a href="{magic_url}" style="display:inline-block; background:#044332; color:white; padding:10px 20px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">Click to Open Dashboard Now ➔</a>
+
+            <p style="font-size:11px; color:#94a3b8; margin-top:20px;">Didn't get it? Check spam, or <a href="/login" style="color:#044332;">try again</a>. Emails can occasionally take a few minutes to arrive.</p>
         </div>
-    </body></html>
+    </body>
+    </html>
     """)
 
 
@@ -2945,31 +3077,37 @@ def verify_login(request: Request, token: Optional[str] = None, otp: Optional[st
     if not verified_email:
         return RedirectResponse(url="/login?error=Login+link+expired+or+already+used.+Please+request+a+new+one.", status_code=303)
 
-    def _session_redirect(url: str) -> RedirectResponse:
-        response = RedirectResponse(url=url, status_code=303)
-        response.set_cookie(
-            key="treekey_contractor_session",
-            value=_sign_session_cookie(verified_email),
-            max_age=86400 * 30,  # 30 days
-            httponly=True,
-            secure=True,
-            samesite="lax"
-        )
-        return response
+    # Paying subscribers land on the full dashboard, free-account signups on
+    # theirs, everyone else gets nudged to subscribe -- see
+    # _login_session_response above (Sep 5 2026 limbo-account distinction
+    # preserved as-is, just no longer duplicated inline here).
+    return _login_session_response(verified_email)
 
-    # Paying subscribers get the full dashboard, same as always.
-    active_sub = database.get_contractor_subscription(verified_email)
-    if active_sub and active_sub.get("active"):
-        return _session_redirect("/dashboard")
 
-    # Sep 5 2026: a free "limbo account" signup (see /free-account below) is
-    # a real, verified account -- just not a paying one -- so it must NOT
-    # hit the old "no subscription" wall. Ghost-session guard for
-    # everyone else (never signed up either way) is unchanged.
-    if database.get_limbo_account(verified_email):
-        return _session_redirect("/free-dashboard")
+@app.post("/api/verify-otp")
+async def verify_otp_route(request: Request):
+    """Sep 8 2026: the OTP-entry counterpart to /verify-login's magic-link
+    click -- the code emailed by request_magic_link above previously had
+    nowhere to be submitted at all. Uses the exact same
+    database.verify_magic_auth_token + _login_session_response path as the
+    link click, so an OTP login is identical in every way except how the
+    user proved it's really them."""
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        return RedirectResponse(url="/login?error=Too+many+attempts.+Please+wait+a+minute+and+try+again.", status_code=303)
 
-    return RedirectResponse(url="/pricing?msg=no_subscription", status_code=303)
+    form = await request.form()
+    email = (form.get("email") or "").strip().lower()
+    otp = (form.get("otp") or "").strip()
+
+    if not email or not otp:
+        return RedirectResponse(url="/login?error=Enter+both+your+email+and+the+6-digit+code+from+the+email.", status_code=303)
+
+    verified_email = database.verify_magic_auth_token(otp=otp, email=email)
+    if not verified_email:
+        return RedirectResponse(url="/login?error=That+code+is+wrong%2C+expired%2C+or+already+used.+Please+request+a+new+one.", status_code=303)
+
+    return _login_session_response(verified_email)
 
 
 # ── Free "Limbo Account" Signup (Sep 5 2026, Nick's ask) ─────────────────────
@@ -3285,6 +3423,11 @@ def contractor_dashboard(request: Request):
                 <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">TreeKey Ledger</div>
                 <div style="font-size:11px; color:#64748b;">Van-Day Costing & £90k VAT Gauge</div>
             </a>
+            <a href="/chip-drop" class="quick-card">
+                <div style="font-size:20px;">🚜</div>
+                <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Chip-Drop Network</div>
+                <div style="font-size:11px; color:#64748b;">Skip £60-£120 Tipping Fees Free</div>
+            </a>
             <a href="/marketplace" class="quick-card">
                 <div style="font-size:20px;">🛒</div>
                 <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Lead Marketplace</div>
@@ -3339,46 +3482,29 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
     """
     spots = database.get_chip_drop_spots(outcode=outcode, material=material, limit=40)
 
-    # If no spots in DB yet, render realistic sample network spots for instant value
+    # Sep 8 2026 FIX: this used to fall back to three entirely fabricated
+    # "sample" sites -- invented names, invented contact people, and fake
+    # phone numbers -- shown with the exact same "✅ Free Drop Site" badge,
+    # live tel: link and live WhatsApp link as real registered listings.
+    # Any contractor visiting while the real directory is still empty (the
+    # normal case pre-launch) would have no way to tell these apart from
+    # real businesses, and clicking Call/WhatsApp on a fake number is a
+    # bad experience at best. Replaced with an honest, clearly-labelled
+    # empty state instead of invented listings.
+    empty_state_html = ""
     if not spots:
-        spots = [
-            {
-                "id": "sample-1",
-                "site_name": "Highfield Allotment Association",
-                "contact_name": "Dave (Site Sec)",
-                "phone": "07700 900123",
-                "outcode": "LS6",
-                "town": "Leeds",
-                "address": "Highfield Lane Allotments, LS6 2AA",
-                "material": "fresh_woodchip",
-                "max_vehicle": "3.5t_transit",
-                "access_notes": "Unload on front hardstanding pad. Gate unlocked 7am-7pm."
-            },
-            {
-                "id": "sample-2",
-                "site_name": "Meadow View Equestrian Stables",
-                "contact_name": "Sarah",
-                "phone": "07700 900456",
-                "outcode": "WF1",
-                "town": "Wakefield",
-                "address": "Meadow Lane, WF1 3PQ",
-                "material": "hardwood_logs",
-                "max_vehicle": "7.5t_truck",
-                "access_notes": "Hardwood rings and cordwood needed for log burner. Wide tractor turning circle."
-            },
-            {
-                "id": "sample-3",
-                "site_name": "Oakridge Community Garden & Farm",
-                "contact_name": "Marcus",
-                "phone": "07700 900789",
-                "outcode": "BD1",
-                "town": "Bradford",
-                "address": "Canal Road, BD1 4SX",
-                "material": "any",
-                "max_vehicle": "3.5t_transit",
-                "access_notes": "Always taking raw woodchip for compost mulch. Drive straight to rear bay."
-            }
-        ]
+        empty_state_html = f"""
+        <div style="background:white; border:1px dashed #cbd5e1; border-radius:12px; padding:28px; text-align:center; color:#64748b;">
+            <div style="font-size:32px; margin-bottom:8px;">🌱</div>
+            <h3 style="margin:0 0 8px 0; color:#0f172a; font-size:16px;">No drop sites listed{f' for {outcode}' if outcode else ''} yet</h3>
+            <p style="font-size:13px; margin:0 0 16px 0; max-width:440px; margin-left:auto; margin-right:auto;">
+                This directory is filled entirely by real allotments, farms, stables and gardens who register themselves —
+                nothing here is invented. Know a local landowner who'd want free arborist woodchip or logs? Point them at
+                the registration form and you'll have a drop site near your next job.
+            </p>
+            <a href="/register-drop-spot" style="display:inline-block; background:#044332; color:white; padding:10px 20px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">+ Register a Drop Site</a>
+        </div>
+        """
 
     spot_cards = ""
     for s in spots:
@@ -3453,7 +3579,7 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
             <b>💡 Pro-Tip for Tree Surgeons:</b> Tipping stations charge £80–£120 + VAT per load plus 45 minutes round-trip driving time. Drop your arborist waste at local community sites for £0.00.
         </div>
 
-        {spot_cards}
+        {spot_cards or empty_state_html}
 
         <div style="text-align:center; margin-top:32px;">
             <a href="/" style="color:#64748b; text-decoration:none; font-size:13px;">← Return to Main Intelligence Map</a>
@@ -6060,37 +6186,92 @@ def export_directors_csv(request: Request, secret: Optional[str] = Query(None)):
 # --- LEGAL PAGES ---
 @app.get("/privacy-policy", response_class=HTMLResponse)
 async def privacy_policy():
+    # Sep 8 2026 rework: the previous version of this page said "We do not
+    # sell your personal data to third parties" -- directly contradicted by
+    # the business itself (Leads containing real people's names, sourced
+    # from public planning/Companies House records, are what customers pay
+    # for). That line was a live liability, not just a "too short" problem.
+    # This version separates customer data from Lead data, states the real
+    # lawful basis (legitimate interests), and is honest about what's still
+    # outstanding rather than pretending it's all resolved -- see the
+    # solicitor-review note at the bottom of the page.
     return """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Privacy Policy - Tree Key</title>
     <link rel="manifest" href="/static/manifest.json">
     <meta name="theme-color" content="#020617">
     <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link href="/static/tailwind.css" rel="stylesheet">
-    <script>if ('serviceWorker' in navigator) {{ window.addEventListener('load', () => {{ navigator.serviceWorker.register('/sw.js'); }}); }}</script>
+    <script>if ('serviceWorker' in navigator) { window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js'); }); }</script>
 </head>
 <body class="bg-slate-900 text-slate-300 font-sans p-8 md:p-16">
     <div class="max-w-3xl mx-auto bg-slate-800 p-8 rounded-lg shadow-xl border border-slate-700">
-        <h1 class="text-3xl font-bold text-white mb-6">Privacy Policy</h1>
-        <p class="mb-4 text-sm text-slate-500">Last updated: September 2026</p>
+        <h1 class="text-3xl font-bold text-white mb-2">Privacy Policy</h1>
+        <p class="mb-6 text-sm text-slate-500">Last updated: September 2026 &middot; Tree Key is a trading name of Vector Data Labs</p>
 
-        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">1. Information We Collect</h2>
-        <p class="mb-4">Tree Key ("we", "us", "our") collects basic contact information (name, email, phone number) when you register for an account or when your business information is retrieved from public registries such as Companies House and public local authority planning portals in the UK.</p>
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">1. Who We Are</h2>
+        <p class="mb-4">Tree Key ("we", "us", "our") operates the website treekey.uk and the lead-generation service described in our <a href="/terms-of-service" class="text-emerald-400 underline">Terms of Service</a>. Tree Key is a trading name of Vector Data Labs, which is the data controller for the personal data described below. For privacy matters, contact <strong>contact@treekey.uk</strong>.</p>
 
-        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">2. How We Use Your Information</h2>
-        <p class="mb-4">We use the account information you provide (name, email, phone number) strictly to operate your account, provide our lead-generation service, notify you of relevant council planning applications, and for billing purposes. We do not sell your account information to data brokers or advertisers.</p>
-        <p class="mb-4">Separately, our Service itself is built on Lead data &mdash; information such as planning-applicant and agent names sourced from public UK council planning registers, which subscribers pay to access as the core of what Tree Key provides. This is the licensed Service you are paying for, not a sale of your own personal data to a third party. Lead data is processed under UK GDPR legitimate interests; if you are an individual named in Lead data (for example, as a planning applicant) rather than a Tree Key account holder, see Sections 3 and 4 below for your rights.</p>
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">2. The Two Kinds of Personal Data We Handle</h2>
+        <p class="mb-2"><strong class="text-white">2.1 Customer data</strong> &mdash; information about you, our paying customer: name, business name, email, phone number, billing details (processed by Stripe), and your usage of the Service.</p>
+        <p class="mb-4"><strong class="text-white">2.2 Lead data</strong> &mdash; information about a third party named in a Lead: typically a planning applicant's or agent's name, sourced from public UK council planning records, and in some cases a business or director name sourced from Companies House. This is data about people who are not our customers and have not signed up to anything.</p>
 
-        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">3. GDPR Rights</h2>
-        <p class="mb-4">Under the UK General Data Protection Regulation (UK GDPR), you have the right to access, rectify, or erase your personal data. If you are receiving commercial outreach from us and wish to opt-out, you may do so at any time using the unsubscribe link provided in our communications.</p>
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">3. Our Lawful Basis for Processing Lead Data</h2>
+        <p class="mb-4">We process Lead data on the basis of <strong class="text-white">legitimate interests</strong> under UK GDPR Article 6(1)(f): our commercial interest in aggregating publicly available planning and company data into a usable directory for tree surgery and arboricultural businesses. A person named in Lead data has the right to object to this processing (Section 8) &mdash; where someone objects, we stop processing their data for this purpose unless we can demonstrate compelling legitimate grounds that override their interests, or the data is needed for a legal claim.</p>
 
-        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">4. Contact Us</h2>
-        <p class="mb-4">For any privacy-related requests, please contact us at: <strong>contact@treekey.uk</strong></p>
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">4. What We Use Personal Data For</h2>
+        <ul class="list-disc list-inside mb-4 space-y-1">
+            <li>Operating and improving the Service (both kinds of data);</li>
+            <li>Providing customer support and processing payments (customer data);</li>
+            <li>Compiling, classifying, and displaying Leads to subscribed customers (Lead data);</li>
+            <li>Sending customers service-related communications and, where not opted out, marketing about the Service;</li>
+            <li>Complying with our legal obligations (e.g. tax, accounting).</li>
+        </ul>
+        <p class="mb-4">We do not use Lead data to build profiles about the individuals named in it beyond what's needed to classify a Lead's relevance.</p>
 
-        <a href="/" class="text-emerald-500 hover:text-emerald-400 mt-8 inline-block font-bold">&larr; Back to Home</a>
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">5. Where Lead Data Comes From</h2>
+        <p class="mb-4">UK local council planning application registers, Companies House (available under the Open Government Licence), and, where used, publicly listed business contact details. We do not purchase Lead data from private data brokers or scrape data that is not otherwise publicly accessible.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">6. Who We Share Data With</h2>
+        <ul class="list-disc list-inside mb-4 space-y-1">
+            <li><strong class="text-white">Stripe</strong> (payment processing) &mdash; customer payment and billing data.</li>
+            <li><strong class="text-white">Render</strong> (hosting) &mdash; the application and database run on Render's infrastructure.</li>
+            <li><strong class="text-white">Our customers</strong> &mdash; Lead data is disclosed to subscribing customers as the core of the Service.</li>
+        </ul>
+        <p class="mb-4">We do not sell personal data to data brokers or advertisers. We do commercially license access to Lead data as the Service itself &mdash; stated plainly here, not denied.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">7. International Data Transfers</h2>
+        <p class="mb-4">Some of our processors (including Stripe and Render) may process data outside the UK. Where this happens, transfers are protected by the UK's International Data Transfer Addendum to the EU Standard Contractual Clauses, or an equivalent lawful transfer mechanism, as provided by each processor's standard terms.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">8. Your Rights</h2>
+        <p class="mb-2">Both customers and individuals named in Lead data have the right, under UK GDPR, to: request access to the personal data we hold about them; request correction of inaccurate data; request erasure ("right to be forgotten"), subject to our legal bases for retaining it; object to processing based on legitimate interests (Section 3); request restriction of processing in certain circumstances; and lodge a complaint with the Information Commissioner's Office (ico.org.uk).</p>
+        <p class="mb-4">To exercise any of these rights, contact <strong>contact@treekey.uk</strong>.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">9. Data Retention</h2>
+        <p class="mb-4">Lead data is retained for 24 months from discovery, after which personal identifiers are anonymized or deleted, though the underlying planning application record may be retained in non-identifying form for business analytics. Customer account data is retained for the life of the account; billing records are kept for 6 years after account closure to meet HMRC record-keeping requirements.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">10. Security</h2>
+        <p class="mb-4">We take reasonable technical and organizational measures to protect personal data: encrypted (HTTPS) connections throughout the Service; account sessions secured with signed, tamper-evident tokens rather than plain credentials; no customer passwords are stored at all (login uses a one-time emailed link, so there is no password database to be breached); and administrative and automated-scan functions are protected by a separate access secret, not exposed publicly.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">11. Cookies</h2>
+        <p class="mb-4">Tree Key currently sets one cookie: a signed session cookie (<code class="text-emerald-300">treekey_contractor_session</code>) used solely to keep you logged in, marked HttpOnly, Secure, and SameSite=Lax. This is a strictly necessary cookie required for the Service to function, so under UK PECR rules it does not require a cookie consent banner. This will be revisited the moment any analytics, advertising, or tracking cookie is added.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">12. Children</h2>
+        <p class="mb-4">The Service is intended for business use and is not directed at children. We do not knowingly collect personal data from children.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">13. Changes to This Policy</h2>
+        <p class="mb-4">We may update this policy from time to time; material changes will be reflected by an updated "last updated" date, and significant changes affecting Lead data subjects' rights will be communicated where practical.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">14. Contact</h2>
+        <p class="mb-6">Questions or requests regarding this policy: <strong>contact@treekey.uk</strong>.</p>
+
+        <p class="mb-4 border-l-4 border-amber-500 pl-4 bg-amber-500/10 py-3 text-slate-300 text-sm">This policy is not a substitute for legal advice. It reflects how the Service actually works today, but two items still need a solicitor's or DPO's sign-off before this is fully complete: (1) a documented Legitimate Interests Assessment backing Section 3, beyond this page's summary of the conclusion; and (2) a working, tested process for someone named in a Lead to actually exercise the erasure/objection rights described in Section 8.</p>
+
+        <a href="/" class="text-emerald-500 hover:text-emerald-400 mt-4 inline-block font-bold">&larr; Back to Home</a>
     </div>
 </body>
 </html>
@@ -6098,36 +6279,197 @@ async def privacy_policy():
 
 @app.get("/terms-of-service", response_class=HTMLResponse)
 async def terms_of_service():
+    # Sep 8 2026 rework: replaces the previous 4-clause page (Nick: "terms
+    # of service is ridiculously short and needs to look more like a real
+    # legal page") with a fuller draft covering accounts, lead-accuracy
+    # disclaimers, acceptable use, IP, data protection, liability and
+    # indemnity -- aligned to match the product as it actually works. See
+    # the note at the bottom on what still needs solicitor sign-off.
     return """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Terms of Service - Tree Key</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#020617">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
+    <link href="/static/tailwind.css" rel="stylesheet">
+    <script>if ('serviceWorker' in navigator) { window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js'); }); }</script>
+</head>
+<body class="bg-slate-900 text-slate-300 font-sans p-8 md:p-16">
+    <div class="max-w-3xl mx-auto bg-slate-800 p-8 rounded-lg shadow-xl border border-slate-700">
+        <h1 class="text-3xl font-bold text-white mb-2">Terms of Service</h1>
+        <p class="mb-6 text-sm text-slate-500">Last updated: September 2026 &middot; Tree Key is a trading name of Vector Data Labs</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">1. Introduction and Acceptance</h2>
+        <p class="mb-2">These Terms and Conditions ("Terms") govern access to and use of the Tree Key website (treekey.uk) and the lead-generation service provided through it (the "Service"), operated by Vector Data Labs, trading as Tree Key ("we", "us", "our").</p>
+        <p class="mb-2">By creating an account, purchasing a subscription, or otherwise using the Service, you ("you", "the Customer") agree to be bound by these Terms. If you do not agree, do not use the Service.</p>
+        <p class="mb-4">The Service is intended for business use by tree surgery, arboricultural, and related trade businesses. It is not intended for consumers acting outside a trade, business, or profession.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">2. Description of the Service</h2>
+        <p class="mb-2">Tree Key identifies and aggregates leads relating to tree work ("Leads") derived substantially from publicly available UK local council planning application records, Companies House records, and related public data sources.</p>
+        <p class="mb-2">Leads are processed using automated methods, including automated classification of whether a named agent or representative on a planning application appears to be a tree surgery or arboricultural business. This classification is a best-effort estimate and is not manually verified for every Lead.</p>
+        <p class="mb-4">Tree Key provides access to Lead information only. Tree Key is not a party to, and has no involvement in, any subsequent contact, quote, contract, or work arrangement between the Customer and any third party named in or connected to a Lead.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">3. Accounts</h2>
+        <p class="mb-2">You must provide accurate registration information and keep it up to date. You are responsible for all activity under your account.</p>
+        <p class="mb-4">We may suspend or terminate an account where we reasonably believe these Terms have been breached, or where required by law.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">4. Subscriptions, Pricing, and Payment</h2>
+        <p class="mb-2">Access to Leads is provided on the subscription plans, credit packages, and pricing displayed on the Service at the time of purchase. Prices and plan structures may change; changes will not affect a billing period already paid for.</p>
+        <p class="mb-2">Payments are processed by Stripe. By subscribing, you authorize recurring charges for the plan you select until you cancel. Subscriptions may be cancelled via your account settings, or by emailing contact@treekey.uk, effective at the end of the current billing period.</p>
+        <p class="mb-4 border-l-4 border-amber-500 pl-4 bg-amber-500/10 py-3 text-slate-200"><strong>Refunds.</strong> Because you are granted immediate access to proprietary Lead data the moment you subscribe or purchase a single lead, all payments &mdash; subscription and one-off purchases alike &mdash; are non-refundable, including for unused portions of a billing cycle. Nothing in this clause affects any statutory right you may have that cannot lawfully be excluded.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">5. Lead Accuracy &mdash; No Warranty</h2>
+        <p class="mb-2">Lead information reflects data available to Tree Key at the time of discovery or last check and is not guaranteed to be current, complete, or accurate. In particular, we do not guarantee that: the underlying planning application remains active or undetermined; no contractor has since been engaged by the applicant, whether or not this is reflected in the public record; contact or applicant details are current or correct; or that use of a Lead will result in a successful quote, contract, or completed job.</p>
+        <p class="mb-2">You are responsible for independently verifying, directly with the applicant, whether work described in a Lead remains available before committing time, quotes, or resources.</p>
+        <p class="mb-4">Tree Key provides the Service on an "as available" basis and, to the extent permitted by law, excludes all implied warranties and conditions relating to accuracy, completeness, fitness for a particular purpose, and satisfactory quality.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">6. Acceptable Use</h2>
+        <p class="mb-2">You agree not to: resell, redistribute, or share Lead data with any third party who is not a party to your own account, except as necessary to quote for or perform the work described; use the Service to build a competing lead-generation product; attempt to scrape, bulk-export beyond what the Service provides, or reverse-engineer the Service; use any Lead's personal data for a purpose other than contacting that person about the specific tree work described in the Lead; or misuse, harass, or make misleading representations to any person contacted via information obtained through the Service.</p>
+        <p class="mb-4">We may suspend access for breach of this section without refund.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">7. Intellectual Property</h2>
+        <p class="mb-2">The Service, its underlying software, aggregation methodology, and branding are owned by Tree Key or its licensors. Nothing in these Terms transfers ownership of any of this to the Customer.</p>
+        <p class="mb-4">Underlying public-record data (planning applications, Companies House filings) remains subject to the terms of the original source (e.g. Companies House data is available under the Open Government Licence); Tree Key's aggregation and classification of it does not create exclusive rights over the underlying facts.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">8. Data Protection</h2>
+        <p class="mb-2">Leads may include personal data (for example, an applicant's or agent's name, and in some cases contact details) sourced from public records. Tree Key processes this personal data as a data controller for the purpose of operating the lead-generation service &mdash; see our <a href="/privacy-policy" class="text-emerald-400 underline">Privacy Policy</a> for the full detail on lawful basis and your rights.</p>
+        <p class="mb-4">Customers who receive personal data through a Lead must handle it in accordance with UK GDPR themselves for their own onward use (e.g., adding a contact to their own CRM), and must not use it for a purpose incompatible with the reason it was provided (see clause 6).</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">9. Limitation of Liability</h2>
+        <p class="mb-2">To the maximum extent permitted by law, Tree Key's total liability arising out of or in connection with the Service, any Lead, or these Terms, whether in contract, tort (including negligence), or otherwise, is limited to the total amount paid by the Customer to Tree Key in the three (3) months preceding the event giving rise to the claim.</p>
+        <p class="mb-2">Tree Key shall not be liable for any indirect or consequential losses, including loss of profit, loss of business opportunity, or wasted expenditure (including quoting, travel, or staff time), arising from reliance on a Lead that proves inaccurate, outdated, or already actioned.</p>
+        <p class="mb-4">Nothing in these Terms excludes or limits liability for death or personal injury caused by negligence, fraud or fraudulent misrepresentation, or any other liability that cannot lawfully be excluded or limited under English law.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">10. Indemnity</h2>
+        <p class="mb-4">You agree to indemnify Tree Key against any claim, loss, or expense arising from your breach of Section 6 (Acceptable Use) or your misuse of personal data obtained through the Service, to the extent permitted by law.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">11. Suspension and Termination</h2>
+        <p class="mb-4">Either party may terminate a subscription in accordance with Section 4. Tree Key may suspend or terminate access immediately for a material breach of these Terms, illegal use of the Service, or non-payment. Sections 5, 7, 8, 9, and 10 survive termination.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">12. Changes to These Terms</h2>
+        <p class="mb-4">We may update these Terms from time to time. Material changes will be notified via the Service or by email before they take effect. Continued use after changes take effect constitutes acceptance.</p>
+
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">13. General</h2>
+        <p class="mb-2"><strong class="text-white">Governing law.</strong> These Terms are governed by the laws of England and Wales, and the courts of England and Wales have exclusive jurisdiction.</p>
+        <p class="mb-2"><strong class="text-white">Severability.</strong> If any provision of these Terms is found unenforceable, the remaining provisions continue in full force.</p>
+        <p class="mb-2"><strong class="text-white">Entire agreement.</strong> These Terms, together with the <a href="/privacy-policy" class="text-emerald-400 underline">Privacy Policy</a> and any order confirmation, constitute the entire agreement between the parties regarding the Service.</p>
+        <p class="mb-6"><strong class="text-white">Contact.</strong> Questions about these Terms can be sent to <strong>contact@treekey.uk</strong>.</p>
+
+        <p class="mb-4 border-l-4 border-amber-500 pl-4 bg-amber-500/10 py-3 text-slate-300 text-sm">These Terms are not a substitute for legal advice. Section 8's data-protection basis is the single biggest item still worth a solicitor's review specifically &mdash; whether relying on legitimate interests to process Lead data is sound is a question of lawfulness, not just of who pays if something goes wrong.</p>
+
+        <a href="/" class="text-emerald-500 hover:text-emerald-400 mt-4 inline-block font-bold">&larr; Back to Home</a>
+    </div>
+</body>
+</html>
+"""
+
+
+@app.get("/faq", response_class=HTMLResponse)
+async def faq_page():
+    """Sep 8 2026, Nick's ask: "need a faq that really gives full explanation
+    on everything you could wonder about us" -- the homepage only ever had a
+    3-question objection-handling blurb. Every answer here is grounded in
+    how the product actually works (checked against the live routes/copy
+    rather than invented), covering the things Nick specifically flagged as
+    confusing when testing the site himself: what Ledger and Chip-Drop are,
+    whether there's an app, WhatsApp, cancellation, and the free-account path."""
+    faq_groups = [
+        ("About Tree Key", [
+            ("What is Tree Key?",
+             "Tree Key finds new tree work before your competitors do. We continuously monitor UK local council planning portals, the GLA Planning Datahub, and other statutory public sources for tree-related applications &mdash; TPO (Tree Preservation Order) consents, Section 211 notices, felling and pruning applications &mdash; and turn each one into a Lead you can quote on directly."),
+            ("How is this different from a directory like Checkatrade or Bark?",
+             "Directories sell the same lead to several competing contractors at once and take a cut of what you earn. Every Lead on Tree Key is single-sale: the moment it's dispatched to a subscriber (or bought from the Marketplace), it's burned from our system and never sold to anyone else. You quote the homeowner directly, under your own brand, with no ongoing commission."),
+            ("Where does the data come from, and is it legal?",
+             "Entirely from public statutory sources: council planning registers and Companies House, both publicly accessible under the Open Government Licence. We don't buy data from private brokers or scrape anything that isn't otherwise publicly available. Full detail on how we're allowed to process it is in our <a href=\"/privacy-policy\" class=\"text-emerald-400 underline\">Privacy Policy</a>."),
+            ("Is there a mobile app?",
+             "Not a separate app to download &mdash; the whole site, including your dashboard, is built to work properly on your phone's browser. Save it to your home screen and it behaves like one."),
+        ]),
+        ("Pricing & Plans", [
+            ("What are my options if I'm not ready to pay?",
+             "You can sign up for a free account with no card required and get one real, fully-unlocked free lead near you to start with, plus occasional teaser emails after that. When you're ready for full coverage, upgrade to a subscription tier from your dashboard at any time."),
+            ("What's the difference between a subscription and the Marketplace?",
+             "A subscription gives you priority, ongoing dispatch of every matching Lead in your territory as it's discovered. Any Lead that isn't claimed by a subscriber flows into the single-purchase Marketplace, where anyone can buy it one-off &mdash; useful for topping up, or for trying Tree Key out before subscribing."),
+            ("Am I tied into a long contract?",
+             "No. Subscriptions are a rolling monthly agreement &mdash; cancel any time from your account settings with zero penalty and no further charges from the next billing date."),
+            ("Can I get a refund?",
+             "Because you get immediate access to the Lead data itself the moment you subscribe or buy, payments are non-refundable &mdash; the same policy that applies to unused portions of a billing cycle. Full detail is in our <a href=\"/terms-of-service\" class=\"text-emerald-400 underline\">Terms of Service</a>."),
+        ]),
+        ("How Matching Works", [
+            ("How do you decide which leads I get?",
+             "You set a home postcode and a radius (up to 50 miles depending on tier). We match leads to you by exact area first, then by distance within your radius, then by wider regional area as a fallback &mdash; so you get the closest, most relevant work first. Enter your full postcode rather than just the outward code (e.g. \"CR5 2LE\" instead of just \"CR5\") for the most accurate distance matching."),
+            ("Can I filter by job size?",
+             "Yes &mdash; each subscription can be set to small, medium, large, or all job sizes, so a one-van operator isn't drowned in commercial clearance leads meant for a multi-crew outfit, or vice versa."),
+            ("What if no leads come through for a while?",
+             "Lead volume depends entirely on how much planning activity is happening in your area &mdash; we don't manufacture leads. If a source genuinely goes quiet for an unusual length of time, that's exactly the kind of thing our internal monitoring is built to catch and flag automatically, and we treat it as something to actively fix, not something to leave unexplained."),
+        ]),
+        ("Tools Included With Your Subscription", [
+            ("What is TreeKey Ledger?",
+             "A financial dashboard built specifically for tree surgeons: it tracks your rolling 12-month turnover against the £90,000 UK VAT registration threshold so you're never caught out, holds a running CIS developer-tax tracker, and includes a van/crew-day cost calculator so you can quote profitably. Find it in your dashboard once you're a subscriber."),
+            ("What is the Chip-Drop Network?",
+             "A directory of local allotments, farms, stables and gardens who want your arborist woodchip or logs for free. Instead of paying £60&ndash;£120 in commercial tipping fees and losing 45 minutes each way, you drop your waste at a nearby registered site instead. Landowners register their own site through the site; the directory only ever shows real, self-registered listings."),
+        ]),
+        ("Your Account", [
+            ("How do I log in? Why no password?",
+             "Tree Key is passwordless by design &mdash; enter your email and we send you a secure, one-tap login link (valid 15 minutes). There's no password database that could ever be breached. If you're reading the email on a different device than the one you want to log in on, the email also includes a 6-digit code you can type in instead of clicking the link."),
+            ("Is WhatsApp involved?",
+             "Two places: our Elite tier includes zero-minute instant WhatsApp lead alerts alongside email, and the Chip-Drop directory gives you a direct WhatsApp link to message a drop site's contact. There isn't yet a general WhatsApp support line &mdash; for anything else, email is the way to reach us."),
+            ("Do you have testimonials from other contractors?",
+             "Not yet &mdash; we're a young platform and would rather wait for genuine results than publish anything that isn't real. That'll change as more contractors come through the platform."),
+        ]),
+        ("Data & Privacy", [
+            ("Is my business data sold to anyone?",
+             "No. Your own account information (name, email, phone, billing) is never sold to data brokers or advertisers &mdash; it's used only to run your account and the Service. What you're paying for is licensed access to Lead data compiled from public records, which is a different thing entirely. See our <a href=\"/privacy-policy\" class=\"text-emerald-400 underline\">Privacy Policy</a> for the full breakdown."),
+            ("I'm named in a Lead and want it removed &mdash; what do I do?",
+             "Email <strong>contact@treekey.uk</strong> and we'll action your request in line with the rights set out in our Privacy Policy."),
+        ]),
+    ]
+
+    groups_html = ""
+    for group_title, qas in faq_groups:
+        items_html = "".join([
+            f"""<div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
+                <h3 class="text-base font-bold text-white mb-2">{q}</h3>
+                <p class="text-slate-400 leading-relaxed text-sm">{a}</p>
+            </div>"""
+            for q, a in qas
+        ])
+        groups_html += f"""
+        <div class="mb-10">
+            <h2 class="text-lg font-extrabold text-emerald-400 font-mono uppercase tracking-wide mb-4">{group_title}</h2>
+            <div class="space-y-4">{items_html}</div>
+        </div>
+        """
+
+    return f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FAQ - Tree Key</title>
     <link rel="manifest" href="/static/manifest.json">
     <meta name="theme-color" content="#020617">
     <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link href="/static/tailwind.css" rel="stylesheet">
     <script>if ('serviceWorker' in navigator) {{ window.addEventListener('load', () => {{ navigator.serviceWorker.register('/sw.js'); }}); }}</script>
 </head>
-<body class="bg-slate-900 text-slate-300 font-sans p-8 md:p-16">
-    <div class="max-w-3xl mx-auto bg-slate-800 p-8 rounded-lg shadow-xl border border-slate-700">
-        <h1 class="text-3xl font-bold text-white mb-6">Terms of Service</h1>
-        <p class="mb-4 text-sm text-slate-500">Last updated: August 2026</p>
-        
-        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">1. Service Description</h2>
-        <p class="mb-4">Tree Key provides an online radar and notification platform that aggregates public statutory planning applications from UK local authorities. We are an independent commercial entity and are not affiliated with any government body.</p>
-        
-        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">2. Subscriptions, Single Lead Purchases & Billing</h2>
-        <p class="mb-4">Tree Key offers two ways to pay: (a) a monthly subscription tier, billed monthly and cancellable at any time, giving ongoing access to leads matching your plan; and (b) one-off single lead purchases, where you pay a one-time price to unlock one specific lead, which is then permanently removed from sale to any other customer.</p>
+<body class="bg-[#020617] text-slate-300 font-sans p-6 md:p-16">
+    <div class="max-w-3xl mx-auto">
+        <div class="text-center mb-4">
+            <a href="/" class="text-emerald-500 hover:text-emerald-400 text-sm font-bold">&larr; Back to Home</a>
+        </div>
+        <h1 class="text-3xl md:text-4xl font-extrabold text-white text-center mb-2 font-mono uppercase tracking-tight">Frequently Asked Questions</h1>
+        <p class="text-center text-slate-500 mb-12 text-sm">Everything about how Tree Key works, what it costs, and how your data is handled.</p>
 
-        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">3. No Guarantee of Lead Volume (Refund Policy)</h2>
-        <p class="mb-4 border-l-4 border-amber-500 pl-4 bg-amber-500/10 py-3 text-slate-200"><strong>Crucial Notice:</strong> The volume of leads you receive is entirely dependent on the organic activity of homeowners and local councils in your chosen radial territory. Tree Key does not guarantee a specific number of leads per month. <strong>Because you are granted immediate access to proprietary data the moment you subscribe or purchase a single lead, all payments &mdash; subscription and one-off single lead purchases alike &mdash; are non-refundable.</strong> We do not offer prorated refunds for mid-cycle subscription cancellations.</p>
+        {groups_html}
 
-        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">4. Acceptable Use</h2>
-        <p class="mb-4">You agree not to scrape, redistribute, or resell the data provided by Tree Key. The platform is strictly for your own business's direct marketing and operational use.</p>
-
-        <a href="/" class="text-emerald-500 hover:text-emerald-400 mt-8 inline-block font-bold">&larr; Back to Home</a>
+        <div class="text-center mt-4 pb-8 text-sm text-slate-500">
+            Still have a question? Email <strong class="text-slate-300">contact@treekey.uk</strong> or <a href="/suggestions" class="text-emerald-400 underline">submit a suggestion</a>.
+        </div>
     </div>
 </body>
 </html>
