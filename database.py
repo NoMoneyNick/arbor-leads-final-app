@@ -2518,7 +2518,24 @@ def classify_leads_by_radius(pool_addresses: list, target_lat: Optional[float], 
     one click. Added an optional `conn` so a caller that already has a
     connection open (as api_check_postcode does) can hand it in and reuse
     it instead of opening a new one; callers that don't pass one keep the
-    old self-contained behaviour exactly as before."""
+    old self-contained behaviour exactly as before.
+
+    Sep 9 2026 (same day, follow-up), CRITICAL fix, Nick's ask ("its been
+    going on a long time now im concerned we are not making progress"): a
+    25-mile search on IG3 was showing 10 in-radius leads and genuinely 0
+    "nearby", despite real leads sitting right next door in IG8/Epping
+    Forest and visible in the notices panel the whole time. Root cause was
+    upstream in api_check_postcode: `pool_addresses` was still restricted to
+    leads sharing the search postcode's own 2-letter area prefix before this
+    function ever ran, so a neighbouring-but-differently-lettered outcode
+    (IG3 vs RM/E/CM, say) could never reach the haversine check at all. The
+    caller now passes an unrestricted, nationwide pool instead. That makes
+    this function's own "nearby" bucket the only thing standing between a
+    sane "connected zones" count and an accidental nationwide one, since
+    without a ceiling here a Glasgow lead would now count as "nearby" to a
+    London search. So "nearby" is now capped to leads within radius_miles +
+    20 -- genuinely just outside the selected radius -- and anything further
+    out is excluded from both buckets, same as an unresolvable outcode."""
     in_radius = 0
     nearby = 0
     if target_lat is None or target_lng is None:
@@ -2564,8 +2581,11 @@ def classify_leads_by_radius(pool_addresses: list, target_lat: Optional[float], 
         dist = haversine_miles(target_lat, target_lng, lead_lat, lead_lon)
         if dist <= radius_miles:
             in_radius += 1
-        else:
+        elif dist <= radius_miles + 20:
             nearby += 1
+        # else: genuinely too far away to call "nearby" -- excluded from
+        # both buckets, same treatment as a lead whose outcode can't be
+        # resolved at all.
     return {"in_radius": in_radius, "nearby": nearby}
 
 
@@ -3748,6 +3768,51 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
             raw_leads = [dict(zip(cols, r)) for r in rows]
             for l in raw_leads:
                 l.setdefault("vertical", "tree")
+
+            # Sep 9 2026, CRITICAL fix -- Nick caught the marketplace showing
+            # the exact street address of unpurchased leads. The template
+            # (marketplace_view in main.py) was trying to mask it itself by
+            # splitting the raw address text on commas and keeping only the
+            # last two segments -- but real scraped council addresses are
+            # very often a single unpunctuated string ("14 OAK AVENUE
+            # CROYDON CR5 2AB", no commas at all), and for those the split
+            # produces just ONE segment, which the old code's fallback
+            # (`if len(parts) > 1 else addr`) then showed in full -- house
+            # number and street included, exactly what buying the lead is
+            # supposed to be for. Fixed at the data layer instead, using the
+            # same reliable, already-proven method the public homepage
+            # ticker uses: resolve each lead's outcode and show only
+            # "OUTCODE, District" (see get_outcode_area_label) -- never the
+            # address text itself, regardless of its punctuation. Batched
+            # the same way as select_diverse_ticker_leads/
+            # classify_leads_by_radius: one query for every distinct outcode
+            # instead of one per lead.
+            _outcodes_by_lead = []
+            _distinct_outcodes = set()
+            for l in raw_leads:
+                oc_list = _extract_outcodes_lenient(l.get("addr") or "")
+                oc = oc_list[0] if oc_list else None
+                _outcodes_by_lead.append(oc)
+                if oc:
+                    _distinct_outcodes.add(oc)
+
+            _area_by_outcode = {}
+            if _distinct_outcodes:
+                try:
+                    cur.execute("SELECT outcode, district, is_london FROM outcode_area_cache WHERE outcode = ANY(%s)",
+                                (list(_distinct_outcodes),))
+                    for oc, district, is_london in cur.fetchall():
+                        label = f"{oc}, {district}, London" if (district and is_london) else (f"{oc}, {district}" if district else oc)
+                        _area_by_outcode[oc] = label
+                except Exception as e:
+                    logger.debug(f"[Marketplace] batch area-cache read failed: {e}")
+
+                _missing = [oc for oc in _distinct_outcodes if oc not in _area_by_outcode]
+                for oc in _missing[:20]:
+                    _area_by_outcode[oc] = get_outcode_area_label(oc)["label"]
+
+            for l, oc in zip(raw_leads, _outcodes_by_lead):
+                l["area_label"] = _area_by_outcode.get(oc, oc or "Area unavailable")
 
             enriched = []
             for l in raw_leads:

@@ -468,17 +468,24 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
     area_letters = "".join([c for c in display_pc_clean if c.isalpha()])[:2]
     conn = database.get_db_conn()
     cur = conn.cursor()
-    if display_pc_clean and area_letters:
-        # Wide catchment: the whole postcode area (e.g. "CR" covers every
-        # CR0-CR9 outcode) -- classify_leads_by_radius then splits this into
-        # genuinely "in your selected radius" vs. "nearby but outside it"
-        # using real distance, not text matching.
-        cur.execute("SELECT address FROM leads WHERE (status = 'new' OR status IS NULL) AND address ~* %s",
-        (rf"\y{area_letters}[0-9]",))
-        wide_pool_addresses = cur.fetchall()
-    else:
-        cur.execute("SELECT address FROM leads WHERE (status = 'new' OR status IS NULL) AND council_source ILIKE %s", (f"%{district[:6]}%",))
-        wide_pool_addresses = cur.fetchall()
+
+    # Sep 9 2026, CRITICAL fix, Nick's ask ("its been going on a long time"):
+    # this pool was still restricted to leads sharing the SAME 2-letter
+    # postcode-area prefix as the search (e.g. only "IG..." for an IG3
+    # search) before the haversine radius check ever ran -- so a genuinely
+    # nearby lead in a neighbouring postcode area (e.g. RM, E, CM, all
+    # bordering IG) could never be counted as "in radius" OR "connected
+    # zones", no matter how close it actually was. That's exactly the "25
+    # miles around London, 10 in radius, 0 surrounding" case Nick flagged --
+    # it wasn't that no nearby leads existed, it's that leads outside the
+    # "IG" text prefix were invisible to this query before distance was ever
+    # considered. Fixed by pulling every currently-open lead nationwide (no
+    # postcode-text filter at all) and letting classify_leads_by_radius's
+    # real distance math do 100% of the geographic work -- see the matching
+    # note there for the new upper bound on what counts as "nearby" (so
+    # removing this filter doesn't make "nearby" include the whole country).
+    cur.execute("SELECT address FROM leads WHERE (status = 'new' OR status IS NULL)")
+    wide_pool_addresses = cur.fetchall()
 
     # Sep 9 2026, Nick's ask: cut the lag on map clicks -- this endpoint
     # already has `conn` open for the queries above, so hand it straight
@@ -1076,10 +1083,23 @@ def public_homepage():
                          biggest thing contractors care about. Promoted to a
                          proper badge, rephrased to spell out what it actually
                          means (not just assert exclusivity as a slogan), and
-                         now pulses gently like the other live indicators. -->
-                    <div class="tk-live-badge inline-flex items-center gap-2.5 px-5 py-2.5 rounded-full border border-emerald-500/40 text-emerald-300 font-bold text-sm shadow-[0_0_20px_rgba(16,185,129,0.15)]">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="shrink-0"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                        You Buy It, It's Yours — We Never Sell That Lead to Anyone Else
+                         now pulses gently like the other live indicators.
+                         Sep 9 2026, Nick's ask: on desktop this pill sat next
+                         to the "Intercepting Live" counters box looking like
+                         a mismatched afterthought -- different shape (full
+                         pill vs rounded box) and much shorter. Rebuilt with
+                         the exact same container classes (rounded-lg/xl box,
+                         same padding scale, same flex-col label/body/detail
+                         structure) so the two boxes now match in size and
+                         shape side by side on desktop, and still stack
+                         cleanly on mobile. -->
+                    <div class="tk-live-badge flex md:inline-flex flex-col items-center gap-1 md:gap-2 w-full md:w-auto px-3 py-1.5 md:px-5 md:py-3 rounded-lg md:rounded-xl border border-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.15)]">
+                        <div class="flex items-center gap-2 text-[10px] md:text-[11px] uppercase tracking-widest text-emerald-400">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="shrink-0"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                            Exclusivity Guarantee
+                        </div>
+                        <div class="text-emerald-300 font-bold text-sm md:text-lg text-center">You Buy It, It's Yours</div>
+                        <div class="text-emerald-400 text-[10px] md:text-xs font-mono text-center">We Never Sell That Lead to Anyone Else</div>
                     </div>
                 </div>
 
@@ -1201,7 +1221,7 @@ def public_homepage():
                          debouncedScanTerritory() in the script block below. -->
                     <form onsubmit="event.preventDefault(); scanTerritory();" class="flex flex-col sm:flex-row gap-4 mb-6">
                         <input type="text" id="postcodeInput" placeholder="Enter your Region or Postcode (e.g., Nottingham or NG22)..." oninput="debouncedScanTerritory()" onkeydown="if(event.key === 'Enter') {{ event.preventDefault(); scanTerritory(); }}" value="B1" required class="flex-1 bg-slate-800 border-2 border-slate-600 text-white font-mono rounded px-4 py-3 focus:outline-none focus:border-brand-green focus:bg-slate-900 transition-colors uppercase text-lg shadow-inner">
-                        <select id="radiusSelect" onchange="scanTerritory()" class="bg-slate-800 border-2 border-slate-600 text-white font-mono rounded px-4 py-3 focus:outline-none focus:border-brand-green">
+                        <select id="radiusSelect" onchange="scanTerritory(true)" class="bg-slate-800 border-2 border-slate-600 text-white font-mono rounded px-4 py-3 focus:outline-none focus:border-brand-green">
                             <option value="16093">10 Miles</option>
                             <option value="24140" selected>15 Miles</option>
                             <option value="32186">20 Miles</option>
@@ -1519,6 +1539,9 @@ def public_homepage():
             ["Aberdeen", 57.1497, -2.0943],
             ["Newcastle", 54.9783, -1.6178],
             ["Leeds", 53.8008, -1.5491],
+            ["Liverpool", 53.4084, -2.9916],
+            ["Bristol", 51.4545, -2.5879],
+            ["Sheffield", 53.3811, -1.4701],
         ];
         TK_UK_CITIES.forEach(function(city) {{
             L.marker([city[1], city[2]], {{
@@ -2686,30 +2709,43 @@ def checkout(plan_key: str, request: Request):
     # Subscription plan — show area selector first if no outcode provided
     plan_name = plan["name"]
     plan_price = f"£{plan['amount'] // 100}/month"
+    # Sep 9 2026, Nick's ask: "the payment page needs to match our design
+    # colour scheme and style" -- this was the last page on the site still
+    # fully light-themed with its own standalone look (white card on a pale
+    # grey page, no nav/footer at all), which stood out badly right at the
+    # point someone's about to pay. Recoloured the same embedded-style
+    # approach used for the rest of the form (kept .card/.plan-box/.hint/
+    # .lock-note as real CSS classes rather than converting every input to
+    # Tailwind, since a form needs consistent focus/hover states that are
+    # easier to keep correct in one small stylesheet) but now dark, on the
+    # shared nav/footer/tailwind.css shell every other page uses.
     return HTMLResponse(f"""<!DOCTYPE html>
 <html lang="en-GB">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Set Your Area — TreeKey</title>
+    <link rel="icon" href="/static/icon-192.png">
+    <link href="/static/tailwind.css" rel="stylesheet">
     <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; }}
-        .card {{ max-width:520px; margin:auto; background:white; border:1px solid #e2e8f0; border-radius:16px; padding:36px; box-shadow:0 4px 20px rgba(0,0,0,0.06); }}
-        h1 {{ color:#044332; font-size:24px; margin:0 0 6px 0; }}
-        p.sub {{ color:#64748b; font-size:14px; margin:0 0 28px 0; }}
-        label {{ display:block; font-size:13px; font-weight:600; color:#374151; margin-bottom:6px; }}
-        input, select {{ width:100%; box-sizing:border-box; padding:11px 14px; border:1px solid #d1d5db; border-radius:8px; font-size:15px; margin-bottom:20px; background:white; }}
-        input:focus, select:focus {{ outline:none; border-color:#044332; box-shadow:0 0 0 3px rgba(4,67,50,0.08); }}
-        .hint {{ font-size:12px; color:#94a3b8; margin-top:-14px; margin-bottom:18px; }}
-        button {{ width:100%; background:#044332; color:white; padding:14px; border:none; border-radius:8px; font-size:16px; font-weight:700; cursor:pointer; }}
-        button:hover {{ background:#065f46; }}
-        .plan-box {{ background:#f0fdf4; border:1px solid #a7f3d0; border-radius:10px; padding:14px 16px; margin-bottom:24px; display:flex; justify-content:space-between; align-items:center; }}
-        .plan-box .name {{ font-weight:700; color:#065f46; font-size:15px; }}
-        .plan-box .price {{ font-weight:800; color:#044332; font-size:18px; }}
-        .lock-note {{ background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:12px 14px; font-size:12px; color:#1e40af; margin-bottom:24px; }}
+        .card {{ max-width:520px; margin:0 auto; background:#0f172a; border:1px solid #334155; border-radius:16px; padding:36px; box-shadow:0 4px 24px rgba(0,0,0,0.4); }}
+        .card h1 {{ color:#ffffff; font-size:24px; margin:0 0 6px 0; }}
+        .card p.sub {{ color:#94a3b8; font-size:14px; margin:0 0 28px 0; }}
+        .card label {{ display:block; font-size:13px; font-weight:600; color:#cbd5e1; margin-bottom:6px; }}
+        .card input, .card select {{ width:100%; box-sizing:border-box; padding:11px 14px; border:1px solid #334155; border-radius:8px; font-size:15px; margin-bottom:20px; background:#020617; color:#e2e8f0; font-family:inherit; }}
+        .card input:focus, .card select:focus {{ outline:none; border-color:#10b981; box-shadow:0 0 0 3px rgba(16,185,129,0.15); }}
+        .card .hint {{ font-size:12px; color:#64748b; margin-top:-14px; margin-bottom:18px; }}
+        .card button {{ width:100%; background:#059669; color:white; padding:14px; border:none; border-radius:8px; font-size:16px; font-weight:700; cursor:pointer; transition:background 0.2s; }}
+        .card button:hover {{ background:#10b981; }}
+        .card .plan-box {{ background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:14px 16px; margin-bottom:24px; display:flex; justify-content:space-between; align-items:center; }}
+        .card .plan-box .name {{ font-weight:700; color:#6ee7b7; font-size:15px; }}
+        .card .plan-box .price {{ font-weight:800; color:#34d399; font-size:18px; }}
+        .card .lock-note {{ background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); border-radius:8px; padding:12px 14px; font-size:12px; color:#7dd3fc; margin-bottom:24px; }}
     </style>
 </head>
-<body>
+<body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
+{_shared_nav_html()}
+<div class="px-4 py-10">
 <div class="card">
     <h1>🌳 One last step</h1>
     <p class="sub">Tell us where you work so we can route the right leads to you.</p>
@@ -2751,10 +2787,12 @@ def checkout(plan_key: str, request: Request):
 
         <button type="submit">Continue to Secure Payment →</button>
     </form>
-    <p style="text-align:center; margin-top:16px; font-size:12px; color:#94a3b8;">
+    <p style="text-align:center; margin-top:16px; font-size:12px; color:#64748b;">
         Secured by Stripe · Cancel anytime · No setup fees
     </p>
 </div>
+</div>
+{_shared_footer_html()}
 </body>
 </html>""")
 
@@ -2916,7 +2954,6 @@ def marketplace_view(tier: Optional[str] = "all"):
     for l in leads:
         lid = l["id"]
         ref = l["ref"]
-        addr = l["addr"]
         summary = l["summary"]
         council = l["council"]
         unlock_fee = l["price"]
@@ -2944,11 +2981,16 @@ def marketplace_view(tier: Optional[str] = "all"):
         except Exception:
             pass
 
-        # Mask exact street number/name to prevent bypassing, but show neighborhood/town & postcode
-        addr_parts = [p.strip() for p in addr.split(",") if p.strip()]
-        masked_area = addr_parts[-1] if len(addr_parts) > 1 else addr
-        if len(addr_parts) >= 2:
-            masked_area = f"{addr_parts[-2]}, {addr_parts[-1]}"
+        # Sep 9 2026, CRITICAL fix, Nick's ask: this used to mask the address
+        # by splitting the raw text on commas and keeping the last two
+        # segments -- silently showed the FULL exact address (house number
+        # and street included) whenever the scraped text had no commas at
+        # all, which is common. Now uses area_label, computed server-side in
+        # database.get_marketplace_leads_with_freshness via the same
+        # outcode-resolution method the public homepage ticker already
+        # relies on -- never the raw address text, regardless of its
+        # formatting. See the note there for the full explanation.
+        masked_area = l.get("area_label") or "Area unavailable"
 
         # Aug 30 2026: this is the single most important fix Nick asked for --
         # has_agent was already captured and already shown post-purchase (the
@@ -2988,35 +3030,56 @@ def marketplace_view(tier: Optional[str] = "all"):
         if l.get("is_urgent"):
             urgent_badge = "<span style='font-size:11px; background:rgba(239,68,68,0.15); color:#fca5a5; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;'>🚨 Urgent</span>"
 
+        # Sep 9 2026, Nick's ask: "marketplace actual lead adverts need
+        # complete overhaul in design to fit our new design scheme" -- the
+        # earlier pass this session only recoloured the existing light-theme
+        # layout for dark, which Nick correctly flagged as not enough.
+        # Rebuilt the whole card: a tier-coloured top accent bar (reuses the
+        # same badge_color already driving the freshness chip, so a Flash
+        # Hot lead now glows red/amber and a Granted lead glows green at a
+        # glance, not just via a small text badge); the area name promoted
+        # to an icon-led heading; the job spec panel gets an explicit
+        # uppercase label matching the site's radar/ticker language; and the
+        # price + CTA are pulled into their own glowing "unlock" panel
+        # (mirrors the homepage's main CTA button treatment) instead of a
+        # plain right-aligned price and a separate button underneath.
         lead_cards += f"""
-        <div class="bg-slate-800/50 border {'border-rose-500/50' if l.get('is_urgent') else 'border-slate-700'} rounded-xl p-5 mb-3.5 shadow-lg">
-            <div class="flex justify-between items-start flex-wrap gap-2.5">
-                <div>
-                    <span style="font-size:11px; background:{badge_bg}; color:{badge_color}; font-weight:bold; padding:4px 10px; border-radius:12px; text-transform:uppercase;">{badge_text}</span>
-                    <span style="font-size:11px; background:rgba(148,163,184,0.1); color:#cbd5e1; padding:3px 8px; border-radius:12px; margin-left:6px;">LPA: {council}</span>
-                    {urgent_badge}
-                    {agent_badge}
-                    <h3 class="mt-2.5 mb-1 text-[17px] text-white font-bold">📍 {masked_area}</h3>
+        <div class="relative bg-slate-800/50 border {'border-rose-500/50' if l.get('is_urgent') else 'border-slate-700'} hover:border-emerald-600/50 rounded-2xl p-5 sm:p-6 mb-4 shadow-lg overflow-hidden transition-all duration-300" style="border-top: 3px solid {badge_color};">
+            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-5">
+                <div class="flex-1 min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span style="font-size:11px; background:{badge_bg}; color:{badge_color}; font-weight:bold; padding:4px 10px; border-radius:12px; text-transform:uppercase;">{badge_text}</span>
+                        <span style="font-size:11px; background:rgba(148,163,184,0.1); color:#cbd5e1; padding:3px 8px; border-radius:12px;">LPA: {council}</span>
+                        {urgent_badge}
+                        {agent_badge}
+                    </div>
+                    <h3 class="mt-3 mb-1 text-lg sm:text-xl text-white font-bold flex items-center gap-2">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="text-emerald-400 shrink-0"><path d="M12 21s-7-6.5-7-11a7 7 0 1 1 14 0c0 4.5-7 11-7 11z"></path><circle cx="12" cy="10" r="2.5"></circle></svg>
+                        {masked_area}
+                    </h3>
+                    <div class="text-[11px] text-slate-500 font-mono">Listed {listed_date}</div>
+
+                    <div class="bg-slate-900/60 border-l-[3px] border-emerald-600 px-3.5 py-3 mt-3 text-[13px] text-slate-300 leading-relaxed rounded-r-lg">
+                        <span class="text-emerald-400 font-mono text-[10px] uppercase tracking-widest block mb-1">Job Specification</span>
+                        {summary[:220]}...
+                    </div>
                 </div>
-                <div class="text-right">
-                    <div class="text-2xl font-extrabold text-emerald-400">£{unlock_fee}</div>
-                    <span class="text-[11px] text-slate-400">{days_left}</span>
+
+                <div class="sm:w-[210px] shrink-0 bg-slate-900/60 border border-emerald-900/50 rounded-xl p-4 flex sm:flex-col items-center sm:items-stretch justify-between sm:justify-start gap-3 text-center">
+                    <div>
+                        <div class="text-2xl sm:text-3xl font-extrabold text-emerald-400">£{unlock_fee}</div>
+                        <div class="text-[11px] text-slate-400">{days_left}</div>
+                    </div>
+                    <a href="/checkout/{plan_key}?lead_id={lid}" class="bg-brand-green hover:bg-emerald-500 text-white px-5 py-3 rounded-lg no-underline font-bold text-[13px] transition-all duration-300 shadow-[0_0_20px_rgba(5,150,105,0.3)] hover:shadow-[0_0_30px_rgba(5,150,105,0.5)] inline-flex items-center justify-center gap-1.5 text-center">
+                        Unlock Address &amp; Contacts →
+                    </a>
+                    <div class="text-[10px] text-slate-500 sm:mt-1 hidden sm:block">
+                        🔒 Single-Sale • burned on unlock
+                    </div>
                 </div>
             </div>
-
-            <div class="text-[11px] text-slate-500 mt-1">📅 Listed: {listed_date}</div>
-
-            <div class="bg-slate-900/60 border-l-[3px] border-emerald-600 px-3.5 py-3 my-3 text-[13px] text-slate-300 leading-relaxed">
-                <b class="text-slate-200">Job Specification:</b> {summary[:220]}...
-            </div>
-
-            <div class="flex justify-between items-center flex-wrap gap-2.5 mt-3.5">
-                <div class="text-xs text-slate-500">
-                    🔒 Single-Sale Asset • Burned permanently upon unlock.
-                </div>
-                <a href="/checkout/{plan_key}?lead_id={lid}" class="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg no-underline font-bold text-[13px] transition-colors">
-                    Unlock Full Property Address &amp; Contacts (£{unlock_fee}) →
-                </a>
+            <div class="text-[10px] text-slate-500 mt-3 sm:hidden">
+                🔒 Single-Sale Asset — burned permanently upon unlock.
             </div>
         </div>"""
 
