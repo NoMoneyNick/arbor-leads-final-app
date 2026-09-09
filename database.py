@@ -2756,7 +2756,11 @@ def select_diverse_ticker_leads(limit: int = 5, enforce_geo_mix: bool = True,
 
     pool = []
     for address, summary, lead_score, lead_price, council_source, reference, discovered_at, outcode in parsed_rows:
-        area = area_by_outcode.get(outcode) or {"district": None, "is_london": False, "label": (outcode or "UK")}
+        # Sep 9 2026: same fallback as the marketplace fix -- when no outcode
+        # could be resolved at all, show the council it was scraped from
+        # ("Woking area") instead of the uninformative bare "UK".
+        _fallback_label = f"{council_source.strip()} area" if council_source else "UK"
+        area = area_by_outcode.get(outcode) or {"district": None, "is_london": False, "label": (outcode or _fallback_label)}
         # Sep 9 2026, CRITICAL fix, Nick's ask: this pool feeds the public
         # homepage's "Intercepting Live" ticker and notices table -- both
         # already show area_label instead of the raw address, but rendered
@@ -4067,7 +4071,25 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                     _area_by_outcode[oc] = get_outcode_area_label(oc)["label"]
 
             for l, oc in zip(raw_leads, _outcodes_by_lead):
-                l["area_label"] = _area_by_outcode.get(oc, oc or "Area unavailable")
+                if oc:
+                    # known outcode -> proper "NG22, Newark"-style label if the
+                    # cache/live lookup resolved it, else just the bare outcode
+                    # itself (e.g. "SM5") -- still real area info, never blank.
+                    l["area_label"] = _area_by_outcode.get(oc, oc)
+                else:
+                    # Sep 9 2026, Nick's ask: "we need to at least put like
+                    # 'woking area' ... or something" -- no outcode could be
+                    # found anywhere (neither the address nor the summary/
+                    # description text), which does happen for some real
+                    # scraped records. Rather than show nothing useful, fall
+                    # back to the council the lead was actually scraped from
+                    # (council_source, e.g. "Woking", "Camden", "Leeds" --
+                    # always present, it's how the scraper found the lead in
+                    # the first place) so a buyer at least sees a real area,
+                    # not a dead end. "Area unavailable" now only appears for
+                    # the handful of leads with no council on record at all.
+                    council = (l.get("council") or "").strip()
+                    l["area_label"] = f"{council} area" if council else "Area unavailable"
 
             # Sep 9 2026: postcode+radius search for the marketplace itself
             # (see this function's docstring). Same batched
