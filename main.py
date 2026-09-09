@@ -753,6 +753,21 @@ def _shared_footer_html() -> str:
                 <p class="text-slate-600">Contact: nick@treekey.uk</p>
             </div>
             <div class="flex gap-6 text-xs font-mono uppercase tracking-wider flex-wrap justify-center md:justify-end shrink-0 pt-2">
+                <!-- Sep 9 2026, Nick's ask: "we need a way for people to
+                     contact us for help (multiple ways) ... refer them to
+                     FAQ ... we need a suggestions [link] everywhere (email,
+                     site, different screens)" -- FAQ and Suggestions already
+                     existed as real pages but weren't linked from the
+                     footer, so most pages never surfaced them. Help is a
+                     direct mailto to the same contact@treekey.uk address
+                     already used everywhere else on the site (ToS, Privacy,
+                     FAQ) -- this footer previously showed a different
+                     address in plain text below ("nick@treekey.uk"); worth
+                     confirming with Nick whether that should also change to
+                     contact@treekey.uk or genuinely routes differently. -->
+                <a href="mailto:contact@treekey.uk" class="text-slate-400 hover:text-white transition-colors">Help</a>
+                <a href="/faq" class="text-slate-400 hover:text-white transition-colors">FAQ</a>
+                <a href="/suggestions" class="text-slate-400 hover:text-white transition-colors">Suggestions</a>
                 <a href="/privacy-policy" class="text-slate-400 hover:text-white transition-colors">Privacy</a>
                 <a href="/terms-of-service" class="text-slate-400 hover:text-white transition-colors">Terms</a>
                 <a href="/health" class="text-slate-400 hover:text-white transition-colors flex items-center gap-2">
@@ -1354,6 +1369,83 @@ def public_homepage():
         </div>
     </section>
 
+    <!-- Sep 9 2026, Nick's ask (round 2): the 4 free-tool cards were "too
+         uniform, hidden at the bottom, the text is soulless" -- moved up
+         here, before pricing ("nearer the top on desktop"), and rebuilt as
+         4 alternating image+text bands instead of a uniform grid so each
+         tool gets its own distinct treatment instead of looking like four
+         interchangeable FAQ entries. Each band has a real image slot --
+         Nick's own photos go here once supplied; a labelled placeholder box
+         stands in until then so the layout is already real and it's obvious
+         at a glance where each image belongs (swap the placeholder div for
+         a real <img> once a file exists, matching the pattern used
+         elsewhere for supplied photos, e.g. fieldwork-bucking.jpg below).
+         Mobile collapses to a plain stacked column (image below text) per
+         Nick's own "I understand phone is different" -- alternating
+         left/right only reads as intentional once there's room for it. -->
+    <section class="py-20 border-t border-slate-800 bg-[#0b1220] overflow-hidden">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-16">
+                <span class="text-slate-500 font-mono font-bold tracking-widest text-sm uppercase">Not Just Leads</span>
+                <h2 class="text-3xl md:text-4xl font-extrabold text-white mt-3">Free Tools Built Into TreeKey</h2>
+            </div>
+
+            <div class="space-y-16 md:space-y-24">
+                <!-- 1. Ledger -->
+                <div class="flex flex-col md:flex-row items-center gap-8 md:gap-12">
+                    <div class="w-full md:w-1/2 aspect-video rounded-2xl border-2 border-dashed border-violet-500/30 bg-violet-500/5 flex items-center justify-center text-center p-6 shrink-0">
+                        <span class="text-violet-400/70 text-xs font-mono uppercase tracking-wider">Image placeholder — Ledger screenshot goes here</span>
+                    </div>
+                    <div class="w-full md:w-1/2">
+                        <div class="text-[11px] font-mono uppercase tracking-widest text-violet-400 font-bold mb-2">Financial Tool</div>
+                        <h3 class="text-2xl font-bold text-white mb-3">TreeKey Ledger</h3>
+                        <p class="text-slate-400 leading-relaxed mb-5">Sole traders underquote jobs because the maths happens in their head on the way to site. Ledger does it for you — tracks your rolling 12-month turnover against the £90,000 VAT threshold, runs a live CIS tax tracker, and works out your real van-and-crew cost per day so every quote actually makes you money.</p>
+                        <a href="/login" class="inline-block text-xs font-mono uppercase tracking-wider text-violet-400 hover:brightness-125 border border-violet-500/30 hover:border-violet-400/60 rounded-full px-5 py-2 transition-all">Open Ledger →</a>
+                    </div>
+                </div>
+
+                <!-- 2. Chip-Drop (reversed) -->
+                <div class="flex flex-col md:flex-row-reverse items-center gap-8 md:gap-12">
+                    <div class="w-full md:w-1/2 aspect-video rounded-2xl border-2 border-dashed border-orange-500/30 bg-orange-500/5 flex items-center justify-center text-center p-6 shrink-0">
+                        <span class="text-orange-400/70 text-xs font-mono uppercase tracking-wider">Image placeholder — Chip-Drop screenshot goes here</span>
+                    </div>
+                    <div class="w-full md:w-1/2">
+                        <div class="text-[11px] font-mono uppercase tracking-widest text-orange-400 font-bold mb-2">Site Network</div>
+                        <h3 class="text-2xl font-bold text-white mb-3">Chip-Drop Network</h3>
+                        <p class="text-slate-400 leading-relaxed mb-5">Every job ends with a truck full of woodchip and nowhere free to put it. Chip-Drop is a directory of local allotments, farms and stables who actively want it — landowners register themselves, you just turn up. No more £60–£120 tipping fees, no detour on the way home.</p>
+                        <a href="/chip-drop" class="inline-block text-xs font-mono uppercase tracking-wider text-orange-400 hover:brightness-125 border border-orange-500/30 hover:border-orange-400/60 rounded-full px-5 py-2 transition-all">Find a Drop Spot →</a>
+                    </div>
+                </div>
+
+                <!-- 3. Storm Radar -->
+                <div class="flex flex-col md:flex-row items-center gap-8 md:gap-12">
+                    <div class="w-full md:w-1/2 aspect-video rounded-2xl border-2 border-dashed border-amber-500/30 bg-amber-500/5 flex items-center justify-center text-center p-6 shrink-0">
+                        <span class="text-amber-400/70 text-xs font-mono uppercase tracking-wider">Image placeholder — Storm Radar screenshot goes here</span>
+                    </div>
+                    <div class="w-full md:w-1/2">
+                        <div class="text-[11px] font-mono uppercase tracking-widest text-amber-400 font-bold mb-2">Emergency Alerts</div>
+                        <h3 class="text-2xl font-bold text-white mb-3">Storm Radar</h3>
+                        <p class="text-slate-400 leading-relaxed mb-5">A storm doesn't file a planning application — it just drops a tree on someone's fence at 2am, and whoever calls first gets the job. Storm Radar watches Met Office high-wind warnings (45mph+ gusts) and flags exactly where and when to expect the callouts, so you're first on the phone, not the fifth.</p>
+                        <a href="/storm-radar" class="inline-block text-xs font-mono uppercase tracking-wider text-amber-400 hover:brightness-125 border border-amber-500/30 hover:border-amber-400/60 rounded-full px-5 py-2 transition-all">View Storm Radar →</a>
+                    </div>
+                </div>
+
+                <!-- 4. The App (reversed) -->
+                <div class="flex flex-col md:flex-row-reverse items-center gap-8 md:gap-12">
+                    <div class="w-full md:w-1/2 aspect-video rounded-2xl border-2 border-dashed border-emerald-500/30 bg-emerald-500/5 flex items-center justify-center text-center p-6 shrink-0">
+                        <span class="text-emerald-400/70 text-xs font-mono uppercase tracking-wider">Image placeholder — The App screenshot goes here</span>
+                    </div>
+                    <div class="w-full md:w-1/2">
+                        <div class="text-[11px] font-mono uppercase tracking-widest text-emerald-400 font-bold mb-2">Mobile Access</div>
+                        <h3 class="text-2xl font-bold text-white mb-3">The TreeKey App</h3>
+                        <p class="text-slate-400 leading-relaxed mb-5">No app store, no download, no faff — install TreeKey straight to your home screen and it opens full-screen like any other app. Your leads, Ledger, and Storm Radar alerts, one tap away, chainsaw still in your other hand.</p>
+                        <a href="/login" class="inline-block text-xs font-mono uppercase tracking-wider text-emerald-400 hover:brightness-125 border border-emerald-500/30 hover:border-emerald-400/60 rounded-full px-5 py-2 transition-all">Get the App →</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- Pricing Section (Anchoring & Scarcity) -->
     <section id="pricing" class="relative z-10 py-24 bg-brand-dark/50 border-t border-slate-800/50">
         <div class="max-w-7xl mx-auto px-4">
@@ -1425,95 +1517,41 @@ def public_homepage():
                 </div>
 
             </div>
-        </div>
-    </section>
 
-    <!-- Sep 9 2026, Nick's ask: "under the 3 price groups I want a less
-         conspicuous section saying ... buy your leads one at a time ... with
-         price button selection to marketplace ... a note telling you these
-         aren't your only options and more specific packages are available."
-         Deliberately small/muted (not another full pricing section) so it
-         doesn't compete with the 3 subscription tiers above -- just a quiet
-         off-ramp for anyone who scrolled past them without subscribing.
-         Buttons all point at /marketplace itself (not a filtered URL) since
-         there's no actual size/price filter on that route to link to --
-         showing a price next to a link that doesn't filter to it would be
-         exactly the kind of fabricated-precision claim already stripped out
-         of this codebase elsewhere (see PROJECT_STATE.md items 11-13). -->
-    <section class="py-10 border-t border-slate-800/50">
-        <div class="container mx-auto px-4 max-w-3xl text-center">
-            <p class="text-slate-400 text-sm">
-                Not ready for a subscription? Buy leads one at a time instead, from as little as
-                <a href="/marketplace" class="text-emerald-400 font-bold hover:brightness-125">£19</a> —
-                <a href="/marketplace" class="text-slate-300 hover:brightness-125 underline decoration-slate-600">£29</a> and
-                <a href="/marketplace" class="text-slate-300 hover:brightness-125 underline decoration-slate-600">£49</a> tiers also available depending on job size.
-                No subscription, no commitment — browse and buy only the ones you want.
-            </p>
-            <a href="/marketplace" class="inline-block mt-3 text-xs font-mono uppercase tracking-wider text-sky-400 hover:brightness-125 border border-sky-500/30 hover:border-sky-400/60 rounded-full px-4 py-1.5 transition-all">
-                Browse the Marketplace →
-            </a>
-            <p class="text-slate-600 text-xs mt-3">
-                These aren't your only options — <a href="/pricing" class="text-slate-400 hover:text-slate-300 underline">see the full range of packages</a> tailored to your trade and job size.
-            </p>
-        </div>
-    </section>
-
-    <!-- Sep 8 2026: LEDGER and CHIP-DROP used to live in the top public nav
-         with zero explanation ("what is ledger?" was Nick's own reaction
-         testing the live site). Both are real, free contractor tools --
-         this section explains them where a visitor actually has the
-         context (right after seeing the pricing) instead of as unlabelled
-         nav items, and doubles as the "mention Chip-Drop on the main page"
-         fix. -->
-    <section class="section py-16 bg-[#0b1220] border-t border-slate-800">
-        <div class="container mx-auto px-4 max-w-5xl">
-            <div class="text-center mb-10">
-                <h2 class="text-2xl font-extrabold text-white font-mono uppercase tracking-tight">Free Tools Built Into TreeKey</h2>
-                <p class="text-slate-400 mt-2 text-sm">Not just leads — free tools for running a tree surgery business day-to-day.</p>
-            </div>
-            <!-- Sep 8 2026: dropped the emoji icons here per Nick ("look
-                 cheap") -- a slim colour-coded accent bar reads cleaner and
-                 more professional. -->
-            <!-- Sep 9 2026, Nick's ask: "the main page should also have
-                 reference and buttons to the app and description for what
-                 the app does and why you want it, same for storm radar" --
-                 same "what is X?" problem Ledger/Chip-Drop had before Sep 8
-                 (nav-only, zero explanation) applied to these two as well,
-                 since neither had a homepage explainer at all before this --
-                 only a bare nav link (Storm Radar) or nothing (the PWA
-                 install button, easy to miss in the nav). Added as two more
-                 cards in this same grid, each with its own button since
-                 Nick specifically asked for buttons here (the original two
-                 cards didn't have any -- added matching ones there too for
-                 consistency). -->
-            <div class="grid md:grid-cols-2 gap-6">
-                <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700 border-t-2 border-t-violet-400">
-                    <div class="text-[11px] font-mono uppercase tracking-widest text-violet-400 font-bold mb-2">Financial Tool</div>
-                    <h3 class="text-lg font-bold text-white mb-2">TreeKey Ledger</h3>
-                    <p class="text-slate-400 text-sm leading-relaxed mb-4">A financial dashboard built for sole-trader and small-crew tree surgeons: tracks your rolling 12-month turnover against the £90,000 UK VAT threshold, holds a running CIS developer-tax tracker, and includes a van/crew-day cost calculator so you never underquote a job. Free in your dashboard once you subscribe.</p>
-                    <a href="/login" class="inline-block text-xs font-mono uppercase tracking-wider text-violet-400 hover:brightness-125 border border-violet-500/30 hover:border-violet-400/60 rounded-full px-4 py-1.5 transition-all">Open Ledger →</a>
+            <!-- Sep 9 2026, Nick's ask: "under the 3 price groups I want a
+                 section saying ... buy your leads one at a time ... with
+                 price button selection to marketplace ... a note telling you
+                 these aren't your only options." First pass put this in its
+                 own separate section below -- Nick's follow-up feedback was
+                 that it read as "too inconspicuous and too far away from the
+                 other subscription buttons." Moved inside THIS section,
+                 directly under the pricing grid, as a real bordered card
+                 (not muted plain text) so it reads as part of the same
+                 pricing decision instead of an afterthought several
+                 scroll-lengths down. Still visually secondary to the 3 tier
+                 cards above (no big price display, one row, quieter colour)
+                 since it's a fallback option, not the primary offer.
+                 Buttons all point at /marketplace itself (not a filtered
+                 URL) since there's no actual size/price filter on that route
+                 to link to -- showing a price next to a link that doesn't
+                 filter to it would be exactly the kind of fabricated-
+                 precision claim already stripped out of this codebase
+                 elsewhere (see PROJECT_STATE.md items 11-13). -->
+            <div class="mt-8 bg-slate-900/60 border border-slate-700 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-5">
+                <div class="text-center md:text-left">
+                    <p class="text-white font-bold text-sm">Not ready for a subscription? Buy leads one at a time instead.</p>
+                    <p class="text-slate-400 text-sm mt-1">
+                        From <span class="text-emerald-400 font-bold">£19</span> · <span class="text-slate-300 font-bold">£29</span> · <span class="text-slate-300 font-bold">£49</span> depending on job size — no commitment, browse and buy only the ones you want.
+                        These aren't your only options either — <a href="/pricing" class="text-slate-300 hover:text-white underline">see the full range of packages</a> tailored to your trade.
+                    </p>
                 </div>
-                <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700 border-t-2 border-t-orange-400">
-                    <div class="text-[11px] font-mono uppercase tracking-widest text-orange-400 font-bold mb-2">Site Network</div>
-                    <h3 class="text-lg font-bold text-white mb-2">Chip-Drop Network</h3>
-                    <p class="text-slate-400 text-sm leading-relaxed mb-4">A directory of local allotments, farms and stables who want your arborist woodchip and logs for free — skip the £60–£120 commercial tipping fee and the round trip on every job. Landowners register their own site; you just turn up.</p>
-                    <a href="/chip-drop" class="inline-block text-xs font-mono uppercase tracking-wider text-orange-400 hover:brightness-125 border border-orange-500/30 hover:border-orange-400/60 rounded-full px-4 py-1.5 transition-all">Find a Drop Spot →</a>
-                </div>
-                <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700 border-t-2 border-t-amber-400">
-                    <div class="text-[11px] font-mono uppercase tracking-widest text-amber-400 font-bold mb-2">Emergency Alerts</div>
-                    <h3 class="text-lg font-bold text-white mb-2">Storm Radar</h3>
-                    <p class="text-slate-400 text-sm leading-relaxed mb-4">Live Met Office high-wind warnings (45mph+ gusts), matched to your patch. Storm damage means urgent, higher-value call-outs — this flags exactly where and when to expect them, so you're first on the phone, not the fifth.</p>
-                    <a href="/storm-radar" class="inline-block text-xs font-mono uppercase tracking-wider text-amber-400 hover:brightness-125 border border-amber-500/30 hover:border-amber-400/60 rounded-full px-4 py-1.5 transition-all">View Storm Radar →</a>
-                </div>
-                <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700 border-t-2 border-t-emerald-400">
-                    <div class="text-[11px] font-mono uppercase tracking-widest text-emerald-400 font-bold mb-2">Mobile Access</div>
-                    <h3 class="text-lg font-bold text-white mb-2">The TreeKey App</h3>
-                    <p class="text-slate-400 text-sm leading-relaxed mb-4">Install TreeKey to your phone's home screen like a normal app — no app store needed. Your leads, Ledger, and Storm Radar alerts, one tap away, full-screen, with no browser bar in the way.</p>
-                    <a href="/login" class="inline-block text-xs font-mono uppercase tracking-wider text-emerald-400 hover:brightness-125 border border-emerald-500/30 hover:border-emerald-400/60 rounded-full px-4 py-1.5 transition-all">Get the App →</a>
-                </div>
+                <a href="/marketplace" class="shrink-0 inline-block text-center bg-sky-500 hover:bg-sky-400 text-white font-extrabold py-3 px-6 rounded-lg transition-all duration-300 uppercase tracking-wider text-sm">
+                    Browse the Marketplace →
+                </a>
             </div>
         </div>
     </section>
+
 
     <!-- Sep 8 2026, Nick's ask: a real photo of UK tree work, supplied by
          Nick, breaking up the page per his long-standing "need pictures"
@@ -1585,6 +1623,21 @@ def public_homepage():
                 <p class="text-slate-600">Contact: nick@treekey.uk</p>
             </div>
             <div class="flex gap-6 text-xs font-mono uppercase tracking-wider flex-wrap justify-center md:justify-end shrink-0 pt-2">
+                <!-- Sep 9 2026, Nick's ask: "we need a way for people to
+                     contact us for help (multiple ways) ... refer them to
+                     FAQ ... we need a suggestions [link] everywhere (email,
+                     site, different screens)" -- FAQ and Suggestions already
+                     existed as real pages but weren't linked from the
+                     footer, so most pages never surfaced them. Help is a
+                     direct mailto to the same contact@treekey.uk address
+                     already used everywhere else on the site (ToS, Privacy,
+                     FAQ) -- this footer previously showed a different
+                     address in plain text below ("nick@treekey.uk"); worth
+                     confirming with Nick whether that should also change to
+                     contact@treekey.uk or genuinely routes differently. -->
+                <a href="mailto:contact@treekey.uk" class="text-slate-400 hover:text-white transition-colors">Help</a>
+                <a href="/faq" class="text-slate-400 hover:text-white transition-colors">FAQ</a>
+                <a href="/suggestions" class="text-slate-400 hover:text-white transition-colors">Suggestions</a>
                 <a href="/privacy-policy" class="text-slate-400 hover:text-white transition-colors">Privacy</a>
                 <a href="/terms-of-service" class="text-slate-400 hover:text-white transition-colors">Terms</a>
                 <!-- Sep 5 2026: Nick flagged this as "what is datahub? broken link".
