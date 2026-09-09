@@ -2574,7 +2574,8 @@ def _size_mix_select(pool: list, limit: int) -> list:
 
 
 def select_diverse_ticker_leads(limit: int = 5, enforce_geo_mix: bool = True,
-                                 pool_rows: list = None, pool_limit: int = 150) -> list:
+                                 pool_rows: list = None, pool_limit: int = 150,
+                                 max_fresh_lookups: int = 20) -> list:
     """Sep 8 2026, Nick's ask: the live feed used to just show the last 5
     leads discovered, full stop -- which meant a busy scan of one council
     could fill the whole ticker with near-identical entries from a single
@@ -2605,11 +2606,51 @@ def select_diverse_ticker_leads(limit: int = 5, enforce_geo_mix: bool = True,
             logger.error(f"[Ticker] Error fetching lead pool: {e}")
             return []
 
-    pool = []
+    # Sep 8 2026: Nick flagged the homepage as "taking so long to load".
+    # Root cause -- this loop used to call get_outcode_area_label() once per
+    # lead in the pool (up to pool_limit=150 leads, on every single
+    # pageview), and that function opens its own fresh Postgres connection
+    # per call (two, on a cache miss) plus a live postcodes.io HTTP call on
+    # any cache miss. That's up to 150 fresh DB connections opened
+    # sequentially just to render the homepage -- a classic N+1, and almost
+    # certainly the actual cause of the slow load (not image size or the
+    # Leaflet script tags, which are comparatively minor). Same fix as the
+    # one already applied to classify_leads_by_radius today: pull every
+    # distinct outcode once, batch-read their cache rows in a single query,
+    # and only fall back to a live lookup for a capped number of genuine
+    # cache misses.
+    parsed_rows = []
+    distinct_outcodes = set()
     for address, summary, lead_score, lead_price, council_source, reference, discovered_at in pool_rows:
         outcodes = _extract_outcodes(address)
         outcode = outcodes[0] if outcodes else None
-        area = get_outcode_area_label(outcode) if outcode else {"district": None, "is_london": False, "label": "UK"}
+        parsed_rows.append((address, summary, lead_score, lead_price, council_source, reference, discovered_at, outcode))
+        if outcode:
+            distinct_outcodes.add(outcode)
+
+    area_by_outcode = {}
+    if distinct_outcodes:
+        try:
+            conn = get_db_conn()
+            cur = conn.cursor()
+            cur.execute("SELECT outcode, district, is_london, lat, lon FROM outcode_area_cache WHERE outcode = ANY(%s)",
+                        (list(distinct_outcodes),))
+            for oc, district, is_london, lat, lon in cur.fetchall():
+                label = f"{oc}, {district}, London" if (district and is_london) else (f"{oc}, {district}" if district else oc)
+                area_by_outcode[oc] = {"district": district, "is_london": bool(is_london), "label": label,
+                                        "lat": lat, "lon": lon}
+            cur.close()
+            conn.close()
+        except Exception as e:
+            logger.debug(f"[Ticker] batch area-cache read failed: {e}")
+
+        missing = [oc for oc in distinct_outcodes if oc not in area_by_outcode]
+        for oc in missing[:max_fresh_lookups]:
+            area_by_outcode[oc] = get_outcode_area_label(oc)  # live lookup; also writes through to the cache
+
+    pool = []
+    for address, summary, lead_score, lead_price, council_source, reference, discovered_at, outcode in parsed_rows:
+        area = area_by_outcode.get(outcode) or {"district": None, "is_london": False, "label": (outcode or "UK")}
         pool.append({
             "address": address, "summary": summary, "lead_score": (lead_score or "small"),
             "lead_price": lead_price, "council_source": council_source, "reference": reference,

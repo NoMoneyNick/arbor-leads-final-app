@@ -804,8 +804,16 @@ def public_homepage():
     <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link href="/static/tailwind.css" rel="stylesheet">
     <script>if ('serviceWorker' in navigator) {{ window.addEventListener('load', () => {{ navigator.serviceWorker.register('/sw.js'); }}); }}</script>
+    <!-- Sep 8 2026: Nick flagged the whole page as slow to load. Leaflet's
+         CSS stays here (needed before the map renders, and stylesheets
+         don't block HTML parsing), but leaflet.js was a blocking <script
+         src> in <head> -- that halts parsing of the ENTIRE page (nav, hero,
+         ticker, everything) until that third-party file finishes
+         downloading from unpkg.com, even though the map isn't used until
+         near the bottom of the page. Moved the script tag down to just
+         before the inline script that actually calls L.map(), right before
+         </body> -- see there for leaflet.js itself. -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         ::-webkit-scrollbar {{ width: 8px; }}
         ::-webkit-scrollbar-track {{ background: #020617; }}
@@ -1358,6 +1366,7 @@ def public_homepage():
         </div>
     </footer>
 
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         // Default to zoomed out Great Britain view
         let map = L.map('map', {{ zoomControl: false }}).setView([54.5, -4.0], 6);
