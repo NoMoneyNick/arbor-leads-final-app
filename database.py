@@ -3652,6 +3652,56 @@ def is_urgent_lead(summary: str) -> bool:
     return any(kw in text for kw in _URGENT_KEYWORDS)
 
 
+# Sep 9 2026, Nick's ask: the marketplace should open with "simple large
+# buttons -- what kinds of leads are you looking for? crown work, stump
+# removal ect" instead of forcing everyone through the tier tabs. There's
+# no structured job-type column on a lead (scanners.py's own JOB_TYPE_KEYWORDS
+# is used for a different, coarser tag), so this is the same honest,
+# best-effort keyword-classification approach as is_urgent_lead above --
+# checked in priority order so a lead mentioning both, e.g., "storm damage"
+# and "crown reduction" gets bucketed as the more urgent/specific category
+# first. A lead matching none of them honestly falls into General/Other
+# rather than being force-fit or hidden.
+JOB_CATEGORIES = {
+    "storm_emergency": {
+        "label": "Storm & Emergency", "icon": "storm", "color": "#dc2626",
+        "keywords": _URGENT_KEYWORDS,
+    },
+    "stump_grinding": {
+        "label": "Stump Grinding", "icon": "stump", "color": "#7c3aed",
+        "keywords": ("stump grinding", "stump removal", "grind the stump", "stump treatment", "remove the stump", "stump only"),
+    },
+    "hedge_work": {
+        "label": "Hedge Work", "icon": "hedge", "color": "#0284c7",
+        "keywords": ("hedge trimming", "hedge reduction", "hedge removal", "hedgerow", "leylandii hedge", "trim the hedge"),
+    },
+    "crown_work": {
+        "label": "Crown Work", "icon": "crown", "color": "#059669",
+        "keywords": ("crown reduction", "crown lift", "crown lifting", "crown thin", "crown thinning", "crown raise", "crown raising", "crown clean", "canopy reduction", "canopy thin", "pollard"),
+    },
+    "felling": {
+        "label": "Felling & Removal", "icon": "fell", "color": "#d97706",
+        "keywords": ("fell", "felling", "removal of", "remove the tree", "take down", "dismantle", "sectional dismantling"),
+    },
+}
+_JOB_CATEGORY_ORDER = ("storm_emergency", "stump_grinding", "hedge_work", "crown_work", "felling")
+_GENERAL_CATEGORY = {"key": "general", "label": "General / Other Tree Work", "icon": "general", "color": "#64748b"}
+
+
+def classify_job_category(summary: str) -> dict:
+    """Best-effort job-category classification for the marketplace's
+    category buttons/filter and card outline colour -- see JOB_CATEGORIES
+    comment above. Never fabricates a category it can't support from the
+    lead's own text."""
+    if summary:
+        text = summary.lower()
+        for key in _JOB_CATEGORY_ORDER:
+            cat = JOB_CATEGORIES[key]
+            if any(kw in text for kw in cat["keywords"]):
+                return {"key": key, "label": cat["label"], "icon": cat["icon"], "color": cat["color"]}
+    return dict(_GENERAL_CATEGORY)
+
+
 def _sort_key_discovered_at(lead: dict) -> float:
     """Descending-time sort key (most recent first) for use as the secondary
     key alongside urgency in get_marketplace_leads_with_freshness. Missing
@@ -3704,10 +3754,16 @@ def _is_agent_already_handling_the_job(lead: dict) -> bool:
     return lead.get("agent_is_tree_surgeon") is not False
 
 
-def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 40) -> list:
+def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 40, filter_category: str = None,
+                                          target_lat: float = None, target_lng: float = None,
+                                          radius_miles: float = None, max_fresh_lookups: int = 20) -> list:
     """
     Returns unallocated leads enriched with their dynamic statutory freshness calculation.
-    Supports filtering by tier ('council', 'domestic', 'flash_hot', 'active', 'clearance', 'granted').
+    Supports filtering by tier ('council', 'domestic', 'flash_hot', 'active', 'clearance', 'granted'),
+    by job category (see JOB_CATEGORIES/classify_job_category above), and by postcode + radius
+    (Sep 9 2026, Nick's ask -- the marketplace itself, not just the homepage radar, now supports
+    a real "enter your postcode and a distance" search; target_lat/target_lng/radius_miles come
+    from resolve_location() on the customer's typed postcode/outcode).
     Enforces strict separation so council planning notices and private domestic leads are never conflated.
     """
     if not SURL:
@@ -3814,8 +3870,38 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
             for l, oc in zip(raw_leads, _outcodes_by_lead):
                 l["area_label"] = _area_by_outcode.get(oc, oc or "Area unavailable")
 
+            # Sep 9 2026: postcode+radius search for the marketplace itself
+            # (see this function's docstring). Same batched
+            # cache-then-capped-live-lookup pattern as classify_leads_by_radius
+            # above, reusing the outcodes already extracted for area_label
+            # rather than re-parsing every address a second time. Both dicts
+            # are initialised unconditionally so the per-lead loop below never
+            # hits a NameError when no radius search is active.
+            _coords_by_outcode = {}
+            _dist_by_lead = {}
+            if target_lat is not None and target_lng is not None and _distinct_outcodes:
+                try:
+                    cur.execute("SELECT outcode, lat, lon FROM outcode_area_cache WHERE outcode = ANY(%s)",
+                                (list(_distinct_outcodes),))
+                    for oc, lat, lon in cur.fetchall():
+                        if lat is not None and lon is not None:
+                            _coords_by_outcode[oc] = (lat, lon)
+                except Exception as e:
+                    logger.debug(f"[Marketplace] batch coord-cache read failed: {e}")
+
+                _missing_coords = [oc for oc in _distinct_outcodes if oc not in _coords_by_outcode]
+                for oc in _missing_coords[:max_fresh_lookups]:
+                    area = get_outcode_area_label(oc)  # also writes through to outcode_area_cache
+                    if area.get("lat") is not None and area.get("lon") is not None:
+                        _coords_by_outcode[oc] = (area["lat"], area["lon"])
+
+                for idx, oc in enumerate(_outcodes_by_lead):
+                    if oc and oc in _coords_by_outcode:
+                        lead_lat, lead_lon = _coords_by_outcode[oc]
+                        _dist_by_lead[idx] = haversine_miles(target_lat, target_lng, lead_lat, lead_lon)
+
             enriched = []
-            for l in raw_leads:
+            for idx, l in enumerate(raw_leads):
                 freshness = calculate_lead_freshness(l["discovered_at"], l["status"], l["summary"], source_type=l.get("source_type", "council_planning"), registered_date=l.get("reg_date"))
                 if freshness.get("tier") == "expired":
                     continue
@@ -3874,16 +3960,26 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                         l["badge_text"] = "🏛️ Council Statutory"
 
                 l["is_urgent"] = is_urgent_lead(l.get("summary"))
+                l["job_category"] = classify_job_category(l.get("summary"))
 
-                # Filter routing
-                if not filter_tier or filter_tier == "all":
-                    enriched.append(l)
-                elif filter_tier == "council" and l["source_type"] == "council_planning":
-                    enriched.append(l)
-                elif filter_tier == "domestic" and l["source_type"] in ("domestic_classified", "direct_homeowner"):
-                    enriched.append(l)
-                elif l["tier"] == filter_tier:
-                    enriched.append(l)
+                # Filter routing -- tier, then job category (Sep 9 2026's
+                # "what kind of leads are you looking for?" buttons), then
+                # postcode+radius search, all independently optional so any
+                # combination (or none) can be active at once.
+                passes_tier = (
+                    (not filter_tier or filter_tier == "all")
+                    or (filter_tier == "council" and l["source_type"] == "council_planning")
+                    or (filter_tier == "domestic" and l["source_type"] in ("domestic_classified", "direct_homeowner"))
+                    or (l["tier"] == filter_tier)
+                )
+                if not passes_tier:
+                    continue
+                if filter_category and filter_category != "all" and l["job_category"]["key"] != filter_category:
+                    continue
+                if radius_miles is not None and target_lat is not None and target_lng is not None:
+                    if idx not in _dist_by_lead or _dist_by_lead[idx] > radius_miles:
+                        continue
+                enriched.append(l)
 
                 # Aug 31 2026: this used to break out of the loop as soon as
                 # `limit` matching leads were collected, in discovered_at-DESC

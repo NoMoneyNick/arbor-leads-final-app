@@ -9,6 +9,10 @@
     --color-red-300: oklch(80.8% 0.114 19.571);
     --color-red-400: oklch(70.4% 0.191 22.216);
     --color-red-500: oklch(63.7% 0.237 25.331);
+    /* Sep 9 2026: added for the login page's dark-theme error banner (see
+       login_page in main.py) -- value from Tailwind's own default v4
+       palette. */
+    --color-red-950: oklch(25.8% 0.092 26.042);
     --color-emerald-200: oklch(90.5% 0.093 164.15);
     --color-amber-300: oklch(87.9% 0.169 91.605);
     --color-amber-400: oklch(82.8% 0.189 84.429);
@@ -278,6 +282,9 @@
   .top-0 {
     top: 0px;
   }
+  .right-0 {
+    right: 0px;
+  }
   .left-1\/2 {
     left: calc(1 / 2 * 100%);
   }
@@ -320,6 +327,9 @@
   .mt-4 {
     margin-top: calc(var(--spacing) * 4);
   }
+  .mt-5 {
+    margin-top: calc(var(--spacing) * 5);
+  }
   .mt-6 {
     margin-top: calc(var(--spacing) * 6);
   }
@@ -340,6 +350,9 @@
   }
   .mb-1 {
     margin-bottom: var(--spacing);
+  }
+  .mb-1\.5 {
+    margin-bottom: calc(var(--spacing) * 1.5);
   }
   .mb-2 {
     margin-bottom: calc(var(--spacing) * 2);
@@ -370,6 +383,9 @@
   }
   .block {
     display: block;
+  }
+  .box-border {
+    box-sizing: border-box;
   }
   .flex {
     display: flex;
@@ -440,6 +456,9 @@
   .w-12 {
     width: calc(var(--spacing) * 12);
   }
+  .w-64 {
+    width: calc(var(--spacing) * 64);
+  }
   .w-full {
     width: 100%;
   }
@@ -448,6 +467,9 @@
   }
   .min-w-0 {
     min-width: calc(var(--spacing) * 0);
+  }
+  .min-w-\[160px\] {
+    min-width: 160px;
   }
   .max-w-2xl {
     max-width: var(--container-2xl);
@@ -502,6 +524,9 @@
   .grid-cols-1 {
     grid-template-columns: repeat(1, minmax(0, 1fr));
   }
+  .grid-cols-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
   .grid-cols-\[56px_92px_1fr_86px_60px\] {
     grid-template-columns: 56px 92px 1fr 86px 60px;
   }
@@ -528,6 +553,9 @@
   }
   .items-start {
     align-items: flex-start;
+  }
+  .items-end {
+    align-items: flex-end;
   }
   .justify-between {
     justify-content: space-between;
@@ -673,6 +701,14 @@
   .border-emerald-950 {
     border-color: var(--color-emerald-950);
   }
+  /* Sep 9 2026: marketplace search redesign (see marketplace_view in
+     main.py). */
+  .bg-emerald-950\/30 {
+    background-color: color-mix(in srgb, oklch(26.2% 0.051 172.552) 30%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-emerald-950) 30%, transparent);
+    }
+  }
   .border-slate-600 {
     border-color: var(--color-slate-600);
   }
@@ -767,6 +803,12 @@
     background-color: color-mix(in srgb, oklch(27.9% 0.041 260.031) 50%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       background-color: color-mix(in oklab, var(--color-slate-800) 50%, transparent);
+    }
+  }
+  .bg-slate-800\/60 {
+    background-color: color-mix(in srgb, oklch(27.9% 0.041 260.031) 60%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-slate-800) 60%, transparent);
     }
   }
   .bg-slate-800\/80 {
@@ -915,6 +957,9 @@
   }
   .pt-4 {
     padding-top: calc(var(--spacing) * 4);
+  }
+  .pt-5 {
+    padding-top: calc(var(--spacing) * 5);
   }
   .pt-8 {
     padding-top: calc(var(--spacing) * 8);
@@ -1119,6 +1164,9 @@
   .uppercase {
     text-transform: uppercase;
   }
+  .normal-case {
+    text-transform: none;
+  }
   .no-underline {
     text-decoration-line: none;
   }
@@ -1289,6 +1337,9 @@
   .px-5 {
     padding-inline: calc(var(--spacing) * 5);
   }
+  .px-6 {
+    padding-inline: calc(var(--spacing) * 6);
+  }
   .py-16 {
     padding-block: calc(var(--spacing) * 16);
   }
@@ -1434,8 +1485,21 @@
       --tw-translate-y: calc(var(--spacing) * -1);
       translate: var(--tw-translate-x) var(--tw-translate-y);
     }
+    .hover\:-translate-y-0\.5:hover {
+      --tw-translate-y: calc(var(--spacing) * -0.5);
+      translate: var(--tw-translate-x) var(--tw-translate-y);
+    }
+    .hover\:brightness-110:hover {
+      --tw-brightness: brightness(110%);
+      filter: var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,);
+    }
     .hover\:border-emerald-500\/50:hover {
       border-color: color-mix(in srgb, oklch(69.6% 0.17 162.48) 50%, transparent);
+    }
+    /* Sep 9 2026: marketplace search/category redesign (see marketplace_view
+       in main.py). */
+    .hover\:text-emerald-200:hover {
+      color: var(--color-emerald-200);
     }
     @supports (color: color-mix(in lab, red, red)) {
       .hover\:border-emerald-500\/50:hover {
@@ -1505,12 +1569,18 @@
   .focus\:border-brand-green:focus {
     border-color: var(--color-brand-green);
   }
+  .focus\:border-emerald-500:focus {
+    border-color: var(--color-emerald-500);
+  }
   .focus\:bg-slate-900:focus {
     background-color: var(--color-slate-900);
   }
   .focus\:outline-none:focus {
     --tw-outline-style: none;
     outline-style: none;
+  }
+  .placeholder\:text-slate-500::placeholder {
+    color: var(--color-slate-500);
   }
   @media (width >= 40rem) {
     .sm\:hidden {
@@ -1522,8 +1592,14 @@
     .sm\:grid {
       display: grid;
     }
+    .sm\:grid-cols-6 {
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
     .sm\:pt-8 {
       padding-top: calc(var(--spacing) * 8);
+    }
+    .sm\:p-6 {
+      padding: calc(var(--spacing) * 6);
     }
     .sm\:bg-\[linear-gradient\(to_bottom\,rgba\(2\,6\,23\,0\.3\)\,rgba\(2\,6\,23\,0\.5\)\,rgba\(2\,6\,23\,0\.7\)\)\] {
       background-image: linear-gradient(to bottom,rgba(2,6,23,0.3),rgba(2,6,23,0.5),rgba(2,6,23,0.7));
@@ -1592,6 +1668,10 @@
     }
     .sm\:text-right {
       text-align: right;
+    }
+    /* Sep 9 2026: login page redesign (see login_page in main.py). */
+    .sm\:py-16 {
+      padding-block: calc(var(--spacing) * 16);
     }
   }
   @media (width >= 48rem) {
@@ -1697,6 +1777,34 @@
     }
     .lg\:pt-10 {
       padding-top: calc(var(--spacing) * 10);
+    }
+  }
+  /* Sep 9 2026: login page redesign (see login_page in main.py). */
+  .border-none {
+    border-style: none;
+  }
+  .cursor-pointer {
+    cursor: pointer;
+  }
+  .max-w-\[420px\] {
+    max-width: 420px;
+  }
+  .max-w-\[440px\] {
+    max-width: 440px;
+  }
+  .text-\[15px\] {
+    font-size: 15px;
+  }
+  .bg-red-950\/40 {
+    background-color: color-mix(in srgb, oklch(25.8% 0.092 26.042) 40%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-red-950) 40%, transparent);
+    }
+  }
+  .border-red-500\/40 {
+    border-color: color-mix(in srgb, oklch(63.7% 0.237 25.331) 40%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-red-500) 40%, transparent);
     }
   }
 }

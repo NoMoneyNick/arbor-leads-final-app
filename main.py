@@ -135,7 +135,7 @@ def scan_nationwide_fast(secret: Optional[str] = Query(None)):
     """
     verify_cron_secret(secret)
     result = _dispatch_locked_scan(scanners.scan_nationwide_bulk_crawler, "nationwide_bulk_crawl")
-    result["coverage"] = "124 UK Outward Postcodes & 300+ Councils"
+    result["coverage"] = "124 UK Outward Postcodes & 300+ Councils & National Parks"
     return result
 
 
@@ -874,9 +874,9 @@ def public_homepage():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TreeKey | UK Tree Surgery Planning Intelligence</title>
-    <meta name="description" content="TreeKey intercepts live UK council planning applications for tree surgery work. Get exclusive leads delivered to tree surgeons before competitors know they exist.">
+    <meta name="description" content="TreeKey intercepts live UK council and National Park planning applications for tree surgery work. Get exclusive leads delivered to tree surgeons before competitors know they exist.">
     <meta property="og:title" content="TreeKey | UK Tree Surgery Planning Intelligence">
-    <meta property="og:description" content="Exclusive tree surgery leads from live UK planning applications. Council TPO notices, S211 felling approvals, and domestic homeowner jobs — delivered first.">
+    <meta property="og:description" content="Exclusive tree surgery leads from live UK planning applications. Council and National Park TPO notices, S211 felling approvals, and domestic homeowner jobs — delivered first.">
     <meta property="og:url" content="https://treekey.uk">
     <meta property="og:type" content="website">
     <!-- Sep 8 2026, Nick's ask: there was no og:image at all, so Google/
@@ -968,6 +968,15 @@ def public_homepage():
                         <a href="/pricing" class="hover:brightness-125 transition-all text-rose-400 font-bold">PACKAGES</a>
                         <a href="/faq" class="hover:brightness-125 transition-all text-violet-400 font-bold">FAQ</a>
                     </div>
+                    <div class="relative">
+                        <button id="pwaInstallBtn" onclick="tkInstallApp()" type="button" class="hidden items-center gap-1.5 bg-slate-800/60 text-emerald-300 border border-emerald-500/40 px-3.5 py-1.5 rounded-lg font-bold uppercase text-xs hover:bg-emerald-600 hover:text-white transition-all">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 3v12"></path><polyline points="7 10 12 15 17 10"></polyline><path d="M5 19h14"></path></svg>
+                            Install App
+                        </button>
+                        <div id="pwaInstallTip" class="hidden absolute right-0 mt-2 w-64 bg-slate-900 border border-emerald-500/30 rounded-lg p-3 text-[11px] text-slate-300 shadow-2xl z-50 font-sans normal-case font-normal leading-relaxed">
+                            Tap the <b class="text-white">Share</b> icon in Safari, then <b class="text-white">"Add to Home Screen"</b> to install TreeKey.
+                        </div>
+                    </div>
                     <a href="/login" class="bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 px-3.5 py-1.5 rounded-lg font-bold uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-[0_0_15px_rgba(5,150,105,0.2)]">
                         Sign Up / Log In ➔
                     </a>
@@ -1032,7 +1041,7 @@ def public_homepage():
             <div class="order-2 sm:order-1 bg-[#0A1A12]/80 border border-emerald-900/50 rounded-xl overflow-hidden shadow-2xl mb-6">
                 <div class="flex items-center gap-2 px-4 py-3 border-b border-emerald-900/50">
                     <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
-                    <span class="font-mono text-[11px] uppercase tracking-widest text-emerald-400">Live Feed — 360+ UK Council Portals</span>
+                    <span class="font-mono text-[11px] uppercase tracking-widest text-emerald-400">Live Feed — 360+ UK Council & National Park Portals</span>
                 </div>
                 <p class="px-4 pt-3 pb-1 text-[11px] font-mono text-slate-500 leading-relaxed">Real notices from our scan, sized by job scope — not anything you pay TreeKey.</p>
                 <div class="mt-1" id="heroTicker">
@@ -1105,13 +1114,13 @@ def public_homepage():
 
                 <!-- The Big Claim -->
                 <h1 class="text-4xl md:text-6xl font-extrabold text-white tracking-tight mb-4 sm:mb-6 leading-tight">
-                    Every job, the moment the council files it.<br>
+                    Every job, the moment it's filed.<br>
                     <span class="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-amber-500">Not the moment your rivals hear about it.</span>
                 </h1>
 
                 <!-- The Pain/Solution Frame -->
                 <p class="mt-4 max-w-2xl mx-auto text-lg text-slate-400 leading-relaxed font-medium">
-                    We watch 360+ UK council planning portals so you don't have to check them between jobs.
+                    We watch 360+ UK council and National Park planning portals so you don't have to check them between jobs.
                     <br><strong class="text-slate-200">When a real felling licence or TPO notice lands in your patch, it's yours first — chainsaw still in the van.</strong>
                 </p>
 
@@ -1181,7 +1190,7 @@ def public_homepage():
                         </div>
                         <div class="flex items-center gap-1.5 text-xs font-mono text-slate-300">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500 shrink-0"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-                            Sourced Directly From Council Planning Registers
+                            Sourced Directly From Council & National Park Planning Registers
                         </div>
                     </div>
                     <!-- Sep 8 2026, Nick's ask: the original logo he supplied,
@@ -1306,7 +1315,7 @@ def public_homepage():
                 <div class="h-12 w-12 rounded bg-amber-500/10 flex items-center justify-center mb-6 border border-amber-500/30 text-amber-400">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
                 </div>
-                <h3 class="text-xl font-bold text-white mb-3">Multi-Council Network Effect</h3>
+                <h3 class="text-xl font-bold text-white mb-3">Multi-Authority Network Effect</h3>
                 <p class="text-slate-400 text-sm leading-relaxed">Commercial clearance jobs often span across borough borders. Our algorithms aggregate planning portals across <strong class="text-slate-200">connected local authorities</strong> simultaneously, granting you access to massive 'bonus' jobs just outside your immediate boundary.</p>
             </div>
 
@@ -1316,7 +1325,7 @@ def public_homepage():
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
                 </div>
                 <h3 class="text-xl font-bold text-white mb-3">Intercept Before Competitors</h3>
-                <p class="text-slate-400 text-sm leading-relaxed">Statutory tree work notices are public council records the moment they're filed — most contractors never check them. We monitor the registers directly and route matching jobs to you <strong class="text-slate-200">as soon as they're published,</strong> so you can reach the homeowner before a competitor who's still waiting for the phone to ring.</p>
+                <p class="text-slate-400 text-sm leading-relaxed">Statutory tree work notices are public planning authority records the moment they're filed — most contractors never check them. We monitor the registers directly and route matching jobs to you <strong class="text-slate-200">as soon as they're published,</strong> so you can reach the homeowner before a competitor who's still waiting for the phone to ring.</p>
             </div>
         </div>
     </section>
@@ -1365,7 +1374,7 @@ def public_homepage():
                         <li class="flex items-start gap-3"><svg width="20" class="text-emerald-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 25-Mile Radial Boundary</li>
                         <li class="flex items-start gap-3"><svg width="20" class="text-emerald-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 100% Exclusive Lead Routing</li>
                         <li class="flex items-start gap-3"><svg width="20" class="text-emerald-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Instant SMS/Phone Notifications</li>
-                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Connected-Council Job Access</li>
+                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Connected-Authority Job Access</li>
                     </ul>
                     <a id="btn-checkout-pro" href="#map" class="block w-full text-center bg-emerald-500 hover:bg-emerald-400 text-white font-extrabold py-5 rounded-lg transition-all duration-300 uppercase tracking-widest text-sm shadow-[0_4px_14px_0_rgba(16,185,129,0.39)]">
                         Secure Priority Access
@@ -1759,6 +1768,50 @@ def public_homepage():
                 setTimeout(() => {{ if (active) pollCounts(); scheduleNext(); }}, delay);
             }}
             scheduleNext();
+        }})();
+
+        // Sep 9 2026, Nick's ask: "why don't we have a download the app
+        // button on the main page?" -- TreeKey is a PWA (manifest + sw.js
+        // already registered above), not a native App Store app, so
+        // "installing" means either the browser's native install prompt
+        // (Chrome/Edge/Android, via beforeinstallprompt) or, on iOS Safari
+        // which has no such API, the manual Share -> Add to Home Screen
+        // flow. This shows the nav button only when installing is actually
+        // possible and not already done, and routes each platform to the
+        // right action.
+        (function() {{
+            const btn = document.getElementById('pwaInstallBtn');
+            const tip = document.getElementById('pwaInstallTip');
+            if (!btn) return;
+
+            const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+            if (isStandalone) return; // already installed -- never show the button
+
+            const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+            let deferredPrompt = null;
+
+            if (isIOS) {{
+                btn.classList.remove('hidden');
+                btn.classList.add('inline-flex');
+            }}
+
+            window.addEventListener('beforeinstallprompt', (e) => {{
+                e.preventDefault();
+                deferredPrompt = e;
+                btn.classList.remove('hidden');
+                btn.classList.add('inline-flex');
+            }});
+
+            window.tkInstallApp = function() {{
+                if (isIOS) {{
+                    tip.classList.toggle('hidden');
+                    return;
+                }}
+                if (deferredPrompt) {{
+                    deferredPrompt.prompt();
+                    deferredPrompt.userChoice.finally(() => {{ deferredPrompt = null; }});
+                }}
+            }};
         }})();
     </script>
 </body>
@@ -2247,7 +2300,7 @@ def pricing(request: Request):
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
         <div class="header">
             <h1>Fair Trade Packages & Zero-Reselling Guarantee</h1>
-            <p>Direct statutory council intelligence & photo-verified homeowner leads. 100% exclusive. No shared bidding wars.</p>
+            <p>Direct statutory council & National Park intelligence & photo-verified homeowner leads. 100% exclusive. No shared bidding wars.</p>
         </div>
 
         {msg_banner}
@@ -2293,7 +2346,7 @@ def pricing(request: Request):
                 <tr>
                     <td><b class="text-white">Lead Source</b></td>
                     <td>❌ Unverified ballpark quote seekers & price checkers.</td>
-                    <td style="color:#6ee7b7; font-weight:bold;">✅ Statutory Council Planning Notices (100% committed).</td>
+                    <td style="color:#6ee7b7; font-weight:bold;">✅ Statutory Council & National Park Planning Notices (100% committed).</td>
                 </tr>
                 <tr>
                     <td><b class="text-white">Trade Cost Framing</b></td>
@@ -2422,8 +2475,8 @@ def partner_offer_page(src: str = "unknown"):
     </head>
     <body>
     <div class="box">
-        <h1>🌳 Real planning-application tree leads, straight from the council register</h1>
-        <p>TreeKey scans UK council planning portals every day for TPO, felling, and tree-work applications the moment they're filed -- so you can quote before anyone else even knows the job exists.</p>
+        <h1>🌳 Real planning-application tree leads, straight from the council & National Park register</h1>
+        <p>TreeKey scans UK council and National Park planning portals every day for TPO, felling, and tree-work applications the moment they're filed -- so you can quote before anyone else even knows the job exists.</p>
         <ul>
             <li>Leads sourced directly from statutory planning notices, not resold directory data</li>
             <li>Priced per lead from £19 -- no lock-in subscription required to start</li>
@@ -2919,14 +2972,63 @@ def admin_simulate_leads(request: Request, secret: Optional[str] = Query(None),
     """)
 
 
+_CAT_ICONS = {
+    "crown": '<path d="M12 2L4 9l3 1-3 5 4-1-1 6h8l-1-6 4 1-3-5 3-1z"></path>',
+    "fell": '<path d="M12 2v14"></path><path d="M12 6L7 10"></path><path d="M12 6l5 4"></path><path d="M8 22h8"></path><path d="M9 22l1.5-6"></path><path d="M15 22l-1.5-6"></path>',
+    "stump": '<path d="M6 20h12"></path><rect x="7" y="14" width="10" height="6" rx="1"></rect><path d="M9 14V8a3 3 0 0 1 6 0v6"></path><path d="M12 8V3"></path>',
+    "hedge": '<path d="M4 20V11a4 4 0 0 1 4-4h0a4 4 0 0 1 4 4 4 4 0 0 1 4-4h0a4 4 0 0 1 4 4v9"></path><path d="M4 20h16"></path>',
+    "storm": '<path d="M13 2 4 14h6l-1 8 9-12h-6z"></path>',
+    "general": '<path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"></path>',
+}
+
+
 @app.get("/marketplace", response_class=HTMLResponse)
-def marketplace_view(tier: Optional[str] = "all"):
+def marketplace_view(tier: Optional[str] = "all", category: Optional[str] = None,
+                      outcode: Optional[str] = None, radius: int = 15):
     """
     Single-Purchase Lead Marketplace with Statutory Freshness Badges & Filter Tabs:
     Allows contractors to preview unallocated leads before unlocking.
     Supports filtering by Flash Hot (Day 0-3), Active, Clearance, and Granted.
+
+    Sep 9 2026, Nick's ask: "the radar map on the main page was only really
+    supposed to be a marketing tool... the way customers will get to the
+    leads they want is when they land on marketplace they enter their post
+    code and a distance option... I want the marketplace to look totally
+    different, when you land it should have simple large buttons, what
+    kinds of leads are you looking for?" -- this page now leads with a real
+    postcode+radius search (reusing database.resolve_location, the same
+    proven geocoder used by checkout sign-up, deliberately NOT the separate
+    homepage radar's own endpoint) and a job-category button grid, both on
+    top of the existing tier tabs rather than replacing them.
     """
-    leads = database.get_marketplace_leads_with_freshness(filter_tier=tier, limit=40)
+    resolved = None
+    search_error_html = ""
+    resolved_note_html = ""
+    target_lat = target_lng = None
+    if outcode and outcode.strip():
+        resolved = database.resolve_location(outcode.strip())
+        if resolved["precision"] == "none":
+            search_error_html = f"""<div class="bg-red-950/40 border border-red-500/40 text-red-300 px-3.5 py-2.5 rounded-lg mb-4 text-sm">Couldn't find "{outcode.strip()}" -- try a full postcode (e.g. CR5 2LE) or just the outward part (e.g. CR5).</div>"""
+        else:
+            target_lat, target_lng = resolved["lat"], resolved["lon"]
+            shown_as = resolved["full_postcode"] or resolved["outcode"]
+            _clear_qs = f"/marketplace?tier={urllib.parse.quote(tier or 'all')}" + (f"&category={urllib.parse.quote(category)}" if category else "")
+            resolved_note_html = f"""<div class="bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 px-3.5 py-2.5 rounded-lg mb-4 text-sm">Showing leads within <b>{radius} miles</b> of <b>{shown_as}</b>. <a href="{_clear_qs}" class="text-emerald-400 underline hover:text-emerald-200">Clear search</a></div>"""
+
+    leads = database.get_marketplace_leads_with_freshness(
+        filter_tier=tier, limit=40, filter_category=category,
+        target_lat=target_lat, target_lng=target_lng,
+        radius_miles=float(radius) if (target_lat is not None and resolved and resolved["precision"] != "none") else None,
+    )
+
+    # Preserves whatever's already active (tier/category/search) while a
+    # link only changes the one thing it's for -- e.g. clicking a category
+    # button keeps the current postcode search and tier tab intact.
+    def _qs(**overrides):
+        params = {"tier": tier or "all", "category": category or "", "outcode": outcode or "", "radius": radius}
+        params.update(overrides)
+        parts = [f"{k}={urllib.parse.quote(str(v))}" for k, v in params.items() if v not in (None, "", "all") or k == "tier"]
+        return "/marketplace?" + "&".join(parts)
 
     # Sep 9 2026, Nick's ask: restyled to match the homepage's dark theme --
     # active tab now solid emerald (matches the homepage's live-badge
@@ -2936,18 +3038,70 @@ def marketplace_view(tier: Optional[str] = "all"):
         is_active = (tier == target_tier) or (not tier and target_tier == "all")
         cls = ("bg-emerald-600 text-white border-emerald-500" if is_active
                else "bg-slate-800/60 text-slate-300 border-slate-700 hover:border-emerald-600/50 hover:text-white")
-        return f'<a href="/marketplace?tier={target_tier}" class="inline-block {cls} border px-3.5 py-2 rounded-full text-xs font-bold mr-2 transition-colors">{label}</a>'
+        return f'<a href="{_qs(tier=target_tier)}" class="inline-block {cls} border px-3.5 py-2 rounded-full text-xs font-bold mr-2 transition-colors">{label}</a>'
 
     tabs_html = f"""
     <div class="mb-5 overflow-x-auto whitespace-nowrap pb-1">
         {tab_btn("all", "🌐 All Leads")}
-        {tab_btn("council", "🏛️ Council Statutory (TPO & S211)")}
+        {tab_btn("council", "🏛️ Council & National Park Statutory (TPO & S211)")}
         {tab_btn("domestic", "🏡 Private Domestic Jobs")}
         {tab_btn("flash_hot", "🔥 Flash Hot (Day 0–3)")}
         {tab_btn("active", "⚡ Prime Quoting (Day 4–14)")}
         {tab_btn("clearance", "⏳ Clearance (<£10)")}
         {tab_btn("granted", "✅ Approved / Granted")}
     </div>
+    """
+
+    # "Simple large buttons -- what kinds of leads are you looking for?
+    # crown work, stump removal ect" -- one button per database.JOB_CATEGORIES
+    # entry plus an "All Types" reset, each large, icon-led, and outlined in
+    # that category's own colour so the same colour code carries through to
+    # the lead cards below.
+    def cat_btn(key: Optional[str], label: str, color: str, icon_key: str):
+        is_active = (category == key) or (not category and key is None)
+        border_style = f"border-color:{color};" if is_active else "border-color:#334155;"
+        bg_style = f"background:{color}1a;" if is_active else ""
+        return f"""<a href="{_qs(category=key)}" style="{border_style} {bg_style}" class="flex flex-col items-center gap-1.5 border-2 rounded-xl px-2 py-3.5 text-center no-underline hover:brightness-110 transition-all">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{_CAT_ICONS[icon_key]}</svg>
+            <span class="text-[11px] font-bold text-slate-200 leading-tight">{label}</span>
+        </a>"""
+
+    category_grid_html = f"""
+    <div class="mb-2">
+        <div class="font-mono text-[11px] uppercase tracking-widest text-emerald-400 mb-2.5">What kind of leads are you looking for?</div>
+        <div class="grid grid-cols-3 sm:grid-cols-6 gap-2.5 mb-5">
+            {cat_btn(None, "All Types", "#10b981", "general")}
+            {cat_btn("crown_work", "Crown Work", database.JOB_CATEGORIES["crown_work"]["color"], "crown")}
+            {cat_btn("felling", "Felling & Removal", database.JOB_CATEGORIES["felling"]["color"], "fell")}
+            {cat_btn("stump_grinding", "Stump Grinding", database.JOB_CATEGORIES["stump_grinding"]["color"], "stump")}
+            {cat_btn("hedge_work", "Hedge Work", database.JOB_CATEGORIES["hedge_work"]["color"], "hedge")}
+            {cat_btn("storm_emergency", "Storm & Emergency", database.JOB_CATEGORIES["storm_emergency"]["color"], "storm")}
+        </div>
+    </div>
+    """
+
+    # "The way customers will get to the leads they want is when they land
+    # on marketplace they enter their post code and a distance option" --
+    # a real GET form (bookmarkable/shareable URL, no JS required) that
+    # preserves whichever tier/category tab is already selected.
+    search_html = f"""
+    <form method="GET" action="/marketplace" class="bg-slate-800/50 border border-slate-700 rounded-xl p-4 mb-5 flex flex-wrap items-end gap-3">
+        <input type="hidden" name="tier" value="{tier or 'all'}">
+        <input type="hidden" name="category" value="{category or ''}">
+        <div class="flex-1 min-w-[160px]">
+            <label class="block text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Postcode or Outcode</label>
+            <input type="text" name="outcode" value="{outcode or ''}" placeholder="e.g. CR5 2LE or CR5" class="w-full box-border bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:border-emerald-500 placeholder:text-slate-500">
+        </div>
+        <div>
+            <label class="block text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Distance</label>
+            <select name="radius" class="bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:border-emerald-500">
+                {"".join(f'<option value="{r}"{" selected" if int(radius) == r else ""}>{r} miles</option>' for r in (5, 10, 15, 25, 50))}
+            </select>
+        </div>
+        <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-lg font-bold text-sm transition-colors">Search</button>
+    </form>
+    {search_error_html}
+    {resolved_note_html}
     """
 
     lead_cards = ""
@@ -2962,6 +3116,10 @@ def marketplace_view(tier: Optional[str] = "all"):
         badge_color = l["badge_color"]
         badge_text = l["badge_text"]
         days_left = l["days_left"]
+        job_cat = l.get("job_category") or database._GENERAL_CATEGORY
+        cat_color = job_cat["color"]
+        cat_label = job_cat["label"]
+        cat_icon = _CAT_ICONS.get(job_cat["icon"], _CAT_ICONS["general"])
 
         # Aug 31 2026: Nick noticed the marketplace never actually showed
         # WHEN a lead was listed -- only a derived "days left" countdown.
@@ -3044,10 +3202,14 @@ def marketplace_view(tier: Optional[str] = "all"):
         # (mirrors the homepage's main CTA button treatment) instead of a
         # plain right-aligned price and a separate button underneath.
         lead_cards += f"""
-        <div class="relative bg-slate-800/50 border {'border-rose-500/50' if l.get('is_urgent') else 'border-slate-700'} hover:border-emerald-600/50 rounded-2xl p-5 sm:p-6 mb-4 shadow-lg overflow-hidden transition-all duration-300" style="border-top: 3px solid {badge_color};">
+        <div class="relative bg-slate-800/50 rounded-2xl p-5 sm:p-6 mb-4 shadow-lg overflow-hidden transition-all duration-300 hover:brightness-110" style="border: 2px solid {cat_color};">
             <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-5">
                 <div class="flex-1 min-w-0">
                     <div class="flex flex-wrap items-center gap-2">
+                        <span style="font-size:11px; background:{cat_color}26; color:{cat_color}; font-weight:bold; padding:4px 10px; border-radius:12px; display:inline-flex; align-items:center; gap:4px;">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="{cat_color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">{cat_icon}</svg>
+                            {cat_label}
+                        </span>
                         <span style="font-size:11px; background:{badge_bg}; color:{badge_color}; font-weight:bold; padding:4px 10px; border-radius:12px; text-transform:uppercase;">{badge_text}</span>
                         <span style="font-size:11px; background:rgba(148,163,184,0.1); color:#cbd5e1; padding:3px 8px; border-radius:12px;">LPA: {council}</span>
                         {urgent_badge}
@@ -3084,9 +3246,15 @@ def marketplace_view(tier: Optional[str] = "all"):
         </div>"""
 
     if not lead_cards:
+        _empty_bits = []
+        if category:
+            _empty_bits.append(f"the \"{database.JOB_CATEGORIES.get(category, {}).get('label', category)}\" category")
+        if resolved and resolved["precision"] != "none":
+            _empty_bits.append(f"within {radius} miles of {resolved['full_postcode'] or resolved['outcode']}")
+        _empty_reason = f" matching {' and '.join(_empty_bits)}" if _empty_bits else " matching the selected filter"
         lead_cards = f"""
         <div class="text-center py-10 px-5 bg-slate-800/50 rounded-xl border border-slate-700">
-            <p class="text-slate-400 m-0">No leads currently matching the selected filter ({tier}). Check back shortly for new council registrations or switch tabs.</p>
+            <p class="text-slate-400 m-0">No leads currently{_empty_reason}. Check back shortly for new council and National Park registrations, widen your search, or switch tabs.</p>
         </div>"""
 
     # Sep 9 2026, Nick's ask: brought this page's whole shell in line with
@@ -3109,7 +3277,7 @@ def marketplace_view(tier: Optional[str] = "all"):
         <div class="flex justify-between items-center mb-5 flex-wrap gap-2.5">
             <div>
                 <h1 class="m-0 text-[28px] font-extrabold text-white">🛒 Statutory Planning Marketplace</h1>
-                <p class="mt-1 mb-0 text-slate-400 text-sm">Real-time council planning notices with statutory freshness countdowns.</p>
+                <p class="mt-1 mb-0 text-slate-400 text-sm">Real-time council and National Park planning notices with statutory freshness countdowns.</p>
             </div>
             <a href="/pricing" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg no-underline font-bold text-[13px] transition-colors">View Monthly Subscriptions</a>
         </div>
@@ -3117,6 +3285,10 @@ def marketplace_view(tier: Optional[str] = "all"):
         <div class="bg-sky-500/10 border border-sky-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-sky-200">
             <b>💡 Single-Sale Guarantee:</b> Every lead purchased below is immediately removed from the live marketplace and burned permanently. You are the ONLY contractor who will receive the property data.
         </div>
+
+        {search_html}
+
+        {category_grid_html}
 
         {tabs_html}
 
@@ -3520,29 +3692,37 @@ def _login_session_response(verified_email: str) -> RedirectResponse:
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(error: Optional[str] = None):
-    err_html = f"<div style='background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px 14px; border-radius:8px; margin-bottom:18px; font-size:13px;'>{error}</div>" if error else ""
+    # Sep 9 2026, Nick's ask: "update our log in/sign in page to look like
+    # our design including a redesign on the text boxes and removal of
+    # emojis" -- brought onto the same dark Tailwind design system as the
+    # homepage/marketplace (shared nav/footer, dark input styling, SVG
+    # brand mark instead of the 🌲 emoji, SVG lock instead of 🔒).
+    err_html = f"""<div class="bg-red-950/40 border border-red-500/40 text-red-300 px-3.5 py-2.5 rounded-lg mb-4 text-sm">{error}</div>""" if error else ""
     return f"""
     <!DOCTYPE html>
-    <html lang="en-GB">
+    <html lang="en-GB" class="scroll-smooth">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Sign Up / Log In | TreeKey</title>
+        <link rel="icon" href="/static/icon-192.png">
+        <link href="/static/tailwind.css" rel="stylesheet">
         <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; }}
-            .box {{ max-width:420px; margin:auto; background:white; padding:32px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04); }}
-            input {{ width:100%; box-sizing:border-box; padding:12px; border:1px solid #cbd5e1; border-radius:8px; margin-top:6px; margin-bottom:16px; font-family:inherit; font-size:15px; }}
-            input:focus {{ outline:none; border-color:#044332; box-shadow:0 0 0 3px rgba(4,67,50,0.1); }}
-            button {{ background:#044332; color:white; border:none; padding:13px; border-radius:8px; font-weight:bold; font-size:15px; cursor:pointer; width:100%; transition:background 0.15s; }}
-            button:hover {{ background:#065f46; }}
+            .box input {{ width:100%; box-sizing:border-box; padding:12px 14px; border:1px solid #334155; border-radius:8px; margin-top:6px; margin-bottom:16px; font-family:inherit; font-size:15px; background:#020617; color:#e2e8f0; }}
+            .box input:focus {{ outline:none; border-color:#10b981; box-shadow:0 0 0 3px rgba(16,185,129,0.15); }}
+            .box input::placeholder {{ color:#475569; }}
         </style>
     </head>
-    <body>
-    <div class="box">
-        <div style="text-align:center; margin-bottom:20px;">
-            <span style="font-size:32px;">🌲</span>
-            <h2 style="margin:8px 0 4px 0; color:#044332;">Sign Up / Log In</h2>
-            <p style="color:#64748b; font-size:13px; margin:0;">Zero-Password • Enter your email, we'll send you a secure link</p>
+    <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
+    {_shared_nav_html()}
+    <div class="px-4 py-10 sm:py-16">
+    <div class="box max-w-[420px] mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
+        <div class="text-center mb-5">
+            <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30 mx-auto mb-3">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"/></svg>
+            </div>
+            <h2 class="text-white text-xl font-bold m-0 mb-1">Sign Up / Log In</h2>
+            <p class="text-slate-400 text-[13px] m-0">Zero-Password — enter your email, we'll send you a secure link</p>
         </div>
 
         {err_html}
@@ -3553,21 +3733,24 @@ def login_page(error: Optional[str] = None):
              phone number in the first place. Copy now matches what actually
              happens rather than promising a channel that doesn't exist. -->
         <form action="/api/request-magic-link" method="POST">
-            <label style="font-size:12px; font-weight:bold; color:#475569;">Email Address:</label>
+            <label class="text-xs font-bold text-slate-300">Email Address:</label>
             <input type="email" name="contact" placeholder="e.g. dave@apex-trees.co.uk" required autofocus>
-            <button type="submit">Send Secure Login Link ⚡</button>
+            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3.5 rounded-lg font-bold text-[15px] cursor-pointer w-full transition-colors">Send Secure Login Link →</button>
         </form>
-        <p style="text-align:center; font-size:12px; color:#94a3b8; margin:-8px 0 0 0;">Works whether you're an existing subscriber or signing up for the first time.</p>
+        <p class="text-center text-xs text-slate-500 mt-3 mb-0">Works whether you're an existing subscriber or signing up for the first time.</p>
 
-        <div style="text-align:center; margin-top:22px; padding-top:18px; border-top:1px solid #f1f5f9;">
-            <p style="font-size:12px; color:#64748b; margin:0 0 8px 0;">New here and not ready to subscribe?</p>
-            <a href="/free-account" style="font-size:13px; font-weight:bold; color:#044332; text-decoration:none;">Get a free lead first, no card needed →</a>
+        <div class="text-center mt-6 pt-4 border-t border-slate-800">
+            <p class="text-xs text-slate-400 mb-2">New here and not ready to subscribe?</p>
+            <a href="/free-account" class="text-[13px] font-bold text-emerald-400 hover:text-emerald-300 no-underline transition-colors">Get a free lead first, no card needed →</a>
         </div>
 
-        <div style="text-align:center; margin-top:18px; font-size:12px; color:#64748b;">
-            🔒 <b>No passwords to leak or remember.</b> We email you a one-tap, 15-minute access link.
+        <div class="flex items-center justify-center gap-2 text-center mt-5 text-xs text-slate-500">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="shrink-0"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            <span><b class="text-slate-300">No passwords to leak or remember.</b> We email you a one-tap, 15-minute access link.</span>
         </div>
     </div>
+    </div>
+    {_shared_footer_html()}
     </body>
     </html>
     """
@@ -3626,37 +3809,43 @@ async def request_magic_link(request: Request):
     # need the dashboard on your laptop" case.
     return HTMLResponse(f"""
     <!DOCTYPE html>
-    <html lang="en-GB">
+    <html lang="en-GB" class="scroll-smooth">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Check Your Inbox | TreeKey</title>
+        <link rel="icon" href="/static/icon-192.png">
+        <link href="/static/tailwind.css" rel="stylesheet">
         <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:60px 16px; }}
-            .box {{ max-width:440px; margin:auto; background:white; padding:32px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04); text-align:center; }}
-            input {{ width:100%; box-sizing:border-box; padding:11px; border:1px solid #cbd5e1; border-radius:8px; font-family:inherit; font-size:16px; letter-spacing:3px; text-align:center; }}
-            input:focus {{ outline:none; border-color:#044332; box-shadow:0 0 0 3px rgba(4,67,50,0.1); }}
-            button {{ background:#044332; color:white; border:none; padding:11px; border-radius:8px; font-weight:bold; font-size:14px; cursor:pointer; width:100%; margin-top:10px; }}
+            .box input {{ width:100%; box-sizing:border-box; padding:11px; border:1px solid #334155; border-radius:8px; font-family:inherit; font-size:16px; letter-spacing:3px; text-align:center; background:#020617; color:#e2e8f0; }}
+            .box input:focus {{ outline:none; border-color:#10b981; box-shadow:0 0 0 3px rgba(16,185,129,0.15); }}
+            .box input::placeholder {{ color:#475569; }}
         </style>
     </head>
-    <body>
-        <div class="box">
-            <span style="font-size:40px;">✉️</span>
-            <h2 style="color:#044332; margin:12px 0 6px 0;">Check Your Inbox</h2>
-            <p style="color:#64748b; font-size:14px; line-height:1.5;">We just sent a secure login link to <b>{contact}</b>. Click it and you're in.</p>
-            <a href="{magic_url}" style="display:inline-block; background:#044332; color:white; padding:11px 22px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:13px; margin-top:8px;">Open on This Device Instead ➔</a>
+    <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
+    {_shared_nav_html()}
+    <div class="px-4 py-10 sm:py-16">
+        <div class="box max-w-[440px] mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl text-center">
+            <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30 mx-auto mb-3">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"></path><path d="m4 4 8 8 8-8"></path></svg>
+            </div>
+            <h2 class="text-white text-xl font-bold m-0 mb-1.5">Check Your Inbox</h2>
+            <p class="text-slate-400 text-sm leading-relaxed">We just sent a secure login link to <b class="text-slate-200">{contact}</b>. Click it and you're in.</p>
+            <a href="{magic_url}" class="inline-block bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg no-underline font-bold text-[13px] mt-2 transition-colors">Open on This Device Instead →</a>
 
-            <div style="text-align:left; margin-top:26px; padding-top:20px; border-top:1px solid #f1f5f9;">
-                <p style="font-size:12px; color:#64748b; margin:0 0 10px 0;"><b>On a different device than your inbox?</b> Enter the 6-digit code from the email:</p>
+            <div class="text-left mt-6 pt-5 border-t border-slate-800">
+                <p class="text-xs text-slate-400 mb-2.5"><b class="text-slate-300">On a different device than your inbox?</b> Enter the 6-digit code from the email:</p>
                 <form action="/api/verify-otp" method="POST">
                     <input type="hidden" name="email" value="{contact}">
                     <input type="text" name="otp" inputmode="numeric" pattern="[0-9]{{6}}" maxlength="6" placeholder="------" required autocomplete="one-time-code">
-                    <button type="submit">Verify Code</button>
+                    <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-none py-2.5 rounded-lg font-bold text-sm cursor-pointer w-full mt-2.5 transition-colors">Verify Code</button>
                 </form>
             </div>
 
-            <p style="font-size:11px; color:#94a3b8; margin-top:20px;">Didn't get it? Check spam, or <a href="/login" style="color:#044332;">try again</a>. Emails can occasionally take a few minutes to arrive.</p>
+            <p class="text-xs text-slate-500 mt-5">Didn't get it? Check spam, or <a href="/login" class="text-emerald-400 hover:text-emerald-300">try again</a>. Emails can occasionally take a few minutes to arrive.</p>
         </div>
+    </div>
+    {_shared_footer_html()}
     </body>
     </html>
     """)
@@ -5517,7 +5706,7 @@ def scan_nationwide_all_uk_endpoint(secret: Optional[str] = Query(None)):
     """
     verify_cron_secret(secret)
     result = _dispatch_locked_scan(scanners.scan_nationwide_bulk_crawler, "nationwide_bulk_crawl")
-    result["coverage"] = "124 UK Outward Postcodes & 300+ Councils"
+    result["coverage"] = "124 UK Outward Postcodes & 300+ Councils & National Parks"
     return result
 
 
