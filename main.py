@@ -480,7 +480,12 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
         cur.execute("SELECT address FROM leads WHERE (status = 'new' OR status IS NULL) AND council_source ILIKE %s", (f"%{district[:6]}%",))
         wide_pool_addresses = cur.fetchall()
 
-    radius_split = database.classify_leads_by_radius(wide_pool_addresses, target_lat, target_lng, radius)
+    # Sep 9 2026, Nick's ask: cut the lag on map clicks -- this endpoint
+    # already has `conn` open for the queries above, so hand it straight
+    # into classify_leads_by_radius and is_territory_claimed below instead
+    # of each opening (and this function then closing) its own separate
+    # connection. See the matching notes on both functions in database.py.
+    radius_split = database.classify_leads_by_radius(wide_pool_addresses, target_lat, target_lng, radius, conn=conn)
 
     # Sep 8 2026, Nick's ask: the radar's "Intercepted Notices" panel should
     # follow wherever the radar is currently pointed, not always show the
@@ -504,9 +509,6 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
                 "time": l["discovered_at"].strftime("%H:%M") if l["discovered_at"] else "--:--",
                 "date": l["discovered_at"].strftime("%d %b") if l["discovered_at"] else "",
             })
-    cur.close()
-    conn.close()
-
     if "Unregistered" in district:
         selected_leads = 0
         connected_leads = 0
@@ -520,8 +522,12 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
     min_val = selected_leads * 450
     max_val = selected_leads * 1450
 
-    # Check territory exclusivity in real-time
-    is_claimed = database.is_territory_claimed(display_pc)
+    # Check territory exclusivity in real-time -- still on the same `conn`
+    # opened above (see the classify_leads_by_radius note), closed just
+    # after this instead of opening yet another fresh connection for it.
+    is_claimed = database.is_territory_claimed(display_pc, conn=conn)
+    cur.close()
+    conn.close()
     exclusivity_label = "&#128274; Locked (Claimed by Local Partner)" if is_claimed else "&#9989; Available (Unclaimed)"
 
     # Sep 3 2026: see _COUNCIL_SOURCE_ISSUES above -- None for every normal
@@ -675,6 +681,84 @@ self.addEventListener('fetch', event => {
 """
     return Response(content=sw_code, media_type="application/javascript")
 
+def _shared_nav_html() -> str:
+    """Sep 9 2026, Nick's ask: Marketplace, Storm Radar and Packages/Pricing
+    still looked like an entirely different, older (light-themed, no nav)
+    site next to the homepage's current dark redesign -- he wants them
+    brought in line before layering more content changes on top. Pulled the
+    homepage's own nav bar out into one shared function so every page uses
+    the exact same header instead of each hand-rolling its own copy that
+    can drift out of sync."""
+    return """
+    <nav class="sticky top-0 z-50 bg-slate-950/95 backdrop-blur-md border-b border-emerald-950 shadow-2xl">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-20">
+                <a href="/" class="flex items-center gap-3 text-white font-bold text-xl tracking-tight no-underline">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"/>
+                        </svg>
+                    </div>
+                    <div class="flex flex-col">
+                        <span class="font-extrabold text-lg text-white leading-none tracking-wider font-sans">TREE<span class="text-emerald-400">KEY</span></span>
+                        <span class="text-[9px] uppercase tracking-widest text-emerald-500 font-mono font-semibold">Arbor Intelligence</span>
+                    </div>
+                </a>
+                <div class="flex items-center gap-3 md:gap-6 font-mono text-sm tracking-wide">
+                    <div class="hidden lg:flex items-center gap-6 text-slate-300">
+                        <a href="/#radar" class="hover:brightness-125 transition-all text-emerald-400 font-bold">RADAR</a>
+                        <a href="/marketplace" class="hover:brightness-125 transition-all text-sky-400 font-bold">MARKETPLACE</a>
+                        <a href="/storm-radar" class="hover:brightness-125 transition-all text-amber-400 font-bold">STORM RADAR</a>
+                        <a href="/pricing" class="hover:brightness-125 transition-all text-rose-400 font-bold">PACKAGES</a>
+                        <a href="/faq" class="hover:brightness-125 transition-all text-violet-400 font-bold">FAQ</a>
+                    </div>
+                    <a href="/login" class="bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 px-3.5 py-1.5 rounded-lg font-bold uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-[0_0_15px_rgba(5,150,105,0.2)]">
+                        Sign Up / Log In &#10132;
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+    """
+
+
+def _shared_footer_html() -> str:
+    """Companion to _shared_nav_html -- same reasoning, see there."""
+    return """
+    <footer class="bg-slate-950 border-t border-slate-800 pt-10 pb-8 mt-16">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-start gap-8">
+            <div class="text-slate-500 text-xs text-center md:text-left max-w-2xl">
+                <img src="/static/images/footer-mark.png" alt="" class="h-7 w-auto opacity-50 mb-2 mx-auto md:mx-0" loading="lazy">
+                <div class="mb-3">
+                    <b class="text-slate-300 text-sm">Tree Key</b> by Vector Data Labs.<br>
+                </div>
+                <p class="mb-2">
+                    Operating in compliance with UK Town and Country Planning statutory register regulations.
+                    Data is aggregated from UK Local Planning Authorities under the Open Government Licence v3.0.
+                </p>
+                <p class="mb-2">
+                    &copy; 2026 Vector Data Labs. All rights reserved. Tree Key is a trading name of Vector Data Labs.
+                    Platform is 256-bit SSL Encrypted &amp; GDPR Compliant.
+                </p>
+                <p class="text-slate-400 mt-4 mb-1 flex items-center justify-center md:justify-start gap-2">
+                    Proudly engineered in the United Kingdom &#127468;&#127463;
+                </p>
+                <p class="text-slate-600">Contact: nick@treekey.uk</p>
+            </div>
+            <div class="flex gap-6 text-xs font-mono uppercase tracking-wider flex-wrap justify-center md:justify-end shrink-0 pt-2">
+                <a href="/privacy-policy" class="text-slate-400 hover:text-white transition-colors">Privacy</a>
+                <a href="/terms-of-service" class="text-slate-400 hover:text-white transition-colors">Terms</a>
+                <a href="/health" class="text-slate-400 hover:text-white transition-colors flex items-center gap-2">
+                    <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
+                    Status
+                </a>
+                <a href="/admin" class="text-brand-green hover:text-emerald-400 transition-colors">Login</a>
+            </div>
+        </div>
+    </footer>
+    """
+
+
 @app.get("/", response_class=HTMLResponse)
 def public_homepage():
     stats = {"p": 0, "l": 0, "diverse_leads": [], "counts": {"today": 0, "week": 0, "month": 0}}
@@ -827,6 +911,16 @@ def public_homepage():
            point offset from the visual center instead of sweeping around the true center. */
         .radar-sweep {{ animation: sweep 4s linear infinite; transform-origin: 0% 100%; }}
         @keyframes sweep {{ to {{ transform: rotate(360deg); }} }}
+        /* Sep 9 2026, Nick's ask: "if people aren't good with maps of the UK
+           they might struggle to place themselves" -- a bare dark map with no
+           place names at all gives visitors no way to orient themselves.
+           These are permanent reference labels for major UK cities, not
+           leads or search results, so they're deliberately muted/small and
+           non-interactive (pointer-events:none) so they never block a map
+           click. */
+        .tk-city-label {{ pointer-events: none; white-space: nowrap; display: flex; align-items: center; gap: 4px; }}
+        .tk-city-dot {{ width: 5px; height: 5px; border-radius: 50%; background: rgba(148,163,184,0.65); box-shadow: 0 0 0 2px rgba(2,6,23,0.5); flex-shrink: 0; }}
+        .tk-city-name {{ font-family: ui-monospace, 'SF Mono', monospace; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: rgba(226,232,240,0.85); text-shadow: 0 1px 3px rgba(0,0,0,0.9); }}
     </style>
 </head>
 <body class="bg-brand-dark text-slate-300 font-sans antialiased selection:bg-brand-green selection:text-white">
@@ -890,12 +984,31 @@ def public_homepage():
              a <picture> source swaps in a portrait-cropped version (same
              photo, cropped to keep the whole figure + chainsaw + harness)
              under 640px; desktop/tablet get the original, unchanged. -->
+        <!-- Sep 9 2026, Nick's ask: "squashed to the top on phone... needs to
+             be behind the text like it is on desktop". Checked this in a
+             real browser rather than guessing -- the image box itself is
+             already the correct full height on both breakpoints (confirmed
+             via computed styles), so this isn't a sizing bug. The real cause:
+             mobile stacks a LOT more content than desktop (badges, headline,
+             paragraph, CTAs, ticker), so the hero is much taller there --
+             and the old gradient's 3 colour stops are evenly spread across
+             WHATEVER height the box ends up (0%/50%/100%), so on a tall
+             mobile box, most of the photo sits in the deep, near-black end
+             of that spread. Only the brighter top of the portrait crop
+             (helmet/hi-vis) survived, reading as "squashed to the top".
+             Fixed with fixed PIXEL stops instead of proportional ones: the
+             mobile gradient ramps to its darkest value over the first 320px
+             (already generous headline-contrast room) then HOLDS there for
+             the rest of the box, however tall it grows -- so the photo stays
+             visible at a constant, moderate dimness all the way down instead
+             of fading out. Desktop's gradient (sm: and up) is untouched --
+             Nick already approved how it looks there. -->
         <div class="absolute inset-0 z-0" aria-hidden="true">
             <picture>
                 <source media="(max-width: 639px)" srcset="/static/images/hero-climber-mobile.jpg">
                 <img src="/static/images/hero-climber.jpg" alt="" class="w-full h-full object-cover opacity-25">
             </picture>
-            <div class="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(2,6,23,0.3),rgba(2,6,23,0.5),rgba(2,6,23,0.7))]"></div>
+            <div class="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(2,6,23,0.15)_0px,rgba(2,6,23,0.35)_320px,rgba(2,6,23,0.35)_100%)] sm:bg-[linear-gradient(to_bottom,rgba(2,6,23,0.3),rgba(2,6,23,0.5),rgba(2,6,23,0.7))]"></div>
         </div>
         <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 flex flex-col">
 
@@ -993,7 +1106,19 @@ def public_homepage():
                              card) was previously only reachable via cold email -- Nick
                              wanted it as a real, discoverable acquisition path on the
                              site itself, not just a cold-outreach bait link. -->
-                        <a href="/free-account" class="flex items-center gap-2 bg-transparent text-emerald-400 border-2 border-emerald-500/50 px-8 py-4 rounded font-bold text-lg hover:bg-emerald-500/10 transition-all duration-300">
+                        <!-- Sep 9 2026: Nick flagged this button as broken on mobile
+                             ("the words are out of place"). Root cause -- this <a> had
+                             `flex items-center gap-2` left over from the icon-button
+                             pattern used elsewhere, but this button has no icon, just
+                             text with one coloured word. A flex container lays out its
+                             text nodes as separate anonymous flex items WITH the gap-2
+                             spacing applied between them -- so "Claim a", the "Free"
+                             span, and "Lead — No Card Needed" were rendering as three
+                             separately-gapped chunks instead of one normal sentence,
+                             which fell apart first wherever the width got tight (mobile).
+                             Removed the unneeded flex display so the text just flows
+                             normally, with "Free" as a plain inline coloured span. -->
+                        <a href="/free-account" class="bg-transparent text-emerald-400 border-2 border-emerald-500/50 px-8 py-4 rounded font-bold text-lg hover:bg-emerald-500/10 transition-all duration-300 text-center">
                             Claim a <span class="text-amber-400">Free</span> Lead — No Card Needed
                         </a>
                     </div>
@@ -1376,6 +1501,37 @@ def public_homepage():
             attribution: '&copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
             maxZoom: 16
         }}).addTo(map);
+
+        // Sep 9 2026, Nick's ask: the base map has no labels at all (it's a
+        // plain dark tile layer, not a labelled reference layer), so a
+        // visitor who isn't confident reading a bare map of the UK has
+        // nothing to orient themselves by. Permanent reference markers for
+        // 8 major cities -- these are landmarks, not leads or search
+        // results, so they're small, muted, and non-interactive (they never
+        // intercept a map click). See .tk-city-label etc. in the <style>
+        // block above.
+        const TK_UK_CITIES = [
+            ["London", 51.5074, -0.1278],
+            ["Manchester", 53.4808, -2.2426],
+            ["Birmingham", 52.4862, -1.8904],
+            ["Cardiff", 51.4816, -3.1791],
+            ["Glasgow", 55.8642, -4.2518],
+            ["Aberdeen", 57.1497, -2.0943],
+            ["Newcastle", 54.9783, -1.6178],
+            ["Leeds", 53.8008, -1.5491],
+        ];
+        TK_UK_CITIES.forEach(function(city) {{
+            L.marker([city[1], city[2]], {{
+                icon: L.divIcon({{
+                    className: 'tk-city-label',
+                    html: '<span class="tk-city-dot"></span><span class="tk-city-name">' + city[0] + '</span>',
+                    iconSize: [0, 0],
+                }}),
+                interactive: false,
+                keyboard: false,
+                zIndexOffset: -1000,
+            }}).addTo(map);
+        }});
 
         // Pin defaults to Birmingham (center of England)
         let currentCircle = L.circle([52.4862, -1.8904], {{
@@ -1965,49 +2121,53 @@ def pricing(request: Request):
     msg_banner = ""
     if msg == "no_subscription":
         msg_banner = (
-            "<div style='background:#fef2f2; border:1px solid #fca5a5; border-radius:8px; padding:16px; margin-bottom:20px; color:#991b1b;'>"
+            "<div class='bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-5 text-red-200'>"
             "<b>No active subscription found</b> for that email. Pick a tier below to unlock your dashboard —"
-            " or, if you're not ready to subscribe yet, <a href='/free-account' style='color:#991b1b; font-weight:bold;'>get one free lead first, no card needed</a>."
+            " or, if you're not ready to subscribe yet, <a href='/free-account' class='text-red-300 font-bold'>get one free lead first, no card needed</a>."
             "</div>"
         )
 
-    # Separate subscriptions and single purchase plans
+    # Sep 9 2026, Nick's ask: dark-theme restyle to match the homepage (see
+    # the same note on marketplace_view/storm_radar_view). Kept the embedded
+    # <style> block for .header/.grid/.comparison-table/.creed-banner
+    # (simpler than converting a whole comparison table to Tailwind utility
+    # classes) but recoloured every value in it for a dark background.
     sub_cards = ""
     single_cards = ""
 
     for key, plan in plans.items():
         if plan["mode"] == "subscription":
-            price_display = f"£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal; color:#64748b;'>/month</span>"
-            roi_box = f"<div style='background:#f0fdf4; border-left:3px solid #059669; padding:10px; font-size:12px; color:#065f46; text-align:left; margin:14px 0; border-radius:4px;'><b>💡 Real-World Math:</b> {plan.get('real_world_roi', '')}</div>"
-            highlight = "border:2px solid #059669; box-shadow:0 8px 24px rgba(5,150,105,0.12);" if key == "climber_domestic" else "border:1px solid #e2e8f0;"
-            
+            price_display = f"£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal; color:#94a3b8;'>/month</span>"
+            roi_box = f"<div style='background:rgba(16,185,129,0.1); border-left:3px solid #059669; padding:10px; font-size:12px; color:#a7f3d0; text-align:left; margin:14px 0; border-radius:4px;'><b>💡 Real-World Math:</b> {plan.get('real_world_roi', '')}</div>"
+            highlight = "border:2px solid #059669; box-shadow:0 8px 24px rgba(5,150,105,0.15);" if key == "climber_domestic" else "border:1px solid #334155;"
+
             sub_cards += f"""
-            <div style="{highlight} border-radius:16px; padding:24px; background:white; display:flex; flex-direction:column; justify-content:space-between; margin-bottom:16px;">
+            <div style="{highlight} border-radius:16px; padding:24px; background:#0f172a; display:flex; flex-direction:column; justify-content:space-between; margin-bottom:16px;">
                 <div>
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                        <span style="font-size:11px; background:#ecfdf5; color:#065f46; font-weight:bold; padding:4px 10px; border-radius:20px; text-transform:uppercase;">{plan['badge']}</span>
+                        <span style="font-size:11px; background:rgba(16,185,129,0.15); color:#6ee7b7; font-weight:bold; padding:4px 10px; border-radius:20px; text-transform:uppercase;">{plan['badge']}</span>
                     </div>
-                    <h3 style="margin:0 0 6px 0; font-size:19px; color:#0f172a;">{plan['name']}</h3>
-                    <p style="color:#64748b; font-size:13px; line-height:1.5; margin:0 0 12px 0;">{plan['description']}</p>
-                    <div style="font-size:28px; font-weight:800; color:#044332; margin:10px 0;">{price_display}</div>
+                    <h3 style="margin:0 0 6px 0; font-size:19px; color:#ffffff;">{plan['name']}</h3>
+                    <p style="color:#94a3b8; font-size:13px; line-height:1.5; margin:0 0 12px 0;">{plan['description']}</p>
+                    <div style="font-size:28px; font-weight:800; color:#34d399; margin:10px 0;">{price_display}</div>
                     {roi_box}
                 </div>
-                <a href="/checkout/{key}" style="background:#044332; color:white; padding:12px; border-radius:8px; text-decoration:none; text-align:center; font-weight:bold; font-size:14px; margin-top:10px; display:block;">
+                <a href="/checkout/{key}" style="background:#059669; color:white; padding:12px; border-radius:8px; text-decoration:none; text-align:center; font-weight:bold; font-size:14px; margin-top:10px; display:block;">
                    Claim Tailored Tier →
                 </a>
             </div>"""
         else:
-            price_display = f"£{plan['amount'] / 100:.0f}<span style='font-size:14px; font-weight:normal; color:#64748b;'> one-off</span>"
+            price_display = f"£{plan['amount'] / 100:.0f}<span style='font-size:14px; font-weight:normal; color:#94a3b8;'> one-off</span>"
             single_cards += f"""
-            <div style="border:1px solid #e2e8f0; border-radius:12px; padding:18px; background:white; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+            <div style="border:1px solid #334155; border-radius:12px; padding:18px; background:#0f172a; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
                 <div style="max-width:480px;">
-                    <span style="font-size:10px; background:#f1f5f9; color:#475569; font-weight:bold; padding:3px 8px; border-radius:12px; text-transform:uppercase;">{plan['badge']}</span>
-                    <h4 style="margin:6px 0 4px 0; font-size:16px; color:#0f172a;">{plan['name']}</h4>
-                    <p style="color:#64748b; font-size:12px; margin:0;">{plan['description']}</p>
+                    <span style="font-size:10px; background:rgba(148,163,184,0.15); color:#cbd5e1; font-weight:bold; padding:3px 8px; border-radius:12px; text-transform:uppercase;">{plan['badge']}</span>
+                    <h4 style="margin:6px 0 4px 0; font-size:16px; color:#ffffff;">{plan['name']}</h4>
+                    <p style="color:#94a3b8; font-size:12px; margin:0;">{plan['description']}</p>
                 </div>
                 <div style="text-align:right;">
-                    <div style="font-size:22px; font-weight:bold; color:#044332; margin-bottom:6px;">{price_display}</div>
-                    <a href="/checkout/{key}" style="background:#0f172a; color:white; padding:8px 18px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold; display:inline-block;">
+                    <div style="font-size:22px; font-weight:bold; color:#34d399; margin-bottom:6px;">{price_display}</div>
+                    <a href="/checkout/{key}" style="background:#1e293b; border:1px solid #475569; color:white; padding:8px 18px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold; display:inline-block;">
                         Unlock Single Lead
                     </a>
                 </div>
@@ -2020,59 +2180,48 @@ def pricing(request: Request):
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Tailored Packages & Anti-Directory Guarantee | TreeKey</title>
+        <link rel="icon" href="/static/icon-192.png">
+        <link href="/static/tailwind.css" rel="stylesheet">
         <style>
-            :root {{
-                --brand-primary: #044332;
-                --brand-dark: #0f172a;
-                --brand-muted: #64748b;
-                --bg-light: #f8fafc;
-                --border-color: #e2e8f0;
-            }}
-            body {{
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                background-color: var(--bg-light);
-                color: var(--brand-dark);
-                margin: 0; padding: 40px 16px;
-                line-height: 1.6;
-            }}
-            .container {{ max-width: 860px; margin: auto; }}
             .header {{ text-align: center; margin-bottom: 32px; }}
-            .header h1 {{ font-size: 34px; font-weight: 800; color: var(--brand-dark); margin: 0 0 10px 0; }}
-            .header p {{ color: var(--brand-muted); font-size: 16px; margin: 0; }}
-            
+            .header h1 {{ font-size: 34px; font-weight: 800; color: #ffffff; margin: 0 0 10px 0; }}
+            .header p {{ color: #94a3b8; font-size: 16px; margin: 0; }}
+
             .creed-banner {{
                 background: linear-gradient(135deg, #044332 0%, #064e3b 100%);
                 color: white;
                 border-radius: 12px;
                 padding: 24px;
                 margin-bottom: 32px;
-                box-shadow: 0 8px 24px rgba(4,67,50,0.15);
+                box-shadow: 0 8px 24px rgba(0,0,0,0.3);
             }}
             .creed-banner h3 {{ margin-top: 0; font-size: 20px; color: #a7f3d0; }}
-            
+
             .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-bottom: 32px; }}
-            
+
             .comparison-table {{
                 width: 100%;
                 border-collapse: collapse;
-                background: white;
+                background: #0f172a;
+                border: 1px solid #334155;
                 border-radius: 12px;
                 overflow: hidden;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.04);
                 margin-top: 24px;
                 font-size: 13px;
             }}
             .comparison-table th, .comparison-table td {{
                 padding: 14px 16px;
                 text-align: left;
-                border-bottom: 1px solid var(--border-color);
+                border-bottom: 1px solid #334155;
+                color: #cbd5e1;
             }}
-            .comparison-table th {{ background: #0f172a; color: white; font-weight: 600; }}
+            .comparison-table th {{ background: #020617; color: white; font-weight: 600; }}
             .comparison-table tr:last-child td {{ border-bottom: none; }}
         </style>
     </head>
-    <body>
-    <div class="container">
+    <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
+    {_shared_nav_html()}
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
         <div class="header">
             <h1>Fair Trade Packages & Zero-Reselling Guarantee</h1>
             <p>Direct statutory council intelligence & photo-verified homeowner leads. 100% exclusive. No shared bidding wars.</p>
@@ -2080,13 +2229,13 @@ def pricing(request: Request):
 
         {msg_banner}
 
-        <h2 style="font-size:22px; margin-bottom:16px; color:#0f172a;">1. Select Your Dedicated Subscription Tier</h2>
+        <h2 class="text-[22px] mb-4 text-white font-bold">1. Select Your Dedicated Subscription Tier</h2>
         <div class="grid">
             {sub_cards}
         </div>
 
-        <h2 style="font-size:22px; margin:32px 0 16px 0; color:#0f172a;">2. Or Buy As You Go (Single-Lead Marketplace)</h2>
-        <p style="color:#64748b; font-size:13px; margin-top:-10px; margin-bottom:16px;">
+        <h2 class="text-[22px] mt-8 mb-4 text-white font-bold">2. Or Buy As You Go (Single-Lead Marketplace)</h2>
+        <p class="text-slate-400 text-[13px] -mt-2 mb-4">
             Subscribers get priority allocation. Any unallocated leads flow into our single-purchase marketplace. Once bought, a lead is burned and never resold.
         </p>
         {single_cards}
@@ -2098,51 +2247,52 @@ def pricing(request: Request):
             </p>
         </div>
 
-        <h2 style="font-size:22px; margin:40px 0 16px 0; color:#0f172a;">⚖️ Why TreeKey is the Opposite of Directories</h2>
+        <h2 class="text-[22px] mt-10 mb-4 text-white font-bold">⚖️ Why TreeKey is the Opposite of Directories</h2>
         <table class="comparison-table">
             <thead>
                 <tr>
                     <th>Feature / Metric</th>
                     <th>Traditional Directories (Bark / Checkatrade / TrustATrader)</th>
-                    <th style="background:#044332;">TreeKey Operating System</th>
+                    <th style="background:#059669;">TreeKey Operating System</th>
                 </tr>
             </thead>
             <tbody>
                 <tr>
-                    <td><b>Lead Exclusivity</b></td>
+                    <td><b class="text-white">Lead Exclusivity</b></td>
                     <td>❌ Sold to 3–5 competing contractors simultaneously.</td>
-                    <td style="color:#065f46; font-weight:bold;">✅ 100% Single-Sale. Lead is burned once dispatched.</td>
+                    <td style="color:#6ee7b7; font-weight:bold;">✅ 100% Single-Sale. Lead is burned once dispatched.</td>
                 </tr>
                 <tr>
-                    <td><b>Price Competition</b></td>
+                    <td><b class="text-white">Price Competition</b></td>
                     <td>❌ Race to the bottom; customer compares 5 cheap quotes.</td>
-                    <td style="color:#065f46; font-weight:bold;">✅ First-Mover Advantage. Quote before competitors know.</td>
+                    <td style="color:#6ee7b7; font-weight:bold;">✅ First-Mover Advantage. Quote before competitors know.</td>
                 </tr>
                 <tr>
-                    <td><b>Lead Source</b></td>
+                    <td><b class="text-white">Lead Source</b></td>
                     <td>❌ Unverified ballpark quote seekers & price checkers.</td>
-                    <td style="color:#065f46; font-weight:bold;">✅ Statutory Council Planning Notices (100% committed).</td>
+                    <td style="color:#6ee7b7; font-weight:bold;">✅ Statutory Council Planning Notices (100% committed).</td>
                 </tr>
                 <tr>
-                    <td><b>Trade Cost Framing</b></td>
+                    <td><b class="text-white">Trade Cost Framing</b></td>
                     <td>❌ Heavy fixed monthly directory listing fees (£120+/mo).</td>
-                    <td style="color:#065f46; font-weight:bold;">✅ Low £49/mo (less than half a tank of diesel). 1 job = 5x ROI.</td>
+                    <td style="color:#6ee7b7; font-weight:bold;">✅ Low £49/mo (less than half a tank of diesel). 1 job = 5x ROI.</td>
                 </tr>
                 <tr>
-                    <td><b>Customer Ownership</b></td>
+                    <td><b class="text-white">Customer Ownership</b></td>
                     <td>❌ Trapped inside their app collecting reviews for them.</td>
-                    <td style="color:#065f46; font-weight:bold;">✅ You Own the Client. Quote directly under your own brand.</td>
+                    <td style="color:#6ee7b7; font-weight:bold;">✅ You Own the Client. Quote directly under your own brand.</td>
                 </tr>
             </tbody>
         </table>
 
-        <div style="text-align:center; margin-top:40px; padding:20px; background:white; border-radius:12px; border:1px solid #e2e8f0;">
-            <p style="margin:0 0 10px 0; font-size:14px; color:#64748b;">Have an idea or want a tool built specifically for your crew?</p>
-            <a href="/suggestions" style="color:#044332; font-weight:bold; text-decoration:none; font-size:14px;">💡 Submit a Suggestion to Our Product Board →</a>
+        <div class="text-center mt-10 p-5 bg-slate-800/50 rounded-xl border border-slate-700">
+            <p class="mb-2.5 text-sm text-slate-400">Have an idea or want a tool built specifically for your crew?</p>
+            <a href="/suggestions" class="text-emerald-400 font-bold no-underline text-sm">💡 Submit a Suggestion to Our Product Board →</a>
             &nbsp;|&nbsp;
-            <a href="/" style="color:#64748b; text-decoration:none; font-size:14px;">Return to Live Map</a>
+            <a href="/" class="text-slate-400 no-underline text-sm">Return to Live Map</a>
         </div>
     </div>
+    {_shared_footer_html()}
     </body>
     </html>
     """
@@ -2740,16 +2890,18 @@ def marketplace_view(tier: Optional[str] = "all"):
     """
     leads = database.get_marketplace_leads_with_freshness(filter_tier=tier, limit=40)
 
-    # Active filter tab styles
+    # Sep 9 2026, Nick's ask: restyled to match the homepage's dark theme --
+    # active tab now solid emerald (matches the homepage's live-badge
+    # accent), inactive tabs a translucent slate chip instead of the old
+    # white-card-on-white-page look.
     def tab_btn(target_tier: str, label: str):
         is_active = (tier == target_tier) or (not tier and target_tier == "all")
-        bg = "#044332" if is_active else "#ffffff"
-        color = "#ffffff" if is_active else "#475569"
-        border = "1px solid #044332" if is_active else "1px solid #cbd5e1"
-        return f'<a href="/marketplace?tier={target_tier}" style="background:{bg}; color:{color}; border:{border}; padding:7px 14px; border-radius:20px; text-decoration:none; font-size:12px; font-weight:bold; margin-right:6px; display:inline-block;">{label}</a>'
+        cls = ("bg-emerald-600 text-white border-emerald-500" if is_active
+               else "bg-slate-800/60 text-slate-300 border-slate-700 hover:border-emerald-600/50 hover:text-white")
+        return f'<a href="/marketplace?tier={target_tier}" class="inline-block {cls} border px-3.5 py-2 rounded-full text-xs font-bold mr-2 transition-colors">{label}</a>'
 
     tabs_html = f"""
-    <div style="margin-bottom:20px; overflow-x:auto; white-space:nowrap; padding-bottom:4px;">
+    <div class="mb-5 overflow-x-auto whitespace-nowrap pb-1">
         {tab_btn("all", "🌐 All Leads")}
         {tab_btn("council", "🏛️ Council Statutory (TPO & S211)")}
         {tab_btn("domestic", "🏡 Private Domestic Jobs")}
@@ -2815,12 +2967,18 @@ def marketplace_view(tier: Optional[str] = "all"):
         # be open). So any has_agent=True lead seen here is that specific
         # case, not "job definitely taken" -- the badge below reflects that
         # instead of showing the old blanket warning.
+        # Sep 9 2026, Nick's ask: recoloured these three badges for the dark
+        # theme (translucent chip + bright text, matching the homepage's
+        # existing badge convention) -- the tier freshness badge above
+        # (badge_bg/badge_color, from database.py) is left as its own
+        # bright pastel chip, which reads fine against a dark card and
+        # wasn't worth the extra risk of touching its business logic today.
         if l.get("has_agent") is True:
-            agent_badge = "<span style='font-size:11px; background:#f1f5f9; color:#475569; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;' title=\"An agent handled the paperwork but doesn't look like a tree company -- the tree work itself may still be open.\">ℹ️ Non-tree agent on record</span>"
+            agent_badge = "<span style='font-size:11px; background:rgba(148,163,184,0.15); color:#cbd5e1; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;' title=\"An agent handled the paperwork but doesn't look like a tree company -- the tree work itself may still be open.\">ℹ️ Non-tree agent on record</span>"
         elif l.get("has_agent") is False:
-            agent_badge = "<span style='font-size:11px; background:#d1fae5; color:#065f46; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;'>✅ No agent listed</span>"
+            agent_badge = "<span style='font-size:11px; background:rgba(16,185,129,0.15); color:#6ee7b7; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;'>✅ No agent listed</span>"
         else:
-            agent_badge = "<span style='font-size:11px; background:#f1f5f9; color:#64748b; padding:3px 8px; border-radius:12px; margin-left:6px;'>Agent status: unconfirmed</span>"
+            agent_badge = "<span style='font-size:11px; background:rgba(148,163,184,0.1); color:#94a3b8; padding:3px 8px; border-radius:12px; margin-left:6px;'>Agent status: unconfirmed</span>"
 
         # Aug 31 2026: Nick's point -- a lead whose own description already
         # signals danger/urgency (see database.is_urgent_lead) genuinely
@@ -2828,46 +2986,50 @@ def marketplace_view(tier: Optional[str] = "all"):
         # here and also sorted to the front by the query itself.
         urgent_badge = ""
         if l.get("is_urgent"):
-            urgent_badge = "<span style='font-size:11px; background:#fee2e2; color:#991b1b; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;'>🚨 Urgent</span>"
+            urgent_badge = "<span style='font-size:11px; background:rgba(239,68,68,0.15); color:#fca5a5; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;'>🚨 Urgent</span>"
 
         lead_cards += f"""
-        <div style="background:white; border:1px solid {'#fca5a5' if l.get('is_urgent') else '#e2e8f0'}; border-radius:12px; padding:20px; margin-bottom:14px; box-shadow:0 2px 8px rgba(0,0,0,0.03);">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+        <div class="bg-slate-800/50 border {'border-rose-500/50' if l.get('is_urgent') else 'border-slate-700'} rounded-xl p-5 mb-3.5 shadow-lg">
+            <div class="flex justify-between items-start flex-wrap gap-2.5">
                 <div>
                     <span style="font-size:11px; background:{badge_bg}; color:{badge_color}; font-weight:bold; padding:4px 10px; border-radius:12px; text-transform:uppercase;">{badge_text}</span>
-                    <span style="font-size:11px; background:#f1f5f9; color:#475569; padding:3px 8px; border-radius:12px; margin-left:6px;">LPA: {council}</span>
+                    <span style="font-size:11px; background:rgba(148,163,184,0.1); color:#cbd5e1; padding:3px 8px; border-radius:12px; margin-left:6px;">LPA: {council}</span>
                     {urgent_badge}
                     {agent_badge}
-                    <h3 style="margin:10px 0 4px 0; font-size:17px; color:#0f172a;">📍 {masked_area}</h3>
+                    <h3 class="mt-2.5 mb-1 text-[17px] text-white font-bold">📍 {masked_area}</h3>
                 </div>
-                <div style="text-align:right;">
-                    <div style="font-size:22px; font-weight:800; color:#044332;">£{unlock_fee}</div>
-                    <span style="font-size:11px; color:#64748b;">{days_left}</span>
+                <div class="text-right">
+                    <div class="text-2xl font-extrabold text-emerald-400">£{unlock_fee}</div>
+                    <span class="text-[11px] text-slate-400">{days_left}</span>
                 </div>
             </div>
 
-            <div style="font-size:11px; color:#94a3b8; margin-top:4px;">📅 Listed: {listed_date}</div>
+            <div class="text-[11px] text-slate-500 mt-1">📅 Listed: {listed_date}</div>
 
-            <div style="background:#f8fafc; border-left:3px solid #044332; padding:12px 14px; margin:12px 0; font-size:13px; color:#334155; line-height:1.5;">
-                <b>Job Specification:</b> {summary[:220]}...
+            <div class="bg-slate-900/60 border-l-[3px] border-emerald-600 px-3.5 py-3 my-3 text-[13px] text-slate-300 leading-relaxed">
+                <b class="text-slate-200">Job Specification:</b> {summary[:220]}...
             </div>
 
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:14px;">
-                <div style="font-size:12px; color:#64748b;">
+            <div class="flex justify-between items-center flex-wrap gap-2.5 mt-3.5">
+                <div class="text-xs text-slate-500">
                     🔒 Single-Sale Asset • Burned permanently upon unlock.
                 </div>
-                <a href="/checkout/{plan_key}?lead_id={lid}" style="background:#044332; color:white; padding:9px 20px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">
-                    Unlock Full Property Address & Contacts (£{unlock_fee}) →
+                <a href="/checkout/{plan_key}?lead_id={lid}" class="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg no-underline font-bold text-[13px] transition-colors">
+                    Unlock Full Property Address &amp; Contacts (£{unlock_fee}) →
                 </a>
             </div>
         </div>"""
 
     if not lead_cards:
         lead_cards = f"""
-        <div style='text-align:center; padding:40px; background:white; border-radius:12px; border:1px solid #e2e8f0;'>
-            <p style='color:#64748b; margin:0;'>No leads currently matching the selected filter ({tier}). Check back shortly for new council registrations or switch tabs.</p>
+        <div class="text-center py-10 px-5 bg-slate-800/50 rounded-xl border border-slate-700">
+            <p class="text-slate-400 m-0">No leads currently matching the selected filter ({tier}). Check back shortly for new council registrations or switch tabs.</p>
         </div>"""
 
+    # Sep 9 2026, Nick's ask: brought this page's whole shell in line with
+    # the homepage's dark redesign -- shared nav/footer (_shared_nav_html /
+    # _shared_footer_html), dark page background, same fonts/link colours
+    # as the rest of the site, instead of its own standalone light page.
     return f"""
     <!DOCTYPE html>
     <html lang="en-GB">
@@ -2875,22 +3037,21 @@ def marketplace_view(tier: Optional[str] = "all"):
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Single-Purchase Planning Lead Marketplace | TreeKey</title>
-        <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; line-height:1.6; }}
-            .container {{ max-width: 840px; margin: auto; }}
-        </style>
+        <link rel="icon" href="/static/icon-192.png">
+        <link href="/static/tailwind.css" rel="stylesheet">
     </head>
-    <body>
-    <div class="container">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
+    <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
+    {_shared_nav_html()}
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
+        <div class="flex justify-between items-center mb-5 flex-wrap gap-2.5">
             <div>
-                <h1 style="margin:0; font-size:28px; color:#044332;">🛒 Statutory Planning Marketplace</h1>
-                <p style="margin:4px 0 0 0; color:#64748b; font-size:14px;">Real-time council planning notices with statutory freshness countdowns.</p>
+                <h1 class="m-0 text-[28px] font-extrabold text-white">🛒 Statutory Planning Marketplace</h1>
+                <p class="mt-1 mb-0 text-slate-400 text-sm">Real-time council planning notices with statutory freshness countdowns.</p>
             </div>
-            <a href="/pricing" style="background:#059669; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">View Monthly Subscriptions</a>
+            <a href="/pricing" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg no-underline font-bold text-[13px] transition-colors">View Monthly Subscriptions</a>
         </div>
 
-        <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:12px 16px; margin-bottom:20px; font-size:13px; color:#1e40af;">
+        <div class="bg-sky-500/10 border border-sky-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-sky-200">
             <b>💡 Single-Sale Guarantee:</b> Every lead purchased below is immediately removed from the live marketplace and burned permanently. You are the ONLY contractor who will receive the property data.
         </div>
 
@@ -2898,10 +3059,11 @@ def marketplace_view(tier: Optional[str] = "all"):
 
         {lead_cards}
 
-        <div style="text-align:center; margin-top:30px;">
-            <a href="/" style="color:#64748b; text-decoration:none; font-size:13px;">← Return to Main Intelligence Map</a>
+        <div class="text-center mt-8">
+            <a href="/" class="text-slate-400 hover:text-white no-underline text-[13px] transition-colors">← Return to Main Intelligence Map</a>
         </div>
     </div>
+    {_shared_footer_html()}
     </body>
     </html>
     """
@@ -4149,6 +4311,10 @@ def storm_radar_view():
             }
         ]
 
+    # Sep 9 2026, Nick's ask: dark-theme restyle to match the homepage (see
+    # the same note on marketplace_view). The alert badge itself
+    # (badge_bg/white text) already reads fine on a dark card unchanged --
+    # only the card background/border/body text needed dark equivalents.
     alert_cards = ""
     for a in alerts:
         region = a["region"]
@@ -4156,30 +4322,30 @@ def storm_radar_view():
         gust = a["gust_mph"]
         level = a.get("level", "amber").upper()
         summary = a["summary"]
-        bg_color = "#fef2f2" if gust >= 50 else "#fffbeb"
-        border_color = "#dc2626" if gust >= 50 else "#d97706"
-        badge_bg = "#dc2626" if gust >= 50 else "#d97706"
+        is_severe = gust >= 50
+        card_cls = "bg-red-950/30 border-red-600/60" if is_severe else "bg-amber-950/30 border-amber-600/60"
+        badge_bg = "#dc2626" if is_severe else "#d97706"
 
         alert_cards += f"""
-        <div style="background:{bg_color}; border:2px solid {border_color}; border-radius:12px; padding:24px; margin-bottom:16px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <div class="{card_cls} border-2 rounded-xl p-6 mb-4">
+            <div class="flex justify-between items-center flex-wrap gap-2.5">
                 <div>
                     <span style="background:{badge_bg}; color:white; font-size:11px; font-weight:bold; padding:4px 10px; border-radius:20px; text-transform:uppercase;">🌪️ {level} GALE ALERT ({gust} MPH)</span>
-                    <h3 style="margin:10px 0 4px 0; color:#0f172a; font-size:20px;">{region}</h3>
-                    <span style="font-size:13px; color:#475569;">Target Sectors: <b>{outcodes}</b></span>
+                    <h3 class="mt-2.5 mb-1 text-white text-xl font-bold">{region}</h3>
+                    <span class="text-[13px] text-slate-400">Target Sectors: <b class="text-slate-200">{outcodes}</b></span>
                 </div>
-                <div style="text-align:right;">
-                    <div style="font-size:13px; color:#64748b;">Emergency Rate Multiplier:</div>
-                    <div style="font-size:22px; font-weight:800; color:#044332;">1.5x – 2.0x Rates</div>
+                <div class="text-right">
+                    <div class="text-[13px] text-slate-400">Emergency Rate Multiplier:</div>
+                    <div class="text-2xl font-extrabold text-emerald-400">1.5x – 2.0x Rates</div>
                 </div>
             </div>
-            <p style="color:#334155; font-size:14px; margin:14px 0 16px 0; line-height:1.5;">
+            <p class="text-slate-300 text-sm my-3.5 leading-relaxed">
                 {summary}
             </p>
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-top:1px solid #e2e8f0; padding-top:14px;">
-                <span style="font-size:12px; color:#64748b;">Valid: {a.get('valid_from')} until {a.get('valid_to')}</span>
-                <a href="/generate-storm-quote/EMERGENCY-DISPATCH" style="background:#044332; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">
-                    Generate 1-Tap Emergency Quote Sheet ➔
+            <div class="flex justify-between items-center flex-wrap gap-2.5 border-t border-white/10 pt-3.5">
+                <span class="text-xs text-slate-400">Valid: {a.get('valid_from')} until {a.get('valid_to')}</span>
+                <a href="/generate-storm-quote/EMERGENCY-DISPATCH" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg no-underline font-bold text-[13px] transition-colors">
+                    Generate 1-Tap Emergency Quote Sheet →
                 </a>
             </div>
         </div>"""
@@ -4191,31 +4357,31 @@ def storm_radar_view():
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Storm Weather Radar & Emergency Dispatch | TreeKey</title>
-        <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; line-height:1.5; }}
-            .container {{ max-width: 860px; margin: auto; }}
-        </style>
+        <link rel="icon" href="/static/icon-192.png">
+        <link href="/static/tailwind.css" rel="stylesheet">
     </head>
-    <body>
-    <div class="container">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
+    <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
+    {_shared_nav_html()}
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
+        <div class="flex justify-between items-center mb-5 flex-wrap gap-2.5">
             <div>
-                <h1 style="margin:0; font-size:28px; color:#044332;">🌪️ Emergency Storm Weather Radar</h1>
-                <p style="margin:4px 0 0 0; color:#64748b; font-size:14px;">Severe gale & wind triggers (45mph+). Targeted emergency mobilization without notification spam.</p>
+                <h1 class="m-0 text-[28px] font-extrabold text-white">🌪️ Emergency Storm Weather Radar</h1>
+                <p class="mt-1 mb-0 text-slate-400 text-sm">Severe gale & wind triggers (45mph+). Targeted emergency mobilization without notification spam.</p>
             </div>
-            <a href="/dashboard" style="background:#0f172a; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold;">← Contractor Dashboard</a>
+            <a href="/dashboard" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-4 py-2 rounded-lg no-underline text-[13px] font-bold transition-colors">← Contractor Dashboard</a>
         </div>
 
-        <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:14px 18px; margin-bottom:24px; font-size:13px; color:#065f46;">
+        <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4.5 py-3.5 mb-6 text-[13px] text-emerald-200">
             <b>🛡️ Zero-Spam Guarantee:</b> We never alert you for normal rain or mild breezes. Alerts trigger strictly for verified 45mph+ gale forecasts in your registered sector so you can mobilize emergency standby crews.
         </div>
 
         {alert_cards}
 
-        <div style="text-align:center; margin-top:32px;">
-            <a href="/" style="color:#64748b; text-decoration:none; font-size:13px;">← Return to Main Intelligence Map</a>
+        <div class="text-center mt-8">
+            <a href="/" class="text-slate-400 hover:text-white no-underline text-[13px] transition-colors">← Return to Main Intelligence Map</a>
         </div>
     </div>
+    {_shared_footer_html()}
     </body>
     </html>
     """

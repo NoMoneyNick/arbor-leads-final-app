@@ -2063,12 +2063,20 @@ def increment_api_usage(api_name: str = "UK Planning API", increment: int = 1, c
     return out
 
 
-def is_territory_claimed(outcode: str) -> bool:
-    """Checks whether a given UK postcode district is already locked by an active subscriber."""
+def is_territory_claimed(outcode: str, conn=None) -> bool:
+    """Checks whether a given UK postcode district is already locked by an active subscriber.
+
+    Sep 9 2026: optional `conn` lets a caller that already has a connection
+    open (api_check_postcode, on every map click) reuse it instead of
+    opening yet another one -- see the matching note on
+    classify_leads_by_radius. Callers that don't pass one keep the old
+    self-contained open/close behaviour."""
     if not SURL or not outcode:
         return False
+    owns_conn = conn is None
     try:
-        conn = get_db_conn()
+        if owns_conn:
+            conn = get_db_conn()
         cur = conn.cursor()
         try:
             cur.execute("SELECT active FROM territory_claims WHERE outcode = %s AND active = TRUE", (outcode.strip().upper(),))
@@ -2076,7 +2084,8 @@ def is_territory_claimed(outcode: str) -> bool:
             return bool(row and row[0])
         finally:
             cur.close()
-            conn.close()
+            if owns_conn:
+                conn.close()
     except Exception as e:
         logger.error(f"[Territory] Check error for {outcode}: {e}")
         return False
@@ -2474,7 +2483,7 @@ def _extract_outcodes_lenient(address: str) -> list:
 
 
 def classify_leads_by_radius(pool_addresses: list, target_lat: Optional[float], target_lng: Optional[float],
-                              radius_miles: float, max_fresh_lookups: int = 20) -> dict:
+                              radius_miles: float, max_fresh_lookups: int = 20, conn=None) -> dict:
     """Sep 8 2026, Nick's ask: the radar's "X Active Leads in radius" figure
     was matching leads against the EXACT outcode typed (e.g. "CR6" only) --
     it never actually used the radius dropdown or the map circle at all, so
@@ -2498,7 +2507,18 @@ def classify_leads_by_radius(pool_addresses: list, target_lat: Optional[float], 
     either is accepted) already filtered to the wider postcode-letter area.
     Returns {"in_radius": int, "nearby": int} -- leads whose outcode can't
     be resolved to a real coordinate are excluded from both counts, never
-    guessed into either bucket."""
+    guessed into either bucket.
+
+    Sep 9 2026, Nick's ask: the lag "between selecting a new pin and the
+    info being updated" was still too long. This function's own batched
+    query was already fast, but the endpoint that calls it (a map click in
+    api_check_postcode) was opening a SEPARATE fresh Postgres connection for
+    this, plus another for is_territory_claimed, plus the one it already
+    held open for its own queries -- 3+ connections opened back-to-back for
+    one click. Added an optional `conn` so a caller that already has a
+    connection open (as api_check_postcode does) can hand it in and reuse
+    it instead of opening a new one; callers that don't pass one keep the
+    old self-contained behaviour exactly as before."""
     in_radius = 0
     nearby = 0
     if target_lat is None or target_lng is None:
@@ -2516,15 +2536,18 @@ def classify_leads_by_radius(pool_addresses: list, target_lat: Optional[float], 
 
     coords = {}
     if distinct:
+        owns_conn = conn is None
         try:
-            conn = get_db_conn()
+            if owns_conn:
+                conn = get_db_conn()
             cur = conn.cursor()
             cur.execute("SELECT outcode, lat, lon FROM outcode_area_cache WHERE outcode = ANY(%s)", (list(distinct),))
             for oc, lat, lon in cur.fetchall():
                 if lat is not None and lon is not None:
                     coords[oc] = (lat, lon)
             cur.close()
-            conn.close()
+            if owns_conn:
+                conn.close()
         except Exception as e:
             logger.debug(f"[Radar Radius] batch cache read failed: {e}")
 
