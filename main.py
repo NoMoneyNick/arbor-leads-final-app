@@ -1307,7 +1307,7 @@ def public_homepage():
                         </table>
                     </div>
                     <div class="p-4 bg-slate-800 border-t border-slate-700 text-center">
-                        <a href="#pricing" class="text-emerald-400 font-mono text-sm hover:text-emerald-300 transition-colors flex items-center justify-center gap-2">
+                        <a href="#pricing" class="text-emerald-400 font-mono text-sm hover:brightness-125 transition-colors flex items-center justify-center gap-2">
                             Upgrade To Unlock Full Commercial Intel <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
                         </a>
                     </div>
@@ -1428,6 +1428,36 @@ def public_homepage():
         </div>
     </section>
 
+    <!-- Sep 9 2026, Nick's ask: "under the 3 price groups I want a less
+         conspicuous section saying ... buy your leads one at a time ... with
+         price button selection to marketplace ... a note telling you these
+         aren't your only options and more specific packages are available."
+         Deliberately small/muted (not another full pricing section) so it
+         doesn't compete with the 3 subscription tiers above -- just a quiet
+         off-ramp for anyone who scrolled past them without subscribing.
+         Buttons all point at /marketplace itself (not a filtered URL) since
+         there's no actual size/price filter on that route to link to --
+         showing a price next to a link that doesn't filter to it would be
+         exactly the kind of fabricated-precision claim already stripped out
+         of this codebase elsewhere (see PROJECT_STATE.md items 11-13). -->
+    <section class="py-10 border-t border-slate-800/50">
+        <div class="container mx-auto px-4 max-w-3xl text-center">
+            <p class="text-slate-400 text-sm">
+                Not ready for a subscription? Buy leads one at a time instead, from as little as
+                <a href="/marketplace" class="text-emerald-400 font-bold hover:brightness-125">£19</a> —
+                <a href="/marketplace" class="text-slate-300 hover:brightness-125 underline decoration-slate-600">£29</a> and
+                <a href="/marketplace" class="text-slate-300 hover:brightness-125 underline decoration-slate-600">£49</a> tiers also available depending on job size.
+                No subscription, no commitment — browse and buy only the ones you want.
+            </p>
+            <a href="/marketplace" class="inline-block mt-3 text-xs font-mono uppercase tracking-wider text-sky-400 hover:brightness-125 border border-sky-500/30 hover:border-sky-400/60 rounded-full px-4 py-1.5 transition-all">
+                Browse the Marketplace →
+            </a>
+            <p class="text-slate-600 text-xs mt-3">
+                These aren't your only options — <a href="/pricing" class="text-slate-400 hover:text-slate-300 underline">see the full range of packages</a> tailored to your trade and job size.
+            </p>
+        </div>
+    </section>
+
     <!-- Sep 8 2026: LEDGER and CHIP-DROP used to live in the top public nav
          with zero explanation ("what is ledger?" was Nick's own reaction
          testing the live site). Both are real, free contractor tools --
@@ -1438,22 +1468,48 @@ def public_homepage():
     <section class="section py-16 bg-[#0b1220] border-t border-slate-800">
         <div class="container mx-auto px-4 max-w-5xl">
             <div class="text-center mb-10">
-                <h2 class="text-2xl font-extrabold text-white font-mono uppercase tracking-tight">Every Subscription Also Includes</h2>
-                <p class="text-slate-400 mt-2 text-sm">Free tools built for running a tree surgery business day-to-day, not just leads.</p>
+                <h2 class="text-2xl font-extrabold text-white font-mono uppercase tracking-tight">Free Tools Built Into TreeKey</h2>
+                <p class="text-slate-400 mt-2 text-sm">Not just leads — free tools for running a tree surgery business day-to-day.</p>
             </div>
             <!-- Sep 8 2026: dropped the emoji icons here per Nick ("look
                  cheap") -- a slim colour-coded accent bar reads cleaner and
                  more professional. -->
+            <!-- Sep 9 2026, Nick's ask: "the main page should also have
+                 reference and buttons to the app and description for what
+                 the app does and why you want it, same for storm radar" --
+                 same "what is X?" problem Ledger/Chip-Drop had before Sep 8
+                 (nav-only, zero explanation) applied to these two as well,
+                 since neither had a homepage explainer at all before this --
+                 only a bare nav link (Storm Radar) or nothing (the PWA
+                 install button, easy to miss in the nav). Added as two more
+                 cards in this same grid, each with its own button since
+                 Nick specifically asked for buttons here (the original two
+                 cards didn't have any -- added matching ones there too for
+                 consistency). -->
             <div class="grid md:grid-cols-2 gap-6">
                 <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700 border-t-2 border-t-violet-400">
                     <div class="text-[11px] font-mono uppercase tracking-widest text-violet-400 font-bold mb-2">Financial Tool</div>
                     <h3 class="text-lg font-bold text-white mb-2">TreeKey Ledger</h3>
-                    <p class="text-slate-400 text-sm leading-relaxed">A financial dashboard built for sole-trader and small-crew tree surgeons: tracks your rolling 12-month turnover against the £90,000 UK VAT threshold, holds a running CIS developer-tax tracker, and includes a van/crew-day cost calculator so you never underquote a job. Free in your dashboard once you subscribe.</p>
+                    <p class="text-slate-400 text-sm leading-relaxed mb-4">A financial dashboard built for sole-trader and small-crew tree surgeons: tracks your rolling 12-month turnover against the £90,000 UK VAT threshold, holds a running CIS developer-tax tracker, and includes a van/crew-day cost calculator so you never underquote a job. Free in your dashboard once you subscribe.</p>
+                    <a href="/login" class="inline-block text-xs font-mono uppercase tracking-wider text-violet-400 hover:brightness-125 border border-violet-500/30 hover:border-violet-400/60 rounded-full px-4 py-1.5 transition-all">Open Ledger →</a>
                 </div>
                 <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700 border-t-2 border-t-orange-400">
                     <div class="text-[11px] font-mono uppercase tracking-widest text-orange-400 font-bold mb-2">Site Network</div>
                     <h3 class="text-lg font-bold text-white mb-2">Chip-Drop Network</h3>
-                    <p class="text-slate-400 text-sm leading-relaxed">A directory of local allotments, farms and stables who want your arborist woodchip and logs for free — skip the £60–£120 commercial tipping fee and the round trip on every job. Landowners register their own site; you just turn up.</p>
+                    <p class="text-slate-400 text-sm leading-relaxed mb-4">A directory of local allotments, farms and stables who want your arborist woodchip and logs for free — skip the £60–£120 commercial tipping fee and the round trip on every job. Landowners register their own site; you just turn up.</p>
+                    <a href="/chip-drop" class="inline-block text-xs font-mono uppercase tracking-wider text-orange-400 hover:brightness-125 border border-orange-500/30 hover:border-orange-400/60 rounded-full px-4 py-1.5 transition-all">Find a Drop Spot →</a>
+                </div>
+                <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700 border-t-2 border-t-amber-400">
+                    <div class="text-[11px] font-mono uppercase tracking-widest text-amber-400 font-bold mb-2">Emergency Alerts</div>
+                    <h3 class="text-lg font-bold text-white mb-2">Storm Radar</h3>
+                    <p class="text-slate-400 text-sm leading-relaxed mb-4">Live Met Office high-wind warnings (45mph+ gusts), matched to your patch. Storm damage means urgent, higher-value call-outs — this flags exactly where and when to expect them, so you're first on the phone, not the fifth.</p>
+                    <a href="/storm-radar" class="inline-block text-xs font-mono uppercase tracking-wider text-amber-400 hover:brightness-125 border border-amber-500/30 hover:border-amber-400/60 rounded-full px-4 py-1.5 transition-all">View Storm Radar →</a>
+                </div>
+                <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700 border-t-2 border-t-emerald-400">
+                    <div class="text-[11px] font-mono uppercase tracking-widest text-emerald-400 font-bold mb-2">Mobile Access</div>
+                    <h3 class="text-lg font-bold text-white mb-2">The TreeKey App</h3>
+                    <p class="text-slate-400 text-sm leading-relaxed mb-4">Install TreeKey to your phone's home screen like a normal app — no app store needed. Your leads, Ledger, and Storm Radar alerts, one tap away, full-screen, with no browser bar in the way.</p>
+                    <a href="/login" class="inline-block text-xs font-mono uppercase tracking-wider text-emerald-400 hover:brightness-125 border border-emerald-500/30 hover:border-emerald-400/60 rounded-full px-4 py-1.5 transition-all">Get the App →</a>
                 </div>
             </div>
         </div>
@@ -1481,7 +1537,7 @@ def public_homepage():
         <div class="container mx-auto px-4 max-w-3xl">
             <div class="text-center mb-12">
                 <h2 class="text-3xl font-extrabold text-white font-mono uppercase tracking-tight">Contractor FAQ</h2>
-                <p class="text-slate-500 text-sm mt-2">Full answers on pricing, data sources, and how everything works: <a href="/faq" class="text-emerald-400 hover:text-emerald-300 underline">see the complete FAQ →</a></p>
+                <p class="text-slate-500 text-sm mt-2">Full answers on pricing, data sources, and how everything works: <a href="/faq" class="text-emerald-400 hover:brightness-125 underline">see the complete FAQ →</a></p>
             </div>
             
             <div class="space-y-6">
@@ -3823,7 +3879,7 @@ def login_page(error: Optional[str] = None):
 
         <div class="text-center mt-4 pt-3 sm:mt-6 sm:pt-4 border-t border-slate-800">
             <p class="text-xs text-slate-400 mb-2">New here and not ready to subscribe?</p>
-            <a href="/free-account" class="text-[13px] font-bold text-emerald-400 hover:text-emerald-300 no-underline transition-colors">Get a free lead first, no card needed →</a>
+            <a href="/free-account" class="text-[13px] font-bold text-emerald-400 hover:brightness-125 no-underline transition-colors">Get a free lead first, no card needed →</a>
         </div>
 
         <div class="flex items-center justify-center gap-2 text-center mt-4 sm:mt-5 text-xs text-slate-500">
@@ -3924,7 +3980,7 @@ async def request_magic_link(request: Request):
                 </form>
             </div>
 
-            <p class="text-xs text-slate-500 mt-5">Didn't get it? Check spam, or <a href="/login" class="text-emerald-400 hover:text-emerald-300">try again</a>. Emails can occasionally take a few minutes to arrive.</p>
+            <p class="text-xs text-slate-500 mt-5">Didn't get it? Check spam, or <a href="/login" class="text-emerald-400 hover:brightness-125">try again</a>. Emails can occasionally take a few minutes to arrive.</p>
         </div>
     </div>
     {_shared_footer_html()}
@@ -4036,7 +4092,7 @@ def free_account_signup_page(error: Optional[str] = None):
             <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3.5 rounded-lg font-bold text-[15px] cursor-pointer w-full transition-colors">Get My Free Lead →</button>
         </form>
         <div class="text-center mt-4 pt-3 sm:mt-5 sm:pt-4 border-t border-slate-800 text-xs text-slate-400">
-            Already have an account? <a href="/login" class="text-emerald-400 hover:text-emerald-300 font-bold no-underline transition-colors">Sign in</a>
+            Already have an account? <a href="/login" class="text-emerald-400 hover:brightness-125 font-bold no-underline transition-colors">Sign in</a>
         </div>
     </div>
     </div>
