@@ -492,7 +492,7 @@ def init_db():
 
             -- Sep 8 2026: small persistent cache so the live-feed ticker and
             -- area-scoped radar results can show a real place name (e.g.
-            -- "CR5, Croydon, London") without calling postcodes.io's free
+            -- "NG22, Newark and Sherwood") without calling postcodes.io's free
             -- outcodes API on every single pageview -- once per outcode ever
             -- seen, reused after that.
             CREATE TABLE IF NOT EXISTS outcode_area_cache (
@@ -645,11 +645,11 @@ def init_db():
             # Business API — no such integration exists in this codebase.
             "ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS notification_preference TEXT DEFAULT 'email';",
             # Sep 8 2026, Nick's proximity-system rework: a subscriber previously
-            # only ever gave a bare outcode (e.g. "CR5"), geocoded to that
+            # only ever gave a bare outcode (e.g. "NG22"), geocoded to that
             # outcode's centroid -- fine for matching, but not precise enough to
             # honestly say "this job is 4.2 miles from you". full_postcode
-            # stores the exact postcode when the customer gave one (e.g. "CR5
-            # 2LE"); lat/lon above then get the exact postcodes.io pin instead
+            # stores the exact postcode when the customer gave one (e.g. "NG22
+            # 8AA"); lat/lon above then get the exact postcodes.io pin instead
             # of just the outcode centroid when it's present. center_outcode is
             # still always kept as the bare outcode (derived even from a full
             # postcode) since territory_claims and the existing prefix-matching
@@ -1831,10 +1831,40 @@ def lookup_full_postcode_centroid(postcode: str) -> tuple:
     return (None, None)
 
 
+def street_view_url(address: str) -> str:
+    """Sep 9 2026, Nick's ask: "send a google street view screenshot of the
+    address or at least a google street view link when they buy the lead."
+    A true embedded screenshot needs Google's paid Street View Static API
+    (a real key with billing, plus a small cost on every purchase) -- not
+    something to switch on without Nick explicitly choosing to pay for it.
+    This is the zero-cost version: a link that opens straight INTO Street
+    View pano mode (not just a map pin the buyer then has to drag the
+    pegman onto themselves).
+
+    Google's Maps URLs API can only launch pano mode from a lat/lon
+    "viewpoint", not a free-text address, so this pulls the full postcode
+    out of the lead's real (already-purchased, unmasked) address text and
+    geocodes THAT via postcodes.io (lookup_full_postcode_centroid, the same
+    free API already used everywhere else here) to get a precise pin.
+    Falls back to a plain Google Maps search link -- never broken or
+    misleading -- when no full postcode can be found or resolved in the
+    address (scraped addresses aren't 100% consistent). Used by both the
+    purchased-lead email (notifications.py) and the contractor dashboard's
+    per-lead "Street View" button (main.py) so the two stay identical."""
+    import urllib.parse
+    address = address or ""
+    m = re.search(r'\b([A-Z]{1,2}[0-9][A-Z0-9]?)\s*([0-9][A-Z]{2})\b', address.upper())
+    if m:
+        lat, lon = lookup_full_postcode_centroid(f"{m.group(1)} {m.group(2)}")
+        if lat is not None and lon is not None:
+            return f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat},{lon}"
+    return f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(address)}"
+
+
 def resolve_location(raw_input: str) -> dict:
     """Sep 8 2026, Nick's proximity-system rework: one place that decides
-    whether a customer typed a full UK postcode ("CR5 2LE") or just an
-    outcode ("CR5" / "B1"), and geocodes it the right way either way --
+    whether a customer typed a full UK postcode ("NG22 8AA") or just an
+    outcode ("NG22" / "B1"), and geocodes it the right way either way --
     exact pin for a full postcode, outcode centroid otherwise. Used by
     checkout signup (register_or_update_subscription) so a customer who
     gives their full postcode gets an exact-distance pin, while one who
@@ -1847,8 +1877,8 @@ def resolve_location(raw_input: str) -> dict:
     "lon": float|None, "precision": "exact"|"area"|"none"}."""
     cleaned = (raw_input or "").strip().upper()
     no_space = cleaned.replace(" ", "")
-    # _FULL_POSTCODE_RE's `\s*` already tolerates "CR5 2LE", "CR5  2LE" or
-    # "CR52LE" typed with no space at all -- match against the raw cleaned
+    # _FULL_POSTCODE_RE's `\s*` already tolerates "NG22 8AA", "NG22  8AA" or
+    # "NG228AA" typed with no space at all -- match against the raw cleaned
     # string first (keeps any space the customer typed), falling back to
     # the space-stripped form for the no-space case.
     m = _FULL_POSTCODE_RE.match(cleaned) or _FULL_POSTCODE_RE.match(no_space)
@@ -1884,10 +1914,10 @@ def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float
 
 
 _OSM_CHIP_DROP_TAGS = [
-    ("landuse", "farmyard", "🚜 Farm"),
-    ("landuse", "allotments", "🌱 Allotments"),
-    ("leisure", "horse_riding", "🐴 Stables / Equestrian"),
-    ("shop", "garden_centre", "🌳 Garden Centre"),
+    ("landuse", "farmyard", "Farm"),
+    ("landuse", "allotments", "Allotments"),
+    ("leisure", "horse_riding", "Stables / Equestrian"),
+    ("shop", "garden_centre", "Garden Centre"),
 ]
 
 
@@ -1960,7 +1990,7 @@ def find_chip_drop_candidates_via_osm(lat: float, lon: float, radius_miles: floa
         if el_lat is None or el_lon is None:
             continue
 
-        category = "📍 Possible Site"
+        category = "Possible Site"
         for k, v, label in _OSM_CHIP_DROP_TAGS:
             if tags.get(k) == v:
                 category = label
@@ -2263,6 +2293,39 @@ def _extract_outcodes(address: str) -> list:
     return [m.group(1) for m in re.finditer(r'\b([A-Z]{1,2}[0-9][A-Z0-9]?)\s*([0-9][A-Z]{2})\b', (address or "").upper())]
 
 
+_FULL_POSTCODE_IN_TEXT_RE = re.compile(r'\b[A-Z]{1,2}[0-9][A-Z0-9]?\s*[0-9][A-Z]{2}\b')
+_STREET_SUFFIXES = (
+    "Road|Rd|Street|St|Avenue|Ave|Lane|Ln|Close|Drive|Dr|Way|Grove|Grv|Crescent|Cres|"
+    "Gardens|Gdns|Court|Ct|Place|Pl|Rise|Walk|Terrace|Ter|Hill|Park|Row|Mews|Square|Sq|Green|Gn"
+)
+_HOUSE_STREET_IN_TEXT_RE = re.compile(
+    r'\b\d{1,4}[A-Za-z]?\s+(?:[A-Z][a-zA-Z\'\-]*\s+){0,3}(?:' + _STREET_SUFFIXES + r')\b'
+)
+
+
+def _redact_address_from_summary(summary: str) -> str:
+    """Sep 9 2026, CRITICAL fix, Nick's ask: the marketplace and the public
+    homepage ticker both already mask the `address` DB column (see
+    get_marketplace_leads_with_freshness and select_diverse_ticker_leads),
+    but neither ever touched the `summary` column -- and real scraped
+    council planning descriptions very often restate the site address in
+    the text itself (e.g. "T1 - Ash - Fell. Site: 14 Oak Avenue, Newark,
+    NG22 8AA"), which handed out exactly what buying the lead is supposed
+    to pay for. This is a best-effort, regex-based scrub -- free-text
+    addresses can't be found with 100% certainty -- run over every summary
+    shown anywhere before a lead is purchased: a full postcode anywhere in
+    the text, and a "<number> <name> <Road/Street/Avenue/...>" pattern for
+    the house-number-plus-street case that doesn't include a postcode.
+    Never applied to a summary AFTER purchase/dispatch (the dashboard, the
+    unlock email, WhatsApp forwarding etc. all still use the raw summary --
+    that's the exact thing being paid for)."""
+    if not summary:
+        return summary
+    redacted = _FULL_POSTCODE_IN_TEXT_RE.sub("[postcode hidden]", summary)
+    redacted = _HOUSE_STREET_IN_TEXT_RE.sub("[address hidden]", redacted)
+    return redacted
+
+
 # Sep 8 2026: the 32 London boroughs plus the City of London, lower-cased,
 # used only to decide whether an outcode's postcodes.io admin_district
 # counts as "London" for the ticker's geographic mix (see
@@ -2283,7 +2346,7 @@ _LONDON_BOROUGHS = frozenset({
 
 def get_outcode_area_label(outcode: str) -> dict:
     """Sep 8 2026, Nick's ask: the ticker and radar notices should show a
-    real place name next to the postcode area (e.g. "CR5, Croydon, London"),
+    real place name next to the postcode area (e.g. "NG22, Newark and Sherwood"),
     not just the bare outcode. Resolves an outcode's district via the same
     free postcodes.io API already used for geocoding, cached in
     outcode_area_cache so this is a one-time lookup per outcode, not a live
@@ -2468,9 +2531,9 @@ def _extract_outcodes_lenient(address: str) -> list:
     """Sep 8 2026: Nick flagged the radar radius classification showing
     "null leads in areas where there are definitely leads". Root cause --
     classify_leads_by_radius (below) was using _extract_outcodes, which only
-    matches a FULL postcode (outcode + incode, e.g. "CR5 2AB") in the
+    matches a FULL postcode (outcode + incode, e.g. "NG22 8AA") in the
     address text. Plenty of real scraped addresses only carry the bare
-    outcode ("...Croydon CR5...") with no incode -- exactly what the proven
+    outcode ("...Newark NG22...") with no incode -- exactly what the proven
     `address ~* '\\yCR[0-9]'` SQL matching elsewhere in this file already
     relies on -- so a real, already-matched lead could still fail to
     extract an outcode here and get silently dropped from both radius
@@ -2485,9 +2548,9 @@ def _extract_outcodes_lenient(address: str) -> list:
 def classify_leads_by_radius(pool_addresses: list, target_lat: Optional[float], target_lng: Optional[float],
                               radius_miles: float, max_fresh_lookups: int = 20, conn=None) -> dict:
     """Sep 8 2026, Nick's ask: the radar's "X Active Leads in radius" figure
-    was matching leads against the EXACT outcode typed (e.g. "CR6" only) --
+    was matching leads against the EXACT outcode typed (e.g. "NG22" only) --
     it never actually used the radius dropdown or the map circle at all, so
-    a real nearby lead at CR5 or CR8 never counted as "in radius" for a CR6
+    a real nearby lead at NG21 or NG24 never counted as "in radius" for a NG22
     search, even though the same leads correctly showed up in "connected
     zones" and the notices table right next to it. This does a genuine
     haversine-distance check against each lead's outcode centroid (same
@@ -2694,6 +2757,13 @@ def select_diverse_ticker_leads(limit: int = 5, enforce_geo_mix: bool = True,
     pool = []
     for address, summary, lead_score, lead_price, council_source, reference, discovered_at, outcode in parsed_rows:
         area = area_by_outcode.get(outcode) or {"district": None, "is_london": False, "label": (outcode or "UK")}
+        # Sep 9 2026, CRITICAL fix, Nick's ask: this pool feeds the public
+        # homepage's "Intercepting Live" ticker and notices table -- both
+        # already show area_label instead of the raw address, but rendered
+        # this summary text completely unredacted. See
+        # _redact_address_from_summary's own docstring for why that's a real
+        # leak (council descriptions often restate the site address inline).
+        summary = _redact_address_from_summary(summary)
         pool.append({
             "address": address, "summary": summary, "lead_score": (lead_score or "small"),
             "lead_price": lead_price, "council_source": council_source, "reference": reference,
@@ -3216,8 +3286,8 @@ def register_or_update_subscription(customer_email: str, outcode: str, tier: str
     """Registers or updates a contractor subscription with seniority timestamp, lat/lon pin, and tier quota.
 
     Sep 8 2026: `outcode` here is actually "whatever the customer typed" --
-    resolve_location works out whether that's a full postcode ("CR5 2LE",
-    giving an exact pin) or just a bare outcode ("CR5", the pre-existing
+    resolve_location works out whether that's a full postcode ("NG22 8AA",
+    giving an exact pin) or just a bare outcode ("NG22", the pre-existing
     centroid-only behaviour) and geocodes accordingly. center_outcode is
     always stored as the plain outcode either way, since territory_claims
     and dispatch_lead_alerts' prefix-matching are keyed on outcode -- this
@@ -3564,7 +3634,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "tier": "granted",
             "badge_color": "#059669",
             "badge_bg": "#ecfdf5",
-            "badge_text": "✅ Officially Approved (Ready to Fell)",
+            "badge_text": "Officially Approved (Ready to Fell)",
             "price": 25,
             "days_left": "Approved by Council",
             "plan_key": "single_lead_medium"
@@ -3603,7 +3673,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
                 "tier": "expired",
                 "badge_color": "#64748b",
                 "badge_bg": "#f1f5f9",
-                "badge_text": "🛑 Expired Domestic Job",
+                "badge_text": "Expired Domestic Job",
                 "price": 0,
                 "days_left": "Expired (>7 days old)",
                 "plan_key": "expired"
@@ -3613,7 +3683,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
                 "tier": "flash_hot",
                 "badge_color": "#059669",
                 "badge_bg": "#ecfdf5",
-                "badge_text": "🔥 Fresh Homeowner Quote (Urgent: Day 0–2)",
+                "badge_text": "Fresh Homeowner Quote (Urgent: Day 0–2)",
                 "price": 35,
                 "days_left": f"{days_left} days left before quote closes",
                 "plan_key": "single_lead_medium"
@@ -3623,7 +3693,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
                 "tier": "active",
                 "badge_color": "#d97706",
                 "badge_bg": "#fffbeb",
-                "badge_text": "⚡ Active Homeowner Quote (Day 3–7)",
+                "badge_text": "Active Homeowner Quote (Day 3–7)",
                 "price": 25,
                 "days_left": f"{days_left} days left before quote closes",
                 "plan_key": "single_lead_small"
@@ -3640,7 +3710,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "tier": "expired",
             "badge_color": "#64748b",
             "badge_bg": "#f1f5f9",
-            "badge_text": "🛑 Expired Statutory Notice (>56 Days)",
+            "badge_text": "Expired Statutory Notice (>56 Days)",
             "price": 0,
             "days_left": "Expired (>56 days)",
             "plan_key": "expired"
@@ -3651,7 +3721,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "tier": "flash_hot",
             "badge_color": "#dc2626",
             "badge_bg": "#fef2f2",
-            "badge_text": "🔥 Flash Hot (Day 0–3 • 0 Competitors Aware)",
+            "badge_text": "Flash Hot (Day 0–3 • 0 Competitors Aware)",
             "price": 29,
             "days_left": f"{days_left} days left in consultation",
             "plan_key": "single_lead_medium"
@@ -3661,7 +3731,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "tier": "active",
             "badge_color": "#d97706",
             "badge_bg": "#fffbeb",
-            "badge_text": "⚡ Prime Quoting Window (Day 4–14)",
+            "badge_text": "Prime Quoting Window (Day 4–14)",
             "price": 19,
             "days_left": f"{days_left} days left in consultation",
             "plan_key": "single_lead_small"
@@ -3671,7 +3741,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "tier": "clearance",
             "badge_color": "#ca8a04",
             "badge_bg": "#fefce8",
-            "badge_text": f"⏳ Late Window Clearance (Closing Soon)",
+            "badge_text": f"Late Window Clearance (Closing Soon)",
             "price": 9,
             "days_left": f"{days_left} days until determination",
             "plan_key": "single_lead_small"
@@ -3681,7 +3751,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "tier": "clearance",
             "badge_color": "#64748b",
             "badge_bg": "#f8fafc",
-            "badge_text": f"📋 Final Determination (Day 43–56)",
+            "badge_text": f"Final Determination (Day 43–56)",
             "price": 9,
             "days_left": f"{days_left} days left",
             "plan_key": "single_lead_small"
@@ -3840,6 +3910,38 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
         conn = get_db_conn()
         cur = conn.cursor()
         try:
+            # Sep 9 2026, CRITICAL fix, Nick's ask: a postcode+radius search
+            # (e.g. his own CR5/Croydon test) was only ever turning up 1-2
+            # results, always from today. Root cause -- this query, radius
+            # search or not, was always capped to the 150 MOST RECENTLY
+            # DISCOVERED unclaimed leads nationwide (recency-sorted, not
+            # proximity-sorted), then filtered down by distance afterwards.
+            # Exactly the same shape of bug as find_nearest_unclaimed_lead's
+            # own Sep 9 fix (see that function's docstring): leads are
+            # discovered in council-by-council scan batches, so "the 150
+            # most recent" at any given moment can easily hold almost none
+            # of a given area's genuinely-nearby unclaimed leads, even when
+            # dozens exist just outside that recency window. When a real
+            # postcode+radius search is active, this now pulls from a much
+            # larger candidate pool (still a defensive ceiling, not
+            # unbounded) before the radius filter runs, so a real nearby
+            # lead can't be pushed out of the window the way it could be at
+            # 150. The default (no search active, just browsing/paginating
+            # the marketplace) keeps the smaller, recency-ordered 150 --
+            # that's the correct, intentional behaviour for "show me what's
+            # newest", not a bug.
+            _is_search = target_lat is not None and target_lng is not None
+            # Sep 9 2026, same-day follow-up, Nick's ask: even with no search
+            # active, every lead on the default marketplace view was showing
+            # "Listed 9 Sep" (today) -- a big same-day scan batch can genuinely
+            # produce 150+ new leads on its own, which fills this recency pool
+            # entirely with today's rows and pushes every older-but-still-
+            # unclaimed lead out of the window completely, not just out of the
+            # visible page. Raised the no-search default too (400, still a
+            # real ceiling for performance, not unbounded like the search
+            # case) so a single busy scan can no longer crowd out the rest of
+            # the genuinely open pool.
+            _pool_limit = 5000 if _is_search else 400
             # Aug 30 2026: has_agent was captured by the scraper and shown to a
             # buyer only AFTER they'd already paid (the "lead unlocked" email)
             # -- this query, which feeds the public pre-purchase marketplace
@@ -3859,8 +3961,8 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                     FROM leads
                     WHERE status = 'new' OR status IS NULL
                     ORDER BY discovered_at DESC
-                    LIMIT 150;
-                """)
+                    LIMIT %s;
+                """, (_pool_limit,))
                 cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date", "source_type", "has_agent", "agent_is_tree_surgeon", "vertical"]
             except Exception as e:
                 # Sep 2 2026 (production incident fix): if the `vertical`
@@ -3885,13 +3987,28 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                     FROM leads
                     WHERE status = 'new' OR status IS NULL
                     ORDER BY discovered_at DESC
-                    LIMIT 150;
-                """)
+                    LIMIT %s;
+                """, (_pool_limit,))
                 cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date", "source_type", "has_agent", "agent_is_tree_surgeon"]
             rows = cur.fetchall()
             raw_leads = [dict(zip(cols, r)) for r in rows]
             for l in raw_leads:
                 l.setdefault("vertical", "tree")
+                # Sep 9 2026, Nick's ask: "so many jobs have area unavailable
+                # ... can we scan the lead and description for an address" --
+                # captured BEFORE redaction below so a postcode/outcode that
+                # only appears in the summary (not the address column) can
+                # still resolve an area. Used as the area_label fallback
+                # further down, never displayed itself.
+                _summary_outcodes = _extract_outcodes_lenient(l.get("summary") or "")
+                l["_summary_oc_fallback"] = _summary_outcodes[0] if _summary_outcodes else None
+                # Sep 9 2026, CRITICAL fix, Nick's ask: the `address` column
+                # was already masked (see below), but a scraped council
+                # summary/description very often restates the site address
+                # in the text itself -- this was handed out, unredacted, to
+                # every visitor before purchase. See
+                # _redact_address_from_summary's own docstring.
+                l["summary"] = _redact_address_from_summary(l.get("summary"))
 
             # Sep 9 2026, CRITICAL fix -- Nick caught the marketplace showing
             # the exact street address of unpurchased leads. The template
@@ -3899,7 +4016,7 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
             # splitting the raw address text on commas and keeping only the
             # last two segments -- but real scraped council addresses are
             # very often a single unpunctuated string ("14 OAK AVENUE
-            # CROYDON CR5 2AB", no commas at all), and for those the split
+            # NEWARK NG22 8AA", no commas at all), and for those the split
             # produces just ONE segment, which the old code's fallback
             # (`if len(parts) > 1 else addr`) then showed in full -- house
             # number and street included, exactly what buying the lead is
@@ -3915,7 +4032,16 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
             _distinct_outcodes = set()
             for l in raw_leads:
                 oc_list = _extract_outcodes_lenient(l.get("addr") or "")
-                oc = oc_list[0] if oc_list else None
+                # Sep 9 2026, Nick's ask: fall back to an outcode spotted in
+                # the summary/description (captured above, before it got
+                # redacted) when the address column itself doesn't yield one
+                # -- real scraped addresses are sometimes just a street name
+                # with no postcode at all, while the application description
+                # mentions the area. Only ever used to resolve area_label,
+                # never to reveal anything -- it's already gone from the
+                # summary text shown to the visitor.
+                oc = oc_list[0] if oc_list else l.pop("_summary_oc_fallback", None)
+                l.pop("_summary_oc_fallback", None)
                 _outcodes_by_lead.append(oc)
                 if oc:
                     _distinct_outcodes.add(oc)
@@ -3931,8 +4057,13 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 except Exception as e:
                     logger.debug(f"[Marketplace] batch area-cache read failed: {e}")
 
+                # Sep 9 2026: raised alongside the pool-limit fix above -- a
+                # much bigger candidate pool during a real search means many
+                # more distinct outcodes can genuinely need a fresh lookup,
+                # not just the same ~20 that a 150-lead pool ever produced.
+                _area_lookup_cap = 60 if _is_search else 30
                 _missing = [oc for oc in _distinct_outcodes if oc not in _area_by_outcode]
-                for oc in _missing[:20]:
+                for oc in _missing[:_area_lookup_cap]:
                     _area_by_outcode[oc] = get_outcode_area_label(oc)["label"]
 
             for l, oc in zip(raw_leads, _outcodes_by_lead):
@@ -3957,8 +4088,9 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 except Exception as e:
                     logger.debug(f"[Marketplace] batch coord-cache read failed: {e}")
 
+                _coord_lookup_cap = max(max_fresh_lookups, 60) if _is_search else max_fresh_lookups
                 _missing_coords = [oc for oc in _distinct_outcodes if oc not in _coords_by_outcode]
-                for oc in _missing_coords[:max_fresh_lookups]:
+                for oc in _missing_coords[:_coord_lookup_cap]:
                     area = get_outcode_area_label(oc)  # also writes through to outcode_area_cache
                     if area.get("lat") is not None and area.get("lon") is not None:
                         _coords_by_outcode[oc] = (area["lat"], area["lon"])
@@ -4014,18 +4146,18 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 if l["source_type"] == "direct_homeowner":
                     l["badge_bg"] = "#ecfdf5"
                     l["badge_color"] = "#065f46"
-                    l["badge_text"] = "🏡 Direct Homeowner (Verified Phone)"
+                    l["badge_text"] = "Direct Homeowner (Verified Phone)"
                 elif l["source_type"] == "domestic_classified":
                     l["badge_bg"] = "#eff6ff"
                     l["badge_color"] = "#1d4ed8"
-                    l["badge_text"] = "🏡 Private Domestic"
+                    l["badge_text"] = "Private Domestic"
                     if "Tender" in l["summary"] or "Estate" in l["summary"]:
                         l["badge_bg"] = "#fdf4ff"
                         l["badge_color"] = "#86198f"
-                        l["badge_text"] = "🏢 Estate Tender"
+                        l["badge_text"] = "Estate Tender"
                 elif l["source_type"] == "council_planning":
                     if not l.get("badge_text") or l["badge_text"] == "Lead":
-                        l["badge_text"] = "🏛️ Council Statutory"
+                        l["badge_text"] = "Council Statutory"
 
                 l["is_urgent"] = is_urgent_lead(l.get("summary"))
                 l["job_category"] = classify_job_category(l.get("summary"))
@@ -4182,13 +4314,13 @@ def get_contractor_financial_summary(contractor_email: str) -> dict:
             headroom = max(0.0, vat_limit - turnover)
             
             if turnover >= vat_limit:
-                vat_status = "🚨 EXCEEDED: Mandatory VAT Registration Required with HMRC"
+                vat_status = "EXCEEDED: Mandatory VAT Registration Required with HMRC"
                 vat_color = "#dc2626"
             elif turnover >= 80000.0:
-                vat_status = f"⚠️ WARNING: Only £{headroom:,.0f} Headroom Remaining Before £90k VAT Trap"
+                vat_status = f"WARNING: Only £{headroom:,.0f} Headroom Remaining Before £90k VAT Trap"
                 vat_color = "#ea580c"
             else:
-                vat_status = f"✅ Safe Zone: £{headroom:,.0f} Remaining in VAT Exemption"
+                vat_status = f"Safe Zone: £{headroom:,.0f} Remaining in VAT Exemption"
                 vat_color = "#059669"
 
             return {

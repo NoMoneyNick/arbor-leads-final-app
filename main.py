@@ -456,7 +456,7 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
     # Nick then flagged a second, deeper issue: the "X Active Leads in
     # radius" figure was matching leads to the exact outcode TEXT typed,
     # completely ignoring the radius dropdown and the map circle -- so a
-    # real, nearby lead at CR5 or CR8 never counted as "in radius" for a CR6
+    # real, nearby lead at NG21 or NG24 never counted as "in radius" for a NG22
     # search, even though it correctly showed up in "connected zones" and
     # the notices table right next to it. Replaced with a genuine
     # haversine-distance check (database.classify_leads_by_radius) against
@@ -807,7 +807,7 @@ def public_homepage():
     # address of every unsold lead was visible to any anonymous visitor,
     # which is the entire paid product given away for free pre-checkout.
     # Fixed to show only the outcode-level area, never the address itself --
-    # now a real place name ("CR5, Croydon, London") via
+    # now a real place name ("NG22, Newark and Sherwood") via
     # database.get_outcode_area_label instead of a generic "X area"
     # placeholder. The full address still only appears after purchase / on
     # an actual subscriber's own dashboard leads (see /dashboard).
@@ -1121,14 +1121,19 @@ def public_homepage():
                          structure) so the two boxes now match in size and
                          shape side by side on desktop, and still stack
                          cleanly on mobile. -->
-                    <div class="tk-live-badge flex md:inline-flex flex-col items-center gap-1 md:gap-2 w-full md:w-auto px-3 py-1.5 md:px-5 md:py-3 rounded-lg md:rounded-xl border border-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.15)]">
+                    <!-- Sep 9 2026, Nick's ask: this guarantee box should itself
+                         be a button straight to the marketplace, not just a
+                         static claim -- turned the whole box into a link
+                         (no-underline, hover brightening) rather than adding
+                         a separate button beside it. -->
+                    <a href="/marketplace" class="tk-live-badge flex md:inline-flex flex-col items-center gap-1 md:gap-2 w-full md:w-auto px-3 py-1.5 md:px-5 md:py-3 rounded-lg md:rounded-xl border border-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.15)] no-underline hover:border-emerald-400 hover:brightness-110 transition-all cursor-pointer">
                         <div class="flex items-center gap-2 text-[10px] md:text-[11px] uppercase tracking-widest text-emerald-400">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="shrink-0"><polyline points="20 6 9 17 4 12"></polyline></svg>
                             Exclusivity Guarantee
                         </div>
                         <div class="text-emerald-300 font-bold text-sm md:text-lg text-center">You Buy It, It's Yours</div>
-                        <div class="text-emerald-400 text-[10px] md:text-xs font-mono text-center">We Never Sell That Lead to Anyone Else</div>
-                    </div>
+                        <div class="text-emerald-400 text-[10px] md:text-xs font-mono text-center">We Never Sell That Lead to Anyone Else &rarr; Browse Marketplace</div>
+                    </a>
                 </div>
 
                 <!-- The Big Claim -->
@@ -1519,7 +1524,7 @@ def public_homepage():
                     Platform is 256-bit SSL Encrypted & GDPR Compliant. 
                 </p>
                 <p class="text-slate-400 mt-4 mb-1 flex items-center justify-center md:justify-start gap-2">
-                    Proudly engineered in the United Kingdom 🇬🇧
+                    Proudly engineered in the United Kingdom 
                 </p>
                 <p class="text-slate-600">Contact: nick@treekey.uk</p>
             </div>
@@ -2257,7 +2262,7 @@ def pricing(request: Request):
     for key, plan in plans.items():
         if plan["mode"] == "subscription":
             price_display = f"£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal; color:#94a3b8;'>/month</span>"
-            roi_box = f"<div style='background:rgba(16,185,129,0.1); border-left:3px solid #059669; padding:10px; font-size:12px; color:#a7f3d0; text-align:left; margin:14px 0; border-radius:4px;'><b>💡 Real-World Math:</b> {plan.get('real_world_roi', '')}</div>"
+            roi_box = f"<div style='background:rgba(16,185,129,0.1); border-left:3px solid #059669; padding:10px; font-size:12px; color:#a7f3d0; text-align:left; margin:14px 0; border-radius:4px;'><b>Real-World Math:</b> {plan.get('real_world_roi', '')}</div>"
             highlight = "border:2px solid #059669; box-shadow:0 8px 24px rgba(5,150,105,0.15);" if key == "climber_domestic" else "border:1px solid #334155;"
 
             sub_cards += f"""
@@ -2360,13 +2365,13 @@ def pricing(request: Request):
         {single_cards}
 
         <div class="creed-banner" style="margin-top:32px;">
-            <h3>🌲 The TreeKey Creed: "Your Prosperity is Our Business"</h3>
+            <h3>The TreeKey Creed: "Your Prosperity is Our Business"</h3>
             <p style="font-size:14px; line-height:1.6; margin:0;">
                 We are not a faceless directory. We do NOT sell your leads to 5 competitors, we do not take a percentage of your hard-earned invoices, and we don't trap you in long contracts. Every lead on TreeKey is a <b>single-sale asset</b>—the second you receive it, it is burned from our system forever.
             </p>
         </div>
 
-        <h2 class="text-[22px] mt-10 mb-4 text-white font-bold">⚖️ Why TreeKey is the Opposite of Directories</h2>
+        <h2 class="text-[22px] mt-10 mb-4 text-white font-bold">Why TreeKey is the Opposite of Directories</h2>
         <table class="comparison-table">
             <thead>
                 <tr>
@@ -2378,35 +2383,35 @@ def pricing(request: Request):
             <tbody>
                 <tr>
                     <td><b class="text-white">Lead Exclusivity</b></td>
-                    <td>❌ Sold to 3–5 competing contractors simultaneously.</td>
-                    <td style="color:#6ee7b7; font-weight:bold;">✅ 100% Single-Sale. Lead is burned once dispatched.</td>
+                    <td>Sold to 3–5 competing contractors simultaneously.</td>
+                    <td style="color:#6ee7b7; font-weight:bold;">100% Single-Sale. Lead is burned once dispatched.</td>
                 </tr>
                 <tr>
                     <td><b class="text-white">Price Competition</b></td>
-                    <td>❌ Race to the bottom; customer compares 5 cheap quotes.</td>
-                    <td style="color:#6ee7b7; font-weight:bold;">✅ First-Mover Advantage. Quote before competitors know.</td>
+                    <td>Race to the bottom; customer compares 5 cheap quotes.</td>
+                    <td style="color:#6ee7b7; font-weight:bold;">First-Mover Advantage. Quote before competitors know.</td>
                 </tr>
                 <tr>
                     <td><b class="text-white">Lead Source</b></td>
-                    <td>❌ Unverified ballpark quote seekers & price checkers.</td>
-                    <td style="color:#6ee7b7; font-weight:bold;">✅ Statutory Council & National Park Planning Notices (100% committed).</td>
+                    <td>Unverified ballpark quote seekers & price checkers.</td>
+                    <td style="color:#6ee7b7; font-weight:bold;">Statutory Council & National Park Planning Notices (100% committed).</td>
                 </tr>
                 <tr>
                     <td><b class="text-white">Trade Cost Framing</b></td>
-                    <td>❌ Heavy fixed monthly directory listing fees (£120+/mo).</td>
-                    <td style="color:#6ee7b7; font-weight:bold;">✅ Low £49/mo (less than half a tank of diesel). 1 job = 5x ROI.</td>
+                    <td>Heavy fixed monthly directory listing fees (£120+/mo).</td>
+                    <td style="color:#6ee7b7; font-weight:bold;">Low £49/mo (less than half a tank of diesel). 1 job = 5x ROI.</td>
                 </tr>
                 <tr>
                     <td><b class="text-white">Customer Ownership</b></td>
-                    <td>❌ Trapped inside their app collecting reviews for them.</td>
-                    <td style="color:#6ee7b7; font-weight:bold;">✅ You Own the Client. Quote directly under your own brand.</td>
+                    <td>Trapped inside their app collecting reviews for them.</td>
+                    <td style="color:#6ee7b7; font-weight:bold;">You Own the Client. Quote directly under your own brand.</td>
                 </tr>
             </tbody>
         </table>
 
         <div class="text-center mt-10 p-5 bg-slate-800/50 rounded-xl border border-slate-700">
             <p class="mb-2.5 text-sm text-slate-400">Have an idea or want a tool built specifically for your crew?</p>
-            <a href="/suggestions" class="text-emerald-400 font-bold no-underline text-sm">💡 Submit a Suggestion to Our Product Board →</a>
+            <a href="/suggestions" class="text-emerald-400 font-bold no-underline text-sm">Submit a Suggestion to Our Product Board →</a>
             &nbsp;|&nbsp;
             <a href="/" class="text-slate-400 no-underline text-sm">Return to Live Map</a>
         </div>
@@ -2439,7 +2444,7 @@ def suggestions_page():
     </head>
     <body>
     <div class="box">
-        <h2 style="margin-top:0; color:#044332;">💡 Arborist Suggestions & Feature Requests</h2>
+        <h2 style="margin-top:0; color:#044332;">Arborist Suggestions & Feature Requests</h2>
         <p style="color:#64748b; font-size:14px; line-height:1.5;">We built TreeKey to serve UK tree surgeons. Tell us what tools, calculators, or data features you need to make your business more profitable.</p>
         <form action="/api/submit-suggestion" method="POST">
             <label style="font-size:13px; font-weight:600;">Your Name / Company Name:</label>
@@ -2451,7 +2456,7 @@ def suggestions_page():
             <label style="font-size:13px; font-weight:600;">Your Suggestion or Problem You Want Solved:</label>
             <textarea name="suggestion" rows="5" placeholder="e.g. I need a tool to calculate tipping weight for mature Ash trees, or an easier way to download council sketch maps..." required></textarea>
             
-            <button type="submit">Submit Suggestion to Founders 🚀</button>
+            <button type="submit">Submit Suggestion to Founders </button>
         </form>
         <p style="text-align:center; margin-top:20px;"><a href="/" style="color:#64748b; text-decoration:none; font-size:13px;">← Return to Main Page</a></p>
     </div>
@@ -2472,7 +2477,7 @@ async def submit_suggestion(request: Request):
     return HTMLResponse("""
     <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#f8fafc;">
         <div style="max-width:500px; margin:auto; background:white; padding:40px; border-radius:16px; border:1px solid #e2e8f0;">
-            <h2 style="color:#059669; margin-top:0;">✅ Suggestion Received!</h2>
+            <h2 style="color:#059669; margin-top:0;">Suggestion Received!</h2>
             <p style="color:#64748b; font-size:15px; line-height:1.5;">Thank you for helping us make TreeKey better for UK tree surgeons. Our team reviews every suggestion directly.</p>
             <a href="/" style="display:inline-block; background:#044332; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; margin-top:15px;">Return to Map</a>
         </div>
@@ -2518,7 +2523,7 @@ def partner_offer_page(src: str = "unknown"):
     </head>
     <body>
     <div class="box">
-        <h1>🌳 Real planning-application tree leads, straight from the council & National Park register</h1>
+        <h1>Real planning-application tree leads, straight from the council & National Park register</h1>
         <p>TreeKey scans UK council and National Park planning portals every day for TPO, felling, and tree-work applications the moment they're filed -- so you can quote before anyone else even knows the job exists.</p>
         <ul>
             <li>Leads sourced directly from statutory planning notices, not resold directory data</li>
@@ -2559,7 +2564,7 @@ async def submit_partner_offer(request: Request):
     return HTMLResponse("""
     <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#f8fafc;">
         <div style="max-width:500px; margin:auto; background:white; padding:40px; border-radius:16px; border:1px solid #e2e8f0;">
-            <h2 style="color:#059669; margin-top:0;">✅ Thanks -- we've got your details!</h2>
+            <h2 style="color:#059669; margin-top:0;">Thanks -- we've got your details!</h2>
             <p style="color:#64748b; font-size:15px; line-height:1.5;">We'll be in touch shortly. In the meantime, feel free to look around.</p>
             <a href="/pricing" style="display:inline-block; background:#044332; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; margin-top:15px;">See Pricing</a>
         </div>
@@ -2620,7 +2625,7 @@ def generate_homeowner_letter(lead_id: str, company: str = "Your Local Tree Spec
     </head>
     <body>
         <div style="text-align:right; margin-bottom:15px;">
-            <button class="btn-print" onclick="window.print()">🖨️ Print / Save as PDF</button>
+            <button class="btn-print" onclick="window.print()">Print / Save as PDF</button>
         </div>
 
         <div class="header">
@@ -2729,12 +2734,12 @@ def generate_street_flyer(lead_id: str, company: str = "Your Local Tree Surgery 
     </head>
     <body>
         <div style="text-align:right;">
-            <button class="btn-print" onclick="window.print()">🖨️ Print 5 Copies for Neighbors</button>
+            <button class="btn-print" onclick="window.print()">Print 5 Copies for Neighbors</button>
         </div>
 
         <div class="card">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                <span class="badge">🌲 Tree Works Notice</span>
+                <span class="badge">Tree Works Notice</span>
                 <span style="font-size:12px; color:#64748b;">NPTC Certified • £5M Insured</span>
             </div>
 
@@ -2745,7 +2750,7 @@ def generate_street_flyer(lead_id: str, company: str = "Your Local Tree Surgery 
             </p>
 
             <div class="discount-box">
-                <h3 style="margin:0 0 6px 0; color:#065f46; font-size:18px;">🎁 20% Same-Day Street Discount</h3>
+                <h3 style="margin:0 0 6px 0; color:#065f46; font-size:18px;">20% Same-Day Street Discount</h3>
                 <p style="margin:0; font-size:13px; color:#047857;">
                     Because our heavy woodchipper, truck, and climbing crew are already on {street_name}, we have zero extra travel costs. We are passing that saving directly to neighbors!
                 </p>
@@ -2843,7 +2848,7 @@ def checkout(plan_key: str, request: Request):
 {_shared_nav_html()}
 <div class="px-4 py-10">
 <div class="card">
-    <h1>🌳 One last step</h1>
+    <h1>One last step</h1>
     <p class="sub">Tell us where you work so we can route the right leads to you.</p>
 
     <div class="plan-box">
@@ -2852,32 +2857,38 @@ def checkout(plan_key: str, request: Request):
     </div>
 
     <div class="lock-note">
-        🔒 Your leads are matched exclusively to your area. Once locked, no other contractor on the same tier will receive leads in your zone.
+        Your leads are matched exclusively to your area. Once locked, no other contractor on the same tier will receive leads in your zone.
     </div>
 
     <form method="POST" action="/checkout/{plan_key}">
         <label for="outcode">Your Postcode or Outcode</label>
-        <input type="text" id="outcode" name="outcode" placeholder="e.g. CR5 2LE, NG22, B1"
+        <input type="text" id="outcode" name="outcode" placeholder="e.g. NG22 8AA, NG22, B1"
                maxlength="8" required autocomplete="postal-code"
                style="text-transform:uppercase;"
                oninput="this.value=this.value.toUpperCase()">
-        <div class="hint">Give your full postcode (e.g. CR5 2LE) for the most accurate job distances — just an outcode (e.g. CR5) works too, but is less precise</div>
+        <div class="hint">Give your full postcode (e.g. NG22 8AA) for the most accurate job distances — just an outcode (e.g. NG22) works too, but is less precise</div>
 
         <label for="radius">Working Radius</label>
+        <!-- Sep 9 2026: this select's own dark theme (.card select above)
+             sets a light text colour, but a browser's native <option> popup
+             ignores that and renders on its own default white background --
+             leaving the options unreadable (near-white text on white). Same
+             fix as the marketplace distance dropdown: force each <option>'s
+             own colours explicitly rather than relying on inheritance. -->
         <select id="radius" name="radius">
-            <option value="10">10 miles — Tight local zone</option>
-            <option value="15" selected>15 miles — Standard (recommended)</option>
-            <option value="20">20 miles — Extended coverage</option>
-            <option value="30">30 miles — Wide regional reach</option>
-            <option value="50">50 miles — Full county coverage</option>
+            <option value="10" style="color:#0f172a; background-color:#ffffff;">10 miles — Tight local zone</option>
+            <option value="15" style="color:#0f172a; background-color:#ffffff;" selected>15 miles — Standard (recommended)</option>
+            <option value="20" style="color:#0f172a; background-color:#ffffff;">20 miles — Extended coverage</option>
+            <option value="30" style="color:#0f172a; background-color:#ffffff;">30 miles — Wide regional reach</option>
+            <option value="50" style="color:#0f172a; background-color:#ffffff;">50 miles — Full county coverage</option>
         </select>
 
         <label for="job_size">Job Sizes You Want</label>
         <select id="job_size" name="job_size">
-            <option value="all" selected>All sizes — small, medium & large</option>
-            <option value="small">Small jobs only</option>
-            <option value="medium">Medium jobs only</option>
-            <option value="large">Large jobs only</option>
+            <option value="all" style="color:#0f172a; background-color:#ffffff;" selected>All sizes — small, medium & large</option>
+            <option value="small" style="color:#0f172a; background-color:#ffffff;">Small jobs only</option>
+            <option value="medium" style="color:#0f172a; background-color:#ffffff;">Medium jobs only</option>
+            <option value="large" style="color:#0f172a; background-color:#ffffff;">Large jobs only</option>
         </select>
         <div class="hint">You'll only be matched to jobs at the size(s) you choose — change this any time from your dashboard</div>
 
@@ -2911,7 +2922,7 @@ async def checkout_post(plan_key: str, outcode: str = Form(...), radius: int = F
         job_size = "all"
 
     # Sep 8 2026, proximity-system rework: resolve here (not just at webhook
-    # time) so a full postcode ("CR5 2LE") is captured and passed through
+    # time) so a full postcode ("NG22 8AA") is captured and passed through
     # Stripe metadata as full_postcode -- register_or_update_subscription
     # geocodes that to an exact pin. The territory-keying outcode
     # (client_reference_id) still only ever carries the bare outcode.
@@ -2995,12 +3006,12 @@ def admin_simulate_leads(request: Request, secret: Optional[str] = Query(None),
 
     return HTMLResponse(f"""
     <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:900px; margin:auto;">
-        <h2 style="color:#044332;">🧪 Dummy Run: Simulate Customer Leads</h2>
+        <h2 style="color:#044332;">Dummy Run: Simulate Customer Leads</h2>
         <p style="color:#64748b; font-size:13px;">Read-only — no leads are burned or emailed. Shows exactly what a subscriber at this location/tier/job-size would currently receive.</p>
         <form method="GET" style="background:white; padding:20px; border-radius:10px; border:1px solid #e2e8f0; display:flex; gap:12px; flex-wrap:wrap; align-items:end; margin-bottom:24px;">
             <input type="hidden" name="secret" value="{secret or ''}">
             <div><label style="display:block; font-size:12px; font-weight:bold; margin-bottom:4px;">Postcode or Outcode</label>
-                <input type="text" name="location" value="{location or ''}" placeholder="e.g. CR5 2LE" style="padding:8px; border:1px solid #cbd5e1; border-radius:6px;"></div>
+                <input type="text" name="location" value="{location or ''}" placeholder="e.g. NG22 8AA" style="padding:8px; border:1px solid #cbd5e1; border-radius:6px;"></div>
             <div><label style="display:block; font-size:12px; font-weight:bold; margin-bottom:4px;">Tier</label>
                 <select name="tier" style="padding:8px; border:1px solid #cbd5e1; border-radius:6px;">{tier_options}</select></div>
             <div><label style="display:block; font-size:12px; font-weight:bold; margin-bottom:4px;">Job Size</label>
@@ -3013,6 +3024,34 @@ def admin_simulate_leads(request: Request, secret: Optional[str] = Query(None),
         <p style="margin-top:24px;"><a href="/admin?secret={secret or ''}" style="color:#044332;">← Back to Admin</a></p>
     </body></html>
     """)
+
+
+def _resolve_marketplace_location(raw_input: str) -> dict:
+    """Sep 9 2026, Nick's ask: "add a 'name place' locator to marketplace to
+    give the option of postcode OR a town or city" -- the marketplace search
+    only ever accepted a postcode/outcode (database.resolve_location), while
+    the homepage radar's own search box (api_check_postcode, just above)
+    already accepts a UK city name via the UK_CITY_COORDS table defined at
+    the top of this file. Rather than inventing a second city list, or
+    moving UK_CITY_COORDS into database.py (which would need main.py to
+    import it back, a circular import), this checks the exact same
+    dictionary main.py already owns first -- exact match, then the same
+    prefix match api_check_postcode uses (e.g. "Nott" -> Nottingham) --
+    and only falls through to database.resolve_location for anything that
+    isn't a recognised city name, so postcodes/outcodes work exactly as
+    before. Returns the same shape as database.resolve_location:
+    {"outcode", "full_postcode", "lat", "lon", "precision"}."""
+    cleaned = (raw_input or "").strip().upper()
+    if cleaned in UK_CITY_COORDS:
+        lat, lon, district, display_pc = UK_CITY_COORDS[cleaned]
+        return {"outcode": display_pc, "full_postcode": None, "lat": lat, "lon": lon,
+                "precision": "area", "district": district}
+    for city_key, city_val in UK_CITY_COORDS.items():
+        if city_key.startswith(cleaned) or cleaned.startswith(city_key):
+            lat, lon, district, display_pc = city_val
+            return {"outcode": display_pc, "full_postcode": None, "lat": lat, "lon": lon,
+                    "precision": "area", "district": district}
+    return database.resolve_location(raw_input)
 
 
 _CAT_ICONS = {
@@ -3049,9 +3088,9 @@ def marketplace_view(tier: Optional[str] = "all", category: Optional[str] = None
     resolved_note_html = ""
     target_lat = target_lng = None
     if outcode and outcode.strip():
-        resolved = database.resolve_location(outcode.strip())
+        resolved = _resolve_marketplace_location(outcode.strip())
         if resolved["precision"] == "none":
-            search_error_html = f"""<div class="bg-red-950/40 border border-red-500/40 text-red-300 px-3.5 py-2.5 rounded-lg mb-4 text-sm">Couldn't find "{outcode.strip()}" -- try a full postcode (e.g. CR5 2LE) or just the outward part (e.g. CR5).</div>"""
+            search_error_html = f"""<div class="bg-red-950/40 border border-red-500/40 text-red-300 px-3.5 py-2.5 rounded-lg mb-4 text-sm">Couldn't find "{outcode.strip()}" -- try a full postcode (e.g. NG22 8AA), just the outward part (e.g. NG22), or a UK town/city name (e.g. Nottingham).</div>"""
         else:
             target_lat, target_lng = resolved["lat"], resolved["lon"]
             shown_as = resolved["full_postcode"] or resolved["outcode"]
@@ -3085,13 +3124,13 @@ def marketplace_view(tier: Optional[str] = "all", category: Optional[str] = None
 
     tabs_html = f"""
     <div class="mb-5 overflow-x-auto whitespace-nowrap pb-1">
-        {tab_btn("all", "🌐 All Leads")}
-        {tab_btn("council", "🏛️ Council & National Park Statutory (TPO & S211)")}
-        {tab_btn("domestic", "🏡 Private Domestic Jobs")}
-        {tab_btn("flash_hot", "🔥 Flash Hot (Day 0–3)")}
-        {tab_btn("active", "⚡ Prime Quoting (Day 4–14)")}
-        {tab_btn("clearance", "⏳ Clearance (<£10)")}
-        {tab_btn("granted", "✅ Approved / Granted")}
+        {tab_btn("all", "All Leads")}
+        {tab_btn("council", "Council & National Park Statutory (TPO & S211)")}
+        {tab_btn("domestic", "Private Domestic Jobs")}
+        {tab_btn("flash_hot", "Flash Hot (Day 0–3)")}
+        {tab_btn("active", "Prime Quoting (Day 4–14)")}
+        {tab_btn("clearance", "Clearance (<£10)")}
+        {tab_btn("granted", "Approved / Granted")}
     </div>
     """
 
@@ -3132,13 +3171,13 @@ def marketplace_view(tier: Optional[str] = "all", category: Optional[str] = None
         <input type="hidden" name="tier" value="{tier or 'all'}">
         <input type="hidden" name="category" value="{category or ''}">
         <div class="flex-1 min-w-[160px]">
-            <label class="block text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Postcode or Outcode</label>
-            <input type="text" name="outcode" value="{outcode or ''}" placeholder="e.g. CR5 2LE or CR5" class="w-full box-border bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:border-emerald-500 placeholder:text-slate-500">
+            <label class="block text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Postcode, Outcode or Town/City</label>
+            <input type="text" name="outcode" value="{outcode or ''}" placeholder="e.g. NG22 8AA, NG22 or Nottingham" class="w-full box-border bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:border-emerald-500 placeholder:text-slate-500">
         </div>
         <div>
             <label class="block text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Distance</label>
             <select name="radius" class="bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:border-emerald-500">
-                {"".join(f'<option value="{r}"{" selected" if int(radius) == r else ""}>{r} miles</option>' for r in (5, 10, 15, 25, 50))}
+                {"".join(f'<option value="{r}" style="color:#0f172a; background-color:#ffffff;"{" selected" if int(radius) == r else ""}>{r} miles</option>' for r in (5, 10, 15, 25, 50))}
             </select>
         </div>
         <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-lg font-bold text-sm transition-colors">Search</button>
@@ -3217,9 +3256,9 @@ def marketplace_view(tier: Optional[str] = "all", category: Optional[str] = None
         # bright pastel chip, which reads fine against a dark card and
         # wasn't worth the extra risk of touching its business logic today.
         if l.get("has_agent") is True:
-            agent_badge = "<span style='font-size:11px; background:rgba(148,163,184,0.15); color:#cbd5e1; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;' title=\"An agent handled the paperwork but doesn't look like a tree company -- the tree work itself may still be open.\">ℹ️ Non-tree agent on record</span>"
+            agent_badge = "<span style='font-size:11px; background:rgba(148,163,184,0.15); color:#cbd5e1; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;' title=\"An agent handled the paperwork but doesn't look like a tree company -- the tree work itself may still be open.\">Non-tree agent on record</span>"
         elif l.get("has_agent") is False:
-            agent_badge = "<span style='font-size:11px; background:rgba(16,185,129,0.15); color:#6ee7b7; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;'>✅ No agent listed</span>"
+            agent_badge = "<span style='font-size:11px; background:rgba(16,185,129,0.15); color:#6ee7b7; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;'>No agent listed</span>"
         else:
             agent_badge = "<span style='font-size:11px; background:rgba(148,163,184,0.1); color:#94a3b8; padding:3px 8px; border-radius:12px; margin-left:6px;'>Agent status: unconfirmed</span>"
 
@@ -3229,7 +3268,7 @@ def marketplace_view(tier: Optional[str] = "all", category: Optional[str] = None
         # here and also sorted to the front by the query itself.
         urgent_badge = ""
         if l.get("is_urgent"):
-            urgent_badge = "<span style='font-size:11px; background:rgba(239,68,68,0.15); color:#fca5a5; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;'>🚨 Urgent</span>"
+            urgent_badge = "<span style='font-size:11px; background:rgba(239,68,68,0.15); color:#fca5a5; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;'>Urgent</span>"
 
         # Sep 9 2026, Nick's ask: "marketplace actual lead adverts need
         # complete overhaul in design to fit our new design scheme" -- the
@@ -3279,12 +3318,12 @@ def marketplace_view(tier: Optional[str] = "all", category: Optional[str] = None
                         Unlock Address &amp; Contacts →
                     </a>
                     <div class="text-[10px] text-slate-500 sm:mt-1 hidden sm:block">
-                        🔒 Single-Sale • burned on unlock
+                        Single-Sale • burned on unlock
                     </div>
                 </div>
             </div>
             <div class="text-[10px] text-slate-500 mt-3 sm:hidden">
-                🔒 Single-Sale Asset — burned permanently upon unlock.
+                Single-Sale Asset — burned permanently upon unlock.
             </div>
         </div>"""
 
@@ -3319,14 +3358,14 @@ def marketplace_view(tier: Optional[str] = "all", category: Optional[str] = None
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
         <div class="flex justify-between items-center mb-5 flex-wrap gap-2.5">
             <div>
-                <h1 class="m-0 text-[28px] font-extrabold text-white">🛒 Statutory Planning Marketplace</h1>
+                <h1 class="m-0 text-[28px] font-extrabold text-white">Statutory Planning Marketplace</h1>
                 <p class="mt-1 mb-0 text-slate-400 text-sm">Real-time council and National Park planning notices with statutory freshness countdowns.</p>
             </div>
             <a href="/pricing" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg no-underline font-bold text-[13px] transition-colors">View Monthly Subscriptions</a>
         </div>
 
         <div class="bg-sky-500/10 border border-sky-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-sky-200">
-            <b>💡 Single-Sale Guarantee:</b> Every lead purchased below is immediately removed from the live marketplace and burned permanently. You are the ONLY contractor who will receive the property data.
+            <b>Single-Sale Guarantee:</b> Every lead purchased below is immediately removed from the live marketplace and burned permanently. You are the ONLY contractor who will receive the property data.
         </div>
 
         {search_html}
@@ -3354,11 +3393,11 @@ def payment_success():
     return """
     <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#f8fafc;">
         <div style="max-width:550px; margin:auto; background:white; padding:40px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04);">
-            <h1 style="color:#059669; margin-top:0;">🎉 Payment Successful!</h1>
+            <h1 style="color:#059669; margin-top:0;">Payment Successful!</h1>
             <p style="color:#64748b; font-size:15px; line-height:1.5;">Thank you. Your exclusive planning intelligence stream has been activated.<br><br>Your lead dispatches will arrive by email automatically — but you can also browse and unlock leads directly below.</p>
             <div style="margin-top:25px; display:flex; flex-direction:column; gap:12px; align-items:center;">
-                <a href="/marketplace" style="background:#044332; color:white; padding:12px 28px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; width:260px; display:block;">🏛️ Browse Available Leads Now</a>
-                <a href="/login" style="background:#1d4ed8; color:white; padding:12px 28px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; width:260px; display:block;">🔑 Log In to Your Dashboard</a>
+                <a href="/marketplace" style="background:#044332; color:white; padding:12px 28px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; width:260px; display:block;">Browse Available Leads Now</a>
+                <a href="/login" style="background:#1d4ed8; color:white; padding:12px 28px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; width:260px; display:block;">Log In to Your Dashboard</a>
             </div>
         </div>
     </body></html>
@@ -3434,7 +3473,7 @@ def ledger_dashboard(request: Request):
         <!-- 1. £90,000 UK VAT Threshold Early-Warning Radar -->
         <div class="card" style="border-left: 4px solid {vat_color};">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                <h3 style="margin:0; font-size:18px; color:#0f172a;">🇬🇧 HMRC £90,000 Rolling VAT Radar</h3>
+                <h3 style="margin:0; font-size:18px; color:#0f172a;">HMRC £90,000 Rolling VAT Radar</h3>
                 <span style="font-size:12px; font-weight:bold; color:{vat_color};">{vat_status}</span>
             </div>
             <p style="color:#64748b; font-size:13px; margin:8px 0 14px 0;">Tracks your rolling 12-month domestic turnover to prevent accidental VAT penalties or losing sole-trader price advantage.</p>
@@ -3466,7 +3505,7 @@ def ledger_dashboard(request: Request):
 
         <!-- 3. Van-Day Job Cost & Minimum Profitable Quote Calculator -->
         <div class="card">
-            <h3 style="margin-top:0; color:#044332; font-size:18px;">🌲 Van & Crew-Day Profit Calculator (True Costing)</h3>
+            <h3 style="margin-top:0; color:#044332; font-size:18px;">Van & Crew-Day Profit Calculator (True Costing)</h3>
             <p style="color:#64748b; font-size:13px;">Never underquote a large tree removal again. Input your crew size and expected waste to compute your exact breakeven and recommended quotation.</p>
             
             <form id="quoteForm" onsubmit="event.preventDefault(); calcQuote();" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-top:16px;">
@@ -3491,7 +3530,7 @@ def ledger_dashboard(request: Request):
                     <input type="number" id="days" value="1" step="0.5" min="0.5">
                 </div>
                 <div style="display:flex; align-items:flex-end;">
-                    <button type="submit" class="btn" style="width:100%;">Calculate Quote ⚡</button>
+                    <button type="submit" class="btn" style="width:100%;">Calculate Quote </button>
                 </div>
             </form>
 
@@ -3515,7 +3554,7 @@ def ledger_dashboard(request: Request):
 
         <!-- 4. Quick Job Entry / CIS Deduction Form -->
         <div class="card">
-            <h3 style="margin-top:0; color:#044332; font-size:18px;">📝 Log Completed Job & CIS Deduction</h3>
+            <h3 style="margin-top:0; color:#044332; font-size:18px;">Log Completed Job & CIS Deduction</h3>
             <p style="color:#64748b; font-size:13px;">Save an invoice to track your 12-month VAT position and commercial CIS tax balances.</p>
             <form action="/api/save-ledger-entry" method="POST" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">
                 <div>
@@ -3546,7 +3585,7 @@ def ledger_dashboard(request: Request):
                     <input type="number" name="fuel_cost" step="0.01" value="25.00">
                 </div>
                 <div style="grid-column:1/-1; margin-top:8px;">
-                    <button type="submit" class="btn">Save Entry to TreeKey Ledger 💾</button>
+                    <button type="submit" class="btn">Save Entry to TreeKey Ledger </button>
                 </div>
             </form>
         </div>
@@ -3656,7 +3695,7 @@ def settings_page(request: Request):
     <body>
     <div class="container">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-            <h1 style="margin:0; font-size:24px; color:#044332;">⚙️ Settings</h1>
+            <h1 style="margin:0; font-size:24px; color:#044332;">Settings</h1>
             <a href="/dashboard" style="color:#044332; font-size:13px; text-decoration:none; font-weight:bold;">← Dashboard</a>
         </div>
         <div class="card">
@@ -3739,7 +3778,7 @@ def login_page(error: Optional[str] = None):
     # our design including a redesign on the text boxes and removal of
     # emojis" -- brought onto the same dark Tailwind design system as the
     # homepage/marketplace (shared nav/footer, dark input styling, SVG
-    # brand mark instead of the 🌲 emoji, SVG lock instead of 🔒).
+    # brand mark instead of the emoji, SVG lock instead of ).
     err_html = f"""<div class="bg-red-950/40 border border-red-500/40 text-red-300 px-3.5 py-2.5 rounded-lg mb-4 text-sm">{error}</div>""" if error else ""
     return f"""
     <!DOCTYPE html>
@@ -3823,7 +3862,7 @@ async def request_magic_link(request: Request):
     import notifications
     email_body = f"""
     <div style="font-family:sans-serif; max-width:500px; margin:auto; padding:20px; color:#0f172a;">
-        <h2 style="color:#044332;">🌲 Your TreeKey Login Link</h2>
+        <h2 style="color:#044332;">Your TreeKey Login Link</h2>
         <p>Click the secure button below to log in directly to your Contractor Command Center:</p>
         <div style="text-align:center; margin:24px 0;">
             <a href="{magic_url}" style="background:#044332; color:white; padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; display:inline-block;">Sign In to Dashboard ➔</a>
@@ -3838,7 +3877,7 @@ async def request_magic_link(request: Request):
     # than whoever's email happens to be TEST_EMAIL ever actually received
     # their login link. The whole login flow was silently broken for every
     # real contractor. Now sends directly to the contractor's own address.
-    notifications.send_transactional_email(to_email=contact, subject="🌲 Your TreeKey 1-Tap Login Link", html_body=email_body)
+    notifications.send_transactional_email(to_email=contact, subject="Your TreeKey 1-Tap Login Link", html_body=email_body)
 
     # Sep 8 2026 SECURITY FIX: the OTP used to be echoed right back onto
     # this confirmation page -- meaning anyone with access to this browser
@@ -3955,7 +3994,7 @@ async def verify_otp_route(request: Request):
 def free_account_signup_page(error: Optional[str] = None):
     # Sep 9 2026, Nick's ask: brought onto the same dark design system as
     # the login page -- shared nav/footer, dark text-box styling, no
-    # emojis (the 🌲 title mark and ⚡ button glyph are both gone, replaced
+    # emojis (the title mark and button glyph are both gone, replaced
     # by the same SVG brand mark used on /login).
     err_html = f"""<div class="bg-red-950/40 border border-red-500/40 text-red-300 px-3.5 py-2.5 rounded-lg mb-4 text-sm">{error}</div>""" if error else ""
     return f"""
@@ -4194,8 +4233,11 @@ def contractor_dashboard(request: Request):
         summary = l.get("summary", "")
         dispatched_at = str(l.get("dispatched_at", ""))[:16]
         
-        # Google Street View direct link
-        gmap_url = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(addr)}"
+        # Google Street View direct link (Sep 9 2026: shared with the
+        # purchase-confirmation email via database.street_view_url, so both
+        # give a real Street View pano link when the address geocodes,
+        # instead of just a generic map pin)
+        gmap_url = database.street_view_url(addr)
 
         # Aug 30 2026: has_agent/applicant_name are captured by the scraper but
         # were never shown here -- every lead looked identical whether or not
@@ -4205,9 +4247,9 @@ def contractor_dashboard(request: Request):
         applicant_name = l.get("applicant_name")
         has_agent = l.get("has_agent")
         if has_agent is True:
-            agent_badge = f"<span style='font-size:10px; background:#fef3c7; color:#92400e; padding:2px 6px; border-radius:4px; font-weight:bold;'>⚠️ AGENT ON RECORD{' — ' + l['agent_company'] if l.get('agent_company') else ''}</span>"
+            agent_badge = f"<span style='font-size:10px; background:#fef3c7; color:#92400e; padding:2px 6px; border-radius:4px; font-weight:bold;'>AGENT ON RECORD{' — ' + l['agent_company'] if l.get('agent_company') else ''}</span>"
         elif has_agent is False:
-            agent_badge = "<span style='font-size:10px; background:#d1fae5; color:#065f46; padding:2px 6px; border-radius:4px; font-weight:bold;'>✅ NO AGENT LISTED</span>"
+            agent_badge = "<span style='font-size:10px; background:#d1fae5; color:#065f46; padding:2px 6px; border-radius:4px; font-weight:bold;'>NO AGENT LISTED</span>"
         else:
             agent_badge = "<span style='font-size:10px; background:#f1f5f9; color:#64748b; padding:2px 6px; border-radius:4px;'>AGENT STATUS UNCONFIRMED</span>"
         applicant_line = f"<br><span style='font-size:11px; color:#475569;'>Applicant: {applicant_name}</span>" if applicant_name else ""
@@ -4218,13 +4260,13 @@ def contractor_dashboard(request: Request):
                 <div>
                     <span style="font-size:10px; background:#f1f5f9; color:#475569; padding:2px 6px; border-radius:4px; font-weight:bold;">REF: {ref}</span>
                     {agent_badge}
-                    <h4 style="margin:4px 0 2px 0; font-size:15px; color:#0f172a;">📍 {addr}</h4>
+                    <h4 style="margin:4px 0 2px 0; font-size:15px; color:#0f172a;">{addr}</h4>
                     <span style="font-size:11px; color:#64748b;">Dispatched: {dispatched_at}</span>{applicant_line}
                 </div>
                 <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                    <a href="/generate-letter/{urllib.parse.quote(ref)}" target="_blank" style="background:#044332; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">🖨️ Letter</a>
-                    <a href="/generate-street-flyer/{urllib.parse.quote(ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">🏘️ Street Flyer</a>
-                    <a href="{gmap_url}" target="_blank" style="background:#0f172a; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">🗺️ Street View</a>
+                    <a href="/generate-letter/{urllib.parse.quote(ref)}" target="_blank" style="background:#044332; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Letter</a>
+                    <a href="/generate-street-flyer/{urllib.parse.quote(ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street Flyer</a>
+                    <a href="{gmap_url}" target="_blank" style="background:#0f172a; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street View</a>
                 </div>
             </div>
             <div style="background:#f8fafc; border-left:3px solid #044332; padding:8px 12px; margin-top:10px; font-size:12px; color:#334155;">
@@ -4258,7 +4300,7 @@ def contractor_dashboard(request: Request):
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
                 <div>
                     <div style="font-size:12px; color:#a7f3d0; text-transform:uppercase; font-weight:bold;">Contractor Command Center</div>
-                    <h2 style="margin:4px 0; font-size:24px;">🌲 {session_email}</h2>
+                    <h2 style="margin:4px 0; font-size:24px;">{session_email}</h2>
                     <div style="font-size:13px; color:#e2e8f0;">
                         Tier: <b>{tier_name}</b> • Sector: <b>{outcode} (15-Mile Radius)</b>
                     </div>
@@ -4266,7 +4308,7 @@ def contractor_dashboard(request: Request):
                 <div style="text-align:right;">
                     {active_badge}
                     <div style="margin-top:8px;">
-                        <a href="/settings" style="color:#a7f3d0; font-size:12px; text-decoration:none; margin-right:12px;">Settings ⚙️</a>
+                        <a href="/settings" style="color:#a7f3d0; font-size:12px; text-decoration:none; margin-right:12px;">Settings </a>
                         <a href="/logout" style="color:#a7f3d0; font-size:12px; text-decoration:none;">Log Out ➔</a>
                     </div>
                 </div>
@@ -4284,24 +4326,24 @@ def contractor_dashboard(request: Request):
                 <div style="font-size:11px; color:#64748b;">Skip £60-£120 Tipping Fees Free</div>
             </a>
             <a href="/marketplace" class="quick-card">
-                <div style="font-size:20px;">🛒</div>
+                <div style="font-size:20px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg></div>
                 <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Lead Marketplace</div>
                 <div style="font-size:11px; color:#64748b;">Browse Unallocated Notices</div>
             </a>
             <a href="/pricing" class="quick-card">
-                <div style="font-size:20px;">💳</div>
+                <div style="font-size:20px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg></div>
                 <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Manage Tier</div>
                 <div style="font-size:11px; color:#64748b;">Upgrade or Adjust Coverage</div>
             </a>
             <a href="/suggestions" class="quick-card">
-                <div style="font-size:20px;">💡</div>
+                <div style="font-size:20px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"></path></svg></div>
                 <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Suggest Tool</div>
                 <div style="font-size:11px; color:#64748b;">Request Features from Founders</div>
             </a>
         </div>
 
         <!-- Dispatched Lead Inbox -->
-        <h3 style="color:#044332; font-size:18px; margin:0 0 14px 0;">📥 Your Exclusive Dispatched Leads ({len(leads)})</h3>
+        <h3 style="color:#044332; font-size:18px; margin:0 0 14px 0;">Your Exclusive Dispatched Leads ({len(leads)})</h3>
         <p style="color:#64748b; font-size:13px; margin-top:-8px; margin-bottom:16px;">
             These statutory planning notices were delivered exclusively to you and burned from all other systems.
         </p>
@@ -4357,7 +4399,7 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
                 cand_cards = "".join([
                     f"""<div style="background:white; border:1px solid #bfdbfe; border-radius:10px; padding:16px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
                         <div>
-                            <span style="font-size:11px; background:#eff6ff; color:#1d4ed8; font-weight:bold; padding:3px 8px; border-radius:12px;">🔍 Possible Candidate — Not Registered</span>
+                            <span style="font-size:11px; background:#eff6ff; color:#1d4ed8; font-weight:bold; padding:3px 8px; border-radius:12px;">Possible Candidate — Not Registered</span>
                             <h4 style="margin:6px 0 2px 0; font-size:15px; color:#0f172a;">{c['category']} {c['name']}</h4>
                             <p style="margin:0; font-size:12px; color:#64748b;">{c['distance_miles']} mi away{' · ' + c['address_hint'] if c['address_hint'] else ''} · <a href="{c['osm_url']}" target="_blank" style="color:#64748b;">view on map</a></p>
                         </div>
@@ -4367,14 +4409,14 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
                 ])
                 candidates_html = f"""
                 <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:14px 18px; margin-bottom:14px; font-size:13px; color:#1e40af;">
-                    <b>ℹ️ Unconfirmed:</b> these are real places found on OpenStreetMap near {loc['outcode']} that often welcome woodchip — nobody has registered them yet, so you'd need to call and ask first. Not the same as the ✅ registered listings below.
+                    <b>Unconfirmed:</b> these are real places found on OpenStreetMap near {loc['outcode']} that often welcome woodchip — nobody has registered them yet, so you'd need to call and ask first. Not the same as the registered listings below.
                 </div>
                 {cand_cards}
                 """
 
     # Sep 8 2026 FIX: this used to fall back to three entirely fabricated
     # "sample" sites -- invented names, invented contact people, and fake
-    # phone numbers -- shown with the exact same "✅ Free Drop Site" badge,
+    # phone numbers -- shown with the exact same "Free Drop Site" badge,
     # live tel: link and live WhatsApp link as real registered listings.
     # Any contractor visiting while the real directory is still empty (the
     # normal case pre-launch) would have no way to tell these apart from
@@ -4385,7 +4427,7 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
     if not spots:
         empty_state_html = f"""
         <div style="background:white; border:1px dashed #cbd5e1; border-radius:12px; padding:28px; text-align:center; color:#64748b;">
-            <div style="font-size:32px; margin-bottom:8px;">🌱</div>
+            <div style="font-size:32px; margin-bottom:8px;"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"></path></svg></div>
             <h3 style="margin:0 0 8px 0; color:#0f172a; font-size:16px;">No drop sites listed{f' for {outcode}' if outcode else ''} yet</h3>
             <p style="font-size:13px; margin:0 0 16px 0; max-width:440px; margin-left:auto; margin-right:auto;">
                 This directory is filled entirely by real allotments, farms, stables and gardens who register themselves —
@@ -4404,8 +4446,8 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
         postcode = s["outcode"]
         town = s["town"]
         addr = s["address"]
-        mat_label = "🌲 Fresh Woodchip Only" if s["material"] == "fresh_woodchip" else ("🪵 Hardwood Logs / Rings" if s["material"] == "hardwood_logs" else "🌳 Any Raw Green Waste / Chips")
-        veh_label = "🚛 Max 3.5t Transit / Tipper" if s.get("max_vehicle") == "3.5t_transit" else "🚜 7.5t Truck / Tractor Access"
+        mat_label = "Fresh Woodchip Only" if s["material"] == "fresh_woodchip" else ("Hardwood Logs / Rings" if s["material"] == "hardwood_logs" else "Any Raw Green Waste / Chips")
+        veh_label = "Max 3.5t Transit / Tipper" if s.get("max_vehicle") == "3.5t_transit" else "7.5t Truck / Tractor Access"
         notes = s.get("access_notes") or "Standard driveway drop. Contact manager prior to arrival."
 
         # Direct WhatsApp and Call links
@@ -4416,14 +4458,14 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
         <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; padding:20px; margin-bottom:14px; box-shadow:0 2px 8px rgba(0,0,0,0.03);">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
                 <div>
-                    <span style="font-size:11px; background:#ecfdf5; color:#065f46; font-weight:bold; padding:3px 8px; border-radius:12px;">✅ Free Drop Site</span>
+                    <span style="font-size:11px; background:#ecfdf5; color:#065f46; font-weight:bold; padding:3px 8px; border-radius:12px;">Free Drop Site</span>
                     <span style="font-size:11px; background:#f1f5f9; color:#475569; padding:3px 8px; border-radius:12px; margin-left:6px;">{postcode} • {town}</span>
-                    <h3 style="margin:8px 0 4px 0; font-size:17px; color:#0f172a;">🏡 {name}</h3>
-                    <p style="margin:0; font-size:13px; color:#64748b;">📍 {addr}</p>
+                    <h3 style="margin:8px 0 4px 0; font-size:17px; color:#0f172a;">{name}</h3>
+                    <p style="margin:0; font-size:13px; color:#64748b;">{addr}</p>
                 </div>
                 <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                    <a href="tel:{phone}" style="background:#044332; color:white; padding:8px 14px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">📞 Call ({contact})</a>
-                    <a href="{wa_link}" target="_blank" style="background:#059669; color:white; padding:8px 14px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">💬 WhatsApp</a>
+                    <a href="tel:{phone}" style="background:#044332; color:white; padding:8px 14px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">Call ({contact})</a>
+                    <a href="{wa_link}" target="_blank" style="background:#059669; color:white; padding:8px 14px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">WhatsApp</a>
                 </div>
             </div>
 
@@ -4466,19 +4508,19 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
         </div>
 
         <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:10px; padding:14px 18px; margin-bottom:24px; font-size:13px; color:#065f46;">
-            <b>💡 Pro-Tip for Tree Surgeons:</b> Tipping stations charge £80–£120 + VAT per load plus 45 minutes round-trip driving time. Drop your arborist waste at local community sites for £0.00.
+            <b>Pro-Tip for Tree Surgeons:</b> Tipping stations charge £80–£120 + VAT per load plus 45 minutes round-trip driving time. Drop your arborist waste at local community sites for £0.00.
         </div>
 
         <form method="GET" style="background:white; border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
             <div style="flex:1; min-width:180px;">
-                <label style="display:block; font-size:11px; font-weight:bold; color:#475569; margin-bottom:4px;">🔍 Find nearby candidates (unconfirmed farms/allotments/stables)</label>
-                <input type="text" name="find_near" value="{find_near or ''}" placeholder="e.g. NG22 or CR5 2LE" style="width:100%; box-sizing:border-box; padding:9px; border:1px solid #cbd5e1; border-radius:6px;">
+                <label style="display:block; font-size:11px; font-weight:bold; color:#475569; margin-bottom:4px;">Find nearby candidates (unconfirmed farms/allotments/stables)</label>
+                <input type="text" name="find_near" value="{find_near or ''}" placeholder="e.g. NG22 or NG22 8AA" style="width:100%; box-sizing:border-box; padding:9px; border:1px solid #cbd5e1; border-radius:6px;">
             </div>
             <button type="submit" style="background:#1d4ed8; color:white; padding:10px 18px; border:none; border-radius:6px; font-weight:bold; font-size:13px; cursor:pointer;">Search</button>
         </form>
         {candidates_html}
 
-        <h2 style="font-size:16px; color:#0f172a; margin:24px 0 12px 0;">✅ Registered Drop Sites</h2>
+        <h2 style="font-size:16px; color:#0f172a; margin:24px 0 12px 0;">Registered Drop Sites</h2>
         {spot_cards or empty_state_html}
 
         <div style="text-align:center; margin-top:32px;">
@@ -4527,7 +4569,7 @@ def register_drop_spot_page(site_name: Optional[str] = None, outcode: Optional[s
     </head>
     <body>
     <div class="box">
-        <h2 style="margin-top:0; color:#044332;">🏡 Register Free Woodchip Drop Site</h2>
+        <h2 style="margin-top:0; color:#044332;">Register Free Woodchip Drop Site</h2>
         <p style="color:#64748b; font-size:13px;">Need free organic woodchip mulch, wood chips, or hardwood logs for your garden, allotment, or stables? Local tree surgeons will drop free loads directly to your property.</p>
         {prefill_note}
 
@@ -4652,7 +4694,7 @@ def storm_radar_view():
         <div class="{card_cls} border-2 rounded-xl p-6 mb-4">
             <div class="flex justify-between items-center flex-wrap gap-2.5">
                 <div>
-                    <span style="background:{badge_bg}; color:white; font-size:11px; font-weight:bold; padding:4px 10px; border-radius:20px; text-transform:uppercase;">🌪️ {level} GALE ALERT ({gust} MPH)</span>
+                    <span style="background:{badge_bg}; color:white; font-size:11px; font-weight:bold; padding:4px 10px; border-radius:20px; text-transform:uppercase;">{level} GALE ALERT ({gust} MPH)</span>
                     <h3 class="mt-2.5 mb-1 text-white text-xl font-bold">{region}</h3>
                     <span class="text-[13px] text-slate-400">Target Sectors: <b class="text-slate-200">{outcodes}</b></span>
                 </div>
@@ -4687,14 +4729,14 @@ def storm_radar_view():
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
         <div class="flex justify-between items-center mb-5 flex-wrap gap-2.5">
             <div>
-                <h1 class="m-0 text-[28px] font-extrabold text-white">🌪️ Emergency Storm Weather Radar</h1>
+                <h1 class="m-0 text-[28px] font-extrabold text-white">Emergency Storm Weather Radar</h1>
                 <p class="mt-1 mb-0 text-slate-400 text-sm">Severe gale & wind triggers (45mph+). Targeted emergency mobilization without notification spam.</p>
             </div>
             <a href="/dashboard" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-4 py-2 rounded-lg no-underline text-[13px] font-bold transition-colors">← Contractor Dashboard</a>
         </div>
 
         <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4.5 py-3.5 mb-6 text-[13px] text-emerald-200">
-            <b>🛡️ Zero-Spam Guarantee:</b> We never alert you for normal rain or mild breezes. Alerts trigger strictly for verified 45mph+ gale forecasts in your registered sector so you can mobilize emergency standby crews.
+            <b>Zero-Spam Guarantee:</b> We never alert you for normal rain or mild breezes. Alerts trigger strictly for verified 45mph+ gale forecasts in your registered sector so you can mobilize emergency standby crews.
         </div>
 
         {alert_cards}
@@ -4730,12 +4772,12 @@ def generate_storm_quote(lead_id: str, company: str = "Your Emergency Tree Surge
     </head>
     <body>
         <div style="text-align:right;">
-            <button class="btn-print" onclick="window.print()">🖨️ Print / Save Emergency Quote PDF</button>
+            <button class="btn-print" onclick="window.print()">Print / Save Emergency Quote PDF</button>
         </div>
 
         <div class="card">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                <span class="badge">🚨 Emergency Dangerous Tree Quotation</span>
+                <span class="badge">Emergency Dangerous Tree Quotation</span>
                 <span style="font-size:12px; color:#64748b;">BS3998:2010 • NPTC • £5M Insurance</span>
             </div>
 
@@ -4804,7 +4846,7 @@ def boost_review_page(contractor_name: Optional[str] = "Your Tree Surgery Busine
     <div class="container">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; flex-wrap:wrap; gap:10px;">
             <div>
-                <h1 style="margin:0; font-size:28px; color:#044332;">⭐ Google Review Booster & Trust Badge</h1>
+                <h1 style="margin:0; font-size:28px; color:#044332;">Google Review Booster & Trust Badge</h1>
                 <p style="margin:4px 0 0 0; color:#64748b; font-size:14px;">Collect 5-star Google reviews from homeowners within 2 hours of packing away the chipper.</p>
             </div>
             <a href="/dashboard" style="background:#0f172a; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold;">← Contractor Dashboard</a>
@@ -4812,7 +4854,7 @@ def boost_review_page(contractor_name: Optional[str] = "Your Tree Surgery Busine
 
         <!-- 1-Tap WhatsApp Booster -->
         <div class="card">
-            <h3 style="margin-top:0; color:#044332; font-size:18px;">📱 1-Tap WhatsApp Homeowner Review Request</h3>
+            <h3 style="margin-top:0; color:#044332; font-size:18px;">1-Tap WhatsApp Homeowner Review Request</h3>
             <p style="color:#64748b; font-size:13px;">Send this pre-formatted message to your client as soon as payment is confirmed:</p>
             
             <div style="background:#f8fafc; border-left:4px solid #059669; padding:14px; margin:16px 0; font-size:13px; color:#334155; line-height:1.6;">
@@ -4820,18 +4862,18 @@ def boost_review_page(contractor_name: Optional[str] = "Your Tree Surgery Busine
             </div>
 
             <div style="margin-top:16px;">
-                <a href="{wa_url}" target="_blank" class="btn-wa">💬 Send Review Request via WhatsApp ➔</a>
+                <a href="{wa_url}" target="_blank" class="btn-wa">Send Review Request via WhatsApp ➔</a>
             </div>
         </div>
 
         <!-- BS3998 Digital Trust Badge -->
         <div class="card">
-            <h3 style="margin-top:0; color:#044332; font-size:18px;">🛡️ Your BS3998:2010 Verified Digital Badge</h3>
+            <h3 style="margin-top:0; color:#044332; font-size:18px;">Your BS3998:2010 Verified Digital Badge</h3>
             <p style="color:#64748b; font-size:13px;">Embed this verified badge on your quotes and invoices to build instant trust with homeowners and commercial estate managers.</p>
             
             <div style="display:flex; align-items:center; gap:16px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:16px; margin:16px 0;">
                 <div style="background:#044332; color:white; width:48px; height:48px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:24px;">
-                    🌲
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 </div>
                 <div>
                     <div style="font-weight:bold; color:#044332; font-size:15px;">BS3998:2010 British Standard Verified Arborist</div>
@@ -4878,7 +4920,7 @@ def quote_estimator_page():
     <div class="box">
         <div style="text-align:center; margin-bottom:24px;">
             <div style="display:inline-block; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:20px; padding:4px 12px; font-size:12px; color:#065f46; font-weight:bold; text-transform:uppercase; margin-bottom:8px;">
-                🤖 AI Arborist Scope Engine
+                AI Arborist Scope Engine
             </div>
             <h1 style="margin:0 0 6px 0; color:#044332; font-size:26px;">Instant Tree Work Estimator</h1>
             <p style="color:#64748b; font-size:14px; margin:0;">Get an accurate fair-market estimate and connect directly with 1 verified local tree surgeon — no spam, no 5-way bidding wars.</p>
@@ -4931,7 +4973,7 @@ def quote_estimator_page():
             <label style="font-size:12px; font-weight:bold;">Job Description / Tree Species (Optional):</label>
             <textarea id="notes" rows="2" placeholder="e.g. Mature Oak overhangs neighbor conservatory; want 2m branch clearance."></textarea>
 
-            <button type="submit" class="btn">Calculate Scope & Estimate ⚡</button>
+            <button type="submit" class="btn">Calculate Scope & Estimate </button>
         </form>
 
         <div id="scopeResult" style="background:#f0fdf4; border:2px solid #059669; border-radius:12px; padding:20px; margin-top:24px; display:none;">
@@ -4947,12 +4989,12 @@ def quote_estimator_page():
             </div>
 
             <div style="font-size:13px; color:#334155; line-height:1.5;">
-                <div style="margin-bottom:6px;"><b>🌲 Green Waste Volume:</b> <span id="estWaste">Approx 1 Tipper Van Load (3–4 m³ chipped)</span></div>
-                <div style="margin-bottom:6px;"><b>⚖️ Statutory Status:</b> <span id="estCouncil">TreeKey will verify Conservation Area & TPO status automatically with your local council.</span></div>
+                <div style="margin-bottom:6px;"><b>Green Waste Volume:</b> <span id="estWaste">Approx 1 Tipper Van Load (3–4 m³ chipped)</span></div>
+                <div style="margin-bottom:6px;"><b>Statutory Status:</b> <span id="estCouncil">TreeKey will verify Conservation Area & TPO status automatically with your local council.</span></div>
             </div>
 
             <div style="background:white; border-radius:8px; padding:14px; margin-top:16px; border:1px solid #bbf7d0;">
-                <h4 style="margin:0 0 6px 0; color:#044332; font-size:14px;">🔒 Connect Directly with 1 Local Senior Tree Surgeon:</h4>
+                <h4 style="margin:0 0 6px 0; color:#044332; font-size:14px;">Connect Directly with 1 Local Senior Tree Surgeon:</h4>
                 <p style="margin:0 0 12px 0; font-size:12px; color:#64748b;">
                     We never share your contact with 5 competing companies. Your job is dispatched 1-to-1 exclusively to the #1 verified arborist in your postcode.
                 </p>
@@ -5031,14 +5073,14 @@ def quote_estimator_page():
                 const data = await res.json();
                 if (data.status === 'success') {
                     statusEl.style.color = '#059669';
-                    statusEl.innerText = '✅ Quote Request Dispatched! The local verified contractor will contact you within 2 business hours.';
+                    statusEl.innerText = 'Quote Request Dispatched! The local verified contractor will contact you within 2 business hours.';
                 } else {
                     statusEl.style.color = '#dc2626';
                     statusEl.innerText = 'Submission error: ' + (data.message || 'Please try again.');
                 }
             } catch(e) {
                 statusEl.style.color = '#059669';
-                statusEl.innerText = '✅ Quote Request Dispatched! The local verified contractor will contact you directly.';
+                statusEl.innerText = 'Quote Request Dispatched! The local verified contractor will contact you directly.';
             }
         }
     </script>
@@ -5063,7 +5105,7 @@ async def submit_homeowner_quote(request: Request):
     min_p = data.get("minPrice", 350)
     max_p = data.get("maxPrice", 550)
 
-    summary = f"🏡 Direct Homeowner Quote Request ({name}): {w_type}. Access: {data.get('access')}, Hazards: {data.get('hazards')}. Notes: {notes}. Fair Estimate: £{min_p}–£{max_p}"
+    summary = f"Direct Homeowner Quote Request ({name}): {w_type}. Access: {data.get('access')}, Hazards: {data.get('hazards')}. Notes: {notes}. Fair Estimate: £{min_p}–£{max_p}"
     contact = f"{name} | Tel: {phone} | Email: {email}"
     ref = f"HOM-{secrets.token_hex(4).upper()}"
 
@@ -5433,7 +5475,7 @@ def local_seo_intake_page(location_slug: str):
 <body>
 <div class="container">
     <div class="card">
-        <span class="badge">📍 Local Service Hub: {city_name} & {region_name}</span>
+        <span class="badge">Local Service Hub: {city_name} & {region_name}</span>
         <h1 class="hero-title">Verified Tree Surgeons in {city_name}</h1>
         <p style="color: #475569; font-size: 16px; margin: 0 0 20px 0;">
             Calculate your fair-market price in seconds and connect directly with <b>1 verified NPTC tree surgeon</b> in {city_name}. No directory spam. No 5-company bidding wars.
@@ -5441,15 +5483,15 @@ def local_seo_intake_page(location_slug: str):
 
         <div class="trust-grid">
             <div class="trust-item">
-                <div style="font-weight:bold; color:#044332; margin-bottom:4px;">🔒 1-to-1 Dispatch Guarantee</div>
+                <div style="font-weight:bold; color:#044332; margin-bottom:4px;">1-to-1 Dispatch Guarantee</div>
                 <div style="font-size:12px; color:#64748b;">We NEVER sell your details to 5 different companies. Only 1 verified local contractor receives your job.</div>
             </div>
             <div class="trust-item">
-                <div style="font-weight:bold; color:#044332; margin-bottom:4px;">🏛️ {council_name} Compliance</div>
+                <div style="font-weight:bold; color:#044332; margin-bottom:4px;">{council_name} Compliance</div>
                 <div style="font-size:12px; color:#64748b;">Free verification of Conservation Areas & Tree Preservation Orders (TPO) before work starts.</div>
             </div>
             <div class="trust-item">
-                <div style="font-weight:bold; color:#044332; margin-bottom:4px;">🌲 Local Tree Specialists</div>
+                <div style="font-weight:bold; color:#044332; margin-bottom:4px;">Local Tree Specialists</div>
                 <div style="font-size:12px; color:#64748b;">Experienced with local species: {tree_types}. Full £5M public liability insurance.</div>
             </div>
         </div>
@@ -5503,7 +5545,7 @@ def local_seo_intake_page(location_slug: str):
             <label style="font-size:12px; font-weight:bold;">Job Description / Tree Species (Optional):</label>
             <textarea id="notes" rows="2" placeholder="e.g. Mature Oak in back garden needs 20% crown reduction and deadwooding."></textarea>
 
-            <button type="submit" class="btn">Calculate Scope & Estimate for {city_name} ⚡</button>
+            <button type="submit" class="btn">Calculate Scope & Estimate for {city_name} </button>
         </form>
 
         <div id="scopeResult" style="background:#f0fdf4; border:2px solid #059669; border-radius:12px; padding:24px; margin-top:24px; display:none;">
@@ -5519,12 +5561,12 @@ def local_seo_intake_page(location_slug: str):
             </div>
 
             <div style="font-size:13px; color:#334155; line-height:1.6; margin-bottom:16px;">
-                <div><b>🌲 Green Waste:</b> <span id="estWaste">Approx 1 Tipper Van Load (chipped & removed)</span></div>
-                <div><b>⚖️ Council Check:</b> <span>TreeKey verifies Conservation Area and TPO status with {council_name}.</span></div>
+                <div><b>Green Waste:</b> <span id="estWaste">Approx 1 Tipper Van Load (chipped & removed)</span></div>
+                <div><b>Council Check:</b> <span>TreeKey verifies Conservation Area and TPO status with {council_name}.</span></div>
             </div>
 
             <div style="background:white; border-radius:8px; padding:18px; border:1px solid #bbf7d0;">
-                <h4 style="margin:0 0 6px 0; color:#044332; font-size:15px;">🔒 Dispatch Directly to the Verified Senior Tree Surgeon in {city_name}:</h4>
+                <h4 style="margin:0 0 6px 0; color:#044332; font-size:15px;">Dispatch Directly to the Verified Senior Tree Surgeon in {city_name}:</h4>
                 <p style="margin:0 0 12px 0; font-size:12px; color:#64748b;">
                     We never sell your details to 5 different companies. Your job is dispatched 1-to-1 exclusively to the #1 verified arborist in your {city_name} postcode.
                 </p>
@@ -5604,14 +5646,14 @@ def local_seo_intake_page(location_slug: str):
             const data = await res.json();
             if (data.status === 'success') {{
                 statusEl.style.color = '#059669';
-                statusEl.innerText = '✅ Quote Request Dispatched! The local verified contractor in ' + cityName + ' will contact you within 2 business hours.';
+                statusEl.innerText = 'Quote Request Dispatched! The local verified contractor in ' + cityName + ' will contact you within 2 business hours.';
             }} else {{
                 statusEl.style.color = '#dc2626';
                 statusEl.innerText = 'Submission error: ' + (data.message || 'Please try again.');
             }}
         }} catch(e) {{
             statusEl.style.color = '#059669';
-            statusEl.innerText = '✅ Quote Request Dispatched! The local verified contractor will contact you directly.';
+            statusEl.innerText = 'Quote Request Dispatched! The local verified contractor will contact you directly.';
         }}
     }}
 </script>
@@ -5788,7 +5830,7 @@ def scan_domestic_jobs_view(request: Request, secret: Optional[str] = Query(None
     verify_admin_or_secret(request, secret)
     count = 0
     return f"""<html><body style="font-family:sans-serif; padding:40px; background:#f8fafc;">
-        <h2 style="color:#044332;">🏡 Domestic Job Board Scraper Complete</h2>
+        <h2 style="color:#044332;">Domestic Job Board Scraper Complete</h2>
         <p>Successfully intercepted and routed <b>{count} new private homeowner tree leads</b> directly to senior contractors.</p>
         <a href="/admin" style="background:#044332; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">← Return to Admin Panel</a>
     </body></html>"""
@@ -6017,7 +6059,7 @@ def run_master_daily_pipeline():
     3. New Contractor Discovery: Queries Companies House for newly incorporated LTDs.
     4. Two-Layer Name Filter & UK Geotargeting: Purges any non-tree surgery or foreign records.
     """
-    logger.info("[PIPELINE] 🚀 Starting Master Daily Automation Pipeline...")
+    logger.info("[PIPELINE] Starting Master Daily Automation Pipeline...")
 
     # Stage -1: Monthly Quota Reset (safe daily call — only fires on 1st of month)
     try:
@@ -6138,7 +6180,7 @@ def run_master_daily_pipeline():
     except Exception as e:
         logger.error(f"[PIPELINE] Stage 4 error: {e}")
 
-    logger.info("[PIPELINE] 🏁 Master Daily Pipeline finished successfully.")
+    logger.info("[PIPELINE] Master Daily Pipeline finished successfully.")
 
 
 def run_full_autonomous_cycle():
@@ -7329,7 +7371,7 @@ async def faq_page():
         ]),
         ("How Matching Works", [
             ("How do you decide which leads I get?",
-             "You set a home postcode and a radius (up to 50 miles depending on tier). We match leads to you by exact area first, then by distance within your radius, then by wider regional area as a fallback &mdash; so you get the closest, most relevant work first. Enter your full postcode rather than just the outward code (e.g. \"CR5 2LE\" instead of just \"CR5\") for the most accurate distance matching."),
+             "You set a home postcode and a radius (up to 50 miles depending on tier). We match leads to you by exact area first, then by distance within your radius, then by wider regional area as a fallback &mdash; so you get the closest, most relevant work first. Enter your full postcode rather than just the outward code (e.g. \"NG22 8AA\" instead of just \"NG22\") for the most accurate distance matching."),
             ("Can I filter by job size?",
              "Yes &mdash; each subscription can be set to small, medium, large, or all job sizes, so a one-van operator isn't drowned in commercial clearance leads meant for a multi-crew outfit, or vice versa."),
             ("What if no leads come through for a while?",

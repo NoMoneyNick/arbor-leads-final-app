@@ -12,7 +12,7 @@ TEST_EMAIL     = os.getenv("TEST_EMAIL", "").strip()
 PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
 ALERT_BATCH_THRESHOLD = 5
 
-SCORE_EMOJI = {"small": "🟡", "medium": "🟠", "large": "🔴"}
+SCORE_TAG = {"small": "Small", "medium": "Medium", "large": "Large"}
 SCORE_LABEL = {"small": "Small — £19", "medium": "Medium — £29", "large": "Large — £49"}
 
 
@@ -25,9 +25,9 @@ def _agent_status_badge(lead: dict) -> str:
     unknown, never as "confirmed no agent"."""
     has_agent = lead.get("has_agent")
     if has_agent is True:
-        return "<span style='color:#b45309; font-weight:bold;'>⚠️ Agent on record</span>"
+        return "<span style='color:#b45309; font-weight:bold;'>Agent on record</span>"
     if has_agent is False:
-        return "<span style='color:#059669;'>✅ No agent listed</span>"
+        return "<span style='color:#059669;'>No agent listed</span>"
     return "<span style='color:#94a3b8;'>— Unconfirmed</span>"
 
 
@@ -153,13 +153,28 @@ def send_transactional_email(to_email: str, subject: str, html_body: str,
         return False
 
 
+def _street_view_link_html(address: str) -> str:
+    """Sep 9 2026, Nick's ask: "send a google street view screenshot of the
+    address or at least a google street view link when they buy the lead."
+    See database.street_view_url's own docstring for why this is a real
+    Street View pano link (not just a map pin) built with zero new cost or
+    API key, and when it honestly falls back to a plain Maps search link
+    instead. Shared with the dashboard's own "Street View" button (see
+    main.py) via that one function, so both stay identical."""
+    import database
+    url = database.street_view_url(address)
+    label = "Open Street View" if "map_action=pano" in url else "View on Map"
+    verb = "see this property in Google Street View" if "map_action=pano" in url else "view this property on Google Maps"
+    return f'To {verb}, click here: <a href="{url}" style="color: #0ea5e9;">{label}</a>'
+
+
 def send_purchased_lead_email(customer_email: str, lead_data: dict):
     """Emails the completely unlocked lead details to the buyer after a successful Stripe payment."""
     if not RESEND_API_KEY:
         logging.warning("[Email] RESEND_API_KEY not set — cannot send purchased lead.")
         return
         
-    subject = f"🌳 Unlocked Lead: {lead_data.get('council_source', 'Local')} Tree Surgery"
+    subject = f"Unlocked Lead: {lead_data.get('council_source', 'Local')} Tree Surgery"
 
     # Aug 30 2026: applicant_name/agent_name/agent_company/has_agent are now
     # captured by the scraper (see mesh_scrapers.py) and returned by
@@ -182,11 +197,11 @@ def send_purchased_lead_email(customer_email: str, lead_data: dict):
     if has_agent is True:
         agent_label = agent_company or agent_name or "an agent"
         agent_row = (
-            f'<p style="margin: 10px 0 0 0; color: #b45309;">⚠️ <strong>Heads up:</strong> this application already lists an agent/contractor '
+            f'<p style="margin: 10px 0 0 0; color: #b45309;"><strong>Heads up:</strong> this application already lists an agent/contractor '
             f'on record ({agent_label}) — the homeowner may already have someone instructed. Worth confirming before you invest time quoting.</p>'
         )
     elif has_agent is False:
-        agent_row = '<p style="margin: 10px 0 0 0; color: #059669;">✅ No agent/contractor is listed on record for this application.</p>'
+        agent_row = '<p style="margin: 10px 0 0 0; color: #059669;">No agent/contractor is listed on record for this application.</p>'
     else:
         agent_row = '<p style="margin: 10px 0 0 0; color: #94a3b8;">Agent/contractor status: not confirmed — the council record didn\'t clearly show one way or the other.</p>'
 
@@ -208,8 +223,7 @@ def send_purchased_lead_email(customer_email: str, lead_data: dict):
         </div>
 
         <p style="font-size: 13px; color: #64748b;">
-            To view this property on Google Maps, click here:
-            <a href="https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(lead_data.get('address', ''))}" style="color: #0ea5e9;">View on Map</a>
+            {_street_view_link_html(lead_data.get('address', ''))}
         </p>
         <p style="font-size: 12px; color: #94a3b8;">
             Note: UK councils do not publish a homeowner's phone number or email address on planning applications. This lead includes everything that is legally published: the address, the applicant name (when the council records it), and the application details above.
@@ -260,7 +274,7 @@ def send_free_account_welcome_email(email: str, lead_data: dict) -> bool:
     unlocked lead -- same level of detail as a paid purchase (see
     send_purchased_lead_email), just framed as a welcome gift rather than
     a receipt, since nothing was actually bought here."""
-    subject = f"🌳 Your free TreeKey lead: {lead_data.get('council_source', 'Local')} Tree Surgery"
+    subject = f"Your free TreeKey lead: {lead_data.get('council_source', 'Local')} Tree Surgery"
     html = f"""
     <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
         <h2 style="color: #059669; margin-top: 0;">Welcome to TreeKey — here's your free lead</h2>
@@ -345,13 +359,12 @@ def send_teaser_email_batch(min_hours_since_last: float = 72.0, unsubscribe_url_
 def create_whatsapp_link(lead_ref: str, city: str, address: str, summary: str,
                          lead_score: str = "small", lead_price: int = 25) -> str:
     """Generates a pre-filled WhatsApp message link for a lead."""
-    emoji = SCORE_EMOJI.get(lead_score, "🟡")
     msg = (
-        f"🌳 *NEW TREE SURGERY LEAD*\n"
-        f"📍 *Location:* {address} ({city})\n"
-        f"🆔 *Ref:* {lead_ref}\n"
-        f"📝 *Work:* {summary[:200]}\n"
-        f"{emoji} *Grade:* {SCORE_LABEL.get(lead_score, 'Small — £25')}\n\n"
+        f"*NEW TREE SURGERY LEAD*\n"
+        f"*Location:* {address} ({city})\n"
+        f"*Ref:* {lead_ref}\n"
+        f"*Work:* {summary[:200]}\n"
+        f"*Grade:* {SCORE_LABEL.get(lead_score, 'Small — £25')}\n\n"
         f"Reply YES to claim this lead."
     )
     return f"https://wa.me/?text={urllib.parse.quote(msg)}"
@@ -492,13 +505,13 @@ def dispatch_lead_alerts(city: str, leads: list):
         
         notice_banner = """
         <div style="background:#f0fdf4; border-left:3px solid #059669; padding:10px; font-size:12px; color:#065f46; margin-bottom:16px;">
-            <b>🔒 Single-Sale Guarantee:</b> These leads have been delivered exclusively to you and burned from our public radar.
+            <b>Single-Sale Guarantee:</b> These leads have been delivered exclusively to you and burned from our public radar.
         </div>
         """
         if is_overflow:
             notice_banner = """
             <div style="background:#eff6ff; border-left:3px solid #3b82f6; padding:10px; font-size:12px; color:#1e40af; margin-bottom:16px;">
-                <b>⚡ Priority Overflow Match:</b> Council filings in your immediate sector were quiet today. To protect your subscription value, we have automatically routed you the highest-value unallocated tree applications from adjacent sectors at zero extra cost.
+                <b>Priority Overflow Match:</b> Council filings in your immediate sector were quiet today. To protect your subscription value, we have automatically routed you the highest-value unallocated tree applications from adjacent sectors at zero extra cost.
             </div>
             """
 
@@ -529,18 +542,18 @@ def dispatch_lead_alerts(city: str, leads: list):
                 l.get("ref", l.get("reference", "")), city, l.get("addr", ""),
                 l.get("summary", ""), l.get("lead_score", "small"), l.get("lead_price", 25)
             )
-            return f"<a href='{wa}' style='background:#25D366; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px; margin-left:4px;'>📲 WhatsApp</a>"
+            return f"<a href='{wa}' style='background:#25D366; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px; margin-left:4px;'>WhatsApp</a>"
 
         rows = "".join([
             f"<tr>"
-            f"<td style='padding:8px;'>{SCORE_EMOJI.get(l.get('lead_score','small'), '🌳')}</td>"
+            f"<td style='padding:8px;'>{SCORE_TAG.get(l.get('lead_score','small'), '')}</td>"
             f"<td style='padding:8px;'><b>{l['addr']}</b></td>"
             f"<td style='padding:8px; white-space:nowrap; color:#044332; font-weight:bold;'>{_distance_cell(l)}</td>"
             f"<td style='padding:8px;'>{l['summary'][:90]}...</td>"
             f"<td style='padding:8px; font-size:11px; white-space:nowrap;'>{_agent_status_badge(l)}</td>"
             f"<td style='padding:8px; white-space:nowrap;'>"
-            f"<a href='{PUBLIC_APP_URL}/generate-letter/{urllib.parse.quote(l.get('ref', l.get('reference', '')))}' style='background:#044332; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px; margin-right:4px;'>🖨️ Letter</a>"
-            f"<a href='{PUBLIC_APP_URL}/generate-street-flyer/{urllib.parse.quote(l.get('ref', l.get('reference', '')))}' style='background:#059669; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px;'>🏘️ Flyer</a>"
+            f"<a href='{PUBLIC_APP_URL}/generate-letter/{urllib.parse.quote(l.get('ref', l.get('reference', '')))}' style='background:#044332; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px; margin-right:4px;'>Letter</a>"
+            f"<a href='{PUBLIC_APP_URL}/generate-street-flyer/{urllib.parse.quote(l.get('ref', l.get('reference', '')))}' style='background:#059669; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px;'>Flyer</a>"
             f"{_wa_button(l)}"
             f"</td>"
             f"</tr>"
@@ -548,7 +561,7 @@ def dispatch_lead_alerts(city: str, leads: list):
         ])
         body = f"""
             <div style="font-family:sans-serif; max-width:640px; margin:auto; color:#0f172a;">
-                <h2 style="color:#044332; margin-bottom:4px;">🌳 TreeKey Intelligence — {len(routed_leads)} New Leads</h2>
+                <h2 style="color:#044332; margin-bottom:4px;">TreeKey Intelligence — {len(routed_leads)} New Leads</h2>
                 <p style="color:#64748b; font-size:14px; margin-top:0;">Here are the latest statutory tree work applications registered for your crew. "Exclusive" means this lead is sent only to you — it does not mean the homeowner hasn't already engaged someone; check the Agent column below.</p>
 
                 {notice_banner}
@@ -579,7 +592,7 @@ def dispatch_lead_alerts(city: str, leads: list):
                     json={
                         "from": "TreeKey Intelligence <leads@treekey.uk>",
                         "to": [email],
-                        "subject": f"🌳 {len(routed_leads)} New Exclusive Planning Leads for your Crew",
+                        "subject": f"{len(routed_leads)} New Exclusive Planning Leads for your Crew",
                         "html": body
                     }
                 )
@@ -591,7 +604,7 @@ def dispatch_lead_alerts(city: str, leads: list):
     if len(leads) > ALERT_BATCH_THRESHOLD:
         rows = "".join([
             f"<tr>"
-            f"<td style='padding:6px;'>{SCORE_EMOJI.get(l.get('lead_score','small'), '🌳')}</td>"
+            f"<td style='padding:6px;'>{SCORE_TAG.get(l.get('lead_score','small'), '')}</td>"
             f"<td style='padding:6px;'><b>{l['addr']}</b></td>"
             f"<td style='padding:6px;'>{l['summary'][:80]}...</td>"
             f"<td style='padding:6px; font-weight:bold;'>£{l.get('lead_price', 25)}</td>"
@@ -599,7 +612,7 @@ def dispatch_lead_alerts(city: str, leads: list):
             for l in leads[:15]
         ])
         body = f"""
-            <h2>📍 {city} Admin Lead Digest — {len(leads)} New Leads</h2>
+            <h2>{city} Admin Lead Digest — {len(leads)} New Leads</h2>
             <p>Total leads routed to customers this cycle: {sum(len(v) for v in customer_leads.values())}</p>
             <table border='1' cellspacing='0' style='border-collapse:collapse; width:100%;'>
                 <tr style='background:#f4f4f9;'>
@@ -611,29 +624,28 @@ def dispatch_lead_alerts(city: str, leads: list):
                 {rows}
             </table>
         """
-        send_resend_email(f"🛡️ ADMIN: {city} Digest: {len(leads)} New Tree Surgery Leads", body)
+        send_resend_email(f"ADMIN: {city} Digest: {len(leads)} New Tree Surgery Leads", body)
     else:
         # Individual emails per lead
         for lead in leads:
             score = lead.get("lead_score", "small")
             price = lead.get("lead_price", 25)
-            emoji = SCORE_EMOJI.get(score, "🟡")
             wa = create_whatsapp_link(
                 lead["ref"], city, lead["addr"], lead["summary"], score, price
             )
             body = f"""
-                <h3>{emoji} New Tree Surgery Lead — {lead['addr']}</h3>
+                <h3>New Tree Surgery Lead — {lead['addr']}</h3>
                 <p><b>City:</b> {city}</p>
                 <p><b>Ref:</b> {lead['ref']}</p>
                 <p><b>Description:</b> {lead['summary']}</p>
                 <p><b>Grade:</b> {SCORE_LABEL.get(score, 'Small')} &nbsp; <b>Value: £{price}</b></p>
                 <p><b>Agent/contractor on record:</b> {_agent_status_badge(lead)}</p>
                 <p><a href='{wa}' style='background:#25D366; color:white; padding:10px 20px;
-                   border-radius:8px; text-decoration:none;'>📲 Forward on WhatsApp</a></p>
+                   border-radius:8px; text-decoration:none;'>Forward on WhatsApp</a></p>
                 <p><a href='{PUBLIC_APP_URL or "#"}'>Open Dashboard →</a></p>
             """
             send_resend_email(
-                f"{emoji} New {score.title()} Lead: {lead['addr']} (£{price})",
+                f"New {score.title()} Lead: {lead['addr']} (£{price})",
                 body
             )
 
@@ -650,13 +662,13 @@ def send_api_quota_warning_email(
     when API usage pace is calculated to breach the 500-request limit.
     """
     pct = round((current_calls / max(cap, 1)) * 100, 1)
-    subject = f"🚨🚨 [CRITICAL WARNING] UPGRADE REQUIRED: {api_name.upper()} REACHING 500 CAP ({current_calls}/{cap} USED) 🚨🚨"
+    subject = f"[CRITICAL WARNING] UPGRADE REQUIRED: {api_name.upper()} REACHING 500 CAP ({current_calls}/{cap} USED) "
     html_body = f"""
     <div style="font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width:640px; margin:auto; padding:0; border:4px solid #b91c1c; border-radius:14px; overflow:hidden; background:#ffffff; box-shadow:0 10px 25px rgba(185,28,28,0.2);">
         <!-- URGENT HEADER BANNER -->
         <div style="background:#b91c1c; color:#ffffff; padding:24px 20px; text-align:center;">
             <h1 style="margin:0; font-size:22px; font-weight:900; letter-spacing:1px; text-transform:uppercase;">
-                🚨 URGENT ACTION REQUIRED 🚨
+                URGENT ACTION REQUIRED 
             </h1>
             <p style="margin:6px 0 0 0; font-size:14px; font-weight:700; opacity:0.95; text-transform:uppercase;">
                 NATIONAL PLANNING DATA API REACHING MONTHLY 500 LIMIT
@@ -670,7 +682,7 @@ def send_api_quota_warning_email(
 
             <div style="background:#fef2f2; border:2px solid #f87171; border-radius:10px; padding:18px; margin:20px 0;">
                 <div style="font-size:13px; font-weight:800; color:#991b1b; text-transform:uppercase; margin-bottom:8px;">
-                    📊 PREDICTIVE QUOTA BURN RATE METRICS:
+                    PREDICTIVE QUOTA BURN RATE METRICS:
                 </div>
                 <table style="width:100%; border-collapse:collapse; font-size:14px;">
                     <tr>
@@ -702,7 +714,7 @@ def send_api_quota_warning_email(
             <div style="text-align:center; margin:30px 0 20px 0;">
                 <a href="https://ukplanningapi.co.uk" target="_blank" 
                    style="display:inline-block; background:#dc2626; color:#ffffff; font-size:16px; font-weight:900; text-transform:uppercase; letter-spacing:0.5px; padding:16px 32px; border-radius:8px; text-decoration:none; box-shadow:0 4px 14px rgba(220,38,38,0.4);">
-                    👉 CLICK HERE TO UPGRADE ACCOUNT NOW ON UKPLANNINGAPI.CO.UK →
+                    CLICK HERE TO UPGRADE ACCOUNT NOW ON UKPLANNINGAPI.CO.UK →
                 </a>
             </div>
 
@@ -812,18 +824,18 @@ def send_system_incident_alert(
         ])
         metrics_html = f"""
         <div style="background:{theme['card_bg']}; border:2px solid {theme['card_border']}; border-radius:10px; padding:16px; margin:18px 0;">
-            <div style="font-size:12px; font-weight:800; color:{theme['bg']}; text-transform:uppercase; margin-bottom:8px;">📊 INCIDENT METRICS & TELEMETRY:</div>
+            <div style="font-size:12px; font-weight:800; color:{theme['bg']}; text-transform:uppercase; margin-bottom:8px;">INCIDENT METRICS & TELEMETRY:</div>
             <table style="width:100%; border-collapse:collapse; font-size:14px;">{rows}</table>
         </div>
         """
 
-    subject = f"🚨🚨 [{severity.upper()}] {category.upper()}: {title.upper()} 🚨🚨"
+    subject = f"[{severity.upper()}] {category.upper()}: {title.upper()} "
     html_body = f"""
     <div style="font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width:640px; margin:auto; padding:0; border:4px solid {theme['border']}; border-radius:14px; overflow:hidden; background:#ffffff; box-shadow:0 10px 25px rgba(0,0,0,0.15);">
         <!-- URGENT HEADER -->
         <div style="background:{theme['bg']}; color:#ffffff; padding:22px 20px; text-align:center;">
             <h1 style="margin:0; font-size:20px; font-weight:900; letter-spacing:1px; text-transform:uppercase;">
-                🚨 {category.upper()} ALERT 🚨
+                {category.upper()} ALERT 
             </h1>
             <p style="margin:6px 0 0 0; font-size:14px; font-weight:700; text-transform:uppercase; opacity:0.95;">
                 {title.upper()}
@@ -838,12 +850,12 @@ def send_system_incident_alert(
             {metrics_html}
 
             <div style="background:#f8fafc; border-left:4px solid {theme['border']}; padding:14px 16px; margin:18px 0; border-radius:4px;">
-                <b style="font-size:13px; color:#0f172a; text-transform:uppercase;">💥 SYSTEM IMPACT:</b>
+                <b style="font-size:13px; color:#0f172a; text-transform:uppercase;">SYSTEM IMPACT:</b>
                 <p style="font-size:14px; color:#334155; margin:4px 0 0 0; line-height:1.5;">{impact}</p>
             </div>
 
             <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:16px; border-radius:8px; margin:20px 0;">
-                <b style="font-size:13px; color:#166534; text-transform:uppercase;">🛠️ ACTION REQUIRED NOW:</b>
+                <b style="font-size:13px; color:#166534; text-transform:uppercase;">ACTION REQUIRED NOW:</b>
                 <p style="font-size:14px; color:#14532d; font-weight:700; margin:6px 0 0 0; line-height:1.5;">{action_required}</p>
             </div>
 
@@ -948,11 +960,11 @@ def send_daily_warning_digest() -> bool:
         """
 
     total = len(recurring)
-    subject = f"📋 Daily warning digest — {total} recurring issue{'s' if total != 1 else ''}"
+    subject = f"Daily warning digest — {total} recurring issue{'s' if total != 1 else ''}"
     html_body = f"""
     <div style="font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width:640px; margin:auto; padding:0; border:2px solid #cbd5e1; border-radius:14px; overflow:hidden; background:#ffffff;">
         <div style="background:#0f172a; color:#ffffff; padding:20px; text-align:center;">
-            <h1 style="margin:0; font-size:18px; font-weight:800;">📋 Daily Warning Digest</h1>
+            <h1 style="margin:0; font-size:18px; font-weight:800;">Daily Warning Digest</h1>
             <p style="margin:6px 0 0 0; font-size:13px; opacity:0.85;">{total} issue{'s' if total != 1 else ''} currently recurring across the last 7 days — one email, not one per issue.</p>
         </div>
         <div style="padding:24px 22px;">

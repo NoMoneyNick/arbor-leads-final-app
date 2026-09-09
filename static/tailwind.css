@@ -1547,6 +1547,12 @@
         border-color: color-mix(in oklab, var(--color-emerald-500) 50%, transparent);
       }
     }
+    /* Sep 9 2026: homepage "You Buy It, It's Yours" guarantee box turned
+       into a link straight to the marketplace (see the hero section in
+       main.py) -- needs its own hover border. */
+    .hover\:border-emerald-400:hover {
+      border-color: var(--color-emerald-400);
+    }
     .hover\:border-slate-500:hover {
       border-color: var(--color-slate-500);
     }
