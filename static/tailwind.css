@@ -285,6 +285,19 @@
   .right-0 {
     right: 0px;
   }
+  /* Sep 9 2026: install-app tooltip nudge (see homepage nav in main.py). */
+  .-top-1 {
+    top: calc(var(--spacing) * -1);
+  }
+  .-right-1 {
+    right: calc(var(--spacing) * -1);
+  }
+  .top-2 {
+    top: calc(var(--spacing) * 2);
+  }
+  .right-2 {
+    right: calc(var(--spacing) * 2);
+  }
   .left-1\/2 {
     left: calc(1 / 2 * 100%);
   }
@@ -459,6 +472,16 @@
   .w-64 {
     width: calc(var(--spacing) * 64);
   }
+  /* Sep 9 2026: install-app tooltip nudge (see homepage nav in main.py). */
+  .w-72 {
+    width: calc(var(--spacing) * 72);
+  }
+  .w-2\.5 {
+    width: calc(var(--spacing) * 2.5);
+  }
+  .h-2\.5 {
+    height: calc(var(--spacing) * 2.5);
+  }
   .w-full {
     width: 100%;
   }
@@ -626,6 +649,11 @@
   .rounded-r-lg {
     border-top-right-radius: var(--radius-lg);
     border-bottom-right-radius: var(--radius-lg);
+  }
+  /* Sep 9 2026: free-lead page redesign (see main.py). */
+  .rounded-r-xl {
+    border-top-right-radius: var(--radius-xl);
+    border-bottom-right-radius: var(--radius-xl);
   }
   .rounded-xl {
     border-radius: var(--radius-xl);
@@ -885,6 +913,16 @@
   }
   .p-4 {
     padding: calc(var(--spacing) * 4);
+  }
+  /* Sep 9 2026: install-app tooltip nudge (see homepage nav in main.py). */
+  .p-3\.5 {
+    padding: calc(var(--spacing) * 3.5);
+  }
+  .pl-0 {
+    padding-left: calc(var(--spacing) * 0);
+  }
+  .pl-\[26px\] {
+    padding-left: 26px;
   }
   .p-5 {
     padding: calc(var(--spacing) * 5);
@@ -1449,9 +1487,12 @@
   .mb-5 { margin-bottom: calc(var(--spacing) * 5); }
   .mt-2\.5 { margin-top: calc(var(--spacing) * 2.5); }
   .mt-3\.5 { margin-top: calc(var(--spacing) * 3.5); }
+  .mb-3\.5 { margin-bottom: calc(var(--spacing) * 3.5); }
   .mt-16 { margin-top: calc(var(--spacing) * 16); }
   .my-3 { margin-top: calc(var(--spacing) * 3); margin-bottom: calc(var(--spacing) * 3); }
   .py-10 { padding-top: calc(var(--spacing) * 10); padding-bottom: calc(var(--spacing) * 10); }
+  /* Sep 9 2026: login page mobile spacing fix (see login_page in main.py). */
+  .py-6 { padding-top: calc(var(--spacing) * 6); padding-bottom: calc(var(--spacing) * 6); }
   .max-w-4xl { max-width: 56rem; }
   .min-h-screen { min-height: 100vh; }
   .overflow-x-auto { overflow-x: auto; }
@@ -1672,6 +1713,35 @@
     /* Sep 9 2026: login page redesign (see login_page in main.py). */
     .sm\:py-16 {
       padding-block: calc(var(--spacing) * 16);
+    }
+    /* Sep 9 2026: free-lead confirmation page redesign (see main.py). */
+    .sm\:py-12 {
+      padding-block: calc(var(--spacing) * 12);
+    }
+    /* Sep 9 2026: login page mobile spacing fix (see login_page in main.py). */
+    .sm\:w-12 {
+      width: calc(var(--spacing) * 12);
+    }
+    .sm\:h-12 {
+      height: calc(var(--spacing) * 12);
+    }
+    .sm\:mb-3 {
+      margin-bottom: calc(var(--spacing) * 3);
+    }
+    .sm\:mb-5 {
+      margin-bottom: calc(var(--spacing) * 5);
+    }
+    .sm\:mt-5 {
+      margin-top: calc(var(--spacing) * 5);
+    }
+    .sm\:mt-6 {
+      margin-top: calc(var(--spacing) * 6);
+    }
+    .sm\:pt-4 {
+      padding-top: calc(var(--spacing) * 4);
+    }
+    .sm\:p-8 {
+      padding: calc(var(--spacing) * 8);
     }
   }
   @media (width >= 48rem) {

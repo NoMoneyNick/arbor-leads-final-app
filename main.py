@@ -970,11 +970,30 @@ def public_homepage():
                     </div>
                     <div class="relative">
                         <button id="pwaInstallBtn" onclick="tkInstallApp()" type="button" class="hidden items-center gap-1.5 bg-slate-800/60 text-emerald-300 border border-emerald-500/40 px-3.5 py-1.5 rounded-lg font-bold uppercase text-xs hover:bg-emerald-600 hover:text-white transition-all">
+                            <span id="pwaInstallPulse" class="hidden absolute -top-1 -right-1 h-2.5 w-2.5"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span></span>
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 3v12"></path><polyline points="7 10 12 15 17 10"></polyline><path d="M5 19h14"></path></svg>
                             Install App
                         </button>
-                        <div id="pwaInstallTip" class="hidden absolute right-0 mt-2 w-64 bg-slate-900 border border-emerald-500/30 rounded-lg p-3 text-[11px] text-slate-300 shadow-2xl z-50 font-sans normal-case font-normal leading-relaxed">
-                            Tap the <b class="text-white">Share</b> icon in Safari, then <b class="text-white">"Add to Home Screen"</b> to install TreeKey.
+                        <!-- Sep 9 2026, Nick's ask: iOS Safari has no API for a
+                             site to trigger installation itself -- Apple only
+                             allows the user-driven Share -> Add to Home Screen
+                             flow, for every website (not just us). Since we
+                             can't remove that step, this makes it as easy as
+                             possible to follow: it now opens on its own the
+                             first time an iPhone visitor shows up (rather than
+                             waiting to be clicked), and shows the actual
+                             Safari share-icon shape (box + arrow) next to the
+                             word "Share" so it's a visual match, not a guess,
+                             plus exactly where to look for it. -->
+                        <div id="pwaInstallTip" class="hidden absolute right-0 mt-2 w-72 bg-slate-900 border border-emerald-500/30 rounded-lg p-3.5 text-[11px] text-slate-300 shadow-2xl z-50 font-sans normal-case font-normal leading-relaxed">
+                            <button onclick="document.getElementById('pwaInstallTip').classList.add('hidden')" type="button" class="absolute top-2 right-2 text-slate-500 hover:text-white text-sm leading-none" aria-label="Close">&times;</button>
+                            <div class="flex items-center gap-2 mb-2">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><path d="M12 2v13"></path><polyline points="8 6 12 2 16 6"></polyline><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"></path></svg>
+                                <span class="text-white font-bold text-xs">1. Tap the Share icon</span>
+                            </div>
+                            <p class="m-0 mb-2 pl-[26px]">It's in Safari's toolbar (usually along the bottom of the screen).</p>
+                            <div class="text-white font-bold text-xs mb-1">2. Tap "Add to Home Screen"</div>
+                            <p class="m-0 pl-0">TreeKey will then open like any other app, full-screen with no browser bar.</p>
                         </div>
                     </div>
                     <a href="/login" class="bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 px-3.5 py-1.5 rounded-lg font-bold uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-[0_0_15px_rgba(5,150,105,0.2)]">
@@ -1782,6 +1801,7 @@ def public_homepage():
         (function() {{
             const btn = document.getElementById('pwaInstallBtn');
             const tip = document.getElementById('pwaInstallTip');
+            const pulse = document.getElementById('pwaInstallPulse');
             if (!btn) return;
 
             const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
@@ -1793,6 +1813,26 @@ def public_homepage():
             if (isIOS) {{
                 btn.classList.remove('hidden');
                 btn.classList.add('inline-flex');
+                pulse.classList.remove('hidden');
+
+                // Sep 9 2026, Nick's ask: "no one wants to click share in
+                // safari" -- can't remove that step (Apple restriction, see
+                // comment above the button markup), so instead of waiting
+                // for a click that may never come, open the how-to
+                // automatically the first time an iPhone visitor shows up.
+                // Once-per-browser via localStorage so it doesn't nag on
+                // every repeat visit; falls back to always-show if storage
+                // is blocked (private browsing etc.) since that's the safer
+                // failure direction here.
+                let alreadyShown = false;
+                try {{ alreadyShown = localStorage.getItem('tk_install_tip_shown') === '1'; }} catch (e) {{}}
+                if (!alreadyShown) {{
+                    setTimeout(() => {{
+                        tip.classList.remove('hidden');
+                        pulse.classList.add('hidden');
+                        try {{ localStorage.setItem('tk_install_tip_shown', '1'); }} catch (e) {{}}
+                    }}, 1800);
+                }}
             }}
 
             window.addEventListener('beforeinstallprompt', (e) => {{
@@ -1800,14 +1840,17 @@ def public_homepage():
                 deferredPrompt = e;
                 btn.classList.remove('hidden');
                 btn.classList.add('inline-flex');
+                pulse.classList.remove('hidden');
             }});
 
             window.tkInstallApp = function() {{
                 if (isIOS) {{
                     tip.classList.toggle('hidden');
+                    pulse.classList.add('hidden');
                     return;
                 }}
                 if (deferredPrompt) {{
+                    pulse.classList.add('hidden');
                     deferredPrompt.prompt();
                     deferredPrompt.userChoice.finally(() => {{ deferredPrompt = null; }});
                 }}
@@ -3715,11 +3758,11 @@ def login_page(error: Optional[str] = None):
     </head>
     <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
     {_shared_nav_html()}
-    <div class="px-4 py-10 sm:py-16">
-    <div class="box max-w-[420px] mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
-        <div class="text-center mb-5">
-            <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30 mx-auto mb-3">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"/></svg>
+    <div class="px-4 py-6 sm:py-16">
+    <div class="box max-w-[420px] mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl">
+        <div class="text-center mb-4 sm:mb-5">
+            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30 mx-auto mb-2.5 sm:mb-3">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"/></svg>
             </div>
             <h2 class="text-white text-xl font-bold m-0 mb-1">Sign Up / Log In</h2>
             <p class="text-slate-400 text-[13px] m-0">Zero-Password — enter your email, we'll send you a secure link</p>
@@ -3739,12 +3782,12 @@ def login_page(error: Optional[str] = None):
         </form>
         <p class="text-center text-xs text-slate-500 mt-3 mb-0">Works whether you're an existing subscriber or signing up for the first time.</p>
 
-        <div class="text-center mt-6 pt-4 border-t border-slate-800">
+        <div class="text-center mt-4 pt-3 sm:mt-6 sm:pt-4 border-t border-slate-800">
             <p class="text-xs text-slate-400 mb-2">New here and not ready to subscribe?</p>
             <a href="/free-account" class="text-[13px] font-bold text-emerald-400 hover:text-emerald-300 no-underline transition-colors">Get a free lead first, no card needed →</a>
         </div>
 
-        <div class="flex items-center justify-center gap-2 text-center mt-5 text-xs text-slate-500">
+        <div class="flex items-center justify-center gap-2 text-center mt-4 sm:mt-5 text-xs text-slate-500">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="shrink-0"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
             <span><b class="text-slate-300">No passwords to leak or remember.</b> We email you a one-tap, 15-minute access link.</span>
         </div>
@@ -3910,45 +3953,55 @@ async def verify_otp_route(request: Request):
 
 @app.get("/free-account", response_class=HTMLResponse)
 def free_account_signup_page(error: Optional[str] = None):
-    err_html = f"<div style='background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px; border-radius:6px; margin-bottom:16px; font-size:13px;'>{error}</div>" if error else ""
+    # Sep 9 2026, Nick's ask: brought onto the same dark design system as
+    # the login page -- shared nav/footer, dark text-box styling, no
+    # emojis (the 🌲 title mark and ⚡ button glyph are both gone, replaced
+    # by the same SVG brand mark used on /login).
+    err_html = f"""<div class="bg-red-950/40 border border-red-500/40 text-red-300 px-3.5 py-2.5 rounded-lg mb-4 text-sm">{error}</div>""" if error else ""
     return f"""
     <!DOCTYPE html>
-    <html lang="en-GB">
+    <html lang="en-GB" class="scroll-smooth">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Get a Free Lead | TreeKey</title>
+        <link rel="icon" href="/static/icon-192.png">
+        <link href="/static/tailwind.css" rel="stylesheet">
         <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; }}
-            .box {{ max-width:440px; margin:auto; background:white; padding:32px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04); }}
-            input {{ width:100%; box-sizing:border-box; padding:12px; border:1px solid #cbd5e1; border-radius:8px; margin-top:6px; margin-bottom:16px; font-family:inherit; font-size:15px; }}
-            button {{ background:#044332; color:white; border:none; padding:12px; border-radius:8px; font-weight:bold; font-size:15px; cursor:pointer; width:100%; }}
-            label {{ font-size:12px; font-weight:bold; color:#475569; }}
+            .box input {{ width:100%; box-sizing:border-box; padding:12px 14px; border:1px solid #334155; border-radius:8px; margin-top:6px; margin-bottom:16px; font-family:inherit; font-size:15px; background:#020617; color:#e2e8f0; }}
+            .box input:focus {{ outline:none; border-color:#10b981; box-shadow:0 0 0 3px rgba(16,185,129,0.15); }}
+            .box input::placeholder {{ color:#475569; }}
         </style>
     </head>
-    <body>
-    <div class="box">
-        <div style="text-align:center; margin-bottom:20px;">
-            <span style="font-size:32px;">🌲</span>
-            <h2 style="margin:8px 0 4px 0; color:#044332;">Get a free tree lead</h2>
-            <p style="color:#64748b; font-size:13px; margin:0;">No card. No subscription. Just a real job near you.</p>
+    <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
+    {_shared_nav_html()}
+    <div class="px-4 py-6 sm:py-16">
+    <div class="box max-w-[440px] mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl">
+        <div class="text-center mb-4 sm:mb-5">
+            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30 mx-auto mb-2.5 sm:mb-3">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"/></svg>
+            </div>
+            <h2 class="text-white text-xl font-bold m-0 mb-1">Get a free tree lead</h2>
+            <p class="text-slate-400 text-[13px] m-0">No card. No subscription. Just a real job near you.</p>
         </div>
         {err_html}
         <form action="/api/free-signup" method="POST">
-            <label>Name:</label>
+            <label class="text-xs font-bold text-slate-300">Name:</label>
             <input type="text" name="name" placeholder="e.g. Dave Smith" required>
-            <label>Email Address:</label>
+            <label class="text-xs font-bold text-slate-300">Email Address:</label>
             <input type="email" name="email" placeholder="e.g. dave@apex-trees.co.uk" required>
-            <label>Phone (optional):</label>
+            <label class="text-xs font-bold text-slate-300">Phone (optional):</label>
             <input type="tel" name="phone" placeholder="e.g. 07123 456789">
-            <label>Your Postcode or Area:</label>
+            <label class="text-xs font-bold text-slate-300">Your Postcode or Area:</label>
             <input type="text" name="postcode" placeholder="e.g. NG22" required>
-            <button type="submit">Get My Free Lead ⚡</button>
+            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3.5 rounded-lg font-bold text-[15px] cursor-pointer w-full transition-colors">Get My Free Lead →</button>
         </form>
-        <div style="text-align:center; margin-top:20px; font-size:12px; color:#64748b;">
-            Already have an account? <a href="/login" style="color:#044332; font-weight:bold;">Sign in</a>
+        <div class="text-center mt-4 pt-3 sm:mt-5 sm:pt-4 border-t border-slate-800 text-xs text-slate-400">
+            Already have an account? <a href="/login" class="text-emerald-400 hover:text-emerald-300 font-bold no-underline transition-colors">Sign in</a>
         </div>
     </div>
+    </div>
+    {_shared_footer_html()}
     </body>
     </html>
     """
@@ -3990,7 +4043,15 @@ async def free_signup(request: Request):
     # double-submit/retry, but checking here too avoids burning a second
     # lead's worth of postcodes.io lookups for nothing.
     if not account.get("free_lead_ref"):
-        candidate = database.find_nearest_unclaimed_lead(lat, lon, max_miles=25.0)
+        # Sep 9 2026, Nick's ask (production incident -- a real signup got
+        # "no job was available"): "this cannot happen under any
+        # circumstance... they get the closest lead by proximity no matter
+        # what." max_miles=None removes the old 25-mile ceiling here so the
+        # single nearest unclaimed lead in the whole pool is always
+        # returned, however far away -- see find_nearest_unclaimed_lead's
+        # own docstring for why this call site (and only this one) now
+        # passes no cap.
+        candidate = database.find_nearest_unclaimed_lead(lat, lon, max_miles=None)
         if candidate:
             burned = database.burn_lead_inventory(candidate["reference"], email)
             if burned:
@@ -4026,49 +4087,58 @@ def free_dashboard(request: Request):
     if not account:
         return RedirectResponse(url="/free-account", status_code=303)
 
+    # Sep 9 2026, Nick's ask, production incident: a real signup landed here
+    # with no lead granted at all -- "this cannot happen under any
+    # circumstance... they get the closest lead by proximity no matter
+    # what." Fixed at the source (main.py's /api/free-signup now calls
+    # database.find_nearest_unclaimed_lead with no distance ceiling, so the
+    # single nearest unclaimed lead in the whole pool is always granted,
+    # however far away). This branch should now only ever show if the
+    # entire pool was genuinely empty at signup, not "nothing nearby" --
+    # copy updated to match, so it never reads like a broken promise.
     if account.get("free_lead_ref"):
         lead = database.get_lead_by_reference(account["free_lead_ref"])
         if lead:
             lead_html = f"""
-            <div class="card" style="border-left:4px solid #059669;">
-                <p style="margin:0 0 10px 0;"><strong>Reference:</strong> {lead.get('reference', 'N/A')}</p>
-                <p style="margin:0 0 10px 0;"><strong>Address:</strong> {lead.get('address', 'N/A')}</p>
-                <p style="margin:0 0 10px 0;"><strong>Source:</strong> {lead.get('council_source', 'N/A')}</p>
-                <p style="margin:0;"><strong>Description:</strong><br>
-                   <span style="color:#475569; font-size:14px;">{lead.get('summary', 'No summary available.')}</span></p>
+            <div class="bg-slate-800/50 border-l-4 border-emerald-500 rounded-r-xl p-5">
+                <p class="m-0 mb-2.5 text-sm"><span class="text-slate-400 font-bold">Reference:</span> <span class="text-slate-100">{lead.get('reference', 'N/A')}</span></p>
+                <p class="m-0 mb-2.5 text-sm"><span class="text-slate-400 font-bold">Address:</span> <span class="text-slate-100">{lead.get('address', 'N/A')}</span></p>
+                <p class="m-0 mb-2.5 text-sm"><span class="text-slate-400 font-bold">Source:</span> <span class="text-slate-100">{lead.get('council_source', 'N/A')}</span></p>
+                <p class="m-0 text-sm"><span class="text-slate-400 font-bold">Description:</span><br>
+                   <span class="text-slate-300 text-[13px] leading-relaxed">{lead.get('summary', 'No summary available.')}</span></p>
             </div>
             """
         else:
-            lead_html = "<p style='color:#64748b;'>Your free lead is no longer available to display, but it was genuinely yours when granted.</p>"
+            lead_html = "<p class='text-slate-400 text-sm'>Your free lead is no longer available to display, but it was genuinely yours when granted.</p>"
     else:
-        lead_html = "<p style='color:#64748b;'>No job was available in your exact area the moment you signed up — we'll email you the first one that appears nearby.</p>"
+        lead_html = "<p class='text-slate-400 text-sm'>There are no jobs anywhere in the system to grant right now -- this should be very rare. We'll email you the very next one that comes in, wherever it is.</p>"
 
     return HTMLResponse(f"""
     <!DOCTYPE html>
-    <html lang="en-GB">
+    <html lang="en-GB" class="scroll-smooth">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Your Free Lead | TreeKey</title>
-        <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; }}
-            .container {{ max-width:640px; margin:auto; }}
-            .card {{ background:white; border:1px solid #e2e8f0; border-radius:12px; padding:20px; margin-bottom:20px; }}
-            .btn {{ background:#044332; color:white; padding:12px 20px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block; }}
-        </style>
+        <link rel="icon" href="/static/icon-192.png">
+        <link href="/static/tailwind.css" rel="stylesheet">
     </head>
-    <body>
-    <div class="container">
-        <h2 style="color:#044332;">🌲 Your Free Lead</h2>
-        {lead_html}
-        <div class="card" style="background:#f0fdf4; border-color:#bbf7d0;">
-            <p style="margin:0 0 12px 0; font-size:14px; color:#065f46;">
+    <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
+    {_shared_nav_html()}
+    <div class="max-w-2xl mx-auto px-4 py-8 sm:py-12">
+        <h2 class="text-white text-2xl font-extrabold mb-4">Your Free Lead</h2>
+        <div class="mb-5">
+            {lead_html}
+        </div>
+        <div class="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-5">
+            <p class="m-0 mb-3.5 text-sm text-emerald-200 leading-relaxed">
                 You're on our free list — expect a couple of local jobs a week by email (address blurred until you subscribe).
                 Subscribe any time to unlock full addresses and get jobs the moment they're filed.
             </p>
-            <a href="/pricing" class="btn">See Subscription Plans →</a>
+            <a href="/pricing" class="inline-block bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg no-underline font-bold text-sm transition-colors">See Subscription Plans →</a>
         </div>
     </div>
+    {_shared_footer_html()}
     </body>
     </html>
     """)

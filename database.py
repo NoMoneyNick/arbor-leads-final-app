@@ -2762,14 +2762,58 @@ def select_diverse_ticker_leads(limit: int = 5, enforce_geo_mix: bool = True,
     return selected[:limit]
 
 
-def find_nearest_unclaimed_lead(lat: float, lon: float, max_miles: float = 25.0, exclude_refs: list = None) -> Optional[dict]:
+def find_nearest_unclaimed_lead(lat: float, lon: float, max_miles: Optional[float] = 25.0,
+                                 exclude_refs: list = None, max_fresh_lookups: int = 30) -> Optional[dict]:
     """Sep 5 2026, free-signup feature: given a signup's lat/lon, finds the
     single closest still-available ('new') lead, using the same outcode-
     extraction + postcodes.io-centroid + haversine approach already proven
     in notifications.dispatch_lead_alerts -- just run once, ad hoc, for one
     person, instead of against a whole batch of freshly-scraped leads.
-    Bounded to the 60 most recently discovered unclaimed leads so this
-    doesn't hammer postcodes.io on every signup."""
+
+    Sep 9 2026, Nick's ask (production incident: a real signup got "no job
+    was available" and Nick was explicit -- "this cannot happen under any
+    circumstance... they get the closest lead by proximity no matter what"):
+    max_miles=None means NO distance ceiling -- the single closest unclaimed
+    lead in the pool is always returned, however far away, rather than
+    quietly returning nothing when nothing happens to be nearby. The default
+    stays a capped 25 miles for other callers (e.g. notifications.py's
+    weekly teaser emails, which are a non-committal nudge that's fine to
+    skip some weeks) -- main.py's free-signup call site is the one that now
+    passes max_miles=None, since that flow explicitly promises a free lead
+    the moment someone signs up and must never come back empty while the
+    pool has anything in it at all.
+
+    Sep 9 2026, SAME DAY follow-up -- the REAL root cause of that incident,
+    found on deep investigation after Nick correctly pushed back that the
+    max_miles=None fix above "is impossible" to have been the whole story
+    (a Croydon postcode should have 100+ unclaimed leads within 25 miles no
+    matter what). It did: this query was bounded to the 60 MOST RECENTLY
+    DISCOVERED unclaimed leads nationwide (`ORDER BY discovered_at DESC
+    LIMIT 60`), not the 60 nearest. Leads are discovered council-by-council
+    in scan batches (see scanners.py's NORTHGATE_COUNCILS/AGILE_APPLICATIONS
+    _COUNCILS/ARCUS_COUNCILS loops), so "the 60 most recent" at any given
+    moment can easily be entirely from a handful of councils on the other
+    side of the country -- completely disconnected from where a signup
+    actually lives. A Croydon signup landing right after a scan batch for,
+    say, the north of England would see zero of its true 100+ nearby
+    candidates, no matter how the distance ceiling above was set. This was
+    never a distance-cap bug; it was a candidate-pool bug.
+    Fixed by dropping the recency cap entirely and instead considering every
+    unclaimed lead in the table, using the exact same batched
+    cache-then-capped-live-lookup pattern already proven in
+    classify_leads_by_radius / get_marketplace_leads_with_freshness: every
+    distinct outcode among the candidates is resolved in ONE cached
+    outcode_area_cache read, and only outcodes genuinely never seen before
+    fall back to a live postcodes.io call (capped at `max_fresh_lookups` per
+    request, same convention as those functions) -- so this scales with the
+    number of *distinct areas* in play, not the size of the leads table, and
+    still doesn't hammer postcodes.io on every signup. Kept a generous
+    LIMIT 5000 (vs the old 60) purely as a defensive ceiling against an
+    unbounded full-table scan as the leads table grows over months/years --
+    at that size it is not a recency-bias risk the way 60 was: 5000
+    unclaimed leads nationwide is far more than any single scan batch could
+    plausibly cluster into one region, so a real nearby lead can't be pushed
+    out of the window the way it could be at 60."""
     if not SURL or lat is None or lon is None:
         return None
     exclude_refs = set(exclude_refs or [])
@@ -2783,34 +2827,58 @@ def find_nearest_unclaimed_lead(lat: float, lon: float, max_miles: float = 25.0,
                 FROM leads
                 WHERE (status = 'new' OR status IS NULL)
                 ORDER BY discovered_at DESC
-                LIMIT 60;
+                LIMIT 5000;
             """)
             rows = cur.fetchall()
+
+            row_outcodes = []
+            distinct = set()
+            for row in rows:
+                reference = row[1]
+                if reference in exclude_refs:
+                    row_outcodes.append(None)
+                    continue
+                outcodes = _extract_outcodes(row[2])
+                oc = outcodes[0] if outcodes else None
+                row_outcodes.append(oc)
+                if oc:
+                    distinct.add(oc)
+
+            coords = {}
+            if distinct:
+                try:
+                    cur.execute("SELECT outcode, lat, lon FROM outcode_area_cache WHERE outcode = ANY(%s)",
+                                (list(distinct),))
+                    for oc, oc_lat, oc_lon in cur.fetchall():
+                        if oc_lat is not None and oc_lon is not None:
+                            coords[oc] = (oc_lat, oc_lon)
+                except Exception as e:
+                    logger.debug(f"[Free Signup] batch coord-cache read failed: {e}")
+
+                missing = [oc for oc in distinct if oc not in coords]
+                for oc in missing[:max_fresh_lookups]:
+                    area = get_outcode_area_label(oc)  # also writes through to outcode_area_cache
+                    if area.get("lat") is not None and area.get("lon") is not None:
+                        coords[oc] = (area["lat"], area["lon"])
         finally:
             cur.close()
             conn.close()
 
         best = None
         best_dist = None
-        for row in rows:
-            reference = row[1]
-            if reference in exclude_refs:
+        for row, oc in zip(rows, row_outcodes):
+            if not oc or oc not in coords:
                 continue
-            address = row[2]
-            for oc in _extract_outcodes(address):
-                lead_lat, lead_lon = lookup_outcode_centroid(oc)
-                if lead_lat is None or lead_lon is None:
-                    continue
-                dist = haversine_miles(lat, lon, lead_lat, lead_lon)
-                if dist <= max_miles and (best_dist is None or dist < best_dist):
-                    best_dist = dist
-                    best = {
-                        "id": row[0], "reference": row[1], "address": row[2], "summary": row[3],
-                        "council_source": row[4], "lead_score": row[5], "lead_price": row[6],
-                        "registered_date": row[7], "vertical": row[8], "applicant_name": row[9],
-                        "agent_name": row[10], "agent_company": row[11], "has_agent": row[12],
-                    }
-                break  # first extractable outcode on this address is enough
+            lead_lat, lead_lon = coords[oc]
+            dist = haversine_miles(lat, lon, lead_lat, lead_lon)
+            if (max_miles is None or dist <= max_miles) and (best_dist is None or dist < best_dist):
+                best_dist = dist
+                best = {
+                    "id": row[0], "reference": row[1], "address": row[2], "summary": row[3],
+                    "council_source": row[4], "lead_score": row[5], "lead_price": row[6],
+                    "registered_date": row[7], "vertical": row[8], "applicant_name": row[9],
+                    "agent_name": row[10], "agent_company": row[11], "has_agent": row[12],
+                }
         return best
     except Exception as e:
         logger.error(f"[Free Signup] Error finding nearest lead for ({lat}, {lon}): {e}")
