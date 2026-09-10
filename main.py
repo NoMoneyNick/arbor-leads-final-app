@@ -2160,6 +2160,7 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
     lead_tag_stats = database.get_tag_counts()
     partner_tag_stats = database.get_partner_tag_counts()
     last_cycle_at = database.get_system_state("last_autonomous_cycle_at")
+    last_cycle_started_at = database.get_system_state("last_autonomous_cycle_started_at")
 
     partner_rows = "".join([
         f"<li><b>{html.escape(str(p[0] or ''))}</b>  {html.escape(str(p[1] or 'Director on file'))} | <b>{html.escape(str(p[2] or ''))}</b> |  {html.escape(str(p[4] or ''))} |  {html.escape(str(p[5] or ''))} |  {p[3] or 'N/A'}</li>"
@@ -2204,6 +2205,39 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
     # partner enrichment) roughly once every 20 hours on its own (see
     # main.py's _autonomous_scheduler_loop) -- this banner reports that
     # fact plainly instead of asking Nick to remember to click anything.
+    #
+    # Sep 10 2026 fix, Nick's "this makes no sense" report: the banner used
+    # to always say "Next one fires on its own in roughly 20 hours from
+    # then" as a fixed string, regardless of how long it had actually been
+    # -- so "Last full cycle: 36h ago" (already 16h PAST the 20h interval,
+    # i.e. overdue) still claimed a future "20 hours from then", which
+    # reads as nonsense to anyone doing the maths, exactly what he flagged.
+    # Now computes real elapsed time against the scheduler's own 20h
+    # threshold (mirroring _autonomous_scheduler_loop's own "most recent of
+    # started/finished" logic) and says plainly whether it's on schedule,
+    # imminent, or overdue -- an overdue reading here is itself a genuine
+    # signal something's stuck (e.g. the scheduler thread died, or a cycle
+    # keeps crashing before it can record a start/finish stamp) and worth
+    # checking Render's logs for "[AUTO]" lines if it persists.
+    AUTONOMOUS_CYCLE_HOURS = 20
+    _most_recent_iso = max([iso for iso in (last_cycle_started_at, last_cycle_at) if iso], default=None)
+    _hours_since_cycle = None
+    if _most_recent_iso:
+        try:
+            _then = datetime.datetime.fromisoformat(_most_recent_iso.replace("Z", "+00:00"))
+            _hours_since_cycle = (datetime.datetime.now(datetime.timezone.utc) - _then).total_seconds() / 3600
+        except Exception:
+            _hours_since_cycle = None
+
+    if _hours_since_cycle is None:
+        _next_cycle_note = "next one due once the scheduler's first check completes"
+    elif _hours_since_cycle >= AUTONOMOUS_CYCLE_HOURS:
+        _overdue_by = _hours_since_cycle - AUTONOMOUS_CYCLE_HOURS
+        _next_cycle_note = f"<b style='color:#b45309;'>overdue by ~{_overdue_by:.0f}h</b> -- should fire on its next 20-minute scheduler check; if this persists, check Render logs for '[AUTO]' lines"
+    else:
+        _remaining = AUTONOMOUS_CYCLE_HOURS - _hours_since_cycle
+        _next_cycle_note = f"next one due in ~{_remaining:.0f}h"
+
     if _pipeline_state.get("running"):
         pipeline_banner = f"""<div style='background:#fef3c7; border:1px solid #f59e0b; border-radius:10px;
             padding:12px 18px; margin-bottom:18px; font-size:14px;'>
@@ -2212,7 +2246,7 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
     else:
         pipeline_banner = f"""<div style='background:#ecfdf5; border:1px solid #10b981; border-radius:10px;
             padding:12px 18px; margin-bottom:18px; font-size:14px;'>
-            &#129302; <b>Running autonomously</b> -- no manual scanning needed. Last full cycle: <b>{_time_ago(last_cycle_at)}</b>. Next one fires on its own in roughly 20 hours from then.
+            &#129302; <b>Running autonomously</b> -- no manual scanning needed. Last full cycle: <b>{_time_ago(last_cycle_at)}</b>. {_next_cycle_note}.
         </div>"""
 
     pct = int((stats['enriched'] / stats['p'] * 100)) if stats['p'] else 0
@@ -4514,8 +4548,16 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
         if loc["lat"] is None:
             candidates_html = f"<p class='text-red-400 text-[13px] mb-5'>Couldn't resolve '{find_near}' to a real UK postcode/outcode.</p>"
         else:
-            candidates = database.find_chip_drop_candidates_via_osm(loc["lat"], loc["lon"], radius_miles=10)
-            if not candidates:
+            osm_result = database.find_chip_drop_candidates_via_osm(loc["lat"], loc["lon"], radius_miles=10)
+            candidates = osm_result["candidates"]
+            if not osm_result["ok"]:
+                # Sep 10 2026 fix: previously identical to the genuine
+                # "nothing nearby" copy below -- see database.py's
+                # find_chip_drop_candidates_via_osm for the live-verified
+                # bug this was hiding (real matching places existed nearby
+                # but the search was silently failing every time).
+                candidates_html = f"<p class='text-amber-400 text-[13px] mb-5'>Couldn't reach the OpenStreetMap search just now (temporary lookup failure, not that there's nothing nearby) -- try again in a moment, or register sites you already know instead.</p>"
+            elif not candidates:
                 candidates_html = f"<p class='text-slate-500 text-[13px] mb-5'>No candidates found on OpenStreetMap within 10 miles of {loc['outcode']}. OSM coverage varies by area -- try registering sites you already know instead.</p>"
             else:
                 cand_cards = "".join([

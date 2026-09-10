@@ -1921,7 +1921,7 @@ _OSM_CHIP_DROP_TAGS = [
 ]
 
 
-def find_chip_drop_candidates_via_osm(lat: float, lon: float, radius_miles: float = 10.0, limit: int = 15) -> list:
+def find_chip_drop_candidates_via_osm(lat: float, lon: float, radius_miles: float = 10.0, limit: int = 15) -> dict:
     """Sep 8 2026, Nick's ask: an automated "find nearby chip-drop
     candidates" layer on top of the self-registration directory (see
     get_chip_drop_spots), inspired by the original Gemini Pro brief.
@@ -1943,13 +1943,17 @@ def find_chip_drop_candidates_via_osm(lat: float, lon: float, radius_miles: floa
     session's earlier /chip-drop fix removed, just with real place names
     attached instead of invented ones.
 
-    Returns a list of {name, category, lat, lon, distance_miles,
-    address_hint, osm_url} dicts, nearest first. Returns [] on any
-    failure (network, no results, bad coords) -- this is an assistive
-    discovery tool, never something a caller should treat as required to
-    succeed."""
+    Sep 10 2026: changed return type from a bare list to
+    {"candidates": [...], "ok": bool} -- see the fix note below the query
+    build for why (this WAS silently broken in production; a plain []
+    made "the request failed" indistinguishable from "genuinely no
+    candidates nearby", which is how it stayed invisible). "candidates" is
+    a list of {name, category, lat, lon, distance_miles, address_hint,
+    osm_url} dicts, nearest first. "ok" is False only when every Overpass
+    endpoint failed outright (network/HTTP error) -- an empty list with
+    ok=True is a genuine "nothing tagged nearby" result, not a failure."""
     if lat is None or lon is None:
-        return []
+        return {"candidates": [], "ok": True}
     radius_m = int(min(radius_miles, 30.0) * 1609.34)  # capped at 30mi -- Overpass gets slow/heavy on huge radii
 
     clauses = "".join([
@@ -1959,24 +1963,55 @@ def find_chip_drop_candidates_via_osm(lat: float, lon: float, radius_miles: floa
     ])
     query = f"[out:json][timeout:20];\n(\n{clauses}\n);\nout center tags {limit * 4};"
 
-    try:
-        # Overpass's fair-use policy asks API consumers to identify
-        # themselves with a real User-Agent rather than a generic client
-        # default -- helps avoid being mistaken for anonymous scraping
-        # traffic and throttled.
-        resp = requests.post(
-            "https://overpass-api.de/api/interpreter",
-            data={"data": query},
-            headers={"User-Agent": "TreeKey/1.0 (treekey.uk; contact@treekey.uk)"},
-            timeout=25,
-        )
-        if resp.status_code != 200:
-            logger.warning(f"[ChipDrop/OSM] Overpass returned {resp.status_code} for ({lat},{lon})")
-            return []
-        elements = resp.json().get("elements", [])
-    except Exception as e:
-        logger.warning(f"[ChipDrop/OSM] Overpass lookup failed for ({lat},{lon}): {e}")
-        return []
+    # Sep 10 2026, Nick's ask ("does it or has it actually produced any
+    # results? if not then its not working"): live-verified this WAS broken
+    # in production -- searching NG25 (Southwell, Notts, which has at least
+    # 3 real named garden centres within a couple of miles per OSM's own
+    # Nominatim search) returned "no candidates" on the live site. The
+    # overpass-api.de single instance is well known in the OSM community for
+    # throttling/rejecting traffic that looks like automated server/
+    # datacenter requests (exactly what a Render-hosted app looks like) --
+    # very plausibly why every request from here was silently failing and
+    # falling into the `except`/non-200 branch below, always returning [].
+    # Two fixes: (1) try a second public Overpass mirror before giving up,
+    # since a single instance's throttling doesn't apply to different
+    # infrastructure; (2) stop returning a bare [] for BOTH "genuinely no
+    # candidates" and "the request itself failed" -- they're not the same
+    # thing and were shown to users/Nick with identical copy either way,
+    # which is exactly how this stayed invisible. Now returns
+    # {"candidates": [...], "ok": bool} so the caller can tell them apart.
+    endpoints = [
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+    ]
+    elements = None
+    last_error = None
+    for endpoint in endpoints:
+        try:
+            # Overpass's fair-use policy asks API consumers to identify
+            # themselves with a real User-Agent rather than a generic client
+            # default -- helps avoid being mistaken for anonymous scraping
+            # traffic and throttled.
+            resp = requests.post(
+                endpoint,
+                data={"data": query},
+                headers={"User-Agent": "TreeKey/1.0 (treekey.uk; contact@treekey.uk)"},
+                timeout=25,
+            )
+            if resp.status_code != 200:
+                last_error = f"HTTP {resp.status_code}"
+                logger.warning(f"[ChipDrop/OSM] {endpoint} returned {resp.status_code} for ({lat},{lon})")
+                continue
+            elements = resp.json().get("elements", [])
+            break
+        except Exception as e:
+            last_error = str(e)
+            logger.warning(f"[ChipDrop/OSM] {endpoint} lookup failed for ({lat},{lon}): {e}")
+            continue
+
+    if elements is None:
+        logger.warning(f"[ChipDrop/OSM] All Overpass endpoints failed for ({lat},{lon}): {last_error}")
+        return {"candidates": [], "ok": False}
 
     tag_to_label = {(k, v): label for k, v, label in _OSM_CHIP_DROP_TAGS}
     candidates = []
@@ -2015,7 +2050,7 @@ def find_chip_drop_candidates_via_osm(lat: float, lon: float, radius_miles: floa
         })
 
     candidates.sort(key=lambda c: c["distance_miles"])
-    return candidates[:limit]
+    return {"candidates": candidates[:limit], "ok": True}
 
 
 def increment_api_usage(api_name: str = "UK Planning API", increment: int = 1, cap: int = 500) -> dict:
@@ -4308,6 +4343,7 @@ def get_contractor_financial_summary(contractor_email: str) -> dict:
             "vat_threshold": 90000.0,
             "vat_headroom": 90000.0,
             "vat_status": "Safe Zone (Unregistered Sole Trader)",
+            "vat_color": "#059669",
             "cis_tax_held": 0.0,
             "net_profit_total": 0.0,
             "job_count": 0
@@ -4360,11 +4396,18 @@ def get_contractor_financial_summary(contractor_email: str) -> dict:
             conn.close()
     except Exception as e:
         logger.error(f"[Ledger] Error generating summary for {contractor_email}: {e}")
+        # Sep 10 2026 fix, Nick's "ledger bug" report: this fallback (and
+        # the SURL/email-missing one above) was missing "vat_color" while
+        # main.py's ledger_dashboard reads it with summary["vat_color"]
+        # (bracket access, no default) -- ANY DB hiccup here previously
+        # crashed the whole /ledger page with an unhandled KeyError instead
+        # of showing a safe, empty ledger.
         return {
             "rolling_turnover": 0.0,
             "vat_threshold": 90000.0,
             "vat_headroom": 90000.0,
             "vat_status": "Unknown",
+            "vat_color": "#64748b",
             "cis_tax_held": 0.0,
             "net_profit_total": 0.0,
             "job_count": 0
