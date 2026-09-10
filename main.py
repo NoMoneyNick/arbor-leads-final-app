@@ -4135,12 +4135,94 @@ async def verify_otp_route(request: Request):
 # viewable and date it was applied... as a sales prompt."
 
 @app.get("/free-account", response_class=HTMLResponse)
-def free_account_signup_page(error: Optional[str] = None):
+def free_account_signup_page(error: Optional[str] = None, sent: Optional[str] = None, code: Optional[str] = None,
+                              expired: Optional[str] = None):
     # Sep 9 2026, Nick's ask: brought onto the same dark design system as
     # the login page -- shared nav/footer, dark text-box styling, no
     # emojis (the title mark and button glyph are both gone, replaced
     # by the same SVG brand mark used on /login).
+    #
+    # Sep 10 2026, free-lead-promo redesign: this is now a single form used
+    # by all three traffic types Nick called out (cold-email code click,
+    # organic search, and a lapsed-code re-request) -- no more instant
+    # grant. Submitting without a code reserves a lead and emails a code;
+    # submitting WITH a code (either typed in, or pre-filled via ?code=
+    # from the emailed link) redeems it. `sent=1` shows the
+    # check-your-email confirmation state instead of the form.
     err_html = f"""<div class="bg-red-950/40 border border-red-500/40 text-red-300 px-3.5 py-2.5 rounded-lg mb-4 text-sm">{error}</div>""" if error else ""
+    code_val = html.escape(code) if code else ""
+
+    if expired:
+        # Sep 10 2026, Nick's explicit ask: a lapsed code gets its own
+        # focused state -- "unfortunately this code has expired, hit the
+        # button to get a fresher one" -- rather than a generic error
+        # dumped back onto the full form. The button reuses the postcode/
+        # phone already on file (see /api/request-new-code) so there's
+        # nothing to retype.
+        body = f"""
+        <div class="text-center mb-4 sm:mb-5">
+            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-amber-600 to-amber-900 flex items-center justify-center shadow-lg border border-amber-500/30 mx-auto mb-2.5 sm:mb-3">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fde68a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+            </div>
+            <h2 class="text-white text-xl font-bold m-0 mb-1">That code has expired</h2>
+            <p class="text-slate-400 text-[13px] m-0">Unfortunately that lead's gone back on the market. Hit the button below and we'll email you a code for a fresher one near you.</p>
+        </div>
+        {err_html}
+        <form action="/api/request-new-code" method="POST">
+            <input type="hidden" name="email" value="{html.escape(expired)}">
+            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3.5 rounded-lg font-bold text-[15px] cursor-pointer w-full transition-colors">Email Me A Fresh Code →</button>
+        </form>
+        <div class="text-center mt-4 pt-3 sm:mt-5 sm:pt-4 border-t border-slate-800 text-xs text-slate-400">
+            Details changed, or that email not working? <a href="/free-account" class="text-emerald-400 hover:brightness-125 font-bold no-underline transition-colors">Fill in the full form instead</a>
+        </div>
+        """
+    elif sent:
+        body = f"""
+        <div class="text-center mb-4 sm:mb-5">
+            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30 mx-auto mb-2.5 sm:mb-3">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"/></svg>
+            </div>
+            <h2 class="text-white text-xl font-bold m-0 mb-1">Check your email</h2>
+            <p class="text-slate-400 text-[13px] m-0">We've reserved a real job near you and emailed you a code. Enter it below once it arrives (valid for 3 days) to reveal it.</p>
+        </div>
+        {err_html}
+        <form action="/api/free-signup" method="POST">
+            <input type="hidden" name="email" value="{html.escape(sent)}">
+            <label class="text-xs font-bold text-slate-300">Your Code:</label>
+            <input type="text" name="code" placeholder="e.g. 4F91A2C0" required style="text-transform:uppercase;">
+            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3.5 rounded-lg font-bold text-[15px] cursor-pointer w-full transition-colors">Unlock My Lead →</button>
+        </form>
+        """
+    else:
+        body = f"""
+        <div class="text-center mb-4 sm:mb-5">
+            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30 mx-auto mb-2.5 sm:mb-3">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"/></svg>
+            </div>
+            <h2 class="text-white text-xl font-bold m-0 mb-1">Get a free tree lead</h2>
+            <p class="text-slate-400 text-[13px] m-0">No card. No subscription. Just a real job near you.</p>
+        </div>
+        {err_html}
+        <form action="/api/free-signup" method="POST">
+            <label class="text-xs font-bold text-slate-300">Name:</label>
+            <input type="text" name="name" placeholder="e.g. Dave Smith" required>
+            <label class="text-xs font-bold text-slate-300">Company Name:</label>
+            <input type="text" name="company_name" placeholder="e.g. Apex Trees Ltd" required>
+            <label class="text-xs font-bold text-slate-300">Email Address:</label>
+            <input type="email" name="email" placeholder="e.g. dave@apex-trees.co.uk" required>
+            <label class="text-xs font-bold text-slate-300">Phone:</label>
+            <input type="tel" name="phone" placeholder="e.g. 07123 456789" required>
+            <label class="text-xs font-bold text-slate-300">Your Postcode or Area:</label>
+            <input type="text" name="postcode" placeholder="e.g. NG22" required>
+            <label class="text-xs font-bold text-slate-300">Already have a code from our email? Enter it here, otherwise leave blank:</label>
+            <input type="text" name="code" placeholder="e.g. 4F91A2C0" value="{code_val}" style="text-transform:uppercase;">
+            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3.5 rounded-lg font-bold text-[15px] cursor-pointer w-full transition-colors">Get My Free Lead →</button>
+        </form>
+        <div class="text-center mt-4 pt-3 sm:mt-5 sm:pt-4 border-t border-slate-800 text-xs text-slate-400">
+            Already have an account? <a href="/login" class="text-emerald-400 hover:brightness-125 font-bold no-underline transition-colors">Sign in</a>
+        </div>
+        """
+
     return f"""
     <!DOCTYPE html>
     <html lang="en-GB" class="scroll-smooth">
@@ -4160,28 +4242,7 @@ def free_account_signup_page(error: Optional[str] = None):
     {_shared_nav_html()}
     <div class="px-4 py-6 sm:py-16">
     <div class="box max-w-[440px] mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl">
-        <div class="text-center mb-4 sm:mb-5">
-            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30 mx-auto mb-2.5 sm:mb-3">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"/></svg>
-            </div>
-            <h2 class="text-white text-xl font-bold m-0 mb-1">Get a free tree lead</h2>
-            <p class="text-slate-400 text-[13px] m-0">No card. No subscription. Just a real job near you.</p>
-        </div>
-        {err_html}
-        <form action="/api/free-signup" method="POST">
-            <label class="text-xs font-bold text-slate-300">Name:</label>
-            <input type="text" name="name" placeholder="e.g. Dave Smith" required>
-            <label class="text-xs font-bold text-slate-300">Email Address:</label>
-            <input type="email" name="email" placeholder="e.g. dave@apex-trees.co.uk" required>
-            <label class="text-xs font-bold text-slate-300">Phone (optional):</label>
-            <input type="tel" name="phone" placeholder="e.g. 07123 456789">
-            <label class="text-xs font-bold text-slate-300">Your Postcode or Area:</label>
-            <input type="text" name="postcode" placeholder="e.g. NG22" required>
-            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3.5 rounded-lg font-bold text-[15px] cursor-pointer w-full transition-colors">Get My Free Lead →</button>
-        </form>
-        <div class="text-center mt-4 pt-3 sm:mt-5 sm:pt-4 border-t border-slate-800 text-xs text-slate-400">
-            Already have an account? <a href="/login" class="text-emerald-400 hover:brightness-125 font-bold no-underline transition-colors">Sign in</a>
-        </div>
+        {body}
     </div>
     </div>
     {_shared_footer_html()}
@@ -4190,68 +4251,253 @@ def free_account_signup_page(error: Optional[str] = None):
     """
 
 
+FREE_LEAD_DAILY_CAP = 50  # Sep 10 2026: circuit-breaker, see _issue_free_lead_code. Raise/lower by editing this constant.
+
+
+def _make_unsubscribe_url(recipient_email: str) -> str:
+    token = _sign_session_cookie(recipient_email)
+    return f"{payments.PUBLIC_APP_URL}/unsubscribe-teaser?token={token}"
+
+
+def _issue_free_lead_code(email: str, phone: str, lat: float, lon: float,
+                           client_ip: str, device_id: str) -> RedirectResponse:
+    """Sep 10 2026: the shared "reserve a lead, mint a code, email it" path,
+    used by both a fresh full-form /api/free-signup submission and the
+    one-click /api/request-new-code button shown after a code expires (see
+    that route below -- Nick's ask was explicit that a lapsed-code visitor
+    should NOT have to retype their postcode/phone, so this takes already-
+    resolved lat/lon/phone rather than re-deriving them from a form)."""
+    # One live reservation per email at a time -- stops stacking up
+    # multiple reservations instead of using or waiting out the current one.
+    if database.has_active_unexpired_code(email):
+        return RedirectResponse(url="/free-account?error=You+already+have+a+code+on+the+way+-+check+your+email%2C+or+wait+for+it+to+expire+before+requesting+another.", status_code=303)
+
+    # Lifetime cap on code REQUESTS (independent of redemption) -- stops
+    # endless resend-and-let-it-expire cycling through real inventory.
+    if database.count_free_lead_code_requests(email) >= 2:
+        return RedirectResponse(url="/free-account?error=You%27ve+reached+the+maximum+number+of+free+lead+requests+for+this+email.", status_code=303)
+
+    # Hard abuse blocks -- same device/connection or phone already redeemed
+    # a free lead recently, most likely the same person on a second inbox.
+    if database.is_ip_or_device_recently_flagged(ip_address=client_ip, device_id=device_id):
+        return RedirectResponse(url="/free-account?error=A+free+lead+has+already+been+claimed+recently+from+this+device+or+connection.", status_code=303)
+    if database.has_duplicate_phone_redeemed(phone, exclude_email=email):
+        return RedirectResponse(url="/free-account?error=A+free+lead+has+already+been+claimed+using+this+phone+number.", status_code=303)
+
+    # Sep 10 2026: daily circuit-breaker -- protects paid inventory from a
+    # bug, a viral share, or a coordinated abuse run quietly giving away
+    # too much of it before a human notices. Alerts Nick (throttled, so
+    # this can only page him once every 6h even if the cap stays hit) via
+    # the same incident-alert mechanism already used for DB/Stripe/scraper
+    # failures elsewhere in this app, since hitting this cap needs a human
+    # decision either way -- raise it, or investigate abuse.
+    if database.count_free_lead_codes_issued_since(hours=24.0) >= FREE_LEAD_DAILY_CAP:
+        try:
+            import notifications
+            notifications.send_system_incident_alert(
+                category="FREE LEAD PROMOTION",
+                title="Daily free-lead code cap reached",
+                description=f"{FREE_LEAD_DAILY_CAP} free-lead codes have been issued in the last 24h -- the circuit-breaker is now declining further requests.",
+                impact="New free-lead signups are being told to try again later until the 24h window rolls off.",
+                action_required="Check whether this is a successful campaign (raise FREE_LEAD_DAILY_CAP in main.py) or abuse (check free_lead_codes for a burst of requests from one IP/device/area).",
+                metric_details={"Cap": str(FREE_LEAD_DAILY_CAP), "Window": "24h"},
+                severity="WARNING",
+                throttle_hours=6.0
+            )
+        except Exception:
+            pass
+        return RedirectResponse(url="/free-account?error=We%27re+seeing+high+demand+for+free+leads+right+now+-+please+try+again+later.", status_code=303)
+
+    # Medium leads only for this promo (strong enough to prove value without
+    # giving away the top tier) -- but Sep 9 2026's "never come back empty"
+    # promise still holds, so fall back to any score if no Medium is near.
+    candidate = database.find_nearest_unclaimed_lead(lat, lon, max_miles=None, score="medium")
+    if not candidate:
+        candidate = database.find_nearest_unclaimed_lead(lat, lon, max_miles=None)
+    if not candidate:
+        return RedirectResponse(url="/free-account?error=No+leads+are+available+right+now+-+please+try+again+shortly.", status_code=303)
+
+    reserved = database.reserve_lead_as_pending(candidate["id"], email)
+    if not reserved:
+        # Someone else's request reserved it in the same instant -- the
+        # atomic UPDATE in reserve_lead_as_pending makes this extremely
+        # rare, just ask them to retry rather than erroring out.
+        return RedirectResponse(url="/free-account?error=That+lead+was+just+taken+-+please+try+again.", status_code=303)
+
+    code_row = database.generate_free_lead_code(email, reserved["reference"], ip_address=client_ip,
+                                                 device_id=device_id, phone=phone, expires_hours=72.0)
+    if not code_row:
+        return RedirectResponse(url="/free-account?error=Something+went+wrong+generating+your+code.+Please+try+again.", status_code=303)
+
+    import notifications
+    notifications.send_free_lead_code_email(email, reserved, code_row["code"], expires_hours=72.0,
+                                              unsubscribe_url=_make_unsubscribe_url(email))
+
+    response = RedirectResponse(url=f"/free-account?sent={urllib.parse.quote(email)}", status_code=303)
+    response.set_cookie(key="treekey_device_id", value=device_id, max_age=86400 * 365,
+                         httponly=True, secure=True, samesite="lax")
+    return response
+
+
 @app.post("/api/free-signup")
 async def free_signup(request: Request):
+    # Sep 10 2026, free-lead-promo redesign (Nick's spec, verbatim): every
+    # free-lead request -- cold-email code click, organic search, or a
+    # lapsed-code re-request -- now goes through the same reserve-then-
+    # redeem loop instead of the old instant grant, so the lead promised in
+    # an email is genuinely the one they get, and it's off the market the
+    # moment the code is sent, not when it's redeemed. See database.py's
+    # reserve_lead_as_pending / generate_free_lead_code / redeem_free_lead_
+    # code / sweep_expired_lead_reservations docstrings for the full
+    # mechanics and the abuse-prevention layers stacked on top.
     client_ip = request.client.host if request.client else "unknown"
     if not _check_rate_limit(client_ip):
         return RedirectResponse(url="/free-account?error=Too+many+attempts.+Please+wait+a+minute+and+try+again.", status_code=303)
 
     form = await request.form()
     name = (form.get("name") or "").strip()
+    company_name = (form.get("company_name") or "").strip()
     email = (form.get("email") or "").strip().lower()
     phone = (form.get("phone") or "").strip()
     postcode_input = (form.get("postcode") or "").strip()
+    code_input = (form.get("code") or "").strip().upper()
 
-    if not email or "@" not in email or not postcode_input:
-        return RedirectResponse(url="/free-account?error=Please+enter+a+valid+email+and+postcode.", status_code=303)
+    if not email or "@" not in email:
+        return RedirectResponse(url="/free-account?error=Please+enter+a+valid+email.", status_code=303)
+
+    device_id = request.cookies.get("treekey_device_id") or secrets.token_hex(16)
+
+    # ---- Branch 1: redeeming a code (from the "check your email" step, or
+    # typed straight in on the main form if they already had one) ----
+    if code_input:
+        result = database.redeem_free_lead_code(email, code_input)
+        if not result["ok"]:
+            if result["reason"] == "expired":
+                # Sep 10 2026, Nick's explicit ask: a lapsed code gets its
+                # own dedicated state with a one-click "get me a new code"
+                # button, not a generic error dumped back onto the full form.
+                return RedirectResponse(url=f"/free-account?expired={urllib.parse.quote(email)}", status_code=303)
+            reason_copy = {
+                "invalid_code_or_email": "That code doesn't match this email address -- double check both and try again.",
+                "already_redeemed": "That code has already been used.",
+                "missing_fields": "Please enter your email and code.",
+                "error": "Something went wrong redeeming that code. Please try again.",
+            }.get(result["reason"], "Something went wrong redeeming that code. Please try again.")
+            return RedirectResponse(url=f"/free-account?error={urllib.parse.quote(reason_copy)}", status_code=303)
+
+        database.record_free_lead_grant(email, result["lead"]["reference"])
+        response = RedirectResponse(url="/free-dashboard", status_code=303)
+        response.set_cookie(key="treekey_contractor_session", value=_sign_session_cookie(email),
+                             max_age=86400 * 30, httponly=True, secure=True, samesite="lax")
+        response.set_cookie(key="treekey_device_id", value=device_id, max_age=86400 * 365,
+                             httponly=True, secure=True, samesite="lax")
+        return response
+
+    # ---- Branch 2: fresh request (organic search, an email-code click
+    # without the code re-typed, or requesting a replacement after a lapsed
+    # code) -- reserve a lead and email a code instead of granting instantly ----
+    if not postcode_input:
+        return RedirectResponse(url="/free-account?error=Please+enter+your+postcode+to+get+a+code.", status_code=303)
+    if not phone:
+        return RedirectResponse(url="/free-account?error=Please+enter+a+phone+number.", status_code=303)
 
     # Resolve the typed postcode/area to an outcode + lat/lon the same way
     # the rest of this app locates a lead or a subscriber -- see
     # database.lookup_outcode_centroid (postcodes.io outcode centroid).
-    # Kept deliberately simple: take the first "word" typed as the outcode
-    # (e.g. "NG22 8AA" -> "NG22", "NG22" -> "NG22") and let postcodes.io
-    # itself say whether that's real, rather than guessing further here.
     outcode_guess = postcode_input.strip().upper().split(" ")[0]
     lat, lon = database.lookup_outcode_centroid(outcode_guess)
     if lat is None or lon is None:
         return RedirectResponse(url="/free-account?error=Couldn%27t+recognise+that+postcode+-+please+try+again+(e.g.+NG22).", status_code=303)
 
     account = database.create_or_update_limbo_account(email=email, name=name or None, phone=phone or None,
-                                                        outcode=outcode_guess, lat=lat, lon=lon)
+                                                        outcode=outcode_guess, lat=lat, lon=lon,
+                                                        company_name=company_name or None)
     if not account:
         return RedirectResponse(url="/free-account?error=Something+went+wrong+creating+your+account.+Please+try+again.", status_code=303)
 
-    # Grant the one-off free lead only if this account has never had one --
-    # record_free_lead_grant's own NULL guard makes this safe even under a
-    # double-submit/retry, but checking here too avoids burning a second
-    # lead's worth of postcodes.io lookups for nothing.
-    if not account.get("free_lead_ref"):
-        # Sep 9 2026, Nick's ask (production incident -- a real signup got
-        # "no job was available"): "this cannot happen under any
-        # circumstance... they get the closest lead by proximity no matter
-        # what." max_miles=None removes the old 25-mile ceiling here so the
-        # single nearest unclaimed lead in the whole pool is always
-        # returned, however far away -- see find_nearest_unclaimed_lead's
-        # own docstring for why this call site (and only this one) now
-        # passes no cap.
-        candidate = database.find_nearest_unclaimed_lead(lat, lon, max_miles=None)
-        if candidate:
-            burned = database.burn_lead_inventory(candidate["reference"], email)
-            if burned:
-                database.record_free_lead_grant(email, burned["reference"])
-                import notifications
-                notifications.send_free_account_welcome_email(email, burned)
+    # Already redeemed their one lifetime free lead -- straight to their
+    # dashboard rather than a scary error, this is a perfectly normal
+    # return visit.
+    if account.get("free_lead_ref"):
+        response = RedirectResponse(url="/free-dashboard", status_code=303)
+        response.set_cookie(key="treekey_contractor_session", value=_sign_session_cookie(email),
+                             max_age=86400 * 30, httponly=True, secure=True, samesite="lax")
+        return response
 
-    response = RedirectResponse(url="/free-dashboard", status_code=303)
-    response.set_cookie(
-        key="treekey_contractor_session",
-        value=_sign_session_cookie(email),
-        max_age=86400 * 30,
-        httponly=True,
-        secure=True,
-        samesite="lax"
-    )
-    return response
+    return _issue_free_lead_code(email, phone, lat, lon, client_ip, device_id)
+
+
+@app.post("/api/request-new-code")
+async def request_new_code(request: Request):
+    """Sep 10 2026, Nick's explicit ask: the button shown on the "this code
+    has expired" state. Deliberately only needs the email -- reuses the
+    postcode/phone already on file from their original request instead of
+    making them retype the whole form."""
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        return RedirectResponse(url="/free-account?error=Too+many+attempts.+Please+wait+a+minute+and+try+again.", status_code=303)
+
+    form = await request.form()
+    email = (form.get("email") or "").strip().lower()
+    if not email or "@" not in email:
+        return RedirectResponse(url="/free-account?error=Please+enter+a+valid+email.", status_code=303)
+
+    account = database.get_limbo_account(email)
+    if not account or account.get("lat") is None or account.get("lon") is None or not account.get("phone"):
+        # No account on file (or it's missing the details this needs) --
+        # send them through the full form instead of failing silently.
+        return RedirectResponse(url=f"/free-account?error=We+don%27t+have+enough+details+on+file+for+that+email+-+please+fill+in+the+form+below.&code=", status_code=303)
+    if account.get("free_lead_ref"):
+        response = RedirectResponse(url="/free-dashboard", status_code=303)
+        response.set_cookie(key="treekey_contractor_session", value=_sign_session_cookie(email),
+                             max_age=86400 * 30, httponly=True, secure=True, samesite="lax")
+        return response
+
+    device_id = request.cookies.get("treekey_device_id") or secrets.token_hex(16)
+    return _issue_free_lead_code(email, account["phone"], account["lat"], account["lon"], client_ip, device_id)
+
+
+@app.post("/webhooks/resend")
+async def resend_webhook(request: Request):
+    """Sep 10 2026: releases a free-lead reservation early if Resend reports
+    the code email hard-bounced or was marked spam, rather than leaving a
+    real lead held for a dead/wrong address for the full 3-day window.
+    Verified live against Resend's own docs (docs.svix.com / svix.com FastAPI
+    guide) rather than guessed: Resend signs webhooks via Svix, sending
+    svix-id/svix-timestamp/svix-signature headers, verified with the `svix`
+    package (added to requirements.txt) against RESEND_WEBHOOK_SECRET.
+    INERT until two manual steps happen on Nick's side, neither of which
+    this code can do for him: (1) set RESEND_WEBHOOK_SECRET in Render's
+    environment variables to the signing secret Resend shows when you
+    register the endpoint, (2) add https://treekey.uk/webhooks/resend as an
+    endpoint in the Resend dashboard's Webhooks section, subscribed to at
+    least email.bounced and email.complained."""
+    webhook_secret = os.getenv("RESEND_WEBHOOK_SECRET", "").strip()
+    if not webhook_secret:
+        logger.warning("[Resend Webhook] RESEND_WEBHOOK_SECRET not set -- ignoring inbound webhook.")
+        return Response(status_code=200)  # 200 so Resend doesn't retry forever on a config gap
+
+    payload = await request.body()
+    try:
+        from svix.webhooks import Webhook
+        # Svix's own docs disagree on what verify() returns (one page says
+        # "returns nothing on success", another shows it assigned to a
+        # variable) -- rather than guess, verify() is used purely for its
+        # side effect (raises on a bad signature) and the payload is parsed
+        # independently below, which is correct regardless of that
+        # discrepancy.
+        Webhook(webhook_secret).verify(payload, dict(request.headers))
+        event = json.loads(payload)
+    except Exception as e:
+        logger.warning(f"[Resend Webhook] Signature verification failed: {e}")
+        return Response(status_code=400)
+
+    event_type = event.get("type", "")
+    if event_type in ("email.bounced", "email.complained"):
+        recipients = (event.get("data") or {}).get("to") or []
+        if recipients:
+            database.release_reservation_on_bounce(recipients)
+    return Response(status_code=200)
 
 
 @app.get("/free-dashboard", response_class=HTMLResponse)
@@ -6489,6 +6735,14 @@ def _autonomous_scheduler_loop():
     later, not again immediately' to behave."""
     time.sleep(120)  # let the app finish starting up before the first check
     while True:
+        try:
+            # Sep 10 2026, free-lead-promo redesign: return any reservation
+            # whose code window lapsed unredeemed back to the general pool.
+            # Cheap single UPDATE, safe to run every 20-minute tick alongside
+            # the autonomous-cycle check below.
+            database.sweep_expired_lead_reservations()
+        except Exception as e:
+            logger.error(f"[AUTO] Expired lead-reservation sweep error: {e}")
         try:
             last_started_iso = database.get_system_state("last_autonomous_cycle_started_at")
             last_finished_iso = database.get_system_state("last_autonomous_cycle_at")

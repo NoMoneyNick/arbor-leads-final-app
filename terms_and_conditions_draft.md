@@ -40,6 +40,18 @@
 
 4.5 Nothing in this clause affects any statutory right you may have that cannot lawfully be excluded.
 
+## 4A. Free Lead Promotion
+
+*[TODO: inserted 10 Sep 2026 to match the new free-lead-promo mechanic (database.py's free_lead_codes system). Numbered 4A rather than renumbering every following clause — solicitor/final-draft pass should fold this into the main sequence properly.]*
+
+4A.1 Tree Key may from time to time offer a free, no-payment Lead to a business signing up via the free-account signup page ("the Promotion"). The Promotion is limited to one Lead per business and per email address, for the lifetime of the Promotion, regardless of how many times a form is submitted.
+
+4A.2 On requesting a free Lead, Tree Key reserves a Lead matching the postcode/area supplied and issues a one-time code by email. That code is valid for 3 days from the time it is issued. If the code is not used to redeem the Lead within that window, the Lead is released back to the general pool and may be sold or granted to any other party; the original recipient may request a further code for a different, then-available Lead, subject to the request limits in clause 4A.3.
+
+4A.3 Tree Key may limit the number of times a single email address, phone number, IP address, or device may request or hold a Promotion code, and may decline to issue a further code where it reasonably suspects the Promotion is being used to obtain more than one free Lead per business.
+
+4A.4 The Promotion may be withdrawn, amended, or limited to specific Lead types or areas at any time without notice, save that a code already issued and unexpired at the time of any such change will still be honoured according to its original terms.
+
 ## 5. Lead Accuracy — No Warranty
 
 5.1 Lead information reflects data available to Tree Key at the time of discovery or last check and is not guaranteed to be current, complete, or accurate. In particular, Tree Key does not guarantee that:

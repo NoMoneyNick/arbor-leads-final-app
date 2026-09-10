@@ -1,5 +1,6 @@
 import os
 import re
+import secrets
 import requests
 import psycopg2
 import logging
@@ -372,7 +373,33 @@ def init_db():
                 last_teaser_lead_ref TEXT,
                 signed_up_at TIMESTAMPTZ DEFAULT NOW(),
                 last_teaser_sent_at TIMESTAMPTZ,
-                unsubscribed BOOLEAN DEFAULT FALSE
+                unsubscribed BOOLEAN DEFAULT FALSE,
+                company_name TEXT
+            );
+
+            -- Sep 10 2026, Nick's "free lead promo" redesign: every free-lead
+            -- signup (whether they arrive via a cold-email code, organic
+            -- search, or a lapsed code) now goes through the same
+            -- reserve-a-lead -> email-a-code -> redeem-the-code loop instead
+            -- of the old instant-grant. A lead is pulled off the market
+            -- (leads.status = 'reserved') the moment its code is generated,
+            -- not when it's redeemed, per Nick's explicit requirement. If the
+            -- code isn't redeemed within its window, sweep_expired_lead_
+            -- reservations() below flips the lead back to 'new'. One row per
+            -- code REQUEST (not per email) so repeat/lapsed-code requests are
+            -- all visible and cappable, and so ip_address/device_id give a
+            -- real abuse-detection trail.
+            CREATE TABLE IF NOT EXISTS free_lead_codes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                email TEXT NOT NULL,
+                lead_reference TEXT NOT NULL,
+                code TEXT UNIQUE NOT NULL,
+                ip_address TEXT,
+                device_id TEXT,
+                phone TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                expires_at TIMESTAMPTZ NOT NULL,
+                redeemed_at TIMESTAMPTZ
             );
 
             CREATE TABLE IF NOT EXISTS chip_drop_spots (
@@ -668,6 +695,13 @@ def init_db():
             # extra postcodes.io calls beyond what was already happening.
             "ALTER TABLE outcode_area_cache ADD COLUMN IF NOT EXISTS lat FLOAT;",
             "ALTER TABLE outcode_area_cache ADD COLUMN IF NOT EXISTS lon FLOAT;",
+            # Sep 10 2026, free-lead-promo redesign: limbo_accounts already
+            # exists in production, so the company_name column added to its
+            # CREATE TABLE above is a no-op there -- CREATE TABLE IF NOT
+            # EXISTS never alters an existing table. This ALTER TABLE is the
+            # actual migration that adds the column live, same pattern as
+            # every other column added to an already-live table on this list.
+            "ALTER TABLE limbo_accounts ADD COLUMN IF NOT EXISTS company_name TEXT;",
         ]
         failed_ddl = _run_ddl_statements_resiliently(conn, resilience_cols, phase_label="Phase1-columns")
 
@@ -2872,7 +2906,8 @@ def select_diverse_ticker_leads(limit: int = 5, enforce_geo_mix: bool = True,
 
 
 def find_nearest_unclaimed_lead(lat: float, lon: float, max_miles: Optional[float] = 25.0,
-                                 exclude_refs: list = None, max_fresh_lookups: int = 30) -> Optional[dict]:
+                                 exclude_refs: list = None, max_fresh_lookups: int = 30,
+                                 score: Optional[str] = None) -> Optional[dict]:
     """Sep 5 2026, free-signup feature: given a signup's lat/lon, finds the
     single closest still-available ('new') lead, using the same outcode-
     extraction + postcodes.io-centroid + haversine approach already proven
@@ -2922,7 +2957,13 @@ def find_nearest_unclaimed_lead(lat: float, lon: float, max_miles: Optional[floa
     at that size it is not a recency-bias risk the way 60 was: 5000
     unclaimed leads nationwide is far more than any single scan batch could
     plausibly cluster into one region, so a real nearby lead can't be pushed
-    out of the window the way it could be at 60."""
+    out of the window the way it could be at 60.
+
+    Sep 10 2026: added the optional `score` filter for the free-lead-promo
+    flow, which must only ever hand out Medium leads (strong enough to prove
+    real value, not so valuable it cannibalises the top tier). Left as an
+    opt-in parameter so every existing caller (organic free-signup, weekly
+    teaser emails) keeps its prior unfiltered-by-score behaviour unchanged."""
     if not SURL or lat is None or lon is None:
         return None
     exclude_refs = set(exclude_refs or [])
@@ -2930,14 +2971,24 @@ def find_nearest_unclaimed_lead(lat: float, lon: float, max_miles: Optional[floa
         conn = get_db_conn()
         cur = conn.cursor()
         try:
-            cur.execute("""
-                SELECT id, reference, address, summary, council_source, lead_score, lead_price,
-                       registered_date, vertical, applicant_name, agent_name, agent_company, has_agent
-                FROM leads
-                WHERE (status = 'new' OR status IS NULL)
-                ORDER BY discovered_at DESC
-                LIMIT 5000;
-            """)
+            if score:
+                cur.execute("""
+                    SELECT id, reference, address, summary, council_source, lead_score, lead_price,
+                           registered_date, vertical, applicant_name, agent_name, agent_company, has_agent
+                    FROM leads
+                    WHERE (status = 'new' OR status IS NULL) AND lead_score = %s
+                    ORDER BY discovered_at DESC
+                    LIMIT 5000;
+                """, (score,))
+            else:
+                cur.execute("""
+                    SELECT id, reference, address, summary, council_source, lead_score, lead_price,
+                           registered_date, vertical, applicant_name, agent_name, agent_company, has_agent
+                    FROM leads
+                    WHERE (status = 'new' OR status IS NULL)
+                    ORDER BY discovered_at DESC
+                    LIMIT 5000;
+                """)
             rows = cur.fetchall()
 
             row_outcodes = []
@@ -3118,11 +3169,14 @@ def simulate_customer_leads(location_input: str, tier: str = "climber_domestic",
 
 
 def create_or_update_limbo_account(email: str, name: str = None, phone: str = None,
-                                    outcode: str = None, lat: float = None, lon: float = None) -> Optional[dict]:
+                                    outcode: str = None, lat: float = None, lon: float = None,
+                                    company_name: str = None) -> Optional[dict]:
     """Sep 5 2026: creates (or refreshes contact details on) a free,
     no-subscription account row. Deliberately never touches free_lead_ref
     or last_teaser_lead_ref on conflict -- a repeat visit to the signup
-    form must never re-arm or reset either of those."""
+    form must never re-arm or reset either of those.
+    Sep 10 2026: added company_name, collected on the free-lead-promo form
+    for lead-quality/CRM purposes."""
     if not SURL or not email or not outcode:
         return None
     try:
@@ -3130,17 +3184,19 @@ def create_or_update_limbo_account(email: str, name: str = None, phone: str = No
         cur = conn.cursor()
         try:
             cur.execute("""
-                INSERT INTO limbo_accounts (email, customer_name, phone, center_outcode, lat, lon)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO limbo_accounts (email, customer_name, phone, center_outcode, lat, lon, company_name)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (email) DO UPDATE SET
                     customer_name = EXCLUDED.customer_name,
                     phone = EXCLUDED.phone,
                     center_outcode = EXCLUDED.center_outcode,
                     lat = EXCLUDED.lat,
-                    lon = EXCLUDED.lon
+                    lon = EXCLUDED.lon,
+                    company_name = COALESCE(EXCLUDED.company_name, limbo_accounts.company_name)
                 RETURNING id, email, customer_name, phone, center_outcode, lat, lon,
-                          free_lead_ref, last_teaser_lead_ref, signed_up_at, last_teaser_sent_at, unsubscribed;
-            """, (email.strip().lower(), name, phone, outcode.strip().upper(), lat, lon))
+                          free_lead_ref, last_teaser_lead_ref, signed_up_at, last_teaser_sent_at, unsubscribed,
+                          company_name;
+            """, (email.strip().lower(), name, phone, outcode.strip().upper(), lat, lon, company_name))
             row = cur.fetchone()
             conn.commit()
             if not row:
@@ -3149,7 +3205,7 @@ def create_or_update_limbo_account(email: str, name: str = None, phone: str = No
                 "id": row[0], "email": row[1], "customer_name": row[2], "phone": row[3],
                 "center_outcode": row[4], "lat": row[5], "lon": row[6], "free_lead_ref": row[7],
                 "last_teaser_lead_ref": row[8], "signed_up_at": row[9], "last_teaser_sent_at": row[10],
-                "unsubscribed": row[11],
+                "unsubscribed": row[11], "company_name": row[12],
             }
         finally:
             cur.close()
@@ -3211,6 +3267,334 @@ def record_free_lead_grant(email: str, lead_ref: str) -> bool:
             conn.close()
     except Exception as e:
         logger.error(f"[Free Signup] Error recording free lead grant for {email}: {e}")
+        return False
+
+
+def reserve_lead_as_pending(lead_id: str, email: str) -> Optional[dict]:
+    """Sep 10 2026, free-lead-promo redesign: the reservation half of the
+    reserve-then-redeem flow. Mirrors burn_lead_inventory's atomic
+    conditional UPDATE (same WHERE status='new' guard) so two concurrent
+    requests can never both reserve the same lead, but flips to 'reserved'
+    rather than the permanent 'claimed' -- this lead is off the market
+    immediately, but sweep_expired_lead_reservations() can still return it
+    if the code that was issued for it is never redeemed. find_nearest_
+    unclaimed_lead already excludes anything not 'new', so a 'reserved' row
+    is automatically invisible to every other signup/teaser lookup with no
+    further changes needed there."""
+    if not SURL or not lead_id:
+        return None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE leads
+                SET status = 'reserved'
+                WHERE (id::text = %s OR reference = %s) AND (status = 'new' OR status IS NULL)
+                RETURNING id, reference, address, summary, council_source, lead_score, lead_price,
+                          registered_date, vertical, applicant_name, agent_name, agent_company, has_agent;
+            """, (lead_id, lead_id))
+            row = cur.fetchone()
+            conn.commit()
+            if row:
+                logger.info(f"[Free Lead Promo] Lead {row[1]} reserved for {email} (pending code redemption).")
+                return {
+                    "id": row[0], "reference": row[1], "address": row[2], "summary": row[3],
+                    "council_source": row[4], "lead_score": row[5], "lead_price": row[6],
+                    "registered_date": row[7], "vertical": row[8], "applicant_name": row[9],
+                    "agent_name": row[10], "agent_company": row[11], "has_agent": row[12],
+                }
+            return None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Lead Promo] Error reserving lead {lead_id} for {email}: {e}")
+        return None
+
+
+def generate_free_lead_code(email: str, lead_reference: str, ip_address: str = None,
+                             device_id: str = None, phone: str = None,
+                             expires_hours: float = 72.0) -> Optional[dict]:
+    """Sep 10 2026: issues the one-time code emailed to the signup, and logs
+    the ip_address/device_id/phone alongside it purely as an abuse-detection
+    trail (see is_ip_or_device_recently_flagged / has_duplicate_phone_
+    redeemed below) -- these do not block a request on their own, main.py's
+    route decides what to do with the signal. Code is 8 hex chars from
+    secrets.token_hex, i.e. 32 bits of entropy -- not guessable by casual
+    brute force, especially combined with the rate limit main.py puts on
+    the redeem endpoint itself."""
+    if not SURL or not email or not lead_reference:
+        return None
+    code = secrets.token_hex(4).upper()
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                INSERT INTO free_lead_codes (email, lead_reference, code, ip_address, device_id, phone, expires_at)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW() + (%s || ' hours')::INTERVAL)
+                RETURNING code, expires_at;
+            """, (email.strip().lower(), lead_reference, code, ip_address, device_id, phone, str(expires_hours)))
+            row = cur.fetchone()
+            conn.commit()
+            if row:
+                return {"code": row[0], "expires_at": row[1]}
+            return None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Lead Promo] Error generating code for {email}: {e}")
+        return None
+
+
+def redeem_free_lead_code(email: str, code: str) -> dict:
+    """Sep 10 2026: validates code+email together (a leaked/forwarded code
+    alone is not enough -- it must match the inbox it was issued to), then
+    atomically flips the reserved lead to permanently 'claimed' the same way
+    burn_lead_inventory does, and marks the code row redeemed so it can
+    never be reused. Returns {"ok": bool, "reason": str, "lead": dict|None}
+    -- main.py maps `reason` to the actual copy shown on the page."""
+    if not SURL or not email or not code:
+        return {"ok": False, "reason": "missing_fields", "lead": None}
+    email = email.strip().lower()
+    code = code.strip().upper()
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT lead_reference, expires_at, redeemed_at FROM free_lead_codes
+                WHERE code = %s AND email = %s;
+            """, (code, email))
+            row = cur.fetchone()
+            if not row:
+                return {"ok": False, "reason": "invalid_code_or_email", "lead": None}
+            lead_reference, expires_at, redeemed_at = row
+            if redeemed_at is not None:
+                return {"ok": False, "reason": "already_redeemed", "lead": None}
+            cur.execute("SELECT NOW() > %s;", (expires_at,))
+            if cur.fetchone()[0]:
+                return {"ok": False, "reason": "expired", "lead": None}
+
+            cur.execute("""
+                UPDATE leads
+                SET status = 'claimed'
+                WHERE reference = %s AND status = 'reserved'
+                RETURNING id, reference, address, summary, council_source, lead_score, lead_price,
+                          applicant_name, agent_name, agent_company, has_agent;
+            """, (lead_reference,))
+            lead_row = cur.fetchone()
+            if not lead_row:
+                # Reservation already swept back (extremely tight race with the
+                # expiry sweep) -- treat exactly like "expired" from the caller's
+                # point of view rather than a generic failure.
+                conn.commit()
+                return {"ok": False, "reason": "expired", "lead": None}
+
+            cur.execute("UPDATE free_lead_codes SET redeemed_at = NOW() WHERE code = %s;", (code,))
+            conn.commit()
+            logger.info(f"[Free Lead Promo] Code {code} redeemed by {email} for lead {lead_reference}.")
+            return {"ok": True, "reason": "ok", "lead": {
+                "id": lead_row[0], "reference": lead_row[1], "address": lead_row[2], "summary": lead_row[3],
+                "council_source": lead_row[4], "lead_score": lead_row[5], "lead_price": lead_row[6],
+                "applicant_name": lead_row[7], "agent_name": lead_row[8], "agent_company": lead_row[9],
+                "has_agent": lead_row[10],
+            }}
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Lead Promo] Error redeeming code {code} for {email}: {e}")
+        return {"ok": False, "reason": "error", "lead": None}
+
+
+def sweep_expired_lead_reservations() -> int:
+    """Sep 10 2026: run periodically (wired into the existing autonomous
+    scheduler loop) -- returns any lead whose code window has passed without
+    being redeemed back to the general 'new' pool. Only ever touches leads
+    still sitting at 'reserved' with no redemption, so a lead that WAS
+    redeemed just before its deadline (already 'claimed') is untouched."""
+    if not SURL:
+        return 0
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE leads SET status = 'new'
+                WHERE status = 'reserved' AND reference IN (
+                    SELECT lead_reference FROM free_lead_codes
+                    WHERE expires_at < NOW() AND redeemed_at IS NULL
+                )
+                RETURNING reference;
+            """)
+            returned = cur.fetchall()
+            conn.commit()
+            if returned:
+                logger.info(f"[Free Lead Promo] Swept {len(returned)} expired reservation(s) back to the pool.")
+            return len(returned)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Lead Promo] Error sweeping expired reservations: {e}")
+        return 0
+
+
+def count_free_lead_code_requests(email: str) -> int:
+    """Sep 10 2026: caps how many times one email can request a fresh code
+    (main.py enforces the actual limit) -- without this, someone could keep
+    hitting "get a new code" indefinitely, cycling through real leads on a
+    rolling 3-day basis without ever converting."""
+    if not SURL or not email:
+        return 0
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT COUNT(*) FROM free_lead_codes WHERE email = %s;", (email.strip().lower(),))
+            return cur.fetchone()[0]
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Lead Promo] Error counting code requests for {email}: {e}")
+        return 0
+
+
+def has_active_unexpired_code(email: str) -> bool:
+    """Sep 10 2026: one live reservation per email at a time -- blocks a
+    second request while an earlier code hasn't expired or been redeemed
+    yet, so the same person can't stack up multiple reservations at once."""
+    if not SURL or not email:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT 1 FROM free_lead_codes
+                WHERE email = %s AND redeemed_at IS NULL AND expires_at > NOW()
+                LIMIT 1;
+            """, (email.strip().lower(),))
+            return cur.fetchone() is not None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Lead Promo] Error checking active code for {email}: {e}")
+        return False
+
+
+def is_ip_or_device_recently_flagged(ip_address: str = None, device_id: str = None, days: int = 30) -> bool:
+    """Sep 10 2026: true if this IP or device cookie has already redeemed a
+    free lead in the lookback window -- the strongest signal available
+    against someone cycling through several email addresses on the same
+    connection/browser. Only checks REDEEMED codes, not every request, so a
+    legitimate shared office IP isn't blocked just because a colleague once
+    requested a code and never redeemed it."""
+    if not SURL or (not ip_address and not device_id):
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT 1 FROM free_lead_codes
+                WHERE redeemed_at IS NOT NULL
+                  AND redeemed_at > NOW() - (%s || ' days')::INTERVAL
+                  AND ((ip_address = %s AND %s IS NOT NULL) OR (device_id = %s AND %s IS NOT NULL))
+                LIMIT 1;
+            """, (str(days), ip_address, ip_address, device_id, device_id))
+            return cur.fetchone() is not None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Lead Promo] Error checking ip/device flag: {e}")
+        return False
+
+
+def count_free_lead_codes_issued_since(hours: float = 24.0) -> int:
+    """Sep 10 2026: backs the daily circuit-breaker in main.py's code-issuing
+    helper -- a hard cap on how many free-lead codes can go out in a rolling
+    window, so a bug, a viral share, or a coordinated abuse run can't quietly
+    give away a large chunk of paid inventory before anyone notices."""
+    if not SURL:
+        return 0
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT COUNT(*) FROM free_lead_codes WHERE created_at > NOW() - (%s || ' hours')::INTERVAL;
+            """, (str(hours),))
+            return cur.fetchone()[0]
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Lead Promo] Error counting recent code issuance: {e}")
+        return 0
+
+
+def release_reservation_on_bounce(recipient_emails: list) -> int:
+    """Sep 10 2026: called from main.py's /webhooks/resend handler when
+    Resend reports a hard bounce or spam complaint on a free-lead-code
+    email. Without this, a mistyped/dead email address would hold a real
+    lead reserved-but-unreachable for the full 3-day window for nothing --
+    this releases it immediately instead. Implemented by setting the code's
+    expires_at to NOW() rather than deleting/flagging it: every other piece
+    of this system (redeem_free_lead_code, sweep_expired_lead_reservations)
+    already knows exactly what to do with an expired-but-unredeemed code,
+    so this reuses that logic instead of adding a second code path."""
+    if not SURL or not recipient_emails:
+        return 0
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE free_lead_codes SET expires_at = NOW()
+                WHERE email = ANY(%s) AND redeemed_at IS NULL AND expires_at > NOW()
+                RETURNING lead_reference;
+            """, ([e.strip().lower() for e in recipient_emails],))
+            affected = cur.fetchall()
+            conn.commit()
+            if affected:
+                logger.info(f"[Free Lead Promo] Released {len(affected)} reservation(s) early after a bounce/complaint.")
+            return len(affected)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Lead Promo] Error releasing reservation on bounce: {e}")
+        return 0
+
+
+def has_duplicate_phone_redeemed(phone: str, exclude_email: str) -> bool:
+    """Sep 10 2026: true if a different email has already redeemed a free
+    lead using this same phone number -- catches the same person signing up
+    twice with two inboxes, which the email-lock alone can't."""
+    if not SURL or not phone:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT 1 FROM free_lead_codes
+                WHERE phone = %s AND email != %s AND redeemed_at IS NOT NULL
+                LIMIT 1;
+            """, (phone, (exclude_email or "").strip().lower()))
+            return cur.fetchone() is not None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Free Lead Promo] Error checking duplicate phone: {e}")
         return False
 
 

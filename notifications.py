@@ -300,6 +300,53 @@ def send_free_account_welcome_email(email: str, lead_data: dict) -> bool:
     return send_transactional_email(to_email=email, subject=subject, html_body=html)
 
 
+def send_free_lead_code_email(email: str, lead_data: dict, code: str, expires_hours: float = 72.0,
+                               unsubscribe_url: str = "") -> bool:
+    """Sep 10 2026, free-lead-promo redesign: replaces the old instant-grant
+    welcome email as the FIRST touch for every free-lead request, whichever
+    of the three traffic types (cold-email code click, organic search, or a
+    lapsed-code re-request) sent them to /free-account. Shows only the rough
+    details (same _blur_address_to_area redaction as the teaser emails,
+    NOT the full address) -- the full reveal only happens once the code is
+    entered back on site, per Nick's explicit spec: "we email them the rough
+    details... enter the code... we reveal the lead to them as if bought."
+    Unsubscribe link styled small/low per Nick's 10 Sep 2026 instruction on
+    the cold-email sequence, matching that same convention here."""
+    subject = f"Your free lead code: {lead_data.get('council_source', 'Local')} Tree Surgery"
+    expires_label = f"{int(expires_hours)} hours" if expires_hours < 48 else f"{int(expires_hours / 24)} days"
+    unsub_html = (
+        f'<p style="font-size:11px; color:#94a3b8; margin-top:36px; padding-top:12px; '
+        f'border-top:1px solid #e2e8f0;"><a href="{unsubscribe_url}" style="color:#94a3b8;">Unsubscribe</a></p>'
+        if unsubscribe_url else ""
+    )
+    html = f"""
+    <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
+        <h2 style="color: #059669; margin-top: 0;">A real job, reserved for you</h2>
+        <p style="color: #374151;">No card, no subscription. This lead has been pulled off the market and held for you, it will not be shown or sold to anyone else while your code is valid.</p>
+        <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
+            <p style="margin: 0 0 10px 0;"><strong>Location:</strong> {_blur_address_to_area(lead_data.get('address', ''))}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source', 'N/A')}</p>
+            <p style="margin: 0;"><strong>Job details:</strong><br/>
+               <span style="color: #475569; font-size: 14px;">{lead_data.get('summary', 'No summary available.')}</span>
+            </p>
+        </div>
+        <div style="background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; padding: 15px; margin: 20px 0; text-align: center;">
+            <p style="margin: 0 0 6px 0; font-size: 12px; color: #059669; font-weight: bold; letter-spacing: 0.5px;">YOUR CODE</p>
+            <p style="margin: 0; font-size: 26px; font-weight: bold; color: #065f46; letter-spacing: 2px; font-family: monospace;">{code}</p>
+        </div>
+        <p style="font-size: 13px; color: #64748b;">
+            Enter this code on the free lead page to reveal the full address and unlock it, same as if you'd bought it:
+            <a href="{PUBLIC_APP_URL}/free-account" style="color:#059669; font-weight:bold;">Enter my code →</a>
+        </p>
+        <p style="font-size: 12px; color: #94a3b8;">
+            This code is valid for {expires_label}. If it isn't used in time, this lead goes back on the open market and you can request a fresh one near you from the same page.
+        </p>
+        {unsub_html}
+    </div>
+    """
+    return send_transactional_email(to_email=email, subject=subject, html_body=html)
+
+
 def send_teaser_lead_email(email: str, lead_data: dict, unsubscribe_url: str = "") -> bool:
     """Sep 5 2026, Nick's ask verbatim: signed-up-but-not-subscribed
     contractors get "specific leads in their area... without the finer
