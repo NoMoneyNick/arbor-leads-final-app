@@ -1588,13 +1588,23 @@ def public_homepage(request: Request):
                      NOT forced into the shared 16:9 aspect-video box the other
                      3 bands use, per his ask to keep its own dimensions/
                      perspective rather than stretching or cropping it into a
-                     landscape shape it was never shot in. aspect-[3/4] matches
-                     the source photo closely enough that object-cover needs
-                     almost no crop, and max-w-sm keeps a portrait image from
-                     ballooning to an oversized column on wide desktop screens. -->
+                     landscape shape it was never shot in. Sized via inline
+                     style rather than a Tailwind class -- see the comment on
+                     the inner div just below for why. -->
                 <div class="flex flex-col md:flex-row-reverse items-center gap-8 md:gap-12">
                     <div class="w-full md:w-1/2 flex justify-center shrink-0">
-                        <div class="w-full max-w-[19.2rem] aspect-[3/4] rounded-2xl overflow-hidden">
+                        <!-- Sep 10 2026 fix: the box wasn't actually shrinking when
+                             Nick asked for -20% -- root cause was that max-w-[19.2rem]
+                             and aspect-[3/4] are Tailwind ARBITRARY-VALUE classes,
+                             and this project's static/tailwind.css is a precompiled
+                             file (built by tailwindcss.exe, not regenerated on
+                             deploy) that only contains rules for classes already
+                             scanned in at build time -- confirmed these two specific
+                             classes (and plain max-w-sm before them) were never in
+                             it, so the box had literally no size constraint either
+                             time. Fixed with inline style instead, which needs no
+                             build step and can't silently go stale like this again. -->
+                        <div class="rounded-2xl overflow-hidden" style="width:100%; max-width:19.2rem; aspect-ratio:3/4;">
                             <img src="/static/images/tool-app.jpg" alt="TreeKey installed as a home-screen app, showing the live lead feed" class="w-full h-full object-cover" loading="lazy">
                         </div>
                     </div>
