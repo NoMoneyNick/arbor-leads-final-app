@@ -1369,83 +1369,6 @@ def public_homepage():
         </div>
     </section>
 
-    <!-- Sep 9 2026, Nick's ask (round 2): the 4 free-tool cards were "too
-         uniform, hidden at the bottom, the text is soulless" -- moved up
-         here, before pricing ("nearer the top on desktop"), and rebuilt as
-         4 alternating image+text bands instead of a uniform grid so each
-         tool gets its own distinct treatment instead of looking like four
-         interchangeable FAQ entries. Each band has a real image slot --
-         Nick's own photos go here once supplied; a labelled placeholder box
-         stands in until then so the layout is already real and it's obvious
-         at a glance where each image belongs (swap the placeholder div for
-         a real <img> once a file exists, matching the pattern used
-         elsewhere for supplied photos, e.g. fieldwork-bucking.jpg below).
-         Mobile collapses to a plain stacked column (image below text) per
-         Nick's own "I understand phone is different" -- alternating
-         left/right only reads as intentional once there's room for it. -->
-    <section class="py-20 border-t border-slate-800 bg-[#0b1220] overflow-hidden">
-        <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="text-center mb-16">
-                <span class="text-slate-500 font-mono font-bold tracking-widest text-sm uppercase">Not Just Leads</span>
-                <h2 class="text-3xl md:text-4xl font-extrabold text-white mt-3">Free Tools Built Into TreeKey</h2>
-            </div>
-
-            <div class="space-y-16 md:space-y-24">
-                <!-- 1. Ledger -->
-                <div class="flex flex-col md:flex-row items-center gap-8 md:gap-12">
-                    <div class="w-full md:w-1/2 aspect-video rounded-2xl border-2 border-dashed border-violet-500/30 bg-violet-500/5 flex items-center justify-center text-center p-6 shrink-0">
-                        <span class="text-violet-400/70 text-xs font-mono uppercase tracking-wider">Image placeholder — Ledger screenshot goes here</span>
-                    </div>
-                    <div class="w-full md:w-1/2">
-                        <div class="text-[11px] font-mono uppercase tracking-widest text-violet-400 font-bold mb-2">Financial Tool</div>
-                        <h3 class="text-2xl font-bold text-white mb-3">TreeKey Ledger</h3>
-                        <p class="text-slate-400 leading-relaxed mb-5">Sole traders underquote jobs because the maths happens in their head on the way to site. Ledger does it for you — tracks your rolling 12-month turnover against the £90,000 VAT threshold, runs a live CIS tax tracker, and works out your real van-and-crew cost per day so every quote actually makes you money.</p>
-                        <a href="/login" class="inline-block text-xs font-mono uppercase tracking-wider text-violet-400 hover:brightness-125 border border-violet-500/30 hover:border-violet-400/60 rounded-full px-5 py-2 transition-all">Open Ledger →</a>
-                    </div>
-                </div>
-
-                <!-- 2. Chip-Drop (reversed) -->
-                <div class="flex flex-col md:flex-row-reverse items-center gap-8 md:gap-12">
-                    <div class="w-full md:w-1/2 aspect-video rounded-2xl border-2 border-dashed border-orange-500/30 bg-orange-500/5 flex items-center justify-center text-center p-6 shrink-0">
-                        <span class="text-orange-400/70 text-xs font-mono uppercase tracking-wider">Image placeholder — Chip-Drop screenshot goes here</span>
-                    </div>
-                    <div class="w-full md:w-1/2">
-                        <div class="text-[11px] font-mono uppercase tracking-widest text-orange-400 font-bold mb-2">Site Network</div>
-                        <h3 class="text-2xl font-bold text-white mb-3">Chip-Drop Network</h3>
-                        <p class="text-slate-400 leading-relaxed mb-5">Every job ends with a truck full of woodchip and nowhere free to put it. Chip-Drop is a directory of local allotments, farms and stables who actively want it — landowners register themselves, you just turn up. No more £60–£120 tipping fees, no detour on the way home.</p>
-                        <a href="/chip-drop" class="inline-block text-xs font-mono uppercase tracking-wider text-orange-400 hover:brightness-125 border border-orange-500/30 hover:border-orange-400/60 rounded-full px-5 py-2 transition-all">Find a Drop Spot →</a>
-                    </div>
-                </div>
-
-                <!-- 3. Storm Radar -->
-                <div class="flex flex-col md:flex-row items-center gap-8 md:gap-12">
-                    <div class="w-full md:w-1/2 aspect-video rounded-2xl border-2 border-dashed border-amber-500/30 bg-amber-500/5 flex items-center justify-center text-center p-6 shrink-0">
-                        <span class="text-amber-400/70 text-xs font-mono uppercase tracking-wider">Image placeholder — Storm Radar screenshot goes here</span>
-                    </div>
-                    <div class="w-full md:w-1/2">
-                        <div class="text-[11px] font-mono uppercase tracking-widest text-amber-400 font-bold mb-2">Emergency Alerts</div>
-                        <h3 class="text-2xl font-bold text-white mb-3">Storm Radar</h3>
-                        <p class="text-slate-400 leading-relaxed mb-5">A storm doesn't file a planning application — it just drops a tree on someone's fence at 2am, and whoever calls first gets the job. Storm Radar watches Met Office high-wind warnings (45mph+ gusts) and flags exactly where and when to expect the callouts, so you're first on the phone, not the fifth.</p>
-                        <a href="/storm-radar" class="inline-block text-xs font-mono uppercase tracking-wider text-amber-400 hover:brightness-125 border border-amber-500/30 hover:border-amber-400/60 rounded-full px-5 py-2 transition-all">View Storm Radar →</a>
-                    </div>
-                </div>
-
-                <!-- 4. The App (reversed) -->
-                <div class="flex flex-col md:flex-row-reverse items-center gap-8 md:gap-12">
-                    <div class="w-full md:w-1/2 aspect-video rounded-2xl border-2 border-dashed border-emerald-500/30 bg-emerald-500/5 flex items-center justify-center text-center p-6 shrink-0">
-                        <span class="text-emerald-400/70 text-xs font-mono uppercase tracking-wider">Image placeholder — The App screenshot goes here</span>
-                    </div>
-                    <div class="w-full md:w-1/2">
-                        <div class="text-[11px] font-mono uppercase tracking-widest text-emerald-400 font-bold mb-2">Mobile Access</div>
-                        <h3 class="text-2xl font-bold text-white mb-3">The TreeKey App</h3>
-                        <p class="text-slate-400 leading-relaxed mb-5">No app store, no download, no faff — install TreeKey straight to your home screen and it opens full-screen like any other app. Your leads, Ledger, and Storm Radar alerts, one tap away, chainsaw still in your other hand.</p>
-                        <a href="/login" class="inline-block text-xs font-mono uppercase tracking-wider text-emerald-400 hover:brightness-125 border border-emerald-500/30 hover:border-emerald-400/60 rounded-full px-5 py-2 transition-all">Get the App →</a>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
     <!-- Pricing Section (Anchoring & Scarcity) -->
     <section id="pricing" class="relative z-10 py-24 bg-brand-dark/50 border-t border-slate-800/50">
         <div class="max-w-7xl mx-auto px-4">
@@ -1548,6 +1471,84 @@ def public_homepage():
                 <a href="/marketplace" class="shrink-0 inline-block text-center bg-sky-500 hover:bg-sky-400 text-white font-extrabold py-3 px-6 rounded-lg transition-all duration-300 uppercase tracking-wider text-sm">
                     Browse the Marketplace →
                 </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Sep 9 2026, Nick's ask (round 2): the 4 free-tool cards were "too
+         uniform, hidden at the bottom, the text is soulless" -- rebuilt as
+         4 alternating image+text bands instead of a uniform grid so each
+         tool gets its own distinct treatment instead of looking like four
+         interchangeable FAQ entries. (Sep 10 2026: Nick asked for pricing to
+         sit ABOVE this section again, so this block now follows Pricing.)
+         Each band has a real image slot --
+         Nick's own photos go here once supplied; a labelled placeholder box
+         stands in until then so the layout is already real and it's obvious
+         at a glance where each image belongs (swap the placeholder div for
+         a real <img> once a file exists, matching the pattern used
+         elsewhere for supplied photos, e.g. fieldwork-bucking.jpg below).
+         Mobile collapses to a plain stacked column (image below text) per
+         Nick's own "I understand phone is different" -- alternating
+         left/right only reads as intentional once there's room for it. -->
+    <section class="py-20 border-t border-slate-800 bg-[#0b1220] overflow-hidden">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-16">
+                <span class="text-slate-500 font-mono font-bold tracking-widest text-sm uppercase">Not Just Leads</span>
+                <h2 class="text-3xl md:text-4xl font-extrabold text-white mt-3">Free Tools Built Into TreeKey</h2>
+            </div>
+
+            <div class="space-y-16 md:space-y-24">
+                <!-- 1. Ledger -->
+                <div class="flex flex-col md:flex-row items-center gap-8 md:gap-12">
+                    <div class="w-full md:w-1/2 aspect-video rounded-2xl border-2 border-dashed border-violet-500/30 bg-violet-500/5 flex items-center justify-center text-center p-6 shrink-0">
+                        <span class="text-violet-400/70 text-xs font-mono uppercase tracking-wider">Image placeholder — Ledger screenshot goes here</span>
+                    </div>
+                    <div class="w-full md:w-1/2">
+                        <div class="text-[11px] font-mono uppercase tracking-widest text-violet-400 font-bold mb-2">Financial Tool</div>
+                        <h3 class="text-2xl font-bold text-white mb-3">TreeKey Ledger</h3>
+                        <p class="text-slate-400 leading-relaxed mb-5">Sole traders underquote jobs because the maths happens in their head on the way to site. Ledger does it for you — tracks your rolling 12-month turnover against the £90,000 VAT threshold, runs a live CIS tax tracker, and works out your real van-and-crew cost per day so every quote actually makes you money.</p>
+                        <a href="/login" class="inline-block text-xs font-mono uppercase tracking-wider text-violet-400 hover:brightness-125 border border-violet-500/30 hover:border-violet-400/60 rounded-full px-5 py-2 transition-all">Open Ledger →</a>
+                    </div>
+                </div>
+
+                <!-- 2. Chip-Drop (reversed) -->
+                <div class="flex flex-col md:flex-row-reverse items-center gap-8 md:gap-12">
+                    <div class="w-full md:w-1/2 aspect-video rounded-2xl border-2 border-dashed border-orange-500/30 bg-orange-500/5 flex items-center justify-center text-center p-6 shrink-0">
+                        <span class="text-orange-400/70 text-xs font-mono uppercase tracking-wider">Image placeholder — Chip-Drop screenshot goes here</span>
+                    </div>
+                    <div class="w-full md:w-1/2">
+                        <div class="text-[11px] font-mono uppercase tracking-widest text-orange-400 font-bold mb-2">Site Network</div>
+                        <h3 class="text-2xl font-bold text-white mb-3">Chip-Drop Network</h3>
+                        <p class="text-slate-400 leading-relaxed mb-5">Every job ends with a truck full of woodchip and nowhere free to put it. Chip-Drop is a directory of local allotments, farms and stables who actively want it — landowners register themselves, you just turn up. No more £60–£120 tipping fees, no detour on the way home.</p>
+                        <a href="/chip-drop" class="inline-block text-xs font-mono uppercase tracking-wider text-orange-400 hover:brightness-125 border border-orange-500/30 hover:border-orange-400/60 rounded-full px-5 py-2 transition-all">Find a Drop Spot →</a>
+                    </div>
+                </div>
+
+                <!-- 3. Storm Radar -->
+                <div class="flex flex-col md:flex-row items-center gap-8 md:gap-12">
+                    <div class="w-full md:w-1/2 aspect-video rounded-2xl border-2 border-dashed border-amber-500/30 bg-amber-500/5 flex items-center justify-center text-center p-6 shrink-0">
+                        <span class="text-amber-400/70 text-xs font-mono uppercase tracking-wider">Image placeholder — Storm Radar screenshot goes here</span>
+                    </div>
+                    <div class="w-full md:w-1/2">
+                        <div class="text-[11px] font-mono uppercase tracking-widest text-amber-400 font-bold mb-2">Emergency Alerts</div>
+                        <h3 class="text-2xl font-bold text-white mb-3">Storm Radar</h3>
+                        <p class="text-slate-400 leading-relaxed mb-5">A storm doesn't file a planning application — it just drops a tree on someone's fence at 2am, and whoever calls first gets the job. Storm Radar watches Met Office high-wind warnings (45mph+ gusts) and flags exactly where and when to expect the callouts, so you're first on the phone, not the fifth.</p>
+                        <a href="/storm-radar" class="inline-block text-xs font-mono uppercase tracking-wider text-amber-400 hover:brightness-125 border border-amber-500/30 hover:border-amber-400/60 rounded-full px-5 py-2 transition-all">View Storm Radar →</a>
+                    </div>
+                </div>
+
+                <!-- 4. The App (reversed) -->
+                <div class="flex flex-col md:flex-row-reverse items-center gap-8 md:gap-12">
+                    <div class="w-full md:w-1/2 aspect-video rounded-2xl border-2 border-dashed border-emerald-500/30 bg-emerald-500/5 flex items-center justify-center text-center p-6 shrink-0">
+                        <span class="text-emerald-400/70 text-xs font-mono uppercase tracking-wider">Image placeholder — The App screenshot goes here</span>
+                    </div>
+                    <div class="w-full md:w-1/2">
+                        <div class="text-[11px] font-mono uppercase tracking-widest text-emerald-400 font-bold mb-2">Mobile Access</div>
+                        <h3 class="text-2xl font-bold text-white mb-3">The TreeKey App</h3>
+                        <p class="text-slate-400 leading-relaxed mb-5">No app store, no download, no faff — install TreeKey straight to your home screen and it opens full-screen like any other app. Your leads, Ledger, and Storm Radar alerts, one tap away, chainsaw still in your other hand.</p>
+                        <a href="/login" class="inline-block text-xs font-mono uppercase tracking-wider text-emerald-400 hover:brightness-125 border border-emerald-500/30 hover:border-emerald-400/60 rounded-full px-5 py-2 transition-all">Get the App →</a>
+                    </div>
+                </div>
             </div>
         </div>
     </section>
@@ -2545,16 +2546,16 @@ def suggestions_page():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Arborist Suggestions Hub | TreeKey</title>
         <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; }
-            .box { max-width:580px; margin:auto; background:white; padding:32px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04); }
-            input, textarea { width:100%; box-sizing:border-box; padding:12px; border:1px solid #cbd5e1; border-radius:8px; margin-bottom:16px; font-family:inherit; font-size:14px; }
-            button { background:#044332; color:white; border:none; padding:12px 24px; border-radius:8px; font-weight:bold; font-size:15px; cursor:pointer; width:100%; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:40px 16px; }
+            .box { max-width:580px; margin:auto; background:#0f172a; padding:32px; border-radius:16px; border:1px solid #1e293b; box-shadow:0 4px 16px rgba(0,0,0,0.04); }
+            input, textarea { width:100%; box-sizing:border-box; padding:12px; background:#020617; color:#e2e8f0; border:1px solid #334155; border-radius:8px; margin-bottom:16px; font-family:inherit; font-size:14px; }
+            button { background:#059669; color:white; border:none; padding:12px 24px; border-radius:8px; font-weight:bold; font-size:15px; cursor:pointer; width:100%; }
         </style>
     </head>
     <body>
     <div class="box">
-        <h2 style="margin-top:0; color:#044332;">Arborist Suggestions & Feature Requests</h2>
-        <p style="color:#64748b; font-size:14px; line-height:1.5;">We built TreeKey to serve UK tree surgeons. Tell us what tools, calculators, or data features you need to make your business more profitable.</p>
+        <h2 style="margin-top:0; color:#34d399;">Arborist Suggestions & Feature Requests</h2>
+        <p style="color:#94a3b8; font-size:14px; line-height:1.5;">We built TreeKey to serve UK tree surgeons. Tell us what tools, calculators, or data features you need to make your business more profitable.</p>
         <form action="/api/submit-suggestion" method="POST">
             <label style="font-size:13px; font-weight:600;">Your Name / Company Name:</label>
             <input type="text" name="name" placeholder="e.g. Dave, Apex Tree Care Ltd" required>
@@ -2567,7 +2568,7 @@ def suggestions_page():
             
             <button type="submit">Submit Suggestion to Founders </button>
         </form>
-        <p style="text-align:center; margin-top:20px;"><a href="/" style="color:#64748b; text-decoration:none; font-size:13px;">← Return to Main Page</a></p>
+        <p style="text-align:center; margin-top:20px;"><a href="/" style="color:#94a3b8; text-decoration:none; font-size:13px;">← Return to Main Page</a></p>
     </div>
     </body>
     </html>
@@ -2584,11 +2585,11 @@ async def submit_suggestion(request: Request):
     database.save_contractor_suggestion(name, contact, suggestion)
     
     return HTMLResponse("""
-    <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#f8fafc;">
-        <div style="max-width:500px; margin:auto; background:white; padding:40px; border-radius:16px; border:1px solid #e2e8f0;">
-            <h2 style="color:#059669; margin-top:0;">Suggestion Received!</h2>
-            <p style="color:#64748b; font-size:15px; line-height:1.5;">Thank you for helping us make TreeKey better for UK tree surgeons. Our team reviews every suggestion directly.</p>
-            <a href="/" style="display:inline-block; background:#044332; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; margin-top:15px;">Return to Map</a>
+    <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#020617;">
+        <div style="max-width:500px; margin:auto; background:#0f172a; padding:40px; border-radius:16px; border:1px solid #1e293b;">
+            <h2 style="color:#34d399; margin-top:0;">Suggestion Received!</h2>
+            <p style="color:#94a3b8; font-size:15px; line-height:1.5;">Thank you for helping us make TreeKey better for UK tree surgeons. Our team reviews every suggestion directly.</p>
+            <a href="/" style="display:inline-block; background:#059669; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; margin-top:15px;">Return to Map</a>
         </div>
     </body></html>
     """)
@@ -2618,16 +2619,16 @@ def partner_offer_page(src: str = "unknown"):
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Planning-Application Tree Leads | TreeKey</title>
         <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; }}
-            .box {{ max-width:560px; margin:auto; background:white; padding:32px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04); }}
-            h1 {{ color:#044332; font-size:24px; margin:0 0 10px 0; }}
-            p {{ color:#64748b; font-size:14px; line-height:1.6; }}
-            ul {{ color:#334155; font-size:14px; line-height:1.8; padding-left:20px; }}
-            input {{ width:100%; box-sizing:border-box; padding:12px; border:1px solid #cbd5e1; border-radius:8px; margin-bottom:14px; font-family:inherit; font-size:14px; }}
-            label {{ font-size:13px; font-weight:600; display:block; margin-bottom:4px; }}
-            button {{ background:#044332; color:white; border:none; padding:14px 24px; border-radius:8px; font-weight:bold; font-size:15px; cursor:pointer; width:100%; }}
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:40px 16px; }}
+            .box {{ max-width:560px; margin:auto; background:#0f172a; padding:32px; border-radius:16px; border:1px solid #1e293b; box-shadow:0 4px 16px rgba(0,0,0,0.04); }}
+            h1 {{ color:#34d399; font-size:24px; margin:0 0 10px 0; }}
+            p {{ color:#94a3b8; font-size:14px; line-height:1.6; }}
+            ul {{ color:#cbd5e1; font-size:14px; line-height:1.8; padding-left:20px; }}
+            input {{ width:100%; box-sizing:border-box; padding:12px; background:#020617; color:#e2e8f0; border:1px solid #334155; border-radius:8px; margin-bottom:14px; font-family:inherit; font-size:14px; }}
+            label {{ font-size:13px; font-weight:600; display:block; margin-bottom:4px; color:#e2e8f0; }}
+            button {{ background:#059669; color:white; border:none; padding:14px 24px; border-radius:8px; font-weight:bold; font-size:15px; cursor:pointer; width:100%; }}
             .altlink {{ text-align:center; margin-top:18px; font-size:13px; }}
-            .altlink a {{ color:#044332; font-weight:600; text-decoration:none; }}
+            .altlink a {{ color:#34d399; font-weight:600; text-decoration:none; }}
         </style>
     </head>
     <body>
@@ -2671,11 +2672,11 @@ async def submit_partner_offer(request: Request):
         database.save_qr_campaign_lead(src, name, phone, email, town)
 
     return HTMLResponse("""
-    <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#f8fafc;">
-        <div style="max-width:500px; margin:auto; background:white; padding:40px; border-radius:16px; border:1px solid #e2e8f0;">
-            <h2 style="color:#059669; margin-top:0;">Thanks -- we've got your details!</h2>
-            <p style="color:#64748b; font-size:15px; line-height:1.5;">We'll be in touch shortly. In the meantime, feel free to look around.</p>
-            <a href="/pricing" style="display:inline-block; background:#044332; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; margin-top:15px;">See Pricing</a>
+    <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#020617;">
+        <div style="max-width:500px; margin:auto; background:#0f172a; padding:40px; border-radius:16px; border:1px solid #1e293b;">
+            <h2 style="color:#34d399; margin-top:0;">Thanks -- we've got your details!</h2>
+            <p style="color:#94a3b8; font-size:15px; line-height:1.5;">We'll be in touch shortly. In the meantime, feel free to look around.</p>
+            <a href="/pricing" style="display:inline-block; background:#059669; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; margin-top:15px;">See Pricing</a>
         </div>
     </body></html>
     """)
@@ -3500,13 +3501,13 @@ def marketplace_view(tier: Optional[str] = "all", category: Optional[str] = None
 @app.get("/payment/success", response_class=HTMLResponse)
 def payment_success():
     return """
-    <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#f8fafc;">
-        <div style="max-width:550px; margin:auto; background:white; padding:40px; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 16px rgba(0,0,0,0.04);">
-            <h1 style="color:#059669; margin-top:0;">Payment Successful!</h1>
-            <p style="color:#64748b; font-size:15px; line-height:1.5;">Thank you. Your exclusive planning intelligence stream has been activated.<br><br>Your lead dispatches will arrive by email automatically — but you can also browse and unlock leads directly below.</p>
+    <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#020617;">
+        <div style="max-width:550px; margin:auto; background:#0f172a; padding:40px; border-radius:16px; border:1px solid #1e293b; box-shadow:0 4px 16px rgba(0,0,0,0.2);">
+            <h1 style="color:#34d399; margin-top:0;">Payment Successful!</h1>
+            <p style="color:#94a3b8; font-size:15px; line-height:1.5;">Thank you. Your exclusive planning intelligence stream has been activated.<br><br>Your lead dispatches will arrive by email automatically — but you can also browse and unlock leads directly below.</p>
             <div style="margin-top:25px; display:flex; flex-direction:column; gap:12px; align-items:center;">
-                <a href="/marketplace" style="background:#044332; color:white; padding:12px 28px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; width:260px; display:block;">Browse Available Leads Now</a>
-                <a href="/login" style="background:#1d4ed8; color:white; padding:12px 28px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; width:260px; display:block;">Log In to Your Dashboard</a>
+                <a href="/marketplace" style="background:#059669; color:white; padding:12px 28px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; width:260px; display:block;">Browse Available Leads Now</a>
+                <a href="/login" style="background:#2563eb; color:white; padding:12px 28px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; width:260px; display:block;">Log In to Your Dashboard</a>
             </div>
         </div>
     </body></html>
@@ -3559,22 +3560,22 @@ def ledger_dashboard(request: Request):
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>TreeKey Ledger | Arborist Financial Engine</title>
         <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; line-height:1.5; }}
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:32px 16px; line-height:1.5; }}
             .container {{ max-width: 900px; margin: auto; }}
-            .card {{ background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }}
+            .card {{ background:#0f172a; border:1px solid #1e293b; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }}
             .grid-stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }}
-            .stat-box {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }}
-            .stat-val {{ font-size: 24px; font-weight: 800; color: #044332; margin-top: 4px; }}
-            input, select {{ width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; margin-top: 4px; font-family: inherit; }}
-            .btn {{ background: #044332; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; }}
+            .stat-box {{ background:#020617; border:1px solid #1e293b; border-radius: 8px; padding: 16px; }}
+            .stat-val {{ font-size: 24px; font-weight: 800; color:#34d399; margin-top: 4px; }}
+            input, select {{ width: 100%; box-sizing: border-box; padding: 10px; background:#020617; color:#e2e8f0; border:1px solid #334155; border-radius: 6px; margin-top: 4px; font-family: inherit; }}
+            .btn {{ background:#059669; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; }}
         </style>
     </head>
     <body>
     <div class="container">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; flex-wrap:wrap; gap:10px;">
             <div>
-                <h1 style="margin:0; font-size:28px; color:#044332;">TreeKey Ledger</h1>
-                <p style="margin:4px 0 0 0; color:#64748b; font-size:14px;">Verticalized Arborist Financial Engine • Van-Day Costing & CIS Tax Tracker</p>
+                <h1 style="margin:0; font-size:28px; color:#34d399;">TreeKey Ledger</h1>
+                <p style="margin:4px 0 0 0; color:#94a3b8; font-size:14px;">Verticalized Arborist Financial Engine • Van-Day Costing & CIS Tax Tracker</p>
             </div>
             <a href="/" style="background:#0f172a; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold;">← Live Radar Map</a>
         </div>
@@ -3582,14 +3583,14 @@ def ledger_dashboard(request: Request):
         <!-- 1. £90,000 UK VAT Threshold Early-Warning Radar -->
         <div class="card" style="border-left: 4px solid {vat_color};">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                <h3 style="margin:0; font-size:18px; color:#0f172a;">HMRC £90,000 Rolling VAT Radar</h3>
+                <h3 style="margin:0; font-size:18px; color:#e2e8f0;">HMRC £90,000 Rolling VAT Radar</h3>
                 <span style="font-size:12px; font-weight:bold; color:{vat_color};">{vat_status}</span>
             </div>
-            <p style="color:#64748b; font-size:13px; margin:8px 0 14px 0;">Tracks your rolling 12-month domestic turnover to prevent accidental VAT penalties or losing sole-trader price advantage.</p>
-            <div style="background:#e2e8f0; border-radius:8px; height:12px; overflow:hidden;">
+            <p style="color:#94a3b8; font-size:13px; margin:8px 0 14px 0;">Tracks your rolling 12-month domestic turnover to prevent accidental VAT penalties or losing sole-trader price advantage.</p>
+            <div style="background:#1e293b; border-radius:8px; height:12px; overflow:hidden;">
                 <div style="background:{vat_color}; width:{vat_pct:.1f}%; height:100%; border-radius:8px;"></div>
             </div>
-            <div style="display:flex; justify-content:space-between; font-size:12px; color:#64748b; margin-top:8px;">
+            <div style="display:flex; justify-content:space-between; font-size:12px; color:#94a3b8; margin-top:8px;">
                 <span>Current 12M: <b>£{turnover:,.2f}</b></span>
                 <span>Limit: <b>£90,000.00</b></span>
             </div>
@@ -3598,24 +3599,24 @@ def ledger_dashboard(request: Request):
         <!-- 2. Financial Metrics -->
         <div class="grid-stats">
             <div class="stat-box">
-                <div style="font-size:12px; color:#64748b; font-weight:bold; text-transform:uppercase;">12-Month Gross Invoiced</div>
+                <div style="font-size:12px; color:#94a3b8; font-weight:bold; text-transform:uppercase;">12-Month Gross Invoiced</div>
                 <div class="stat-val">£{turnover:,.2f}</div>
             </div>
             <div class="stat-box">
-                <div style="font-size:12px; color:#64748b; font-weight:bold; text-transform:uppercase;">CIS Developer Tax Held</div>
-                <div class="stat-val" style="color:#2563eb;">£{cis_held:,.2f}</div>
-                <div style="font-size:11px; color:#64748b;">Claimable on Self-Assessment</div>
+                <div style="font-size:12px; color:#94a3b8; font-weight:bold; text-transform:uppercase;">CIS Developer Tax Held</div>
+                <div class="stat-val" style="color:#60a5fa;">£{cis_held:,.2f}</div>
+                <div style="font-size:11px; color:#94a3b8;">Claimable on Self-Assessment</div>
             </div>
             <div class="stat-box">
-                <div style="font-size:12px; color:#64748b; font-weight:bold; text-transform:uppercase;">Calculated Net Profit</div>
+                <div style="font-size:12px; color:#94a3b8; font-weight:bold; text-transform:uppercase;">Calculated Net Profit</div>
                 <div class="stat-val" style="color:#059669;">£{net_profit:,.2f}</div>
             </div>
         </div>
 
         <!-- 3. Van-Day Job Cost & Minimum Profitable Quote Calculator -->
         <div class="card">
-            <h3 style="margin-top:0; color:#044332; font-size:18px;">Van & Crew-Day Profit Calculator (True Costing)</h3>
-            <p style="color:#64748b; font-size:13px;">Never underquote a large tree removal again. Input your crew size and expected waste to compute your exact breakeven and recommended quotation.</p>
+            <h3 style="margin-top:0; color:#34d399; font-size:18px;">Van & Crew-Day Profit Calculator (True Costing)</h3>
+            <p style="color:#94a3b8; font-size:13px;">Never underquote a large tree removal again. Input your crew size and expected waste to compute your exact breakeven and recommended quotation.</p>
             
             <form id="quoteForm" onsubmit="event.preventDefault(); calcQuote();" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-top:16px;">
                 <div>
@@ -3643,18 +3644,18 @@ def ledger_dashboard(request: Request):
                 </div>
             </form>
 
-            <div id="quoteResult" style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:16px; margin-top:20px; display:none;">
+            <div id="quoteResult" style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.3); border-radius:8px; padding:16px; margin-top:20px; display:none;">
                 <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;">
                     <div>
-                        <span style="font-size:11px; color:#065f46; font-weight:bold;">TRUE BASELINE COST:</span>
-                        <div id="resCost" style="font-size:20px; font-weight:800; color:#0f172a;">£0.00</div>
+                        <span style="font-size:11px; color:#34d399; font-weight:bold;">TRUE BASELINE COST:</span>
+                        <div id="resCost" style="font-size:20px; font-weight:800; color:#e2e8f0;">£0.00</div>
                     </div>
                     <div>
-                        <span style="font-size:11px; color:#065f46; font-weight:bold;">RECOMMENDED QUOTE (40% Margin):</span>
-                        <div id="resStd" style="font-size:22px; font-weight:800; color:#044332;">£0.00</div>
+                        <span style="font-size:11px; color:#34d399; font-weight:bold;">RECOMMENDED QUOTE (40% Margin):</span>
+                        <div id="resStd" style="font-size:22px; font-weight:800; color:#34d399;">£0.00</div>
                     </div>
                     <div>
-                        <span style="font-size:11px; color:#065f46; font-weight:bold;">PREMIUM QUOTE (55% Margin):</span>
+                        <span style="font-size:11px; color:#34d399; font-weight:bold;">PREMIUM QUOTE (55% Margin):</span>
                         <div id="resPrem" style="font-size:22px; font-weight:800; color:#059669;">£0.00</div>
                     </div>
                 </div>
@@ -3663,8 +3664,8 @@ def ledger_dashboard(request: Request):
 
         <!-- 4. Quick Job Entry / CIS Deduction Form -->
         <div class="card">
-            <h3 style="margin-top:0; color:#044332; font-size:18px;">Log Completed Job & CIS Deduction</h3>
-            <p style="color:#64748b; font-size:13px;">Save an invoice to track your 12-month VAT position and commercial CIS tax balances.</p>
+            <h3 style="margin-top:0; color:#34d399; font-size:18px;">Log Completed Job & CIS Deduction</h3>
+            <p style="color:#94a3b8; font-size:13px;">Save an invoice to track your 12-month VAT position and commercial CIS tax balances.</p>
             <form action="/api/save-ledger-entry" method="POST" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">
                 <div>
                     <label style="font-size:12px; font-weight:bold;">Job / Property Name:</label>
@@ -3776,15 +3777,15 @@ def settings_page(request: Request):
         return RedirectResponse(url="/login", status_code=303)
 
     current = database.get_contractor_settings(email).get("notification_preference", "email")
-    saved_banner = "<div style='background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:10px; margin-bottom:16px; color:#065f46; font-size:13px;'>Saved.</div>" if request.query_params.get("saved") else ""
+    saved_banner = "<div style='background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:8px; padding:10px; margin-bottom:16px; color:#34d399; font-size:13px;'>Saved.</div>" if request.query_params.get("saved") else ""
 
     def opt(value, label, desc):
         checked = "checked" if current == value else ""
         return f"""
-        <label style="display:block; border:1px solid #e2e8f0; border-radius:8px; padding:14px; margin-bottom:10px; cursor:pointer;">
+        <label style="display:block; border:1px solid #1e293b; border-radius:8px; padding:14px; margin-bottom:10px; cursor:pointer;">
             <input type="radio" name="notification_preference" value="{value}" {checked} style="width:auto; margin-right:8px;">
             <b>{label}</b>
-            <div style="font-size:12px; color:#64748b; margin-left:22px;">{desc}</div>
+            <div style="font-size:12px; color:#94a3b8; margin-left:22px;">{desc}</div>
         </label>
         """
 
@@ -3795,22 +3796,22 @@ def settings_page(request: Request):
         <meta charset="UTF-8">
         <title>Settings | TreeKey</title>
         <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; }}
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:32px 16px; }}
             .container {{ max-width: 600px; margin: auto; }}
-            .card {{ background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; }}
-            .btn {{ background: #044332; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; }}
+            .card {{ background:#0f172a; border:1px solid #1e293b; border-radius: 12px; padding: 24px; }}
+            .btn {{ background:#059669; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; }}
         </style>
     </head>
     <body>
     <div class="container">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-            <h1 style="margin:0; font-size:24px; color:#044332;">Settings</h1>
-            <a href="/dashboard" style="color:#044332; font-size:13px; text-decoration:none; font-weight:bold;">← Dashboard</a>
+            <h1 style="margin:0; font-size:24px; color:#34d399;">Settings</h1>
+            <a href="/dashboard" style="color:#34d399; font-size:13px; text-decoration:none; font-weight:bold;">← Dashboard</a>
         </div>
         <div class="card">
             {saved_banner}
             <h3 style="margin-top:0; font-size:16px;">Lead Notification Format</h3>
-            <p style="color:#64748b; font-size:13px;">How new leads are delivered when you're allocated one.</p>
+            <p style="color:#94a3b8; font-size:13px;">How new leads are delivered when you're allocated one.</p>
             <form method="POST" action="/api/save-settings">
                 {opt("email", "Email only", "Standard lead-delivery email with Letter/Flyer tools.")}
                 {opt("whatsapp", "Email + WhatsApp forward buttons", "Adds a one-tap “Forward on WhatsApp” button next to each lead so you can send it straight to your crew.")}
@@ -3970,13 +3971,13 @@ async def request_magic_link(request: Request):
     # Send Magic Link via Resend Email
     import notifications
     email_body = f"""
-    <div style="font-family:sans-serif; max-width:500px; margin:auto; padding:20px; color:#0f172a;">
-        <h2 style="color:#044332;">Your TreeKey Login Link</h2>
+    <div style="font-family:sans-serif; max-width:500px; margin:auto; padding:20px; color:#e2e8f0;">
+        <h2 style="color:#34d399;">Your TreeKey Login Link</h2>
         <p>Click the secure button below to log in directly to your Contractor Command Center:</p>
         <div style="text-align:center; margin:24px 0;">
-            <a href="{magic_url}" style="background:#044332; color:white; padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; display:inline-block;">Sign In to Dashboard ➔</a>
+            <a href="{magic_url}" style="background:#059669; color:white; padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; display:inline-block;">Sign In to Dashboard ➔</a>
         </div>
-        <p style="font-size:13px; color:#64748b;">Logging in on a different device than this email is on? Enter this 6-digit code there instead: <b style="font-size:16px; color:#0f172a; letter-spacing:1px;">{otp_code}</b></p>
+        <p style="font-size:13px; color:#94a3b8;">Logging in on a different device than this email is on? Enter this 6-digit code there instead: <b style="font-size:16px; color:#e2e8f0; letter-spacing:1px;">{otp_code}</b></p>
         <p style="font-size:11px; color:#94a3b8; margin-top:24px;">This secure link and code are valid for 15 minutes. If you did not request this, you can safely ignore this email -- nothing happens unless the link is clicked or the code is entered.</p>
     </div>
     """
@@ -4235,15 +4236,27 @@ def free_dashboard(request: Request):
     if not account:
         return RedirectResponse(url="/free-account", status_code=303)
 
-    # Sep 9 2026, Nick's ask, production incident: a real signup landed here
-    # with no lead granted at all -- "this cannot happen under any
-    # circumstance... they get the closest lead by proximity no matter
-    # what." Fixed at the source (main.py's /api/free-signup now calls
-    # database.find_nearest_unclaimed_lead with no distance ceiling, so the
-    # single nearest unclaimed lead in the whole pool is always granted,
-    # however far away). This branch should now only ever show if the
-    # entire pool was genuinely empty at signup, not "nothing nearby" --
-    # copy updated to match, so it never reads like a broken promise.
+    # Sep 10 2026, Nick's ask, production incident: he logged into an
+    # account signed up before the Sep 9 database.py fix (find_unclaimed_lead's
+    # recency-capped candidate pool, see database.py) and this page just kept
+    # showing the SAME stale "no jobs" failure from his original signup
+    # attempt forever -- the grant was only ever attempted once, at
+    # /api/free-signup, with no retry path afterward. Any account whose
+    # first attempt happened to fail (unlucky timing before the fix landed,
+    # a genuine empty pool that moment, a transient DB error) was stuck
+    # showing a false "no jobs" message permanently, even once real nearby
+    # leads existed. Self-heal here instead: if this account still has no
+    # free_lead_ref, retry the grant on this very page load before falling
+    # back to the "no jobs" copy -- same logic as free_signup's own grant
+    # block, just re-runnable rather than one-shot.
+    if not account.get("free_lead_ref"):
+        candidate = database.find_nearest_unclaimed_lead(account["lat"], account["lon"], max_miles=None)
+        if candidate:
+            burned = database.burn_lead_inventory(candidate["reference"], email)
+            if burned:
+                database.record_free_lead_grant(email, burned["reference"])
+                account["free_lead_ref"] = burned["reference"]
+
     if account.get("free_lead_ref"):
         lead = database.get_lead_by_reference(account["free_lead_ref"])
         if lead:
@@ -4331,7 +4344,7 @@ def contractor_dashboard(request: Request):
     leads = data["dispatched_leads"]
     tier_name = sub.get("tier", "Free / Pay-As-You-Go").replace("_", " ").title()
     outcode = sub.get("outcode", "GB")
-    active_badge = "<span style='background:#ecfdf5; color:#065f46; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:bold;'>ACTIVE PARTNER</span>" if sub.get("active") else "<span style='background:#f1f5f9; color:#64748b; padding:3px 8px; border-radius:12px; font-size:11px;'>FREE TIER</span>"
+    active_badge = "<span style='background:rgba(16,185,129,0.12); color:#34d399; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:bold;'>ACTIVE PARTNER</span>" if sub.get("active") else "<span style='background:#1e293b; color:#94a3b8; padding:3px 8px; border-radius:12px; font-size:11px;'>FREE TIER</span>"
 
     # Format leads table
     lead_rows = ""
@@ -4356,35 +4369,35 @@ def contractor_dashboard(request: Request):
         applicant_name = l.get("applicant_name")
         has_agent = l.get("has_agent")
         if has_agent is True:
-            agent_badge = f"<span style='font-size:10px; background:#fef3c7; color:#92400e; padding:2px 6px; border-radius:4px; font-weight:bold;'>AGENT ON RECORD{' — ' + l['agent_company'] if l.get('agent_company') else ''}</span>"
+            agent_badge = f"<span style='font-size:10px; background:rgba(217,119,6,0.15); color:#fbbf24; padding:2px 6px; border-radius:4px; font-weight:bold;'>AGENT ON RECORD{' — ' + l['agent_company'] if l.get('agent_company') else ''}</span>"
         elif has_agent is False:
-            agent_badge = "<span style='font-size:10px; background:#d1fae5; color:#065f46; padding:2px 6px; border-radius:4px; font-weight:bold;'>NO AGENT LISTED</span>"
+            agent_badge = "<span style='font-size:10px; background:rgba(16,185,129,0.12); color:#34d399; padding:2px 6px; border-radius:4px; font-weight:bold;'>NO AGENT LISTED</span>"
         else:
-            agent_badge = "<span style='font-size:10px; background:#f1f5f9; color:#64748b; padding:2px 6px; border-radius:4px;'>AGENT STATUS UNCONFIRMED</span>"
-        applicant_line = f"<br><span style='font-size:11px; color:#475569;'>Applicant: {applicant_name}</span>" if applicant_name else ""
+            agent_badge = "<span style='font-size:10px; background:#1e293b; color:#94a3b8; padding:2px 6px; border-radius:4px;'>AGENT STATUS UNCONFIRMED</span>"
+        applicant_line = f"<br><span style='font-size:11px; color:#94a3b8;'>Applicant: {applicant_name}</span>" if applicant_name else ""
 
         lead_rows += f"""
-        <div style="background:white; border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin-bottom:12px;">
+        <div style="background:#0f172a; border:1px solid #1e293b; border-radius:10px; padding:16px; margin-bottom:12px;">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
                 <div>
-                    <span style="font-size:10px; background:#f1f5f9; color:#475569; padding:2px 6px; border-radius:4px; font-weight:bold;">REF: {ref}</span>
+                    <span style="font-size:10px; background:#1e293b; color:#94a3b8; padding:2px 6px; border-radius:4px; font-weight:bold;">REF: {ref}</span>
                     {agent_badge}
-                    <h4 style="margin:4px 0 2px 0; font-size:15px; color:#0f172a;">{addr}</h4>
-                    <span style="font-size:11px; color:#64748b;">Dispatched: {dispatched_at}</span>{applicant_line}
+                    <h4 style="margin:4px 0 2px 0; font-size:15px; color:#e2e8f0;">{addr}</h4>
+                    <span style="font-size:11px; color:#94a3b8;">Dispatched: {dispatched_at}</span>{applicant_line}
                 </div>
                 <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                    <a href="/generate-letter/{urllib.parse.quote(ref)}" target="_blank" style="background:#044332; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Letter</a>
+                    <a href="/generate-letter/{urllib.parse.quote(ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Letter</a>
                     <a href="/generate-street-flyer/{urllib.parse.quote(ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street Flyer</a>
-                    <a href="{gmap_url}" target="_blank" style="background:#0f172a; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street View</a>
+                    <a href="{gmap_url}" target="_blank" style="background:#334155; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street View</a>
                 </div>
             </div>
-            <div style="background:#f8fafc; border-left:3px solid #044332; padding:8px 12px; margin-top:10px; font-size:12px; color:#334155;">
+            <div style="background:#020617; border-left:3px solid #059669; padding:8px 12px; margin-top:10px; font-size:12px; color:#cbd5e1;">
                 <b>Specification:</b> {summary[:180]}...
             </div>
         </div>"""
 
     if not lead_rows:
-        lead_rows = "<div style='text-align:center; padding:32px; background:white; border-radius:10px; border:1px solid #e2e8f0;'><p style='color:#64748b; margin:0;'>No leads currently allocated. Your incoming planning intelligence will appear here in real-time.</p></div>"
+        lead_rows = "<div style='text-align:center; padding:32px; background:#0f172a; border-radius:10px; border:1px solid #1e293b;'><p style='color:#94a3b8; margin:0;'>No leads currently allocated. Your incoming planning intelligence will appear here in real-time.</p></div>"
 
     return f"""
     <!DOCTYPE html>
@@ -4394,12 +4407,12 @@ def contractor_dashboard(request: Request):
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Contractor Dashboard | TreeKey</title>
         <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; line-height:1.5; }}
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:32px 16px; line-height:1.5; }}
             .container {{ max-width: 900px; margin: auto; }}
-            .header-box {{ background: linear-gradient(135deg, #044332 0%, #064e3b 100%); color: white; border-radius: 14px; padding: 24px; margin-bottom: 24px; }}
+            .header-box {{ background:linear-gradient(135deg, #065f46 0%, #022c22 100%); color: white; border-radius: 14px; padding: 24px; margin-bottom: 24px; }}
             .quick-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }}
-            .quick-card {{ background: white; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; text-decoration: none; color: inherit; display: block; }}
-            .quick-card:hover {{ border-color: #044332; }}
+            .quick-card {{ background:#0f172a; border:1px solid #1e293b; border-radius: 10px; padding: 14px; text-decoration: none; color: inherit; display: block; }}
+            .quick-card:hover {{ border-color:#34d399; }}
         </style>
     </head>
     <body>
@@ -4428,39 +4441,39 @@ def contractor_dashboard(request: Request):
         <div class="quick-grid">
             <a href="/ledger" class="quick-card" style="border-top:2px solid #8b5cf6;">
                 <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">TreeKey Ledger</div>
-                <div style="font-size:11px; color:#64748b;">Van-Day Costing & £90k VAT Gauge</div>
+                <div style="font-size:11px; color:#94a3b8;">Van-Day Costing & £90k VAT Gauge</div>
             </a>
             <a href="/chip-drop" class="quick-card" style="border-top:2px solid #fb923c;">
                 <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Chip-Drop Network</div>
-                <div style="font-size:11px; color:#64748b;">Skip £60-£120 Tipping Fees Free</div>
+                <div style="font-size:11px; color:#94a3b8;">Skip £60-£120 Tipping Fees Free</div>
             </a>
             <a href="/marketplace" class="quick-card">
                 <div style="font-size:20px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg></div>
                 <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Lead Marketplace</div>
-                <div style="font-size:11px; color:#64748b;">Browse Unallocated Notices</div>
+                <div style="font-size:11px; color:#94a3b8;">Browse Unallocated Notices</div>
             </a>
             <a href="/pricing" class="quick-card">
                 <div style="font-size:20px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg></div>
                 <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Manage Tier</div>
-                <div style="font-size:11px; color:#64748b;">Upgrade or Adjust Coverage</div>
+                <div style="font-size:11px; color:#94a3b8;">Upgrade or Adjust Coverage</div>
             </a>
             <a href="/suggestions" class="quick-card">
                 <div style="font-size:20px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"></path></svg></div>
                 <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Suggest Tool</div>
-                <div style="font-size:11px; color:#64748b;">Request Features from Founders</div>
+                <div style="font-size:11px; color:#94a3b8;">Request Features from Founders</div>
             </a>
         </div>
 
         <!-- Dispatched Lead Inbox -->
-        <h3 style="color:#044332; font-size:18px; margin:0 0 14px 0;">Your Exclusive Dispatched Leads ({len(leads)})</h3>
-        <p style="color:#64748b; font-size:13px; margin-top:-8px; margin-bottom:16px;">
+        <h3 style="color:#34d399; font-size:18px; margin:0 0 14px 0;">Your Exclusive Dispatched Leads ({len(leads)})</h3>
+        <p style="color:#94a3b8; font-size:13px; margin-top:-8px; margin-bottom:16px;">
             These statutory planning notices were delivered exclusively to you and burned from all other systems.
         </p>
 
         {lead_rows}
 
         <div style="text-align:center; margin-top:32px;">
-            <a href="/" style="color:#64748b; text-decoration:none; font-size:13px;">← Return to Main Intelligence Map</a>
+            <a href="/" style="color:#94a3b8; text-decoration:none; font-size:13px;">← Return to Main Intelligence Map</a>
         </div>
     </div>
     </body>
@@ -4499,25 +4512,25 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
     if find_near:
         loc = database.resolve_location(find_near)
         if loc["lat"] is None:
-            candidates_html = f"<p style='color:#b91c1c; font-size:13px; margin-bottom:20px;'>Couldn't resolve '{find_near}' to a real UK postcode/outcode.</p>"
+            candidates_html = f"<p class='text-red-400 text-[13px] mb-5'>Couldn't resolve '{find_near}' to a real UK postcode/outcode.</p>"
         else:
             candidates = database.find_chip_drop_candidates_via_osm(loc["lat"], loc["lon"], radius_miles=10)
             if not candidates:
-                candidates_html = f"<p style='color:#64748b; font-size:13px; margin-bottom:20px;'>No candidates found on OpenStreetMap within 10 miles of {loc['outcode']}. OSM coverage varies by area -- try registering sites you already know instead.</p>"
+                candidates_html = f"<p class='text-slate-500 text-[13px] mb-5'>No candidates found on OpenStreetMap within 10 miles of {loc['outcode']}. OSM coverage varies by area -- try registering sites you already know instead.</p>"
             else:
                 cand_cards = "".join([
-                    f"""<div style="background:white; border:1px solid #bfdbfe; border-radius:10px; padding:16px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                    f"""<div class="bg-slate-900/60 border border-sky-500/20 rounded-[10px] p-4 mb-2.5 flex justify-between items-center flex-wrap gap-2.5">
                         <div>
-                            <span style="font-size:11px; background:#eff6ff; color:#1d4ed8; font-weight:bold; padding:3px 8px; border-radius:12px;">Possible Candidate — Not Registered</span>
-                            <h4 style="margin:6px 0 2px 0; font-size:15px; color:#0f172a;">{c['category']} {c['name']}</h4>
-                            <p style="margin:0; font-size:12px; color:#64748b;">{c['distance_miles']} mi away{' · ' + c['address_hint'] if c['address_hint'] else ''} · <a href="{c['osm_url']}" target="_blank" style="color:#64748b;">view on map</a></p>
+                            <span class="text-[11px] bg-sky-500/10 text-sky-400 font-bold px-2 py-[3px] rounded-xl">Possible Candidate — Not Registered</span>
+                            <h4 class="mt-1.5 mb-0.5 text-[15px] text-white">{c['category']} {c['name']}</h4>
+                            <p class="m-0 text-xs text-slate-400">{c['distance_miles']} mi away{' · ' + c['address_hint'] if c['address_hint'] else ''} · <a href="{c['osm_url']}" target="_blank" class="text-slate-400 hover:text-slate-200 underline">view on map</a></p>
                         </div>
-                        <a href="/register-drop-spot?site_name={urllib.parse.quote(c['name'])}&town={urllib.parse.quote(loc['outcode'])}" style="background:#1d4ed8; color:white; padding:7px 14px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:12px; white-space:nowrap;">Suggest for Registration →</a>
+                        <a href="/register-drop-spot?site_name={urllib.parse.quote(c['name'])}&town={urllib.parse.quote(loc['outcode'])}" class="bg-sky-500 hover:bg-sky-400 text-white px-3.5 py-[7px] rounded-md no-underline font-bold text-xs whitespace-nowrap transition-colors">Suggest for Registration →</a>
                     </div>"""
                     for c in candidates
                 ])
                 candidates_html = f"""
-                <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:14px 18px; margin-bottom:14px; font-size:13px; color:#1e40af;">
+                <div class="bg-sky-500/10 border border-sky-500/30 rounded-[10px] px-4.5 py-3.5 mb-3.5 text-[13px] text-sky-300">
                     <b>Unconfirmed:</b> these are real places found on OpenStreetMap near {loc['outcode']} that often welcome woodchip — nobody has registered them yet, so you'd need to call and ask first. Not the same as the registered listings below.
                 </div>
                 {cand_cards}
@@ -4535,15 +4548,15 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
     empty_state_html = ""
     if not spots:
         empty_state_html = f"""
-        <div style="background:white; border:1px dashed #cbd5e1; border-radius:12px; padding:28px; text-align:center; color:#64748b;">
-            <div style="font-size:32px; margin-bottom:8px;"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"></path></svg></div>
-            <h3 style="margin:0 0 8px 0; color:#0f172a; font-size:16px;">No drop sites listed{f' for {outcode}' if outcode else ''} yet</h3>
-            <p style="font-size:13px; margin:0 0 16px 0; max-width:440px; margin-left:auto; margin-right:auto;">
+        <div class="bg-slate-900/40 border border-dashed border-slate-700 rounded-xl p-7 text-center text-slate-400">
+            <div class="mb-2 flex justify-center"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"></path></svg></div>
+            <h3 class="m-0 mb-2 text-white text-base">No drop sites listed{f' for {outcode}' if outcode else ''} yet</h3>
+            <p class="text-[13px] m-0 mb-4 max-w-[440px] mx-auto">
                 This directory is filled entirely by real allotments, farms, stables and gardens who register themselves —
                 nothing here is invented. Know a local landowner who'd want free arborist woodchip or logs? Point them at
                 the registration form and you'll have a drop site near your next job.
             </p>
-            <a href="/register-drop-spot" style="display:inline-block; background:#044332; color:white; padding:10px 20px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">+ Register a Drop Site</a>
+            <a href="/register-drop-spot" class="inline-block bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg no-underline font-bold text-[13px] transition-colors">+ Register a Drop Site</a>
         </div>
         """
 
@@ -4564,36 +4577,42 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
         wa_link = f"https://wa.me/{clean_phone}?text=Hi%20{contact},%20TreeKey%20arborist%20crew%20has%20a%20fresh%20load%20of%20woodchip/timber.%20Do%20you%20have%20space%20today?"
 
         spot_cards += f"""
-        <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; padding:20px; margin-bottom:14px; box-shadow:0 2px 8px rgba(0,0,0,0.03);">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+        <div class="bg-[#0f172a] border border-slate-800 rounded-xl p-5 mb-3.5 hover:border-slate-600 transition-colors">
+            <div class="flex justify-between items-start flex-wrap gap-2.5">
                 <div>
-                    <span style="font-size:11px; background:#ecfdf5; color:#065f46; font-weight:bold; padding:3px 8px; border-radius:12px;">Free Drop Site</span>
-                    <span style="font-size:11px; background:#f1f5f9; color:#475569; padding:3px 8px; border-radius:12px; margin-left:6px;">{postcode} • {town}</span>
-                    <h3 style="margin:8px 0 4px 0; font-size:17px; color:#0f172a;">{name}</h3>
-                    <p style="margin:0; font-size:13px; color:#64748b;">{addr}</p>
+                    <span class="text-[11px] bg-emerald-500/10 text-emerald-400 font-bold px-2 py-[3px] rounded-xl">Free Drop Site</span>
+                    <span class="text-[11px] bg-slate-800 text-slate-400 px-2 py-[3px] rounded-xl ml-1.5">{postcode} • {town}</span>
+                    <h3 class="mt-2 mb-1 text-[17px] text-white">{name}</h3>
+                    <p class="m-0 text-[13px] text-slate-400">{addr}</p>
                 </div>
-                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                    <a href="tel:{phone}" style="background:#044332; color:white; padding:8px 14px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">Call ({contact})</a>
-                    <a href="{wa_link}" target="_blank" style="background:#059669; color:white; padding:8px 14px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">WhatsApp</a>
+                <div class="flex gap-2 flex-wrap">
+                    <a href="tel:{phone}" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-lg no-underline font-bold text-[13px] transition-colors">Call ({contact})</a>
+                    <a href="{wa_link}" target="_blank" class="bg-emerald-700 hover:bg-emerald-600 text-white px-3.5 py-2 rounded-lg no-underline font-bold text-[13px] transition-colors">WhatsApp</a>
                 </div>
             </div>
 
-            <div style="background:#f8fafc; border-radius:8px; padding:12px; margin-top:14px; font-size:13px; display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px;">
+            <div class="bg-slate-900/60 rounded-lg p-3 mt-3.5 text-[13px] grid gap-2.5" style="grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));">
                 <div>
-                    <div style="font-size:11px; color:#64748b; font-weight:bold; text-transform:uppercase;">Material Needed:</div>
-                    <div style="font-weight:bold; color:#0f172a;">{mat_label}</div>
+                    <div class="text-[11px] text-slate-500 font-bold uppercase">Material Needed:</div>
+                    <div class="font-bold text-slate-200">{mat_label}</div>
                 </div>
                 <div>
-                    <div style="font-size:11px; color:#64748b; font-weight:bold; text-transform:uppercase;">Vehicle Clearance:</div>
-                    <div style="font-weight:bold; color:#0f172a;">{veh_label}</div>
+                    <div class="text-[11px] text-slate-500 font-bold uppercase">Vehicle Clearance:</div>
+                    <div class="font-bold text-slate-200">{veh_label}</div>
                 </div>
             </div>
 
-            <div style="margin-top:10px; font-size:12px; color:#475569;">
-                <b>Access Instructions:</b> {notes}
+            <div class="mt-2.5 text-xs text-slate-400">
+                <b class="text-slate-300">Access Instructions:</b> {notes}
             </div>
         </div>"""
 
+    # Sep 10 2026, Nick's ask: "free woodchip dropper page needs to be
+    # redone and brought up to new design" -- was a standalone light-themed
+    # page with none of the site chrome (no shared nav/footer, own <html>
+    # with a white body). Rebuilt on the same dark-theme pattern used by
+    # storm_radar_view/marketplace_view: shared nav+footer, tailwind.css,
+    # bg-brand-dark body, slate/emerald card styling throughout.
     return f"""
     <!DOCTYPE html>
     <html lang="en-GB">
@@ -4601,41 +4620,41 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Woodchip & Timber Drop-Spotter | TreeKey</title>
-        <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; line-height:1.5; }}
-            .container {{ max-width: 860px; margin: auto; }}
-        </style>
+        <link rel="icon" href="/static/icon-192.png">
+        <link href="/static/tailwind.css" rel="stylesheet">
     </head>
-    <body>
-    <div class="container">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
+    <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
+    {_shared_nav_html()}
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
+        <div class="flex justify-between items-center mb-5 flex-wrap gap-2.5">
             <div>
-                <h1 style="margin:0; font-size:28px; color:#044332;">Free Woodchip & Timber Drop-Spotter</h1>
-                <p style="margin:4px 0 0 0; color:#64748b; font-size:14px;">Drop fresh arborist chips and timber rings within minutes of your job site. Save £60–£120 tipping fees.</p>
+                <h1 class="m-0 text-[28px] font-extrabold text-white">Free Woodchip & Timber Drop-Spotter</h1>
+                <p class="mt-1 mb-0 text-slate-400 text-sm">Drop fresh arborist chips and timber rings within minutes of your job site. Save £60–£120 tipping fees.</p>
             </div>
-            <a href="/register-drop-spot" style="background:#044332; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:bold; font-size:13px;">+ Register a Drop Site</a>
+            <a href="/register-drop-spot" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4.5 py-2.5 rounded-lg no-underline font-bold text-[13px] transition-colors">+ Register a Drop Site</a>
         </div>
 
-        <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:10px; padding:14px 18px; margin-bottom:24px; font-size:13px; color:#065f46;">
+        <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4.5 py-3.5 mb-6 text-[13px] text-emerald-200">
             <b>Pro-Tip for Tree Surgeons:</b> Tipping stations charge £80–£120 + VAT per load plus 45 minutes round-trip driving time. Drop your arborist waste at local community sites for £0.00.
         </div>
 
-        <form method="GET" style="background:white; border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
-            <div style="flex:1; min-width:180px;">
-                <label style="display:block; font-size:11px; font-weight:bold; color:#475569; margin-bottom:4px;">Find nearby candidates (unconfirmed farms/allotments/stables)</label>
-                <input type="text" name="find_near" value="{find_near or ''}" placeholder="e.g. NG22 or NG22 8AA" style="width:100%; box-sizing:border-box; padding:9px; border:1px solid #cbd5e1; border-radius:6px;">
+        <form method="GET" class="bg-[#0f172a] border border-slate-800 rounded-lg p-4 mb-5 flex gap-2.5 flex-wrap items-end">
+            <div class="flex-1 min-w-[180px]">
+                <label class="block text-[11px] font-bold text-slate-400 mb-1">Find nearby candidates (unconfirmed farms/allotments/stables)</label>
+                <input type="text" name="find_near" value="{find_near or ''}" placeholder="e.g. NG22 or NG22 8AA" class="w-full box-border bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:border-emerald-500 placeholder:text-slate-500">
             </div>
-            <button type="submit" style="background:#1d4ed8; color:white; padding:10px 18px; border:none; border-radius:6px; font-weight:bold; font-size:13px; cursor:pointer;">Search</button>
+            <button type="submit" class="bg-sky-500 hover:bg-sky-400 text-white px-4.5 py-2.5 rounded-lg border-0 font-bold text-[13px] cursor-pointer transition-colors">Search</button>
         </form>
         {candidates_html}
 
-        <h2 style="font-size:16px; color:#0f172a; margin:24px 0 12px 0;">Registered Drop Sites</h2>
+        <h2 class="text-base text-white mt-6 mb-3 font-bold">Registered Drop Sites</h2>
         {spot_cards or empty_state_html}
 
-        <div style="text-align:center; margin-top:32px;">
-            <a href="/" style="color:#64748b; text-decoration:none; font-size:13px;">← Return to Main Intelligence Map</a>
+        <div class="text-center mt-8">
+            <a href="/" class="text-slate-400 hover:text-white no-underline text-[13px] transition-colors">← Return to Main Intelligence Map</a>
         </div>
     </div>
+    {_shared_footer_html()}
     </body>
     </html>
     """
@@ -4658,10 +4677,15 @@ def register_drop_spot_page(site_name: Optional[str] = None, outcode: Optional[s
     prefill_note = ""
     if site_name:
         prefill_note = (
-            "<div style='background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:10px 14px; margin-bottom:16px; font-size:12px; color:#1e40af;'>"
+            "<div class='bg-sky-500/10 border border-sky-500/30 rounded-lg px-3.5 py-2.5 mb-4 text-xs text-sky-300'>"
             "Pre-filled from an unconfirmed nearby candidate — please double-check every field and only submit once you've actually confirmed with the site."
             "</div>"
         )
+    # Sep 10 2026, Nick's ask: brought this in line with the same dark-theme
+    # rebuild as chip_drop_view above (shared nav/footer, dark form inputs
+    # matching the pattern used on e.g. the marketplace search form).
+    field_cls = "w-full box-border bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-3.5 py-2.5 text-sm mt-1 mb-3.5 focus:outline-none focus:border-emerald-500 placeholder:text-slate-500"
+    label_cls = "text-xs font-bold text-slate-400"
     return f"""
     <!DOCTYPE html>
     <html lang="en-GB">
@@ -4669,62 +4693,62 @@ def register_drop_spot_page(site_name: Optional[str] = None, outcode: Optional[s
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Register Free Woodchip Drop Site | TreeKey</title>
-        <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:40px 16px; }}
-            .box {{ max-width: 520px; margin: auto; background: white; padding: 32px; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: 0 4px 16px rgba(0,0,0,0.04); }}
-            input, select, textarea {{ width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; margin-top: 4px; margin-bottom: 14px; font-family: inherit; }}
-            button {{ background: #044332; color: white; border: none; padding: 12px; border-radius: 8px; font-weight: bold; font-size: 15px; cursor: pointer; width: 100%; }}
-        </style>
+        <link rel="icon" href="/static/icon-192.png">
+        <link href="/static/tailwind.css" rel="stylesheet">
     </head>
-    <body>
-    <div class="box">
-        <h2 style="margin-top:0; color:#044332;">Register Free Woodchip Drop Site</h2>
-        <p style="color:#64748b; font-size:13px;">Need free organic woodchip mulch, wood chips, or hardwood logs for your garden, allotment, or stables? Local tree surgeons will drop free loads directly to your property.</p>
-        {prefill_note}
+    <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
+    {_shared_nav_html()}
+    <div class="max-w-[520px] mx-auto px-4 py-10">
+        <div class="bg-[#0f172a] border border-slate-800 rounded-2xl p-8">
+            <h2 class="mt-0 text-white text-2xl font-bold">Register Free Woodchip Drop Site</h2>
+            <p class="text-slate-400 text-[13px]">Need free organic woodchip mulch, wood chips, or hardwood logs for your garden, allotment, or stables? Local tree surgeons will drop free loads directly to your property.</p>
+            {prefill_note}
 
-        <form action="/api/submit-drop-spot" method="POST">
-            <label style="font-size:12px; font-weight:bold;">Property / Site Name:</label>
-            <input type="text" name="site_name" value="{site_name_val}" placeholder="e.g. Oak Tree Allotments or Highfield Farm" required>
+            <form action="/api/submit-drop-spot" method="POST">
+                <label class="{label_cls}">Property / Site Name:</label>
+                <input type="text" name="site_name" value="{site_name_val}" placeholder="e.g. Oak Tree Allotments or Highfield Farm" required class="{field_cls}">
 
-            <label style="font-size:12px; font-weight:bold;">Contact Name:</label>
-            <input type="text" name="contact_name" placeholder="e.g. Dave or Sarah" required>
+                <label class="{label_cls}">Contact Name:</label>
+                <input type="text" name="contact_name" placeholder="e.g. Dave or Sarah" required class="{field_cls}">
 
-            <label style="font-size:12px; font-weight:bold;">Phone / WhatsApp (for delivery driver to call):</label>
-            <input type="tel" name="phone" placeholder="e.g. 07700 900123" required>
+                <label class="{label_cls}">Phone / WhatsApp (for delivery driver to call):</label>
+                <input type="tel" name="phone" placeholder="e.g. 07700 900123" required class="{field_cls}">
 
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                <div>
-                    <label style="font-size:12px; font-weight:bold;">Postcode Outcode:</label>
-                    <input type="text" name="outcode" value="{outcode_val}" placeholder="e.g. LS6 or WF1" required>
+                <div class="grid grid-cols-2 gap-2.5">
+                    <div>
+                        <label class="{label_cls}">Postcode Outcode:</label>
+                        <input type="text" name="outcode" value="{outcode_val}" placeholder="e.g. LS6 or WF1" required class="{field_cls}">
+                    </div>
+                    <div>
+                        <label class="{label_cls}">Town / City:</label>
+                        <input type="text" name="town" value="{town_val}" placeholder="e.g. Leeds" required class="{field_cls}">
+                    </div>
                 </div>
-                <div>
-                    <label style="font-size:12px; font-weight:bold;">Town / City:</label>
-                    <input type="text" name="town" value="{town_val}" placeholder="e.g. Leeds" required>
-                </div>
-            </div>
 
-            <label style="font-size:12px; font-weight:bold;">Full Drop Address:</label>
-            <input type="text" name="address" placeholder="e.g. 14 Highfield Lane, Leeds LS6 2AA" required>
+                <label class="{label_cls}">Full Drop Address:</label>
+                <input type="text" name="address" placeholder="e.g. 14 Highfield Lane, Leeds LS6 2AA" required class="{field_cls}">
 
-            <label style="font-size:12px; font-weight:bold;">Material Needed:</label>
-            <select name="material_accepted">
-                <option value="fresh_woodchip">Fresh Arborist Woodchip (Mulch & Beds)</option>
-                <option value="hardwood_logs">Hardwood Logs / Rings (Firewood & Stoves)</option>
-                <option value="any">Any Green Waste / Woodchip / Cordwood</option>
-            </select>
+                <label class="{label_cls}">Material Needed:</label>
+                <select name="material_accepted" class="{field_cls}">
+                    <option value="fresh_woodchip">Fresh Arborist Woodchip (Mulch & Beds)</option>
+                    <option value="hardwood_logs">Hardwood Logs / Rings (Firewood & Stoves)</option>
+                    <option value="any">Any Green Waste / Woodchip / Cordwood</option>
+                </select>
 
-            <label style="font-size:12px; font-weight:bold;">Max Vehicle Size Clearance:</label>
-            <select name="max_vehicle_size">
-                <option value="3.5t_transit">Max 3.5t Transit Tipper (Standard Driveways)</option>
-                <option value="7.5t_truck">7.5t Truck / Tractor Trailer (Farms & Large Yards)</option>
-            </select>
+                <label class="{label_cls}">Max Vehicle Size Clearance:</label>
+                <select name="max_vehicle_size" class="{field_cls}">
+                    <option value="3.5t_transit">Max 3.5t Transit Tipper (Standard Driveways)</option>
+                    <option value="7.5t_truck">7.5t Truck / Tractor Trailer (Farms & Large Yards)</option>
+                </select>
 
-            <label style="font-size:12px; font-weight:bold;">Access Instructions:</label>
-            <textarea name="access_instructions" rows="3" placeholder="e.g. Tip on tarmac driveway to left of gate. Driveway is 2.8m wide."></textarea>
+                <label class="{label_cls}">Access Instructions:</label>
+                <textarea name="access_instructions" rows="3" placeholder="e.g. Tip on tarmac driveway to left of gate. Driveway is 2.8m wide." class="{field_cls}"></textarea>
 
-            <button type="submit">Submit Free Drop Listing ➔</button>
-        </form>
+                <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-0 py-3 rounded-lg font-bold text-[15px] cursor-pointer w-full transition-colors">Submit Free Drop Listing ➔</button>
+            </form>
+        </div>
     </div>
+    {_shared_footer_html()}
     </body>
     </html>
     """
@@ -4945,9 +4969,9 @@ def boost_review_page(contractor_name: Optional[str] = "Your Tree Surgery Busine
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Google Review Booster & BS3998 Badge | TreeKey</title>
         <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; line-height:1.5; }}
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:32px 16px; line-height:1.5; }}
             .container {{ max-width: 800px; margin: auto; }}
-            .card {{ background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }}
+            .card {{ background:#0f172a; border:1px solid #1e293b; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }}
             .btn-wa {{ background: #059669; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; }}
         </style>
     </head>
@@ -4955,19 +4979,19 @@ def boost_review_page(contractor_name: Optional[str] = "Your Tree Surgery Busine
     <div class="container">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; flex-wrap:wrap; gap:10px;">
             <div>
-                <h1 style="margin:0; font-size:28px; color:#044332;">Google Review Booster & Trust Badge</h1>
-                <p style="margin:4px 0 0 0; color:#64748b; font-size:14px;">Collect 5-star Google reviews from homeowners within 2 hours of packing away the chipper.</p>
+                <h1 style="margin:0; font-size:28px; color:#34d399;">Google Review Booster & Trust Badge</h1>
+                <p style="margin:4px 0 0 0; color:#94a3b8; font-size:14px;">Collect 5-star Google reviews from homeowners within 2 hours of packing away the chipper.</p>
             </div>
-            <a href="/dashboard" style="background:#0f172a; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold;">← Contractor Dashboard</a>
+            <a href="/dashboard" style="background:#334155; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold;">← Contractor Dashboard</a>
         </div>
 
         <!-- 1-Tap WhatsApp Booster -->
         <div class="card">
-            <h3 style="margin-top:0; color:#044332; font-size:18px;">1-Tap WhatsApp Homeowner Review Request</h3>
-            <p style="color:#64748b; font-size:13px;">Send this pre-formatted message to your client as soon as payment is confirmed:</p>
+            <h3 style="margin-top:0; color:#34d399; font-size:18px;">1-Tap WhatsApp Homeowner Review Request</h3>
+            <p style="color:#94a3b8; font-size:13px;">Send this pre-formatted message to your client as soon as payment is confirmed:</p>
             
-            <div style="background:#f8fafc; border-left:4px solid #059669; padding:14px; margin:16px 0; font-size:13px; color:#334155; line-height:1.6;">
-                "Hi there, thank you for choosing <b>{contractor_name}</b> for your tree surgery today! If you were happy with our work and tidy garden clearance, could you leave us a quick 5-star review on Google? It means the world to our crew: <span style='color:#2563eb;'>{google_link}</span>"
+            <div style="background:#020617; border-left:4px solid #059669; padding:14px; margin:16px 0; font-size:13px; color:#cbd5e1; line-height:1.6;">
+                "Hi there, thank you for choosing <b>{contractor_name}</b> for your tree surgery today! If you were happy with our work and tidy garden clearance, could you leave us a quick 5-star review on Google? It means the world to our crew: <span style='color:#60a5fa;'>{google_link}</span>"
             </div>
 
             <div style="margin-top:16px;">
@@ -4977,22 +5001,22 @@ def boost_review_page(contractor_name: Optional[str] = "Your Tree Surgery Busine
 
         <!-- BS3998 Digital Trust Badge -->
         <div class="card">
-            <h3 style="margin-top:0; color:#044332; font-size:18px;">Your BS3998:2010 Verified Digital Badge</h3>
-            <p style="color:#64748b; font-size:13px;">Embed this verified badge on your quotes and invoices to build instant trust with homeowners and commercial estate managers.</p>
+            <h3 style="margin-top:0; color:#34d399; font-size:18px;">Your BS3998:2010 Verified Digital Badge</h3>
+            <p style="color:#94a3b8; font-size:13px;">Embed this verified badge on your quotes and invoices to build instant trust with homeowners and commercial estate managers.</p>
             
-            <div style="display:flex; align-items:center; gap:16px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:16px; margin:16px 0;">
-                <div style="background:#044332; color:white; width:48px; height:48px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:24px;">
+            <div style="display:flex; align-items:center; gap:16px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:16px; margin:16px 0;">
+                <div style="background:#059669; color:white; width:48px; height:48px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:24px;">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 </div>
                 <div>
-                    <div style="font-weight:bold; color:#044332; font-size:15px;">BS3998:2010 British Standard Verified Arborist</div>
-                    <div style="font-size:12px; color:#065f46;">Verified Member • £5M Public Liability Insured • NPTC Certified Crew</div>
+                    <div style="font-weight:bold; color:#34d399; font-size:15px;">BS3998:2010 British Standard Verified Arborist</div>
+                    <div style="font-size:12px; color:#34d399;">Verified Member • £5M Public Liability Insured • NPTC Certified Crew</div>
                 </div>
             </div>
         </div>
 
         <div style="text-align:center; margin-top:32px;">
-            <a href="/" style="color:#64748b; text-decoration:none; font-size:13px;">← Return to Main Intelligence Map</a>
+            <a href="/" style="color:#94a3b8; text-decoration:none; font-size:13px;">← Return to Main Intelligence Map</a>
         </div>
     </div>
     </body>
@@ -5019,20 +5043,20 @@ def quote_estimator_page():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Instant Tree Work Scope & Fair Quote Estimator | TreeKey</title>
         <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; line-height:1.5; }
-            .box { max-width: 680px; margin: auto; background: white; padding: 32px; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
-            input, select, textarea { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; margin-top: 4px; margin-bottom: 16px; font-family: inherit; font-size: 14px; }
-            .btn { background: #044332; color: white; border: none; padding: 14px 20px; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer; width: 100%; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:32px 16px; line-height:1.5; }
+            .box { max-width: 680px; margin: auto; background:#0f172a; padding: 32px; border-radius: 16px; border:1px solid #1e293b; box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
+            input, select, textarea { width: 100%; box-sizing: border-box; padding: 12px; background:#020617; color:#e2e8f0; border:1px solid #334155; border-radius: 8px; margin-top: 4px; margin-bottom: 16px; font-family: inherit; font-size: 14px; }
+            .btn { background:#059669; color: white; border: none; padding: 14px 20px; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer; width: 100%; }
         </style>
     </head>
     <body>
     <div class="box">
         <div style="text-align:center; margin-bottom:24px;">
-            <div style="display:inline-block; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:20px; padding:4px 12px; font-size:12px; color:#065f46; font-weight:bold; text-transform:uppercase; margin-bottom:8px;">
+            <div style="display:inline-block; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); border-radius:20px; padding:4px 12px; font-size:12px; color:#34d399; font-weight:bold; text-transform:uppercase; margin-bottom:8px;">
                 AI Arborist Scope Engine
             </div>
-            <h1 style="margin:0 0 6px 0; color:#044332; font-size:26px;">Instant Tree Work Estimator</h1>
-            <p style="color:#64748b; font-size:14px; margin:0;">Get an accurate fair-market estimate and connect directly with 1 verified local tree surgeon — no spam, no 5-way bidding wars.</p>
+            <h1 style="margin:0 0 6px 0; color:#34d399; font-size:26px;">Instant Tree Work Estimator</h1>
+            <p style="color:#94a3b8; font-size:14px; margin:0;">Get an accurate fair-market estimate and connect directly with 1 verified local tree surgeon — no spam, no 5-way bidding wars.</p>
         </div>
 
         <form id="scopeForm" onsubmit="event.preventDefault(); calcScope();">
@@ -5085,26 +5109,26 @@ def quote_estimator_page():
             <button type="submit" class="btn">Calculate Scope & Estimate </button>
         </form>
 
-        <div id="scopeResult" style="background:#f0fdf4; border:2px solid #059669; border-radius:12px; padding:20px; margin-top:24px; display:none;">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-b:1px solid #bbf7d0; padding-bottom:14px; margin-bottom:14px;">
+        <div id="scopeResult" style="background:rgba(16,185,129,0.08); border:2px solid #059669; border-radius:12px; padding:20px; margin-top:24px; display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-bottom:1px solid rgba(16,185,129,0.3); padding-bottom:14px; margin-bottom:14px;">
                 <div>
-                    <span style="font-size:11px; color:#065f46; font-weight:bold; text-transform:uppercase;">Fair-Market Estimate Range:</span>
-                    <div id="estPrice" style="font-size:28px; font-weight:800; color:#044332;">£450 – £650</div>
+                    <span style="font-size:11px; color:#34d399; font-weight:bold; text-transform:uppercase;">Fair-Market Estimate Range:</span>
+                    <div id="estPrice" style="font-size:28px; font-weight:800; color:#34d399;">£450 – £650</div>
                 </div>
                 <div style="text-align:right;">
-                    <span style="font-size:11px; color:#065f46; font-weight:bold; text-transform:uppercase;">Estimated Duration:</span>
-                    <div id="estCrew" style="font-size:16px; font-weight:bold; color:#0f172a;">1/2 Day (Climber + Groundy)</div>
+                    <span style="font-size:11px; color:#34d399; font-weight:bold; text-transform:uppercase;">Estimated Duration:</span>
+                    <div id="estCrew" style="font-size:16px; font-weight:bold; color:#e2e8f0;">1/2 Day (Climber + Groundy)</div>
                 </div>
             </div>
 
-            <div style="font-size:13px; color:#334155; line-height:1.5;">
+            <div style="font-size:13px; color:#cbd5e1; line-height:1.5;">
                 <div style="margin-bottom:6px;"><b>Green Waste Volume:</b> <span id="estWaste">Approx 1 Tipper Van Load (3–4 m³ chipped)</span></div>
                 <div style="margin-bottom:6px;"><b>Statutory Status:</b> <span id="estCouncil">TreeKey will verify Conservation Area & TPO status automatically with your local council.</span></div>
             </div>
 
-            <div style="background:white; border-radius:8px; padding:14px; margin-top:16px; border:1px solid #bbf7d0;">
-                <h4 style="margin:0 0 6px 0; color:#044332; font-size:14px;">Connect Directly with 1 Local Senior Tree Surgeon:</h4>
-                <p style="margin:0 0 12px 0; font-size:12px; color:#64748b;">
+            <div style="background:#0f172a; border-radius:8px; padding:14px; margin-top:16px; border:1px solid rgba(16,185,129,0.3);">
+                <h4 style="margin:0 0 6px 0; color:#34d399; font-size:14px;">Connect Directly with 1 Local Senior Tree Surgeon:</h4>
+                <p style="margin:0 0 12px 0; font-size:12px; color:#94a3b8;">
                     We never share your contact with 5 competing companies. Your job is dispatched 1-to-1 exclusively to the #1 verified arborist in your postcode.
                 </p>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
@@ -5112,7 +5136,7 @@ def quote_estimator_page():
                     <input type="tel" id="custPhone" placeholder="Mobile / WhatsApp Number" style="margin:0; padding:10px;" required>
                 </div>
                 <input type="email" id="custEmail" placeholder="Email Address (for official quote)" style="margin:0 0 12px 0; padding:10px;">
-                <button type="button" onclick="submitHomeownerJob()" style="background:#044332; color:white; padding:12px 18px; border-radius:6px; font-weight:bold; font-size:14px; cursor:pointer; width:100%; border:none;">
+                <button type="button" onclick="submitHomeownerJob()" style="background:#059669; color:white; padding:12px 18px; border-radius:6px; font-weight:bold; font-size:14px; cursor:pointer; width:100%; border:none;">
                     Request Free Official Site Visit & Quote ➔
                 </button>
                 <div id="submitStatus" style="font-size:13px; font-weight:bold; margin-top:8px; text-align:center;"></div>
@@ -5170,7 +5194,7 @@ def quote_estimator_page():
                 return;
             }
 
-            statusEl.style.color = '#044332';
+            statusEl.style.color = '#34d399';
             statusEl.innerText = 'Connecting with verified senior contractor...';
 
             try {
@@ -5570,15 +5594,15 @@ def local_seo_intake_page(location_slug: str):
     </script>
 
     <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:32px 16px; line-height:1.6; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:32px 16px; line-height:1.6; }}
         .container {{ max-width: 800px; margin: auto; }}
-        .card {{ background: white; padding: 32px; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: 0 4px 20px rgba(0,0,0,0.05); margin-bottom: 24px; }}
-        input, select, textarea {{ width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; margin-top: 4px; margin-bottom: 16px; font-family: inherit; font-size: 14px; }}
-        .btn {{ background: #044332; color: white; border: none; padding: 14px 20px; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer; width: 100%; }}
-        .badge {{ display: inline-block; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 20px; padding: 4px 12px; font-size: 12px; color: #065f46; font-weight: bold; margin-bottom: 12px; }}
-        .hero-title {{ color: #044332; font-size: 32px; margin: 0 0 10px 0; font-weight: 800; line-height: 1.2; }}
+        .card {{ background:#0f172a; padding: 32px; border-radius: 16px; border:1px solid #1e293b; box-shadow: 0 4px 20px rgba(0,0,0,0.05); margin-bottom: 24px; }}
+        input, select, textarea {{ width: 100%; box-sizing: border-box; padding: 12px; background:#020617; color:#e2e8f0; border:1px solid #334155; border-radius: 8px; margin-top: 4px; margin-bottom: 16px; font-family: inherit; font-size: 14px; }}
+        .btn {{ background:#059669; color: white; border: none; padding: 14px 20px; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer; width: 100%; }}
+        .badge {{ display: inline-block; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); border-radius: 20px; padding: 4px 12px; font-size: 12px; color:#34d399; font-weight: bold; margin-bottom: 12px; }}
+        .hero-title {{ color:#34d399; font-size: 32px; margin: 0 0 10px 0; font-weight: 800; line-height: 1.2; }}
         .trust-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin: 24px 0; }}
-        .trust-item {{ background: #f8fafc; border: 1px solid #e2e8f0; padding: 16px; border-radius: 10px; }}
+        .trust-item {{ background:#020617; border:1px solid #1e293b; padding: 16px; border-radius: 10px; }}
     </style>
 </head>
 <body>
@@ -5586,27 +5610,27 @@ def local_seo_intake_page(location_slug: str):
     <div class="card">
         <span class="badge">Local Service Hub: {city_name} & {region_name}</span>
         <h1 class="hero-title">Verified Tree Surgeons in {city_name}</h1>
-        <p style="color: #475569; font-size: 16px; margin: 0 0 20px 0;">
+        <p style="color:#94a3b8; font-size: 16px; margin: 0 0 20px 0;">
             Calculate your fair-market price in seconds and connect directly with <b>1 verified NPTC tree surgeon</b> in {city_name}. No directory spam. No 5-company bidding wars.
         </p>
 
         <div class="trust-grid">
             <div class="trust-item">
-                <div style="font-weight:bold; color:#044332; margin-bottom:4px;">1-to-1 Dispatch Guarantee</div>
-                <div style="font-size:12px; color:#64748b;">We NEVER sell your details to 5 different companies. Only 1 verified local contractor receives your job.</div>
+                <div style="font-weight:bold; color:#34d399; margin-bottom:4px;">1-to-1 Dispatch Guarantee</div>
+                <div style="font-size:12px; color:#94a3b8;">We NEVER sell your details to 5 different companies. Only 1 verified local contractor receives your job.</div>
             </div>
             <div class="trust-item">
-                <div style="font-weight:bold; color:#044332; margin-bottom:4px;">{council_name} Compliance</div>
-                <div style="font-size:12px; color:#64748b;">Free verification of Conservation Areas & Tree Preservation Orders (TPO) before work starts.</div>
+                <div style="font-weight:bold; color:#34d399; margin-bottom:4px;">{council_name} Compliance</div>
+                <div style="font-size:12px; color:#94a3b8;">Free verification of Conservation Areas & Tree Preservation Orders (TPO) before work starts.</div>
             </div>
             <div class="trust-item">
-                <div style="font-weight:bold; color:#044332; margin-bottom:4px;">Local Tree Specialists</div>
-                <div style="font-size:12px; color:#64748b;">Experienced with local species: {tree_types}. Full £5M public liability insurance.</div>
+                <div style="font-weight:bold; color:#34d399; margin-bottom:4px;">Local Tree Specialists</div>
+                <div style="font-size:12px; color:#94a3b8;">Experienced with local species: {tree_types}. Full £5M public liability insurance.</div>
             </div>
         </div>
 
         <form id="scopeForm" onsubmit="event.preventDefault(); calcLocalScope();">
-            <h3 style="color:#044332; font-size:18px; margin: 20px 0 12px 0;">Step 1: Calculate Your Fair-Market Estimate</h3>
+            <h3 style="color:#34d399; font-size:18px; margin: 20px 0 12px 0;">Step 1: Calculate Your Fair-Market Estimate</h3>
             
             <label style="font-size:12px; font-weight:bold;">Tree Surgery Work Required in {city_name}:</label>
             <select id="workType">
@@ -5657,26 +5681,26 @@ def local_seo_intake_page(location_slug: str):
             <button type="submit" class="btn">Calculate Scope & Estimate for {city_name} </button>
         </form>
 
-        <div id="scopeResult" style="background:#f0fdf4; border:2px solid #059669; border-radius:12px; padding:24px; margin-top:24px; display:none;">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-bottom:1px solid #bbf7d0; padding-bottom:14px; margin-bottom:14px;">
+        <div id="scopeResult" style="background:rgba(16,185,129,0.08); border:2px solid #059669; border-radius:12px; padding:24px; margin-top:24px; display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-bottom:1px solid rgba(16,185,129,0.3); padding-bottom:14px; margin-bottom:14px;">
                 <div>
-                    <span style="font-size:11px; color:#065f46; font-weight:bold; text-transform:uppercase;">Fair-Market Estimate Range:</span>
-                    <div id="estPrice" style="font-size:32px; font-weight:800; color:#044332;">£450 – £650</div>
+                    <span style="font-size:11px; color:#34d399; font-weight:bold; text-transform:uppercase;">Fair-Market Estimate Range:</span>
+                    <div id="estPrice" style="font-size:32px; font-weight:800; color:#34d399;">£450 – £650</div>
                 </div>
                 <div style="text-align:right;">
-                    <span style="font-size:11px; color:#065f46; font-weight:bold; text-transform:uppercase;">Estimated Duration:</span>
-                    <div id="estCrew" style="font-size:16px; font-weight:bold; color:#0f172a;">1/2 Day (Climber + Groundy)</div>
+                    <span style="font-size:11px; color:#34d399; font-weight:bold; text-transform:uppercase;">Estimated Duration:</span>
+                    <div id="estCrew" style="font-size:16px; font-weight:bold; color:#e2e8f0;">1/2 Day (Climber + Groundy)</div>
                 </div>
             </div>
 
-            <div style="font-size:13px; color:#334155; line-height:1.6; margin-bottom:16px;">
+            <div style="font-size:13px; color:#cbd5e1; line-height:1.6; margin-bottom:16px;">
                 <div><b>Green Waste:</b> <span id="estWaste">Approx 1 Tipper Van Load (chipped & removed)</span></div>
                 <div><b>Council Check:</b> <span>TreeKey verifies Conservation Area and TPO status with {council_name}.</span></div>
             </div>
 
-            <div style="background:white; border-radius:8px; padding:18px; border:1px solid #bbf7d0;">
-                <h4 style="margin:0 0 6px 0; color:#044332; font-size:15px;">Dispatch Directly to the Verified Senior Tree Surgeon in {city_name}:</h4>
-                <p style="margin:0 0 12px 0; font-size:12px; color:#64748b;">
+            <div style="background:#0f172a; border-radius:8px; padding:18px; border:1px solid rgba(16,185,129,0.3);">
+                <h4 style="margin:0 0 6px 0; color:#34d399; font-size:15px;">Dispatch Directly to the Verified Senior Tree Surgeon in {city_name}:</h4>
+                <p style="margin:0 0 12px 0; font-size:12px; color:#94a3b8;">
                     We never sell your details to 5 different companies. Your job is dispatched 1-to-1 exclusively to the #1 verified arborist in your {city_name} postcode.
                 </p>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
@@ -5684,7 +5708,7 @@ def local_seo_intake_page(location_slug: str):
                     <input type="tel" id="custPhone" placeholder="Mobile / WhatsApp Number" style="margin:0; padding:10px;" required>
                 </div>
                 <input type="email" id="custEmail" placeholder="Email Address (for official PDF quote)" style="margin:0 0 12px 0; padding:10px;">
-                <button type="button" onclick="submitLocalJob('{city_name}')" style="background:#044332; color:white; padding:14px 18px; border-radius:6px; font-weight:bold; font-size:15px; cursor:pointer; width:100%; border:none;">
+                <button type="button" onclick="submitLocalJob('{city_name}')" style="background:#059669; color:white; padding:14px 18px; border-radius:6px; font-weight:bold; font-size:15px; cursor:pointer; width:100%; border:none;">
                     Request Free Site Visit & Quote in {city_name} ➔
                 </button>
                 <div id="submitStatus" style="font-size:13px; font-weight:bold; margin-top:10px; text-align:center;"></div>
@@ -5743,7 +5767,7 @@ def local_seo_intake_page(location_slug: str):
             return;
         }}
 
-        statusEl.style.color = '#044332';
+        statusEl.style.color = '#34d399';
         statusEl.innerText = 'Connecting with verified senior contractor in ' + cityName + '...';
 
         try {{
