@@ -98,7 +98,8 @@ def send_resend_email(subject: str, html_body: str) -> bool:
 
 
 def send_transactional_email(to_email: str, subject: str, html_body: str,
-                              from_label: str = "TreeKey Support <leads@treekey.uk>") -> bool:
+                              from_label: str = "TreeKey Support <leads@treekey.uk>",
+                              headers: Optional[Dict[str, str]] = None) -> bool:
     """Sep 5 2026 CRITICAL FIX: send_resend_email() above always sends to the
     fixed internal TEST_EMAIL address -- correct for the admin/incident
     alerts it was built for, but main.py's magic-link login handler
@@ -122,18 +123,29 @@ def send_transactional_email(to_email: str, subject: str, html_body: str,
         _record_email_attempt(False, "invalid recipient")
         return False
     try:
+        payload = {
+            "from": from_label,
+            "to": [to_email],
+            "subject": subject,
+            "html": html_body
+        }
+        if headers:
+            # Sep 10 2026: lets callers (e.g. send_free_lead_code_email) attach
+            # real RFC-standard email headers -- specifically List-Unsubscribe
+            # / List-Unsubscribe-Post, which Gmail/Yahoo treat as a legitimacy
+            # signal for tab placement (Primary vs Promotions) and which their
+            # bulk-sender rules require one-click support for. Resend's own API
+            # docs confirm "headers" is a plain {name: value} object on the
+            # send-email payload -- verified live against resend.com/docs
+            # rather than assumed, per Nick's no-guessing rule.
+            payload["headers"] = headers
         res = requests.post(
             "https://api.resend.com/emails",
             headers={
                 "Authorization": f"Bearer {RESEND_API_KEY}",
                 "Content-Type": "application/json"
             },
-            json={
-                "from": from_label,
-                "to": [to_email],
-                "subject": subject,
-                "html": html_body
-            },
+            json=payload,
             timeout=10
         )
         if res.status_code not in (200, 201):
@@ -254,6 +266,27 @@ def send_purchased_lead_email(customer_email: str, lead_data: dict):
         logging.error(f"[Email] Error sending purchased lead to {customer_email}: {e}")
 
 
+def _list_unsubscribe_headers(unsubscribe_url: str) -> Optional[Dict[str, str]]:
+    """Sep 10 2026: real List-Unsubscribe / List-Unsubscribe-Post headers
+    (RFC 2369 / RFC 8058), not just a link in the body. Verified live
+    against Google's bulk-sender guidance and current deliverability
+    write-ups (Suped, Resend's own blog) rather than assumed: mailbox
+    providers read these as a strong "legitimate, compliant sender" signal
+    that feeds into Primary-vs-Promotions placement, on top of being a
+    requirement once send volume crosses Gmail/Yahoo's bulk-sender
+    threshold. List-Unsubscribe-Post=One-Click is only honest to send
+    because /unsubscribe and /unsubscribe-teaser in main.py now both have
+    a POST handler that actually honours a bare one-click POST (added
+    alongside this) -- advertising one-click support without backing it
+    is worse than not advertising it at all."""
+    if not unsubscribe_url:
+        return None
+    return {
+        "List-Unsubscribe": f"<{unsubscribe_url}>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    }
+
+
 def _blur_address_to_area(address: str) -> str:
     """Sep 5 2026, free-signup teaser emails: shows the general area (the
     postcode outcode, e.g. "NG22") without the street/house-number detail
@@ -311,40 +344,83 @@ def send_free_lead_code_email(email: str, lead_data: dict, code: str, expires_ho
     entered back on site, per Nick's explicit spec: "we email them the rough
     details... enter the code... we reveal the lead to them as if bought."
     Unsubscribe link styled small/low per Nick's 10 Sep 2026 instruction on
-    the cold-email sequence, matching that same convention here."""
-    subject = f"Your free lead code: {lead_data.get('council_source', 'Local')} Tree Surgery"
+    the cold-email sequence, matching that same convention here.
+
+    Sep 10 2026, v2 -- Nick's direct feedback on the first live test:
+    (1) Gmail sorted it into Promotions, not Primary -- rewritten subject/
+    opening copy to read as a confirmation rather than a marketing pitch
+    ("free", "no card, no subscription" sales framing removed), added a
+    hidden preheader so Gmail's preview snippet is the confirmation line
+    rather than whatever text happened to render first, and this now sends
+    real List-Unsubscribe / List-Unsubscribe-Post headers (see
+    _list_unsubscribe_headers) -- all verified against current deliverability
+    guidance rather than guessed, since none of this is guaranteed to move
+    a specific message and Nick should know it's a best-effort fix, not a
+    promise. (2) "looks cheap and scammy, needs our design stamp" -- added
+    the real TreeKey mark (served from /static/icon-192.png, the same file
+    used as the site's own favicon/app icon) as a small header, tightened
+    the copy to state facts rather than sell, and removed the "same as if
+    you'd bought it" comparison-shopping line. (3) "this was not a cold
+    sales email with a code, it was just confirmation code" -- reworded
+    throughout as a reservation confirmation, not an offer."""
+    subject = f"Your TreeKey confirmation code — {lead_data.get('council_source', 'Local')} job reserved"
     expires_label = f"{int(expires_hours)} hours" if expires_hours < 48 else f"{int(expires_hours / 24)} days"
     unsub_html = (
         f'<p style="font-size:11px; color:#94a3b8; margin-top:36px; padding-top:12px; '
         f'border-top:1px solid #e2e8f0;"><a href="{unsubscribe_url}" style="color:#94a3b8;">Unsubscribe</a></p>'
         if unsubscribe_url else ""
     )
+    # Hidden preheader: this is the snippet Gmail/Outlook show next to the
+    # subject line. Without it, Gmail grabs the first visible text in the
+    # body instead -- previously that was "No card, no subscription...",
+    # which reads exactly like a marketing teaser. The &nbsp;+zero-width-
+    # joiner padding after it is the standard trick to stop Gmail tacking
+    # on extra body text after the preheader in the preview snippet.
+    preheader = (
+        f"Confirmation code for the job reserved for you near "
+        f"{_blur_address_to_area(lead_data.get('address', ''))}."
+    )
+    preheader_html = (
+        f'<div style="display:none; max-height:0; overflow:hidden; mso-hide:all;">{preheader}'
+        + "&nbsp;&zwnj;" * 40 +
+        '</div>'
+    )
+    logo_url = f"{PUBLIC_APP_URL}/static/icon-192.png"
     html = f"""
-    <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
-        <h2 style="color: #059669; margin-top: 0;">A real job, reserved for you</h2>
-        <p style="color: #374151;">No card, no subscription. This lead has been pulled off the market and held for you, it will not be shown or sold to anyone else while your code is valid.</p>
-        <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
+    {preheader_html}
+    <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 600px; margin: auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 8px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid #e5e7eb; width:100%;">
+            <tr>
+                <td style="width:34px; vertical-align:middle;"><img src="{logo_url}" width="28" height="28" alt="TreeKey" style="display:block; border-radius:6px;"></td>
+                <td style="vertical-align:middle; padding-left:8px; font-size:15px; font-weight:bold; color:#111827; letter-spacing:0.3px;">TreeKey</td>
+            </tr>
+        </table>
+        <h2 style="color: #111827; margin: 0 0 12px 0; font-size: 19px;">Your job reservation is confirmed</h2>
+        <p style="color: #374151; margin: 0 0 16px 0;">We've reserved the job below for you and taken it off the market. Use the confirmation code to view the full details.</p>
+        <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 0 0 20px 0; border: 1px solid #e2e8f0;">
             <p style="margin: 0 0 10px 0;"><strong>Location:</strong> {_blur_address_to_area(lead_data.get('address', ''))}</p>
             <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source', 'N/A')}</p>
             <p style="margin: 0;"><strong>Job details:</strong><br/>
                <span style="color: #475569; font-size: 14px;">{lead_data.get('summary', 'No summary available.')}</span>
             </p>
         </div>
-        <div style="background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; padding: 15px; margin: 20px 0; text-align: center;">
-            <p style="margin: 0 0 6px 0; font-size: 12px; color: #059669; font-weight: bold; letter-spacing: 0.5px;">YOUR CODE</p>
-            <p style="margin: 0; font-size: 26px; font-weight: bold; color: #065f46; letter-spacing: 2px; font-family: monospace;">{code}</p>
+        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 15px; margin: 0 0 20px 0; text-align: center;">
+            <p style="margin: 0 0 6px 0; font-size: 12px; color: #166534; font-weight: bold; letter-spacing: 0.5px;">CONFIRMATION CODE</p>
+            <p style="margin: 0; font-size: 26px; font-weight: bold; color: #14532d; letter-spacing: 2px; font-family: monospace;">{code}</p>
         </div>
-        <p style="font-size: 13px; color: #64748b;">
-            Enter this code on the free lead page to reveal the full address and unlock it, same as if you'd bought it:
-            <a href="{PUBLIC_APP_URL}/free-account" style="color:#059669; font-weight:bold;">Enter my code →</a>
+        <p style="font-size: 13px; color: #64748b; margin: 0 0 8px 0;">
+            Enter this code to view the full job details:
+            <a href="{PUBLIC_APP_URL}/free-account" style="color:#059669; font-weight:bold;">View my reserved job →</a>
         </p>
-        <p style="font-size: 12px; color: #94a3b8;">
-            This code is valid for {expires_label}. If it isn't used in time, this lead goes back on the open market and you can request a fresh one near you from the same page.
+        <p style="font-size: 12px; color: #94a3b8; margin: 0;">
+            This code is valid for {expires_label}. If it isn't used in time, the job is released and you can request another one near you from the same page.
         </p>
+        <p style="font-size:11px; color:#cbd5e1; margin-top:24px;">TreeKey — Vector Data Labs · treekey.uk</p>
         {unsub_html}
     </div>
     """
-    return send_transactional_email(to_email=email, subject=subject, html_body=html)
+    return send_transactional_email(to_email=email, subject=subject, html_body=html,
+                                     headers=_list_unsubscribe_headers(unsubscribe_url))
 
 
 def send_teaser_lead_email(email: str, lead_data: dict, unsubscribe_url: str = "") -> bool:
@@ -374,7 +450,8 @@ def send_teaser_lead_email(email: str, lead_data: dict, unsubscribe_url: str = "
         {unsub_html}
     </div>
     """
-    return send_transactional_email(to_email=email, subject=subject, html_body=html)
+    return send_transactional_email(to_email=email, subject=subject, html_body=html,
+                                     headers=_list_unsubscribe_headers(unsubscribe_url))
 
 
 def send_teaser_email_batch(min_hours_since_last: float = 72.0, unsubscribe_url_builder=None) -> int:

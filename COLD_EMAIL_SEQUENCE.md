@@ -8,6 +8,8 @@ Written 2 Sep 2026, pulling real pricing/copy from `payments.py` (not the older,
 
 **Styling instruction (10 Sep 2026):** in the actual HTML send template, the unsubscribe link must be very small (roughly 10-11px) and pushed well below the sign-off, visually separated from the body copy (e.g. extra top margin, muted grey colour, thin divider above it) — not a normal-weight line sitting right under "Nick, TreeKey".
 
+**Unsubscribe infrastructure now real (10 Sep 2026):** every `[link]`/`Unsubscribe: [link]` placeholder in this document referred to a mechanism that didn't exist yet — the only working unsubscribe route required an existing limbo_accounts row, which a cold contact who's never touched the site doesn't have. That's now fixed: `GET /unsubscribe?token=...` works for any email address (see main.py), signed the same way as every other link in this app via `_sign_session_cookie(email)`. When the enrichment script mentioned below is actually built, every send must build this token per recipient and use the real URL, e.g. `f"{PUBLIC_APP_URL}/unsubscribe?token={_sign_session_cookie(recipient_email)}"` — not the `[link]` placeholder still shown throughout the drafts in this file.
+
 **Personalization tokens used:** `{{director_name}}`, `{{company_name}}`, `{{city}}`, `{{recent_tpo_street}}`
 
 ---

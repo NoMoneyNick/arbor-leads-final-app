@@ -389,6 +389,21 @@ def init_db():
             -- code REQUEST (not per email) so repeat/lapsed-code requests are
             -- all visible and cappable, and so ip_address/device_id give a
             -- real abuse-detection trail.
+            -- Sep 10 2026: closes the compliance gap flagged repeatedly this
+            -- session -- the ONLY working unsubscribe route (/unsubscribe-
+            -- teaser) requires an existing limbo_accounts row, so a cold
+            -- contact who has never touched the site (the actual audience
+            -- of COLD_EMAIL_SEQUENCE.md, once that sending system is built)
+            -- has no way to opt out. This is a single suppression list keyed
+            -- by email, independent of any account existing, checked by
+            -- every marketing-style send in this app -- see the new
+            -- /unsubscribe route in main.py and is_email_suppressed below.
+            CREATE TABLE IF NOT EXISTS email_suppressions (
+                email TEXT PRIMARY KEY,
+                suppressed_at TIMESTAMPTZ DEFAULT NOW(),
+                reason TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS free_lead_codes (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 email TEXT NOT NULL,
@@ -3603,7 +3618,15 @@ def get_limbo_accounts_due_for_teaser(min_hours_since_last: float = 72.0) -> lis
     anyone who has since become a real paying subscriber (checked live
     against contractor_subscriptions.active rather than a stored flag on
     this table, so it can never drift out of sync with a Stripe webhook)
-    and anyone who unsubscribed."""
+    and anyone who unsubscribed.
+
+    Sep 10 2026: also excludes anyone on the new, account-independent
+    email_suppressions list (see add_email_suppression/is_email_suppressed)
+    -- someone can now opt out via the generic /unsubscribe link before or
+    without ever having la.unsubscribed set, and this join is what actually
+    enforces that for this batch rather than relying on the per-row
+    is_email_suppressed helper (this fails the whole query closed -- no
+    cohort at all -- on a DB error, which is the safer default here)."""
     if not SURL:
         return []
     try:
@@ -3615,7 +3638,9 @@ def get_limbo_accounts_due_for_teaser(min_hours_since_last: float = 72.0) -> lis
                        la.free_lead_ref, la.last_teaser_lead_ref
                 FROM limbo_accounts la
                 LEFT JOIN contractor_subscriptions cs ON cs.customer_email = la.email AND cs.active = TRUE
+                LEFT JOIN email_suppressions es ON es.email = la.email
                 WHERE la.unsubscribed = FALSE
+                  AND es.email IS NULL
                   AND cs.id IS NULL
                   AND (la.last_teaser_sent_at IS NULL OR la.last_teaser_sent_at < NOW() - (%s || ' hours')::interval);
             """, (min_hours_since_last,))
@@ -3648,6 +3673,61 @@ def set_limbo_account_unsubscribed(email: str) -> bool:
             conn.close()
     except Exception as e:
         logger.error(f"[Free Signup] Error unsubscribing {email}: {e}")
+        return False
+
+
+def add_email_suppression(email: str, reason: str = "user_unsubscribed") -> bool:
+    """Sep 10 2026: the canonical opt-out write, callable for ANY email
+    address regardless of whether it has a limbo_accounts row -- unlike
+    set_limbo_account_unsubscribed above, which only affects an existing
+    account. main.py's new generic /unsubscribe route calls this (and also
+    still calls set_limbo_account_unsubscribed if that account happens to
+    exist, so nothing already relying on the `unsubscribed` column breaks)."""
+    if not SURL or not email:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                INSERT INTO email_suppressions (email, reason) VALUES (%s, %s)
+                ON CONFLICT (email) DO NOTHING;
+            """, (email.strip().lower(), reason))
+            conn.commit()
+            return True
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Suppression] Error adding suppression for {email}: {e}")
+        return False
+
+
+def is_email_suppressed(email: str) -> bool:
+    """Sep 10 2026: check before ANY marketing-style send (teaser emails,
+    and the future cold-outreach sequence once it's built) -- NOT before
+    the free-lead-code email itself, which is transactional (the user just
+    actively requested it by submitting the form)."""
+    if not SURL or not email:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT 1 FROM email_suppressions WHERE email = %s;", (email.strip().lower(),))
+            return cur.fetchone() is not None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Suppression] Error checking suppression for {email}: {e}")
+        # This standalone check fails open (False) on a DB error, matching
+        # every other lookup function's convention in this file. The actual
+        # batch-send enforcement point, get_limbo_accounts_due_for_teaser
+        # below, filters suppressed emails with its own SQL JOIN rather than
+        # calling this per-row, so a DB outage there fails the whole cohort
+        # query closed (returns no one to send to) rather than relying on
+        # this function's per-row behaviour.
         return False
 
 

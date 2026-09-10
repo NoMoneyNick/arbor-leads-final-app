@@ -17,7 +17,7 @@ import payments
 import csv
 import io
 from fastapi import FastAPI, Query, BackgroundTasks, HTTPException, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from typing import Optional
@@ -770,11 +770,7 @@ def _shared_footer_html() -> str:
                 <a href="/suggestions" class="text-slate-400 hover:text-white transition-colors">Suggestions</a>
                 <a href="/privacy-policy" class="text-slate-400 hover:text-white transition-colors">Privacy</a>
                 <a href="/terms-of-service" class="text-slate-400 hover:text-white transition-colors">Terms</a>
-                <a href="/health" class="text-slate-400 hover:text-white transition-colors flex items-center gap-2">
-                    <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
-                    Status
-                </a>
-                <a href="/admin" class="text-brand-green hover:text-emerald-400 transition-colors">Login</a>
+                <a href="/login" class="text-brand-green hover:text-emerald-400 transition-colors">Login</a>
             </div>
         </div>
     </footer>
@@ -1645,11 +1641,7 @@ def public_homepage():
                      It was never actually broken (real 200 JSON) -- just mislabeled:
                      it's a live-system-status pulse, not a data hub. Renamed to
                      match what a visitor actually gets when they click it. -->
-                <a href="/health" class="text-slate-400 hover:text-white transition-colors flex items-center gap-2">
-                    <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
-                    Status
-                </a>
-                <a href="/admin" class="text-brand-green hover:text-emerald-400 transition-colors">Login</a>
+                <a href="/login" class="text-brand-green hover:text-emerald-400 transition-colors">Login</a>
             </div>
         </div>
     </footer>
@@ -4591,7 +4583,60 @@ def unsubscribe_teaser(token: Optional[str] = None):
     if not email:
         return HTMLResponse("<h3>Invalid or expired unsubscribe link.</h3>", status_code=400)
     database.set_limbo_account_unsubscribed(email)
+    database.add_email_suppression(email, reason="teaser_unsubscribe")
     return HTMLResponse(f"<h3>You've been unsubscribed, {email}. You won't receive any more of these emails.</h3>")
+
+
+@app.post("/unsubscribe-teaser")
+def unsubscribe_teaser_one_click(token: Optional[str] = None):
+    """Sep 10 2026: RFC 8058 one-click unsubscribe. notifications.py now
+    sends a List-Unsubscribe-Post: List-Unsubscribe=One-Click header on
+    free-lead-code and teaser emails, which tells Gmail/Yahoo/Outlook they
+    may POST to the List-Unsubscribe URL directly (no page load, no
+    confirmation click) to unsubscribe someone. That header is only honest
+    to send if a POST to this exact path actually works -- same body as
+    the GET version above, just returning plain 200 text since the mailbox
+    provider's POST bot never renders HTML."""
+    email = _verify_session_cookie(token)
+    if not email:
+        return PlainTextResponse("Invalid or expired unsubscribe link.", status_code=400)
+    database.set_limbo_account_unsubscribed(email)
+    database.add_email_suppression(email, reason="teaser_unsubscribe")
+    return PlainTextResponse("Unsubscribed.")
+
+
+@app.get("/unsubscribe", response_class=HTMLResponse)
+def unsubscribe_generic(token: Optional[str] = None):
+    """Sep 10 2026: the canonical unsubscribe link, works for ANY email --
+    unlike /unsubscribe-teaser above, this does NOT require the address to
+    already have a limbo_accounts row, closing the gap flagged repeatedly
+    this session: a cold-outreach recipient who has never touched the site
+    (the actual audience of COLD_EMAIL_SEQUENCE.md, once that sending
+    system is built) previously had no way to opt out at all. Uses the same
+    _sign_session_cookie/_verify_session_cookie HMAC signer already used
+    for /unsubscribe-teaser and login links -- it just signs an email
+    string, nothing about it is limbo-account-specific, so it works here
+    unchanged. Still also flips limbo_accounts.unsubscribed when that
+    account exists, so nothing relying on that column breaks."""
+    email = _verify_session_cookie(token)
+    if not email:
+        return HTMLResponse("<h3>Invalid or expired unsubscribe link.</h3>", status_code=400)
+    database.add_email_suppression(email, reason="unsubscribe_link")
+    database.set_limbo_account_unsubscribed(email)  # no-op if no account exists for this email
+    return HTMLResponse(f"<h3>You've been unsubscribed, {email}. You won't receive any more marketing emails from TreeKey.</h3>")
+
+
+@app.post("/unsubscribe")
+def unsubscribe_generic_one_click(token: Optional[str] = None):
+    """RFC 8058 one-click counterpart to /unsubscribe above -- see
+    unsubscribe_teaser_one_click's docstring for why this needs to exist
+    once List-Unsubscribe-Post is advertised in the email headers."""
+    email = _verify_session_cookie(token)
+    if not email:
+        return PlainTextResponse("Invalid or expired unsubscribe link.", status_code=400)
+    database.add_email_suppression(email, reason="unsubscribe_link")
+    database.set_limbo_account_unsubscribed(email)
+    return PlainTextResponse("Unsubscribed.")
 
 
 @app.get("/trigger-teaser-emails")
