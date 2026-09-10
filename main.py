@@ -3180,6 +3180,19 @@ def admin_clear_lead_flag(request: Request, secret: Optional[str] = Query(None),
     return PlainTextResponse(f"No redeemed free_lead_codes rows found for {email} -- nothing to clear.")
 
 
+@app.get("/admin/list-redeemed-leads")
+def admin_list_redeemed_leads(request: Request, secret: Optional[str] = Query(None), limit: int = Query(15)):
+    """Admin/debug-only, Sep 10 2026: read-only lookup so you can see the
+    EXACT email string a redemption used (rather than guessing) before
+    calling /admin/clear-lead-flag. Nothing is changed here."""
+    verify_admin_or_secret(request, secret)
+    rows = database.list_recent_redeemed_free_leads(limit=limit)
+    if not rows:
+        return PlainTextResponse("No redeemed free_lead_codes rows found at all.")
+    lines = [f"{r['redeemed_at']}  |  email={r['email']}  |  ip={r['ip_address']}  |  device={r['device_id']}" for r in rows]
+    return PlainTextResponse("\n".join(lines))
+
+
 def _resolve_marketplace_location(raw_input: str) -> dict:
     """Sep 9 2026, Nick's ask: "add a 'name place' locator to marketplace to
     give the option of postcode OR a town or city" -- the marketplace search

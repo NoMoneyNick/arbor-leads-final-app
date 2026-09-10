@@ -3545,6 +3545,37 @@ def clear_lead_flag_for_email(email: str) -> int:
         return 0
 
 
+def list_recent_redeemed_free_leads(limit: int = 15) -> list:
+    """Admin/debug read-only helper, Sep 10 2026: lists the most recent
+    REDEEMED free_lead_codes rows (email, when, ip/device) so Nick can see
+    exactly which email/connection is holding the 30-day
+    is_ip_or_device_recently_flagged block, instead of guessing at the
+    email to pass to clear_lead_flag_for_email. Nothing here is changed,
+    purely a lookup."""
+    if not SURL:
+        return []
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT email, redeemed_at, ip_address, device_id
+                FROM free_lead_codes
+                WHERE redeemed_at IS NOT NULL
+                ORDER BY redeemed_at DESC
+                LIMIT %s;
+            """, (limit,))
+            rows = cur.fetchall()
+            return [{"email": r[0], "redeemed_at": r[1].isoformat() if r[1] else None,
+                     "ip_address": r[2], "device_id": r[3]} for r in rows]
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Admin] Error listing recent redemptions: {e}")
+        return []
+
+
 def count_free_lead_codes_issued_since(hours: float = 24.0) -> int:
     """Sep 10 2026: backs the daily circuit-breaker in main.py's code-issuing
     helper -- a hard cap on how many free-lead codes can go out in a rolling
