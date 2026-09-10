@@ -175,9 +175,19 @@ def _street_view_link_html(address: str) -> str:
     main.py) via that one function, so both stay identical."""
     import database
     url = database.street_view_url(address)
-    label = "Open Street View" if "map_action=pano" in url else "View on Map"
-    verb = "see this property in Google Street View" if "map_action=pano" in url else "view this property on Google Maps"
-    return f'To {verb}, click here: <a href="{url}" style="color: #0ea5e9;">{label}</a>'
+    is_pano = "map_action=pano" in url
+    label = "Open Street View" if is_pano else "View on Map"
+    verb = "see this property in Google Street View" if is_pano else "view this property on Google Maps"
+    # Sep 10 2026, Nick's ask: this is Google's nearest-available imagery to
+    # the geocoded address, not a verified photo of the actual property --
+    # it can be outdated, or (especially on rural/unnamed roads) show a
+    # neighbouring building instead. Said plainly so nobody mistakes it for
+    # a guarantee.
+    caveat = (
+        ' <span style="color:#94a3b8; font-size:12px;">(imagery may be out of date or not show the exact property)</span>'
+        if is_pano else ""
+    )
+    return f'To {verb}, click here: <a href="{url}" style="color: #0ea5e9;">{label}</a>{caveat}'
 
 
 def send_purchased_lead_email(customer_email: str, lead_data: dict):
@@ -266,6 +276,85 @@ def send_purchased_lead_email(customer_email: str, lead_data: dict):
         logging.error(f"[Email] Error sending purchased lead to {customer_email}: {e}")
 
 
+def send_free_lead_granted_email(customer_email: str, lead_data: dict, unsubscribe_url: str = "") -> bool:
+    """Sep 10 2026, Nick's ask (verbatim: "once they own a lead we give them
+    everything we have on it, everything we can find"). A paid marketplace
+    purchase already gets this via send_purchased_lead_email (called from
+    payments.handle_stripe_webhook), but the free-lead reserve+code
+    redesign never grew an equivalent for a FREE grant -- the old
+    instant-grant flow had one (send_free_account_welcome_email, deleted
+    earlier this session as dead/unsafe), but nothing safe replaced its
+    actual job once the architecture moved to reserve-then-redeem. Right
+    now a free-lead customer who successfully redeems their code only ever
+    sees the full details on the dashboard page itself -- confirmed live
+    (Nick's own test) that no email with the unlocked details goes out at
+    all. This mirrors send_purchased_lead_email's content exactly (address,
+    applicant/agent info, summary, Street View link, the same "what
+    councils do/don't publish" note) since the moment they own a lead the
+    same redaction rules that apply pre-purchase no longer apply -- only
+    the subject/intro wording differs (no "purchase" framing for something
+    that cost no money). Routed through send_transactional_email (real
+    List-Unsubscribe headers) rather than send_purchased_lead_email's older
+    direct Resend call, matching this session's other email fixes."""
+    subject = f"Your free lead is confirmed — {lead_data.get('council_source', 'Local')} tree job unlocked"
+
+    applicant_name = lead_data.get("applicant_name")
+    agent_name = lead_data.get("agent_name")
+    agent_company = lead_data.get("agent_company")
+    has_agent = lead_data.get("has_agent")
+
+    applicant_row = (
+        f'<p style="margin: 0 0 10px 0;"><strong>Homeowner / Applicant:</strong> {applicant_name}</p>'
+        if applicant_name else
+        '<p style="margin: 0 0 10px 0; color: #94a3b8;"><strong>Homeowner / Applicant:</strong> Not published by the council for this application.</p>'
+    )
+
+    if has_agent is True:
+        agent_label = agent_company or agent_name or "an agent"
+        agent_row = (
+            f'<p style="margin: 10px 0 0 0; color: #b45309;"><strong>Heads up:</strong> this application already lists an agent/contractor '
+            f'on record ({agent_label}) — the homeowner may already have someone instructed. Worth confirming before you invest time quoting.</p>'
+        )
+    elif has_agent is False:
+        agent_row = '<p style="margin: 10px 0 0 0; color: #059669;">No agent/contractor is listed on record for this application.</p>'
+    else:
+        agent_row = '<p style="margin: 10px 0 0 0; color: #94a3b8;">Agent/contractor status: not confirmed — the council record didn\'t clearly show one way or the other.</p>'
+
+    unsub_html = (
+        f'<p style="font-size:10px; color:#9ca3af; margin-top:20px;"><a href="{unsubscribe_url}" style="color:#9ca3af;">Unsubscribe</a></p>'
+        if unsubscribe_url else ""
+    )
+
+    html = f"""
+    <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
+        <h2 style="color: #059669; margin-top: 0;">Your free lead is confirmed!</h2>
+        <p style="color: #374151;">This job is genuinely yours now — nobody else can claim it. Here are the full details.</p>
+
+        <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
+            <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {lead_data.get('reference', 'N/A')}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {lead_data.get('address', 'N/A')}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source', 'N/A')}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Estimated Value Grade:</strong> {lead_data.get('lead_score', 'Medium').title()}</p>
+            {applicant_row}
+            <p style="margin: 0;"><strong>Description / Summary:</strong><br/>
+               <span style="color: #475569; font-size: 14px;">{lead_data.get('summary', 'No summary available.')}</span>
+            </p>
+            {agent_row}
+        </div>
+
+        <p style="font-size: 13px; color: #64748b;">
+            {_street_view_link_html(lead_data.get('address', ''))}
+        </p>
+        <p style="font-size: 12px; color: #94a3b8;">
+            Note: UK councils do not publish a homeowner's phone number or email address on planning applications. This lead includes everything that is legally published: the address, the applicant name (when the council records it), and the application details above.
+        </p>
+        {unsub_html}
+    </div>
+    """
+    return send_transactional_email(to_email=customer_email, subject=subject, html_body=html,
+                                     headers=_list_unsubscribe_headers(unsubscribe_url))
+
+
 def _list_unsubscribe_headers(unsubscribe_url: str) -> Optional[Dict[str, str]]:
     """Sep 10 2026: real List-Unsubscribe / List-Unsubscribe-Post headers
     (RFC 2369 / RFC 8058), not just a link in the body. Verified live
@@ -324,8 +413,23 @@ def _safe_area_label(address: str) -> str:
     number: an outcode alone doesn't encode one. Returns e.g. "SM7,
     Reigate and Banstead" -- real, specific enough that Nick's own test
     reaction was "I recognise Banstead, that's near me", without ever
-    touching the raw address text."""
+    touching the raw address text.
+
+    Sep 10 2026 follow-up: get_outcode_area_label resolves at OUTCODE level,
+    which is ambiguous when one outcode spans more than one district (e.g.
+    TN16 is mostly Sevenoaks, Kent, but a sliver of it is the London borough
+    of Bromley) -- confirmed live, a real lead in Brasted, Kent (TN16 1JB)
+    got wrongly labelled "TN16, Bromley, London". Now prefers a full-
+    postcode lookup (database.get_full_postcode_area_label, unambiguous)
+    when the address contains a full postcode, falling back to the
+    outcode-only resolution when it doesn't -- same structural guarantee as
+    before, still never touches street/house-level text."""
     import database
+    full_postcodes = database._extract_full_postcodes(address or "")
+    if full_postcodes:
+        area = database.get_full_postcode_area_label(full_postcodes[0])
+        if area.get("label"):
+            return area["label"]
     outcodes = database._extract_outcodes(address or "")
     if not outcodes:
         return "your area"
@@ -390,7 +494,7 @@ def send_cold_email_1(email: str, lead_data: dict, code: str, director_name: str
         <p style="margin:0 0 14px 0;">{director_line}</p>
         <p style="margin:0 0 14px 0;">Found a live tree job near {area} that nobody's claimed yet.</p>
         <p style="margin:0 0 14px 0;">{council} logged {work} this week (ref {ref}). No tree surgeon's listed as the agent on it yet.</p>
-        <p style="margin:0 0 14px 0;">It's sitting on the council's public planning register right now, free for anyone to look up, but nobody's contacted the homeowner first. It's yours, free, no card needed: <a href="{link}" style="color:#059669;">{link}</a></p>
+        <p style="margin:0 0 14px 0;">It's a live, unclaimed job on the council's register — we've already pulled it, verified it and set it aside for you, so you're not the one trawling every council portal yourself. Nobody's contacted the homeowner yet. It's yours, free, no card needed: <a href="{link}" style="color:#059669;">{link}</a></p>
         <p style="margin:0 0 14px 0;">Your code: <strong style="font-family:monospace; letter-spacing:1px;">{code}</strong> — enter it on that page to unlock the full address.</p>
         <p style="margin:0 0 14px 0;">I run TreeKey — we scan every UK council's planning register daily for tree work and pass on jobs like this before most contractors even know they exist.</p>
         <p style="margin:0 0 20px 0;">More in a few days if it's useful. No obligation either way.</p>

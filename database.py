@@ -2475,6 +2475,59 @@ def get_outcode_area_label(outcode: str) -> dict:
     return {"district": district, "is_london": is_london, "label": _label(district, is_london), "lat": lat, "lon": lon}
 
 
+def _extract_full_postcodes(address: str) -> list:
+    """Sep 10 2026: same regex as _extract_outcodes above, but keeps the
+    incode too (e.g. "TN16 1JB" not just "TN16") -- for callers that need
+    get_full_postcode_area_label's precise per-postcode lookup rather than
+    the ambiguous outcode-only one."""
+    return [f"{m.group(1)} {m.group(2)}" for m in re.finditer(r'\b([A-Z]{1,2}[0-9][A-Z0-9]?)\s*([0-9][A-Z]{2})\b', (address or "").upper())]
+
+
+_full_postcode_area_cache: Dict[str, dict] = {}
+
+
+def get_full_postcode_area_label(full_postcode: str) -> dict:
+    """Sep 10 2026: get_outcode_area_label above resolves via the OUTCODE-
+    level postcodes.io endpoint, which returns a LIST of districts whenever
+    one outcode spans more than one (e.g. TN16 covers mostly Sevenoaks,
+    Kent, but a small sliver of it is in the London borough of Bromley) --
+    it always took districts[0], with no way to know which one actually
+    applies to any specific address in that outcode. Confirmed live: a real
+    lead at "White Cottage, High Street, Brasted, Kent TN16 1JB" got
+    labelled "TN16, Bromley, London" in a cold email, which is wrong --
+    Brasted isn't anywhere near Bromley. This does a per-postcode lookup
+    instead (unambiguous -- one exact postcode has exactly one
+    admin_district), used whenever a full postcode is available rather
+    than just an outcode. In-memory cache only (not the outcode_area_cache
+    table/schema) since this is only used per-email-send, not a page-load-
+    critical path like the ticker/radar -- deliberately the smallest safe
+    fix rather than touching the existing outcode-level cache other
+    callers rely on."""
+    full_postcode = (full_postcode or "").strip().upper()
+    if not full_postcode:
+        return {"district": None, "is_london": False, "label": ""}
+    if full_postcode in _full_postcode_area_cache:
+        return _full_postcode_area_cache[full_postcode]
+    outcode = full_postcode.split(" ")[0]
+    result = {"district": None, "is_london": False, "label": outcode}
+    try:
+        resp = requests.get(f"https://api.postcodes.io/postcodes/{full_postcode.replace(' ', '')}", timeout=3)
+        if resp.status_code == 200:
+            data = resp.json().get("result") or {}
+            district = data.get("admin_district")
+            resolved_outcode = data.get("outcode") or outcode
+            is_london = bool(district) and district.strip().lower() in _LONDON_BOROUGHS
+            if district:
+                label = f"{resolved_outcode}, {district}, London" if is_london else f"{resolved_outcode}, {district}"
+            else:
+                label = resolved_outcode
+            result = {"district": district, "is_london": is_london, "label": label}
+    except Exception as e:
+        _geocode_failure("full postcode area label", full_postcode, e)
+    _full_postcode_area_cache[full_postcode] = result
+    return result
+
+
 def get_lead_discovery_counts() -> dict:
     """Real counts of leads discovered today / this week / this calendar
     month -- for the honest "counting up" ticker display. Never padded;

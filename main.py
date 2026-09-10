@@ -4483,6 +4483,20 @@ async def free_signup(request: Request):
             return RedirectResponse(
                 url="/free-account?error=Your+code+worked+and+the+job+is+now+yours%2C+but+we+couldn%27t+load+your+account+to+show+it.+Please+contact+contact%40treekey.uk+with+your+email+so+we+can+fix+this+manually.",
                 status_code=303)
+
+        # Sep 10 2026, Nick's ask ("once they own a lead we give them
+        # everything we have on it"): a paid marketplace purchase already
+        # gets a full-details email via send_purchased_lead_email -- a
+        # successful free-lead redemption never did under the reserve+code
+        # redesign, confirmed live. Best-effort: a failed send here must
+        # never block the redirect to their dashboard, since the lead is
+        # already genuinely theirs regardless of whether this email lands.
+        try:
+            import notifications
+            notifications.send_free_lead_granted_email(email, result["lead"], unsubscribe_url=_make_unsubscribe_url(email))
+        except Exception as e:
+            logger.error(f"[Free Signup] send_free_lead_granted_email failed for {email}: {e}")
+
         response = RedirectResponse(url="/free-dashboard", status_code=303)
         response.set_cookie(key="treekey_contractor_session", value=_sign_session_cookie(email),
                              max_age=86400 * 30, httponly=True, secure=True, samesite="lax")
@@ -4633,6 +4647,14 @@ def free_dashboard(request: Request):
             if burned:
                 database.record_free_lead_grant(email, burned["reference"])
                 account["free_lead_ref"] = burned["reference"]
+                # Sep 10 2026, same fix as the main redemption branch above:
+                # this self-heal path also hands someone a genuinely-owned
+                # lead, so it should get the same full-details email.
+                try:
+                    import notifications
+                    notifications.send_free_lead_granted_email(email, burned, unsubscribe_url=_make_unsubscribe_url(email))
+                except Exception as e:
+                    logger.error(f"[Free Dashboard] send_free_lead_granted_email failed for {email}: {e}")
 
     if account.get("free_lead_ref"):
         lead = database.get_lead_by_reference(account["free_lead_ref"])
@@ -4790,6 +4812,16 @@ def contractor_dashboard(request: Request):
         # give a real Street View pano link when the address geocodes,
         # instead of just a generic map pin)
         gmap_url = database.street_view_url(addr)
+        is_street_view_pano = "map_action=pano" in gmap_url
+        # Sep 10 2026, Nick's ask: make the "this is Google's nearest
+        # imagery, not a verified photo" caveat visible on the page itself,
+        # not just a hover tooltip on the button (see below) -- same
+        # wording as the matching email caveat in notifications.
+        # _street_view_link_html.
+        street_view_caveat = (
+            '<div style="font-size:10px; color:#64748b; margin-top:6px;">Street View imagery may be out of date or not show the exact property.</div>'
+            if is_street_view_pano else ""
+        )
 
         # Aug 30 2026: has_agent/applicant_name are captured by the scraper but
         # were never shown here -- every lead looked identical whether or not
@@ -4818,9 +4850,10 @@ def contractor_dashboard(request: Request):
                 <div style="display:flex; gap:6px; flex-wrap:wrap;">
                     <a href="/generate-letter/{urllib.parse.quote(ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Letter</a>
                     <a href="/generate-street-flyer/{urllib.parse.quote(ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street Flyer</a>
-                    <a href="{gmap_url}" target="_blank" style="background:#334155; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street View</a>
+                    <a href="{gmap_url}" target="_blank" title="Google's nearest available imagery for this address -- may be outdated or not show the exact property" style="background:#334155; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street View</a>
                 </div>
             </div>
+            {street_view_caveat}
             <div style="background:#020617; border-left:3px solid #059669; padding:8px 12px; margin-top:10px; font-size:12px; color:#cbd5e1;">
                 <b>Specification:</b> {summary[:180]}...
             </div>
