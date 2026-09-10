@@ -2769,7 +2769,7 @@ def trigger_qr_campaign_stats(secret: Optional[str] = Query(None)):
 # ── 1-Tap Homeowner Introduction Letter Generator ─────────────────────────────
 
 @app.get("/generate-letter/{lead_id}", response_class=HTMLResponse)
-def generate_homeowner_letter(lead_id: str, company: str = "Your Local Tree Specialists", phone: str = "07XXX XXXXXX"):
+def generate_homeowner_letter(request: Request, lead_id: str, company: str = "Your Local Tree Specialists", phone: str = "07XXX XXXXXX"):
     row = None
     try:
         conn = database.get_db_conn()
@@ -2794,6 +2794,19 @@ def generate_homeowner_letter(lead_id: str, company: str = "Your Local Tree Spec
             status_code=403
         )
 
+    # Sep 10 2026, Nick's ask ("an issue on the app, how do you go back
+    # when you click through?"): TreeKey's manifest.json sets
+    # display: standalone -- no browser chrome, no back/forward buttons --
+    # and this page (plus generate_street_flyer below) previously had ZERO
+    # navigation of its own, deliberately, since it's meant to be a clean
+    # printable document. Fine in a normal browser tab; inside the
+    # installed standalone app, that stranded the user with no way back at
+    # all. Added a small "back" link (hidden when actually printing, same
+    # @media print rule as the Print button) that goes to wherever THIS
+    # contractor's own dashboard actually is, using the same
+    # _nav_auth_state routing logic the nav bar uses.
+    _back_auth = _nav_auth_state(request)
+    back_url = _back_auth["dashboard_url"] if _back_auth else "/"
     return f"""
     <!DOCTYPE html>
     <html lang="en-GB">
@@ -2805,11 +2818,13 @@ def generate_homeowner_letter(lead_id: str, company: str = "Your Local Tree Spec
             .header {{ border-bottom: 2px solid #044332; padding-bottom: 15px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: flex-end; }}
             .title {{ font-size: 20px; font-weight: bold; color: #044332; }}
             .btn-print {{ background: #044332; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; font-family: sans-serif; }}
-            @media print {{ .btn-print {{ display: none; }} body {{ padding: 0; }} }}
+            .btn-back {{ color: #044332; font-family: sans-serif; font-size: 13px; text-decoration: none; font-weight: bold; }}
+            @media print {{ .btn-print {{ display: none; }} .btn-back {{ display: none; }} body {{ padding: 0; }} }}
         </style>
     </head>
     <body>
-        <div style="text-align:right; margin-bottom:15px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <a href="{back_url}" class="btn-back">&larr; Back to Dashboard</a>
             <button class="btn-print" onclick="window.print()">Print / Save as PDF</button>
         </div>
 
@@ -2863,7 +2878,7 @@ def generate_homeowner_letter(lead_id: str, company: str = "Your Local Tree Spec
 # ── 2. The "Neighbor Multiplier" 1-Tap Street Flyer Generator ─────────────────
 
 @app.get("/generate-street-flyer/{lead_id}", response_class=HTMLResponse)
-def generate_street_flyer(lead_id: str, company: str = "Your Local Tree Surgery Team", phone: str = "07XXX XXXXXX"):
+def generate_street_flyer(request: Request, lead_id: str, company: str = "Your Local Tree Surgery Team", phone: str = "07XXX XXXXXX"):
     row = None
     try:
         conn = database.get_db_conn()
@@ -2902,6 +2917,10 @@ def generate_street_flyer(lead_id: str, company: str = "Your Local Tree Surgery 
     parts = [p.strip() for p in addr.split(",") if p.strip()]
     street_name = parts[0] if parts else "your street"
 
+    # Sep 10 2026: same standalone-PWA "no way back" fix as
+    # generate_homeowner_letter above -- see that function's comment.
+    _back_auth = _nav_auth_state(request)
+    back_url = _back_auth["dashboard_url"] if _back_auth else "/"
     return f"""
     <!DOCTYPE html>
     <html lang="en-GB">
@@ -2913,12 +2932,14 @@ def generate_street_flyer(lead_id: str, company: str = "Your Local Tree Surgery 
             .card {{ border: 2px solid #044332; border-radius: 12px; padding: 28px; background: #ffffff; }}
             .badge {{ background: #044332; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; }}
             .btn-print {{ background: #044332; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; margin-bottom: 20px; }}
+            .btn-back {{ color: #044332; font-size: 13px; text-decoration: none; font-weight: bold; }}
             .discount-box {{ background: #f0fdf4; border: 2px dashed #059669; border-radius: 8px; padding: 16px; margin: 20px 0; text-align: center; }}
-            @media print {{ .btn-print {{ display: none; }} body {{ padding: 0; }} }}
+            @media print {{ .btn-print {{ display: none; }} .btn-back {{ display: none; }} body {{ padding: 0; }} }}
         </style>
     </head>
     <body>
-        <div style="text-align:right;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <a href="{back_url}" class="btn-back">&larr; Back to Dashboard</a>
             <button class="btn-print" onclick="window.print()">Print 5 Copies for Neighbors</button>
         </div>
 
@@ -5509,10 +5530,14 @@ def storm_radar_view(request: Request):
 
 
 @app.get("/generate-storm-quote/{lead_id}", response_class=HTMLResponse)
-def generate_storm_quote(lead_id: str, company: str = "Your Emergency Tree Surgery Team", phone: str = "07XXX XXXXXX"):
+def generate_storm_quote(request: Request, lead_id: str, company: str = "Your Emergency Tree Surgery Team", phone: str = "07XXX XXXXXX"):
     """
     Generates a 1-tap printable Emergency Storm Takedown & Hazardous Tree Quote Sheet with BS3998 compliance.
     """
+    # Sep 10 2026: same standalone-PWA "no way back" fix as
+    # generate_homeowner_letter/generate_street_flyer above.
+    _back_auth = _nav_auth_state(request)
+    back_url = _back_auth["dashboard_url"] if _back_auth else "/"
     return f"""
     <!DOCTYPE html>
     <html lang="en-GB">
@@ -5524,11 +5549,13 @@ def generate_storm_quote(lead_id: str, company: str = "Your Emergency Tree Surge
             .card {{ border: 2px solid #dc2626; border-radius: 12px; padding: 28px; background: #ffffff; }}
             .badge {{ background: #dc2626; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; }}
             .btn-print {{ background: #044332; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; margin-bottom: 20px; }}
-            @media print {{ .btn-print {{ display: none; }} body {{ padding: 0; }} }}
+            .btn-back {{ color: #044332; font-size: 13px; text-decoration: none; font-weight: bold; }}
+            @media print {{ .btn-print {{ display: none; }} .btn-back {{ display: none; }} body {{ padding: 0; }} }}
         </style>
     </head>
     <body>
-        <div style="text-align:right;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <a href="{back_url}" class="btn-back">&larr; Back to Dashboard</a>
             <button class="btn-print" onclick="window.print()">Print / Save Emergency Quote PDF</button>
         </div>
 
