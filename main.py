@@ -688,15 +688,66 @@ self.addEventListener('fetch', event => {
 """
     return Response(content=sw_code, media_type="application/javascript")
 
-def _shared_nav_html() -> str:
+def _nav_auth_state(request: Optional[Request]) -> Optional[dict]:
+    """Sep 10 2026, Nick's ask: "when you log in, it should say 'nick logged
+    in' or something instead of the sign up/log in in the top right, it
+    should change if youre logged in" -- plus "same with website" (i.e.
+    every page, not just the dashboard). Shared by _shared_nav_html and the
+    homepage's own hand-rolled nav so both read login state the same way.
+    Returns None if there's no valid session; otherwise a dict with a
+    friendly display name and the correct landing page for THIS account
+    (paid subscriber vs free/limbo account vs neither), reusing the exact
+    same active_sub / limbo_account checks _login_session_response already
+    makes at login time, so a logged-in visitor always lands where their
+    own login would have sent them."""
+    if request is None:
+        return None
+    session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not session_email:
+        return None
+    active_sub = database.get_contractor_subscription(session_email)
+    if active_sub and active_sub.get("active"):
+        dashboard_url = "/dashboard"
+    elif database.get_limbo_account(session_email):
+        dashboard_url = "/free-dashboard"
+    else:
+        dashboard_url = "/pricing"
+    display_name = (session_email.split("@")[0] or session_email).replace(".", " ").replace("_", " ").replace("+", " ").strip().title() or session_email
+    return {"email": session_email, "display_name": display_name, "dashboard_url": dashboard_url}
+
+
+def _nav_auth_block_html(request: Optional[Request]) -> str:
+    """The bit of the nav that swaps between "Sign Up / Log In" and a
+    logged-in state -- pulled out so both _shared_nav_html and the
+    homepage's own nav render it identically."""
+    auth = _nav_auth_state(request)
+    if auth:
+        return f"""
+                    <a href="{auth['dashboard_url']}" class="hover:brightness-125 transition-all text-emerald-300 font-bold text-xs sm:text-sm">
+                        {html.escape(auth['display_name'])} — Dashboard &#10132;
+                    </a>
+                    <a href="/logout" class="text-slate-400 hover:text-white transition-colors text-xs font-mono uppercase">Log Out</a>"""
+    return """
+                    <a href="/login" class="bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 px-3.5 py-1.5 rounded-lg font-bold uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-[0_0_15px_rgba(5,150,105,0.2)]">
+                        Sign Up / Log In &#10132;
+                    </a>"""
+
+
+def _shared_nav_html(request: Optional[Request] = None) -> str:
     """Sep 9 2026, Nick's ask: Marketplace, Storm Radar and Packages/Pricing
     still looked like an entirely different, older (light-themed, no nav)
     site next to the homepage's current dark redesign -- he wants them
     brought in line before layering more content changes on top. Pulled the
     homepage's own nav bar out into one shared function so every page uses
     the exact same header instead of each hand-rolling its own copy that
-    can drift out of sync."""
-    return """
+    can drift out of sync.
+
+    Sep 10 2026: now takes the request so it can show real login state (see
+    _nav_auth_state) -- every caller should pass its own `request` object;
+    a caller with no session context (or one that genuinely can't be
+    logged in) can omit it and gets the logged-out button as before."""
+    auth_block = _nav_auth_block_html(request)
+    return f"""
     <nav class="sticky top-0 z-50 bg-slate-950/95 backdrop-blur-md border-b border-emerald-950 shadow-2xl">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center h-20">
@@ -719,9 +770,7 @@ def _shared_nav_html() -> str:
                         <a href="/pricing" class="hover:brightness-125 transition-all text-rose-400 font-bold">PACKAGES</a>
                         <a href="/faq" class="hover:brightness-125 transition-all text-violet-400 font-bold">FAQ</a>
                     </div>
-                    <a href="/login" class="bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 px-3.5 py-1.5 rounded-lg font-bold uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-[0_0_15px_rgba(5,150,105,0.2)]">
-                        Sign Up / Log In &#10132;
-                    </a>
+                    {auth_block}
                 </div>
             </div>
         </div>
@@ -778,7 +827,7 @@ def _shared_footer_html() -> str:
 
 
 @app.get("/", response_class=HTMLResponse)
-def public_homepage():
+def public_homepage(request: Request):
     stats = {"p": 0, "l": 0, "diverse_leads": [], "counts": {"today": 0, "week": 0, "month": 0}}
     try:
         conn = database.get_db_conn(); cur = conn.cursor()
@@ -1007,9 +1056,7 @@ def public_homepage():
                             <p class="m-0 pl-0">TreeKey will then open like any other app, full-screen with no browser bar.</p>
                         </div>
                     </div>
-                    <a href="/login" class="bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 px-3.5 py-1.5 rounded-lg font-bold uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-[0_0_15px_rgba(5,150,105,0.2)]">
-                        Sign Up / Log In ➔
-                    </a>
+                    {_nav_auth_block_html(request)}
                 </div>
             </div>
         </div>
@@ -2482,7 +2529,7 @@ def pricing(request: Request):
         </style>
     </head>
     <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
-    {_shared_nav_html()}
+    {_shared_nav_html(request)}
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
         <div class="header">
             <h1>Fair Trade Packages & Zero-Reselling Guarantee</h1>
@@ -2983,7 +3030,7 @@ def checkout(plan_key: str, request: Request):
     </style>
 </head>
 <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
-{_shared_nav_html()}
+{_shared_nav_html(request)}
 <div class="px-4 py-10">
 <div class="card">
     <h1>One last step</h1>
@@ -3234,7 +3281,7 @@ _CAT_ICONS = {
 
 
 @app.get("/marketplace", response_class=HTMLResponse)
-def marketplace_view(tier: Optional[str] = "all", category: Optional[str] = None,
+def marketplace_view(request: Request, tier: Optional[str] = "all", category: Optional[str] = None,
                       outcode: Optional[str] = None, radius: int = 15):
     """
     Single-Purchase Lead Marketplace with Statutory Freshness Badges & Filter Tabs:
@@ -3523,7 +3570,7 @@ def marketplace_view(tier: Optional[str] = "all", category: Optional[str] = None
         <link href="/static/tailwind.css" rel="stylesheet">
     </head>
     <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
-    {_shared_nav_html()}
+    {_shared_nav_html(request)}
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
         <div class="flex justify-between items-center mb-5 flex-wrap gap-2.5">
             <div>
@@ -3942,7 +3989,7 @@ def _login_session_response(verified_email: str) -> RedirectResponse:
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page(error: Optional[str] = None):
+def login_page(request: Request, error: Optional[str] = None):
     # Sep 9 2026, Nick's ask: "update our log in/sign in page to look like
     # our design including a redesign on the text boxes and removal of
     # emojis" -- brought onto the same dark Tailwind design system as the
@@ -3965,7 +4012,7 @@ def login_page(error: Optional[str] = None):
         </style>
     </head>
     <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
-    {_shared_nav_html()}
+    {_shared_nav_html(request)}
     <div class="px-4 py-6 sm:py-16">
     <div class="box max-w-[420px] mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl">
         <div class="text-center mb-4 sm:mb-5">
@@ -4029,14 +4076,21 @@ async def request_magic_link(request: Request):
 
     # Send Magic Link via Resend Email
     import notifications
+    # Sep 10 2026 fix: this was using the SITE's dark-theme text colour
+    # (#e2e8f0, #94a3b8 -- light grey/slate, meant to sit on a near-black
+    # background) but an email has no background-colour set, so it renders
+    # on white in every inbox -- pale-grey-on-white, exactly the "hard to
+    # read" bug Nick flagged. Switched to the same dark-on-white palette
+    # (#0f172a / #334155 / #64748b) already used by every other transactional
+    # email in notifications.py (e.g. send_purchased_lead_email).
     email_body = f"""
-    <div style="font-family:sans-serif; max-width:500px; margin:auto; padding:20px; color:#e2e8f0;">
-        <h2 style="color:#34d399;">Your TreeKey Login Link</h2>
-        <p>Click the secure button below to log in directly to your Contractor Command Center:</p>
+    <div style="font-family:sans-serif; max-width:500px; margin:auto; padding:20px; color:#334155;">
+        <h2 style="color:#059669;">Your TreeKey Login Link</h2>
+        <p style="color:#334155;">Click the secure button below to log in directly to your Contractor Command Center:</p>
         <div style="text-align:center; margin:24px 0;">
             <a href="{magic_url}" style="background:#059669; color:white; padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; display:inline-block;">Sign In to Dashboard ➔</a>
         </div>
-        <p style="font-size:13px; color:#94a3b8;">Logging in on a different device than this email is on? Enter this 6-digit code there instead: <b style="font-size:16px; color:#e2e8f0; letter-spacing:1px;">{otp_code}</b></p>
+        <p style="font-size:13px; color:#64748b;">Logging in on a different device than this email is on? Enter this 6-digit code there instead: <b style="font-size:16px; color:#0f172a; letter-spacing:1px;">{otp_code}</b></p>
         <p style="font-size:11px; color:#94a3b8; margin-top:24px;">This secure link and code are valid for 15 minutes. If you did not request this, you can safely ignore this email -- nothing happens unless the link is clicked or the code is entered.</p>
     </div>
     """
@@ -4074,7 +4128,7 @@ async def request_magic_link(request: Request):
         </style>
     </head>
     <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
-    {_shared_nav_html()}
+    {_shared_nav_html(request)}
     <div class="px-4 py-10 sm:py-16">
         <div class="box max-w-[440px] mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl text-center">
             <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30 mx-auto mb-3">
@@ -4160,7 +4214,7 @@ async def verify_otp_route(request: Request):
 # viewable and date it was applied... as a sales prompt."
 
 @app.get("/free-account", response_class=HTMLResponse)
-def free_account_signup_page(error: Optional[str] = None, sent: Optional[str] = None, code: Optional[str] = None,
+def free_account_signup_page(request: Request, error: Optional[str] = None, sent: Optional[str] = None, code: Optional[str] = None,
                               expired: Optional[str] = None):
     # Sep 9 2026, Nick's ask: brought onto the same dark design system as
     # the login page -- shared nav/footer, dark text-box styling, no
@@ -4264,7 +4318,7 @@ def free_account_signup_page(error: Optional[str] = None, sent: Optional[str] = 
         </style>
     </head>
     <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
-    {_shared_nav_html()}
+    {_shared_nav_html(request)}
     <div class="px-4 py-6 sm:py-16">
     <div class="box max-w-[440px] mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl">
         {body}
@@ -4679,6 +4733,53 @@ def free_dashboard(request: Request):
     else:
         lead_html = "<p class='text-slate-400 text-sm'>There are no jobs anywhere in the system to grant right now -- this should be very rare. We'll email you the very next one that comes in, wherever it is.</p>"
 
+    # Sep 10 2026, Nick's ask: "the app needs a home screen with options and
+    # buttons... links to the tools, links to your leads, link to the
+    # marketplace etc. its way too basic" -- this page (the one a free
+    # signup actually lands on and keeps coming back to) previously had
+    # nothing but the one granted lead and a subscribe upsell, no way to
+    # reach anything else in the app without knowing the URL. Quick-links
+    # grid mirrors the paid dashboard's own "Quick Access" grid (same
+    # destinations that make sense pre-subscription): Ledger only needs a
+    # session, not an active sub (see ledger_dashboard), so it's genuinely
+    # usable here too. Letter/Street Flyer link to their actual granted
+    # lead when they have one, same generator tools already offered from
+    # the free-lead-granted email.
+    free_ref = account.get("free_lead_ref")
+    tool_cards = ""
+    if free_ref:
+        ref_q = urllib.parse.quote(free_ref)
+        tool_cards += f"""
+            <a href="/generate-letter/{ref_q}" target="_blank" class="block bg-slate-800/50 border border-slate-700 hover:border-emerald-500 rounded-xl p-4 no-underline transition-colors">
+                <div class="text-white font-bold text-sm mb-1">Intro Letter</div>
+                <div class="text-slate-400 text-xs">For your free lead's homeowner</div>
+            </a>
+            <a href="/generate-street-flyer/{ref_q}" target="_blank" class="block bg-slate-800/50 border border-slate-700 hover:border-emerald-500 rounded-xl p-4 no-underline transition-colors">
+                <div class="text-white font-bold text-sm mb-1">Street Flyer</div>
+                <div class="text-slate-400 text-xs">Canvass the neighbours too</div>
+            </a>"""
+    tool_cards += """
+            <a href="/marketplace" class="block bg-slate-800/50 border border-slate-700 hover:border-sky-500 rounded-xl p-4 no-underline transition-colors">
+                <div class="text-white font-bold text-sm mb-1">Lead Marketplace</div>
+                <div class="text-slate-400 text-xs">Buy other unallocated leads outright</div>
+            </a>
+            <a href="/ledger" class="block bg-slate-800/50 border border-slate-700 hover:border-violet-500 rounded-xl p-4 no-underline transition-colors">
+                <div class="text-white font-bold text-sm mb-1">TreeKey Ledger</div>
+                <div class="text-slate-400 text-xs">Van-day costing &amp; £90k VAT gauge</div>
+            </a>
+            <a href="/chip-drop" class="block bg-slate-800/50 border border-slate-700 hover:border-orange-500 rounded-xl p-4 no-underline transition-colors">
+                <div class="text-white font-bold text-sm mb-1">Chip-Drop Network</div>
+                <div class="text-slate-400 text-xs">Skip £60-£120 tipping fees, free</div>
+            </a>
+            <a href="/storm-radar" class="block bg-slate-800/50 border border-slate-700 hover:border-amber-500 rounded-xl p-4 no-underline transition-colors">
+                <div class="text-white font-bold text-sm mb-1">Storm Radar</div>
+                <div class="text-slate-400 text-xs">High-wind warnings, be first to call</div>
+            </a>
+            <a href="/suggestions" class="block bg-slate-800/50 border border-slate-700 hover:border-slate-500 rounded-xl p-4 no-underline transition-colors">
+                <div class="text-white font-bold text-sm mb-1">Suggest a Tool</div>
+                <div class="text-slate-400 text-xs">Request features from the founders</div>
+            </a>"""
+
     return HTMLResponse(f"""
     <!DOCTYPE html>
     <html lang="en-GB" class="scroll-smooth">
@@ -4690,18 +4791,23 @@ def free_dashboard(request: Request):
         <link href="/static/tailwind.css" rel="stylesheet">
     </head>
     <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
-    {_shared_nav_html()}
+    {_shared_nav_html(request)}
     <div class="max-w-2xl mx-auto px-4 py-8 sm:py-12">
         <h2 class="text-white text-2xl font-extrabold mb-4">Your Free Lead</h2>
         <div class="mb-5">
             {lead_html}
         </div>
-        <div class="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-5">
+        <div class="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-5 mb-8">
             <p class="m-0 mb-3.5 text-sm text-emerald-200 leading-relaxed">
                 You're on our free list — expect a couple of local jobs a week by email (address blurred until you subscribe).
                 Subscribe any time to unlock full addresses and get jobs the moment they're filed.
             </p>
             <a href="/pricing" class="inline-block bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg no-underline font-bold text-sm transition-colors">See Subscription Plans →</a>
+        </div>
+
+        <h3 class="text-slate-400 text-xs font-bold uppercase tracking-wider mb-3">Quick Links</h3>
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {tool_cards}
         </div>
     </div>
     {_shared_footer_html()}
@@ -4820,20 +4926,24 @@ def contractor_dashboard(request: Request):
         filed_line = f"<br><span style='font-size:11px; color:#94a3b8;'>Filed: {filed_date}</span>" if filed_date else ""
 
         # Google Street View direct link (Sep 9 2026: shared with the
-        # purchase-confirmation email via database.street_view_url, so both
-        # give a real Street View pano link when the address geocodes,
-        # instead of just a generic map pin)
-        gmap_url = database.street_view_url(addr)
-        is_street_view_pano = "map_action=pano" in gmap_url
-        # Sep 10 2026, Nick's ask: make the "this is Google's nearest
-        # imagery, not a verified photo" caveat visible on the page itself,
-        # not just a hover tooltip on the button (see below) -- same
-        # wording as the matching email caveat in notifications.
-        # _street_view_link_html.
-        street_view_caveat = (
-            '<div style="font-size:10px; color:#64748b; margin-top:6px;">Street View imagery may be out of date or not show the exact property.</div>'
-            if is_street_view_pano else ""
-        )
+        # purchase-confirmation email via database.street_view_url).
+        #
+        # Sep 10 2026, production incident: this used to call
+        # database.street_view_url(addr) right here, INSIDE this per-lead
+        # loop -- meaning every dashboard page load made one live Google
+        # Geocoding API call per dispatched lead, sequentially. Nick
+        # reported "the loading was quite long" right after the Geocoding
+        # version of street_view_url shipped, and this loop is why. Fixed
+        # by no longer resolving the precise pin at render time at all --
+        # the button now links to /street-view/{reference}, which does the
+        # (now-cached, see database._street_view_url_cache) geocode lookup
+        # on click instead of on every render, then redirects straight into
+        # Street View. Since we no longer know precision ahead of the
+        # click, the caveat is now always shown rather than only for a
+        # precise pano link -- true either way, and safer than implying
+        # false precision.
+        gmap_url = f"/street-view/{urllib.parse.quote(ref)}"
+        street_view_caveat = '<div style="font-size:10px; color:#64748b; margin-top:6px;">Street View imagery may be out of date or not show the exact property.</div>'
 
         # Aug 30 2026: has_agent/applicant_name are captured by the scraper but
         # were never shown here -- every lead looked identical whether or not
@@ -4932,6 +5042,10 @@ def contractor_dashboard(request: Request):
                 <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Manage Tier</div>
                 <div style="font-size:11px; color:#94a3b8;">Upgrade or Adjust Coverage</div>
             </a>
+            <a href="/storm-radar" class="quick-card" style="border-top:2px solid #f59e0b;">
+                <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Storm Radar</div>
+                <div style="font-size:11px; color:#94a3b8;">High-Wind Warnings, Be First To Call</div>
+            </a>
             <a href="/suggestions" class="quick-card">
                 <div style="font-size:20px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"></path></svg></div>
                 <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Suggest Tool</div>
@@ -4956,6 +5070,27 @@ def contractor_dashboard(request: Request):
     """
 
 
+@app.get("/street-view/{reference}")
+def street_view_redirect(reference: str, request: Request):
+    """Sep 10 2026: resolves a dispatched lead's precise Street View pin
+    on click instead of at dashboard-render time -- see the comment in
+    contractor_dashboard's lead loop above for the production incident
+    this fixes (every dashboard load was making one Google Geocoding call
+    per lead). Session-gated and ownership-checked via
+    database.get_dispatched_lead_address_for_contractor -- this must never
+    become an open "resolve any address" endpoint, and must never leak
+    which references exist to someone they weren't dispatched to."""
+    session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not session_email:
+        return RedirectResponse(url="/login", status_code=303)
+
+    addr = database.get_dispatched_lead_address_for_contractor(session_email, reference)
+    if not addr:
+        return PlainTextResponse("Lead not found, or not dispatched to your account.", status_code=404)
+
+    return RedirectResponse(url=database.street_view_url(addr), status_code=302)
+
+
 @app.get("/logout")
 def logout():
     response = RedirectResponse(url="/login", status_code=303)
@@ -4968,7 +5103,7 @@ def logout():
 # ── 5. Free Woodchip & Timber Drop-Spotter Hub ─────────────────────────────────
 
 @app.get("/chip-drop", response_class=HTMLResponse)
-def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all", find_near: Optional[str] = None):
+def chip_drop_view(request: Request, outcode: Optional[str] = None, material: Optional[str] = "all", find_near: Optional[str] = None):
     """
     Woodchip & Timber Drop-Spotter Directory:
     Connects tree surgeons with nearby allotments, farms, and smallholders wanting free arborist woodchip or logs.
@@ -5107,7 +5242,7 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
         <link href="/static/tailwind.css" rel="stylesheet">
     </head>
     <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
-    {_shared_nav_html()}
+    {_shared_nav_html(request)}
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
         <div class="flex justify-between items-center mb-5 flex-wrap gap-2.5">
             <div>
@@ -5144,7 +5279,7 @@ def chip_drop_view(outcode: Optional[str] = None, material: Optional[str] = "all
 
 
 @app.get("/register-drop-spot", response_class=HTMLResponse)
-def register_drop_spot_page(site_name: Optional[str] = None, outcode: Optional[str] = None, town: Optional[str] = None):
+def register_drop_spot_page(request: Request, site_name: Optional[str] = None, outcode: Optional[str] = None, town: Optional[str] = None):
     """
     Intake form for UK landowners, allotments, and stables wanting free arborist woodchip or firewood.
 
@@ -5180,7 +5315,7 @@ def register_drop_spot_page(site_name: Optional[str] = None, outcode: Optional[s
         <link href="/static/tailwind.css" rel="stylesheet">
     </head>
     <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
-    {_shared_nav_html()}
+    {_shared_nav_html(request)}
     <div class="max-w-[520px] mx-auto px-4 py-10">
         <div class="bg-[#0f172a] border border-slate-800 rounded-2xl p-8">
             <h2 class="mt-0 text-white text-2xl font-bold">Register Free Woodchip Drop Site</h2>
@@ -5269,7 +5404,7 @@ async def handle_submit_drop_spot(request: Request):
 # ── 6. Emergency Storm Weather Radar & Rate Multiplier ────────────────────────
 
 @app.get("/storm-radar", response_class=HTMLResponse)
-def storm_radar_view():
+def storm_radar_view(request: Request):
     """
     Emergency Storm Weather Radar:
     Monitors Met Office high-wind gale events (45mph+ gusts).
@@ -5347,7 +5482,7 @@ def storm_radar_view():
         <link href="/static/tailwind.css" rel="stylesheet">
     </head>
     <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
-    {_shared_nav_html()}
+    {_shared_nav_html(request)}
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
         <div class="flex justify-between items-center mb-5 flex-wrap gap-2.5">
             <div>

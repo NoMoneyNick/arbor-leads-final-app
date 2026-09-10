@@ -1852,6 +1852,12 @@ def lookup_full_postcode_centroid(postcode: str) -> tuple:
     return (None, None)
 
 
+# Sep 10 2026: in-memory cache for street_view_url, keyed by raw address
+# text -- see that function's docstring for why (avoids re-paying the
+# Google Geocoding API call for a repeat click on the same lead).
+_street_view_url_cache: Dict[str, str] = {}
+
+
 def street_view_url(address: str) -> str:
     """Sep 9 2026, Nick's ask: "send a google street view screenshot of the
     address or at least a google street view link when they buy the lead."
@@ -1887,9 +1893,28 @@ def street_view_url(address: str) -> str:
     method or worse) falls through to the postcode-centroid method exactly
     as before, so this can only ever get MORE precise, never less. Not
     live-tested against a real key from this sandbox (no network/key
-    here) -- verify the next real lead's Street View link."""
+    here) -- verify the next real lead's Street View link.
+
+    Sep 10 2026, production incident: this was being called once per
+    dispatched lead, EVERY dashboard page load (main.py's /dashboard loop)
+    -- meaning a contractor with a screenful of leads triggered that many
+    live, sequential Google Geocoding calls just to render their own
+    dashboard, which is exactly what Nick reported as "the loading was
+    quite long" right after this Geocoding-first version shipped. Fixed at
+    the call site (dashboard now links to /street-view/{reference}, which
+    resolves this on click instead of on every render -- see main.py) and,
+    belt-and-braces, cached here too so re-clicking the same lead, or two
+    leads sharing an address, never re-pays the network cost."""
     import urllib.parse
     address = address or ""
+
+    cached = _street_view_url_cache.get(address)
+    if cached is not None:
+        return cached
+
+    def _cache_and_return(url: str) -> str:
+        _street_view_url_cache[address] = url
+        return url
 
     google_key = os.getenv("GOOGLE_MAPS_KEY", "").strip()
     if google_key and address.strip():
@@ -1908,7 +1933,7 @@ def street_view_url(address: str) -> str:
                         loc = top["geometry"].get("location") or {}
                         g_lat, g_lon = loc.get("lat"), loc.get("lng")
                         if g_lat is not None and g_lon is not None:
-                            return f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={g_lat},{g_lon}"
+                            return _cache_and_return(f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={g_lat},{g_lon}")
         except Exception as e:
             logger.debug(f"[Street View] Geocoding API lookup failed, falling back to postcode centroid: {e}")
 
@@ -1916,8 +1941,8 @@ def street_view_url(address: str) -> str:
     if m:
         lat, lon = lookup_full_postcode_centroid(f"{m.group(1)} {m.group(2)}")
         if lat is not None and lon is not None:
-            return f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat},{lon}"
-    return f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(address)}"
+            return _cache_and_return(f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat},{lon}")
+    return _cache_and_return(f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(address)}")
 
 
 def resolve_location(raw_input: str) -> dict:
@@ -5098,6 +5123,38 @@ def verify_magic_auth_token(token: str = None, otp: str = None, email: str = Non
             conn.close()
     except Exception as e:
         logger.error(f"[Auth] Error verifying auth token: {e}")
+        return None
+
+
+def get_dispatched_lead_address_for_contractor(email: str, reference: str) -> Optional[str]:
+    """Sep 10 2026: split out of the dashboard's per-lead Street View lookup
+    (see main.py's /street-view/{reference} route) so that lookup can
+    confirm a lead was genuinely dispatched to THIS contractor before
+    resolving its address -- same ownership boundary as
+    get_contractor_dashboard_data's own dispatched-leads query, just keyed
+    by one reference instead of returning all 30. Returns None if no such
+    dispatch exists (wrong contractor, bad reference, or a typo'd URL) so
+    the caller can 404 rather than leak an address."""
+    if not SURL or not email or not reference:
+        return None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT l.address
+                FROM lead_dispatches d
+                JOIN leads l ON l.id = d.lead_id
+                WHERE d.contractor_email = %s AND l.reference = %s
+                LIMIT 1;
+            """, (email.strip().lower(), reference.strip()))
+            row = cur.fetchone()
+            return row[0] if row else None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Street View] Error confirming dispatch ownership for {reference}: {e}")
         return None
 
 
