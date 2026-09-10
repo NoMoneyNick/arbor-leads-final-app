@@ -1021,40 +1021,12 @@ def log_system_warning(category: str, title: str, description: str = "") -> bool
         return False
 
 
-def get_warning_recurrence_days(category: str, title: str, window_days: int = 7) -> int:
-    """Counts the number of DISTINCT calendar days this exact category+
-    title has been logged within the trailing `window_days` -- the signal
-    notifications.send_system_incident_alert uses to tell a genuinely
-    sustained, worsening problem (the same thing, day after day) apart from
-    a one-off blip or a burst of unrelated alerts all re-firing at once
-    (e.g. every in-memory alert throttle resetting on the same redeploy --
-    live-confirmed Sep 3/4 2026 to look identical to a real incident from
-    the alert titles alone, but NOT be one). Returns 0 on any DB error so a
-    health-check failure can never itself block or wrongly escalate an
-    alert."""
-    if not SURL:
-        return 0
-    try:
-        conn = get_db_conn()
-        cur = conn.cursor()
-        try:
-            cur.execute(
-                """
-                SELECT COUNT(DISTINCT occurred_at::date)
-                FROM system_warnings
-                WHERE category = %s AND title = %s
-                  AND occurred_at >= NOW() - (%s || ' days')::interval;
-                """,
-                (category, title, window_days),
-            )
-            row = cur.fetchone()
-            return row[0] if row else 0
-        finally:
-            cur.close()
-            conn.close()
-    except Exception as e:
-        logger.error(f"[SystemWarnings] Error counting recurrence for {category}:{title}: {e}")
-        return 0
+# Sep 10 2026 cleanup: get_warning_recurrence_days (the old per-title
+# recurrence counter) was deleted here. It was fully superseded on Sep 8
+# 2026 by get_all_recurring_warnings below (see that function's own
+# docstring), which is the one notifications.send_system_incident_alert /
+# send_daily_warning_digest actually call now. Confirmed zero remaining
+# callers anywhere in the codebase before removal.
 
 
 def get_all_recurring_warnings(window_days: int = 7, min_days: int = 3, active_within_hours: int = 24) -> list:
@@ -3535,6 +3507,42 @@ def is_ip_or_device_recently_flagged(ip_address: str = None, device_id: str = No
     except Exception as e:
         logger.error(f"[Free Lead Promo] Error checking ip/device flag: {e}")
         return False
+
+
+def clear_lead_flag_for_email(email: str) -> int:
+    """Admin/debug tool, Sep 10 2026 (Nick's ask: "it's our system, can't we
+    wipe that one from the system?"). Nulls out ONLY the ip_address and
+    device_id fingerprint columns on this email's already-redeemed
+    free_lead_codes row(s) -- the two columns is_ip_or_device_recently_
+    flagged actually checks. Does NOT touch redeemed_at, the code, or lead
+    ownership: the original redeemed lead stays exactly as claimed as it
+    was. This exists purely so a test/QA connection (e.g. Nick's own
+    browser after a live test redemption) can be un-stuck without weakening
+    the guard for any real customer -- every other customer's fingerprint
+    rows are untouched. Returns the number of rows cleared."""
+    if not SURL or not email:
+        return 0
+    email = email.strip().lower()
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE free_lead_codes
+                SET ip_address = NULL, device_id = NULL
+                WHERE email = %s AND redeemed_at IS NOT NULL
+                RETURNING id;
+            """, (email,))
+            rows = cur.fetchall()
+            conn.commit()
+            logger.info(f"[Admin] Cleared IP/device fingerprint on {len(rows)} free_lead_codes row(s) for {email}")
+            return len(rows)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Admin] Error clearing lead flag for {email}: {e}")
+        return 0
 
 
 def count_free_lead_codes_issued_since(hours: float = 24.0) -> int:

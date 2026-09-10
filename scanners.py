@@ -2874,14 +2874,11 @@ def scan_city_planning_api(city_name: str) -> int:
         return 0
 
 
-def scan_scotland_leads() -> int:
-    """Scans all 32 Scottish local authority planning portals in parallel."""
-    return scan_city_planning_api("Scotland")
-
-
-def scan_wales_leads() -> int:
-    """Scans all 22 Welsh local authority planning portals in parallel."""
-    return scan_city_planning_api("Wales")
+# Sep 10 2026 cleanup: scan_scotland_leads / scan_wales_leads (standalone
+# per-nation wrappers around scan_city_planning_api) were deleted here.
+# Confirmed harmless -- scan_nationwide_bulk_crawler below already covers
+# Scotland and Wales via its own `regions` list and a different call path,
+# so there was no coverage gap, just two unused wrapper functions.
 
 
 def scan_nationwide_bulk_crawler() -> dict:

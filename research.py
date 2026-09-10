@@ -393,12 +393,10 @@ def scrape_contact_info_from_website(website_url: str):
     return email, phone
 
 
-def scrape_email_from_website(website_url: str) -> Optional[str]:
-    """Back-compat wrapper around scrape_contact_info_from_website for any
-    caller that only wants the email. Prefer the combined function directly
-    when you also need phone, so the site is only fetched once."""
-    email, _phone = scrape_contact_info_from_website(website_url)
-    return email
+# Sep 10 2026 cleanup: scrape_email_from_website (a "back-compat wrapper"
+# around scrape_contact_info_from_website for email-only callers) was
+# deleted here. Confirmed zero callers anywhere in the codebase -- nothing
+# was actually using the back-compat path, so it was just unused weight.
 
 
 # Sep 2 2026: hoisted to a single module-level constant. This used to be
@@ -1072,7 +1070,7 @@ def _enrich_and_upsert_partner_candidate(item):
         # can't detect); a real URL there with Phone/Email still N/A
         # means the website WAS found but scrape_contact_info_from_
         # website can't extract anything from that specific page.
-        logger.info(f"[Investigator] ✅ {name} ({assigned_city}) → "
+        logger.info(f"[Investigator] {name} ({assigned_city}) → "
                     f"Director: {md_name or 'N/A'} | Website: {website or 'NONE'} | "
                     f"Phone: {phone or 'N/A'} | Email: {email or 'N/A'}")
         return name
@@ -1182,7 +1180,7 @@ def perform_research(city_name: str):
             assigned_city = resolve_uk_city(addr, name, default_city=city_name)
             candidates_to_enrich.append((co, name, company_number, addr, assigned_city))
 
-        logger.info(f"[Investigator] ⚡ {len(candidates_to_enrich)} brand new tree surgery LTDs to enrich for {city_name} (out of {len(all_companies)} raw search items).")
+        logger.info(f"[Investigator] {len(candidates_to_enrich)} brand new tree surgery LTDs to enrich for {city_name} (out of {len(all_companies)} raw search items).")
 
 
         if candidates_to_enrich:
@@ -1192,7 +1190,7 @@ def perform_research(city_name: str):
 
         cur.close()
         conn.close()
-        logger.info(f"[Investigator] 🚀 Research complete for {city_name}! Enriched {len(candidates_to_enrich)} new partners.")
+        logger.info(f"[Investigator] Research complete for {city_name}! Enriched {len(candidates_to_enrich)} new partners.")
 
     except Exception as e:
         logger.error(f"[Investigator] Fatal error in perform_research: {e}")
@@ -1299,7 +1297,7 @@ def perform_research_by_sic(city_name: str):
             assigned_city = resolve_uk_city(addr, name, default_city=city_name)
             all_candidates.append((co, name, company_number, addr, assigned_city))
 
-    logger.info(f"[Investigator SIC] ⚡ {len(all_candidates)} new SIC-code-matched tree "
+    logger.info(f"[Investigator SIC] {len(all_candidates)} new SIC-code-matched tree "
                 f"companies to enrich for {city_name} (branded/non-obvious names a "
                 f"keyword search would miss).")
 
@@ -1308,7 +1306,7 @@ def perform_research_by_sic(city_name: str):
         with ThreadPoolExecutor(max_workers=10) as executor:
             executor.map(_enrich_and_upsert_partner_candidate, all_candidates)
 
-    logger.info(f"[Investigator SIC] 🚀 SIC-code research complete for {city_name}! "
+    logger.info(f"[Investigator SIC] SIC-code research complete for {city_name}! "
                 f"Enriched {len(all_candidates)} new partners.")
 
 
@@ -1445,12 +1443,12 @@ def discover_sole_traders_via_google_places(city_name: str, limit_per_area: int 
             written += 1
             if phone:
                 known_phones.add(re.sub(r'[\s\(\)\-\.]', '', phone))
-            logger.info(f"[Sole Trader Discovery] ✅ {name} ({assigned_city}) → "
+            logger.info(f"[Sole Trader Discovery] {name} ({assigned_city}) → "
                         f"Website: {website or 'NONE'} | Phone: {phone or 'N/A'} | Email: {email or 'N/A'}")
         except Exception as we:
             logger.error(f"[Sole Trader Discovery] DB write error for {name}: {we}")
 
-    logger.info(f"[Sole Trader Discovery] 🚀 Sole-trader discovery complete for {city_name}! "
+    logger.info(f"[Sole Trader Discovery] Sole-trader discovery complete for {city_name}! "
                 f"Wrote {written} of {len(places)} Places results (rest were duplicates, spam, or off-trade).")
     return written
 
@@ -1475,7 +1473,7 @@ def research_all_cities():
         "Scotland", "Wales"
     ]
     for r in regions:
-        logger.info(f"[Investigator] 🚀 Starting nationwide batch discovery for {r}...")
+        logger.info(f"[Investigator] Starting nationwide batch discovery for {r}...")
         perform_research(r)
         perform_research_by_sic(r)
         discover_sole_traders_via_google_places(r)
@@ -1766,7 +1764,7 @@ def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -
             logger.info(f"[Enrichment] All partners {f'in {city_name}' if city_name else ''} are already enriched!")
             return 0
 
-        logger.info(f"[Enrichment] 🚀 Processing {len(partners)} partners {f'for {city_name}' if city_name else ''} in chunks of {COMMIT_CHUNK_SIZE}...")
+        logger.info(f"[Enrichment] Processing {len(partners)} partners {f'for {city_name}' if city_name else ''} in chunks of {COMMIT_CHUNK_SIZE}...")
 
         from psycopg2.extras import execute_batch
 
@@ -1827,7 +1825,7 @@ def enrich_existing_partners(limit: int = 50, city_name: Optional[str] = None) -
                 f"{total_saved} saved so far {f'for {city_name}' if city_name else ''}."
             )
 
-        logger.info(f"[Enrichment] 🎯 Complete! Enriched and saved {total_saved} partners in {city_name or 'batch'}.")
+        logger.info(f"[Enrichment] Complete! Enriched and saved {total_saved} partners in {city_name or 'batch'}.")
         return total_saved
 
     except Exception as e:

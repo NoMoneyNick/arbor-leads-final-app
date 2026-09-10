@@ -3162,6 +3162,24 @@ def admin_simulate_leads(request: Request, secret: Optional[str] = Query(None),
     """)
 
 
+@app.get("/admin/clear-lead-flag")
+def admin_clear_lead_flag(request: Request, secret: Optional[str] = Query(None), email: str = Query(...)):
+    """Admin/debug-only, Sep 10 2026 (Nick's ask: "it's our system, can't we
+    wipe that one from the system?"). is_ip_or_device_recently_flagged
+    blocks a connection from claiming a second free lead for 30 days after
+    its first redemption -- correct for a real customer, but it also blocks
+    repeat testing from the same office/home connection. This clears only
+    the IP/device fingerprint on `email`'s already-redeemed free_lead_codes
+    row(s) (database.clear_lead_flag_for_email) so that ONE connection can
+    request a fresh test lead again. The original redeemed lead is
+    untouched, and no other customer's data is affected."""
+    verify_admin_or_secret(request, secret)
+    cleared = database.clear_lead_flag_for_email(email)
+    if cleared:
+        return PlainTextResponse(f"Cleared IP/device fingerprint on {cleared} row(s) for {email}. This connection can request a new free lead now.")
+    return PlainTextResponse(f"No redeemed free_lead_codes rows found for {email} -- nothing to clear.")
+
+
 def _resolve_marketplace_location(raw_input: str) -> dict:
     """Sep 9 2026, Nick's ask: "add a 'name place' locator to marketplace to
     give the option of postcode OR a town or city" -- the marketplace search
@@ -5201,19 +5219,25 @@ def storm_radar_view():
     """
     alerts = database.get_active_storm_alerts()
 
-    if not alerts:
-        alerts = [
-            {
-                "id": "sample-storm-1",
-                "region": "Northern England & Pennines",
-                "outcodes": ["LS", "BD", "HG", "WF", "HD", "HX"],
-                "gust_mph": 55,
-                "level": "amber",
-                "summary": "Met Office Amber Warning: 50-60mph wind gusts forecast. High risk of branch failure and uprooted shallow-root conifers.",
-                "valid_from": "Tonight 21:00",
-                "valid_to": "Tomorrow 18:00"
-            }
-        ]
+    # Sep 10 2026, real bug fix: this used to fall back to a single hardcoded
+    # "sample" alert (Northern England, 55mph, "Tonight 21:00") whenever
+    # get_active_storm_alerts() came back empty -- and since nothing in the
+    # codebase ever called database.record_storm_alert to populate a real
+    # one, that fake alert was not an occasional placeholder, it was the
+    # ONLY thing this page has ever shown, permanently, with no "sample" or
+    # "example" label anywhere on the card -- indistinguishable from a real
+    # live Met Office warning. A repeat visitor would see the exact same
+    # "storm tonight" warning every day forever. Replaced with an honest
+    # empty state instead of a fabricated one. Wiring this up to a REAL
+    # weather feed (Met Office DataHub or similar) is a separate, bigger
+    # build -- needs an API key/cost decision and a scan job -- flagged to
+    # Nick rather than guessed at here.
+    empty_state_html = """
+        <div class="bg-slate-900/40 border border-white/10 rounded-xl p-8 text-center">
+            <p class="text-slate-300 text-base font-semibold m-0">No severe weather warnings active right now.</p>
+            <p class="text-slate-500 text-sm mt-2 mb-0">This page will show an alert here as soon as a qualifying high-wind gale event (45mph+ gusts) is recorded.</p>
+        </div>
+    """
 
     # Sep 9 2026, Nick's ask: dark-theme restyle to match the homepage (see
     # the same note on marketplace_view). The alert badge itself
@@ -5279,7 +5303,7 @@ def storm_radar_view():
             <b>Zero-Spam Guarantee:</b> We never alert you for normal rain or mild breezes. Alerts trigger strictly for verified 45mph+ gale forecasts in your registered sector so you can mobilize emergency standby crews.
         </div>
 
-        {alert_cards}
+        {alert_cards or empty_state_html}
 
         <div class="text-center mt-8">
             <a href="/" class="text-slate-400 hover:text-white no-underline text-[13px] transition-colors">← Return to Main Intelligence Map</a>
