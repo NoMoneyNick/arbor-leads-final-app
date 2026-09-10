@@ -3169,7 +3169,12 @@ def simulate_customer_leads(location_input: str, tier: str = "climber_domestic",
         matches.append({
             "reference": reference,
             "area": f"{extracted[0]} area" if extracted else (council_source or "UK"),
-            "summary": summary,
+            # Sep 10 2026: same missing-redaction gap found in the email
+            # paths (notifications._redacted_summary) -- this admin tool is
+            # read-only and gated, but a summary can restate the full
+            # address inline (_redact_address_from_summary's own docstring),
+            # and this is still meant to show area only, never street/house.
+            "summary": _redact_address_from_summary(summary),
             "lead_score": lead_score or "small",
             "distance_miles": dist,
             "match_reason": match_reason,

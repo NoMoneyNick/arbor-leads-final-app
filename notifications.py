@@ -287,83 +287,122 @@ def _list_unsubscribe_headers(unsubscribe_url: str) -> Optional[Dict[str, str]]:
     }
 
 
-def _extract_street_level(address: str) -> str:
-    """Cold Email 1's whole persuasion mechanism (see COLD_EMAIL_SEQUENCE.md,
-    "Variant A -- proof of surveillance") depends on a real street name, not
-    a vague postcode area -- that specificity is what proves a human
-    actually looked at the register instead of mail-merging a blast. But
-    the exact house number / full address is deliberately held back until
-    they click through and get the code, same principle as
-    _blur_address_to_area just one level less blurred. Strips a leading
-    house number/building identifier off the first address segment, keeps
-    street + locality, drops the postcode segment entirely."""
-    import re
-    if not address:
+def _redacted_summary(summary: Optional[str]) -> str:
+    """Sep 10 2026: real scraped council descriptions very often restate
+    the site address inline (e.g. "T1 - Ash - Fell. Site: 14 Oak Avenue,
+    Newark, NG22 8AA") -- database._redact_address_from_summary already
+    exists to strip that, and was already applied to the public ticker and
+    homepage notices (see its own docstring), but no EMAIL path called it:
+    the free-lead-code confirmation, the teaser email, and the new cold
+    Email 1 were all handing out whatever the raw summary contained,
+    unredacted, before a lead is ever paid for or code-redeemed. Found
+    while investigating the address leak Nick caught live. Every pre-
+    purchase email now routes summary text through this."""
+    import database
+    return database._redact_address_from_summary(summary) if summary else "No summary available."
+
+
+def _safe_area_label(address: str) -> str:
+    """Sep 10 2026 CRITICAL FIX: the previous _extract_street_level (now
+    removed) tried to derive a "street, locality" string by splitting the
+    raw scraped address on commas and stripping a leading house number.
+    Live-tested and confirmed broken -- Nick's real test send leaked a
+    COMPLETE unredacted address (house name, house number, street, town,
+    county, full postcode) into a cold-outreach email, because the real
+    address string wasn't comma-delimited the way the test fixture used to
+    write this function was. That's a product-breaking bug: it hands out
+    exactly what buying/redeeming a lead is supposed to gate.
+
+    Fixed by not parsing the raw address at all. Instead this pulls just
+    the outcode out of it (the same regex-based extraction already proven
+    in _extract_outcodes/classify_leads_by_radius, which finds a postcode
+    shape anywhere in the text regardless of delimiters) and resolves that
+    outcode to a real place name via database.get_outcode_area_label --
+    the exact same mechanism already used for the public ticker and the
+    admin lead-simulator, both of which deliberately show area, never
+    street/house, pre-purchase. Structurally can't leak a street or house
+    number: an outcode alone doesn't encode one. Returns e.g. "SM7,
+    Reigate and Banstead" -- real, specific enough that Nick's own test
+    reaction was "I recognise Banstead, that's near me", without ever
+    touching the raw address text."""
+    import database
+    outcodes = database._extract_outcodes(address or "")
+    if not outcodes:
         return "your area"
-    postcode_re = re.compile(r'^[A-Z]{1,2}[0-9][A-Z0-9]?\s*[0-9][A-Z]{2}$', re.I)
-    parts = [p.strip() for p in address.split(",") if p.strip()]
-    parts = [p for p in parts if not postcode_re.match(p)]
-    if parts:
-        parts[0] = re.sub(r'^\s*\d+[A-Za-z]?\s+', '', parts[0])
-    return ", ".join(parts) if parts else "your area"
+    area = database.get_outcode_area_label(outcodes[0])
+    return area.get("label") or outcodes[0]
 
 
 def send_cold_email_1(email: str, lead_data: dict, code: str, director_name: str = "",
                        company_name: str = "", unsubscribe_url: str = "") -> bool:
     """Sep 10 2026: the actual first-touch cold-outreach email, built from
     the copy Nick approved after the full cross-LLM ranking exercise --
-    COLD_EMAIL_SEQUENCE.md's "Final Verdict" section, Final Email 1 with
-    the revised opening ("Public notice, not a directory lead."). This is
-    NOT a variant of the free-lead-code confirmation email above -- it's a
-    different email for a different moment in the funnel (cold outreach to
-    someone who's never touched the site, vs. confirming a signup someone
-    just completed) and per the approved copy's own design notes
-    (Variant C, "Pattern Interrupt": plain, terse, doesn't read like
-    marketing HTML precisely because it isn't styled like marketing HTML)
-    it is deliberately near-plain-text, not a branded card. Don't
-    "improve" this one by making it look more like a template -- that
-    would work against the exact mechanism the copy is built on.
+    COLD_EMAIL_SEQUENCE.md's "Final Verdict" section. Rewritten same day
+    after Nick's live test caught two real problems with the first version:
 
-    Real tokens only, same honesty standard enforced everywhere else in
-    this project (PROJECT_STATE.md items 11-13, the banned "racing against
-    N other firms" line): {{recent_tpo_council}}/{{recent_tpo_work}}/
-    {{recent_tpo_ref}} come directly off the real reserved lead, and
-    {{recent_tpo_street}} is the real street via _extract_street_level, not
-    a placeholder. The code + a tappable link are both included so this
-    works as an actual functional send, not just a copy preview -- the
-    email references a lead that is genuinely reserved and genuinely
-    redeemable with the code shown.
+    1. PRODUCT-BREAKING: leaked the full raw address (see _safe_area_label
+       above for the fix and root cause). Summary text can also restate an
+       address inline (the exact issue database._redact_address_from_summary
+       was already built to catch for the marketplace/ticker, per its own
+       docstring) -- this now runs every summary through that same function
+       before it ever reaches an email, which the marketplace/ticker paths
+       already did but no pre-purchase EMAIL path (this one, the free-lead-
+       code confirmation, or the teaser email) previously did. Fixed in all
+       three here and in the two functions above.
+    2. "Public notice, not a directory lead" tested as confusing jargon to
+       an actual reader, not the pattern-interrupt hook it read as on paper
+       -- dropped. What Nick's own reaction confirmed DOES work: recognising
+       a real, specific place name ("I recognise Banstead, that's near me")
+       is what signals "this is actually about me", not an unexplained
+       phrase. Kept the real specificity, cut the jargon.
 
-    Unsubscribe styled per COLD_EMAIL_SEQUENCE.md's explicit instruction:
-    very small, pushed well below the sign-off, visually separated."""
+    Still short, still signed like a real person wrote it (that mechanism
+    tested fine) -- just with a small signature/logo line so it reads as
+    from an actual business, per Nick's "competent IT department" feedback,
+    without turning into a marketing-template card."""
     director_line = f"{director_name}," if director_name else f"Found this for {company_name},"
-    street = _extract_street_level(lead_data.get("address", ""))
-    work = (lead_data.get("summary") or "tree work").strip().rstrip(".")
-    if len(work) > 100:
-        work = work[:97].rstrip() + "..."
-    council = (lead_data.get("council_source") or "the council").replace(" Council", "") + " Council"
+    area = _safe_area_label(lead_data.get("address", ""))
+    work = _redacted_summary(lead_data.get("summary")).strip().rstrip(".")
+    if work == "No summary available.":
+        work = "tree work"
+    if len(work) > 130:
+        work = work[:127].rsplit(" ", 1)[0].rstrip() + "..."
+    council = lead_data.get("council_source") or "the council"
     ref = lead_data.get("reference") or "on record"
     link = f"{PUBLIC_APP_URL}/free-account"
 
-    subject = f"{street}, filed this week, unclaimed"
+    # Subject reads cleaner with just the place name, not "SM7, Reigate and
+    # Banstead" -- the outcode's kept in the body copy where the extra
+    # precision reads as specificity rather than clutter.
+    subject_area = area.split(", ", 1)[1] if ", " in area else area
+    subject = f"{subject_area} — tree job filed this week, unclaimed"
     unsub_html = (
         f'<p style="font-size:10px; color:#9ca3af; margin-top:40px; padding-top:10px; '
         f'border-top:1px solid #eee;"><a href="{unsubscribe_url}" style="color:#9ca3af;">Unsubscribe</a></p>'
         if unsubscribe_url else ""
     )
-    # Deliberately plain: system font stack, no border/card, no logo, no
-    # colour blocks -- this is meant to read like an email a person typed,
-    # per the copy's own "pattern interrupt" design rationale above.
+    logo_url = f"{PUBLIC_APP_URL}/static/icon-192.png"
+    # Still plain/personal in the body copy (that part tested fine) --
+    # only the signature gets a small logo, so it reads as a real person
+    # writing on behalf of an actual business, not a marketing template.
     html = f"""
-    <div style="font-family: -apple-system, Segoe UI, Arial, sans-serif; max-width: 560px; margin: auto; padding: 8px; color:#1f2937; font-size:15px; line-height:1.5;">
+    <div style="font-family: -apple-system, Segoe UI, Arial, sans-serif; max-width: 560px; margin: auto; padding: 8px; color:#1f2937; font-size:15px; line-height:1.6;">
         <p style="margin:0 0 14px 0;">{director_line}</p>
-        <p style="margin:0 0 14px 0;">Public notice, not a directory lead.</p>
-        <p style="margin:0 0 14px 0;">{council} logged {work} on {street} this week (ref {ref}). No tree surgeon's listed as agent yet.</p>
-        <p style="margin:0 0 14px 0;">It's on the public register, so anyone can see it, but nobody's called the homeowner first. It's yours, free, no card: <a href="{link}" style="color:#059669;">{link}</a></p>
-        <p style="margin:0 0 14px 0;">Your code: <strong style="font-family:monospace; letter-spacing:1px;">{code}</strong> — enter it on that page to view the full details.</p>
-        <p style="margin:0 0 14px 0;">I run TreeKey. We watch every UK council register daily and sell each lead once, then it's gone from the platform for good.</p>
-        <p style="margin:0 0 14px 0;">More in a few days if useful. No obligation.</p>
-        <p style="margin:0;">Nick, TreeKey (treekey.uk)</p>
+        <p style="margin:0 0 14px 0;">Found a live tree job near {area} that nobody's claimed yet.</p>
+        <p style="margin:0 0 14px 0;">{council} logged {work} this week (ref {ref}). No tree surgeon's listed as the agent on it yet.</p>
+        <p style="margin:0 0 14px 0;">It's sitting on the council's public planning register right now, free for anyone to look up, but nobody's called the homeowner first. It's yours, free, no card needed: <a href="{link}" style="color:#059669;">{link}</a></p>
+        <p style="margin:0 0 14px 0;">Your code: <strong style="font-family:monospace; letter-spacing:1px;">{code}</strong> — enter it on that page to unlock the full address.</p>
+        <p style="margin:0 0 14px 0;">I run TreeKey — we scan every UK council's planning register daily for tree work and pass on jobs like this before most contractors even know they exist.</p>
+        <p style="margin:0 0 20px 0;">More in a few days if it's useful. No obligation either way.</p>
+        <table role="presentation" cellpadding="0" cellspacing="0" style="border-top:1px solid #e5e7eb; padding-top:12px; width:100%;">
+            <tr>
+                <td style="width:30px; vertical-align:middle;"><img src="{logo_url}" width="24" height="24" alt="TreeKey" style="display:block; border-radius:5px;"></td>
+                <td style="vertical-align:middle; padding-left:8px; font-size:14px; color:#374151;">
+                    Nick — TreeKey<br>
+                    <a href="https://treekey.uk" style="color:#9ca3af; font-size:12px;">treekey.uk</a>
+                </td>
+            </tr>
+        </table>
         {unsub_html}
     </div>
     """
@@ -386,36 +425,22 @@ def _blur_address_to_area(address: str) -> str:
     return "Exact address unlocks with a subscription"
 
 
-def send_free_account_welcome_email(email: str, lead_data: dict) -> bool:
-    """Sep 5 2026, Nick's "limbo account" ask: welcomes a brand-new free
-    (no-payment) signup and hands over their one genuinely free, fully
-    unlocked lead -- same level of detail as a paid purchase (see
-    send_purchased_lead_email), just framed as a welcome gift rather than
-    a receipt, since nothing was actually bought here."""
-    subject = f"Your free TreeKey lead: {lead_data.get('council_source', 'Local')} Tree Surgery"
-    html = f"""
-    <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
-        <h2 style="color: #059669; margin-top: 0;">Welcome to TreeKey — here's your free lead</h2>
-        <p style="color: #374151;">Thanks for signing up. No card, no subscription — here's a real, currently-available job near you.</p>
-        <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
-            <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {lead_data.get('reference', 'N/A')}</p>
-            <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {lead_data.get('address', 'N/A')}</p>
-            <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source', 'N/A')}</p>
-            <p style="margin: 0;"><strong>Description / Summary:</strong><br/>
-               <span style="color: #475569; font-size: 14px;">{lead_data.get('summary', 'No summary available.')}</span>
-            </p>
-        </div>
-        <p style="font-size: 13px; color: #64748b;">
-            This is a one-off welcome gift, not a subscription — we'll send you a couple of local jobs a week
-            (address blurred until you subscribe) so you can see what TreeKey finds in your area before committing to anything.
-        </p>
-        <p style="font-size: 12px; color: #94a3b8;">
-            Note: UK councils do not publish a homeowner's phone number or email address on planning applications.
-            This lead includes everything that is legally published.
-        </p>
-    </div>
-    """
-    return send_transactional_email(to_email=email, subject=subject, html_body=html)
+    # Sep 10 2026: send_free_account_welcome_email removed. It was the
+    # OLD instant-grant welcome email from before the reserve+code redesign
+    # -- by design back then it showed the FULL unredacted address and raw
+    # summary immediately on signup, no gate at all. That directly
+    # contradicts the current product (address only unlocks after a real
+    # code redemption -- see send_free_lead_code_email) and nothing live
+    # calls it any more (verified: no call site in main.py, only leftover
+    # defensive mocks in test_main.py, which already tolerate it not
+    # existing). Found while investigating Nick's "is this how we present
+    # our leads?" report of a live address leak -- this wasn't the leak
+    # that fired (that was send_cold_email_1, fixed above), but it was
+    # dead code with the exact same class of bug baked in, left in place
+    # it's a live landmine for whoever next wires up a free-signup email
+    # without knowing the architecture changed. Deleted rather than fixed
+    # in place, since the entire premise (unlock everything at signup) no
+    # longer matches how the product works.
 
 
 def send_free_lead_code_email(email: str, lead_data: dict, code: str, expires_hours: float = 72.0,
@@ -486,7 +511,7 @@ def send_free_lead_code_email(email: str, lead_data: dict, code: str, expires_ho
             <p style="margin: 0 0 10px 0;"><strong>Location:</strong> {_blur_address_to_area(lead_data.get('address', ''))}</p>
             <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source', 'N/A')}</p>
             <p style="margin: 0;"><strong>Job details:</strong><br/>
-               <span style="color: #475569; font-size: 14px;">{lead_data.get('summary', 'No summary available.')}</span>
+               <span style="color: #475569; font-size: 14px;">{_redacted_summary(lead_data.get('summary'))}</span>
             </p>
         </div>
         <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 15px; margin: 0 0 20px 0; text-align: center;">
@@ -525,7 +550,7 @@ def send_teaser_lead_email(email: str, lead_data: dict, unsubscribe_url: str = "
             <p style="margin: 0 0 10px 0;"><strong>Location:</strong> {_blur_address_to_area(lead_data.get('address', ''))}</p>
             <p style="margin: 0 0 10px 0;"><strong>Filed:</strong> {registered}</p>
             <p style="margin: 0;"><strong>Job details:</strong><br/>
-               <span style="color: #475569; font-size: 14px;">{lead_data.get('summary', 'No summary available.')}</span>
+               <span style="color: #475569; font-size: 14px;">{_redacted_summary(lead_data.get('summary'))}</span>
             </p>
         </div>
         <p style="font-size: 13px; color: #64748b;">
