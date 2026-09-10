@@ -1871,9 +1871,47 @@ def street_view_url(address: str) -> str:
     misleading -- when no full postcode can be found or resolved in the
     address (scraped addresses aren't 100% consistent). Used by both the
     purchased-lead email (notifications.py) and the contractor dashboard's
-    per-lead "Street View" button (main.py) so the two stay identical."""
+    per-lead "Street View" button (main.py) so the two stay identical.
+
+    Sep 10 2026 follow-up: a postcode CENTROID isn't always precise enough
+    -- confirmed live, a real address on a mixed-use high street (several
+    frontages sharing one postcode) put the pano viewpoint outside a
+    neighbouring shop, not the actual property. When GOOGLE_MAPS_KEY is
+    configured (already provisioned for the Places pipeline in
+    research.py, no new key/billing setup needed), this now tries Google's
+    Geocoding API first with the FULL address text -- it can return
+    ROOFTOP or RANGE_INTERPOLATED precision (building-level, not just
+    postcode-level) for a well-formed UK address. Only trusted when the
+    result says it's actually that precise; anything coarser
+    (GEOMETRIC_CENTER/APPROXIMATE, which can be as vague as the postcode
+    method or worse) falls through to the postcode-centroid method exactly
+    as before, so this can only ever get MORE precise, never less. Not
+    live-tested against a real key from this sandbox (no network/key
+    here) -- verify the next real lead's Street View link."""
     import urllib.parse
     address = address or ""
+
+    google_key = os.getenv("GOOGLE_MAPS_KEY", "").strip()
+    if google_key and address.strip():
+        try:
+            resp = requests.get(
+                "https://maps.googleapis.com/maps/api/geocode/json",
+                params={"address": address, "region": "uk", "key": google_key},
+                timeout=3,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("status") == "OK" and data.get("results"):
+                    top = data["results"][0]
+                    location_type = (top.get("geometry", {}).get("location_type") or "").upper()
+                    if location_type in ("ROOFTOP", "RANGE_INTERPOLATED"):
+                        loc = top["geometry"].get("location") or {}
+                        g_lat, g_lon = loc.get("lat"), loc.get("lng")
+                        if g_lat is not None and g_lon is not None:
+                            return f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={g_lat},{g_lon}"
+        except Exception as e:
+            logger.debug(f"[Street View] Geocoding API lookup failed, falling back to postcode centroid: {e}")
+
     m = re.search(r'\b([A-Z]{1,2}[0-9][A-Z0-9]?)\s*([0-9][A-Z]{2})\b', address.upper())
     if m:
         lat, lon = lookup_full_postcode_centroid(f"{m.group(1)} {m.group(2)}")
@@ -2311,7 +2349,7 @@ def burn_lead_inventory(lead_id: str, buyer_email: str) -> dict:
                 SET status = 'claimed'
                 WHERE (id::text = %s OR reference = %s) AND (status = 'new' OR status IS NULL)
                 RETURNING id, reference, address, summary, council_source, lead_score, lead_price,
-                          applicant_name, agent_name, agent_company, has_agent;
+                          applicant_name, agent_name, agent_company, has_agent, registered_date;
             """, (lead_id, lead_id))
             row = cur.fetchone()
             conn.commit()
@@ -2329,6 +2367,7 @@ def burn_lead_inventory(lead_id: str, buyer_email: str) -> dict:
                     "agent_name": row[8],
                     "agent_company": row[9],
                     "has_agent": row[10],
+                    "registered_date": row[11],
                 }
             return None
         finally:
@@ -3428,7 +3467,7 @@ def redeem_free_lead_code(email: str, code: str) -> dict:
                 SET status = 'claimed'
                 WHERE reference = %s AND status = 'reserved'
                 RETURNING id, reference, address, summary, council_source, lead_score, lead_price,
-                          applicant_name, agent_name, agent_company, has_agent;
+                          applicant_name, agent_name, agent_company, has_agent, registered_date;
             """, (lead_reference,))
             lead_row = cur.fetchone()
             if not lead_row:
@@ -3445,7 +3484,7 @@ def redeem_free_lead_code(email: str, code: str) -> dict:
                 "id": lead_row[0], "reference": lead_row[1], "address": lead_row[2], "summary": lead_row[3],
                 "council_source": lead_row[4], "lead_score": lead_row[5], "lead_price": lead_row[6],
                 "applicant_name": lead_row[7], "agent_name": lead_row[8], "agent_company": lead_row[9],
-                "has_agent": lead_row[10],
+                "has_agent": lead_row[10], "registered_date": lead_row[11],
             }}
         finally:
             cur.close()
@@ -3876,7 +3915,7 @@ def get_lead_by_reference(reference: str) -> Optional[dict]:
         try:
             cur.execute("""
                 SELECT id, reference, address, summary, council_source, lead_score, lead_price,
-                       applicant_name, agent_name, agent_company, has_agent
+                       applicant_name, agent_name, agent_company, has_agent, registered_date
                 FROM leads WHERE reference = %s;
             """, (reference,))
             row = cur.fetchone()
@@ -3886,6 +3925,7 @@ def get_lead_by_reference(reference: str) -> Optional[dict]:
                 "id": row[0], "reference": row[1], "address": row[2], "summary": row[3],
                 "council_source": row[4], "lead_score": row[5], "lead_price": row[6],
                 "applicant_name": row[7], "agent_name": row[8], "agent_company": row[9], "has_agent": row[10],
+                "registered_date": row[11],
             }
         finally:
             cur.close()
@@ -5092,7 +5132,8 @@ def get_contractor_dashboard_data(email: str) -> dict:
             # 2. Fetch dispatched leads
             cur.execute("""
                 SELECT l.id, l.reference, l.address, l.summary, l.council_source, l.lead_score, l.lead_price,
-                       d.dispatched_at, d.dispatch_type, l.applicant_name, l.agent_name, l.agent_company, l.has_agent
+                       d.dispatched_at, d.dispatch_type, l.applicant_name, l.agent_name, l.agent_company, l.has_agent,
+                       l.registered_date
                 FROM lead_dispatches d
                 JOIN leads l ON l.id = d.lead_id
                 WHERE d.contractor_email = %s
@@ -5101,7 +5142,7 @@ def get_contractor_dashboard_data(email: str) -> dict:
             """, (email.strip().lower(),))
             leads_rows = cur.fetchall()
             cols = ["id", "ref", "addr", "summary", "council", "score", "price", "dispatched_at", "dispatch_type",
-                     "applicant_name", "agent_name", "agent_company", "has_agent"]
+                     "applicant_name", "agent_name", "agent_company", "has_agent", "registered_date"]
             dispatched_leads = [dict(zip(cols, r)) for r in leads_rows]
 
             return {

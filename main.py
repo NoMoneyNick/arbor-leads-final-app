@@ -1477,12 +1477,14 @@ def public_homepage():
          tool gets its own distinct treatment instead of looking like four
          interchangeable FAQ entries. (Sep 10 2026: Nick asked for pricing to
          sit ABOVE this section again, so this block now follows Pricing.)
-         Each band has a real image slot --
-         Nick's own photos go here once supplied; a labelled placeholder box
-         stands in until then so the layout is already real and it's obvious
-         at a glance where each image belongs (swap the placeholder div for
-         a real <img> once a file exists, matching the pattern used
-         elsewhere for supplied photos, e.g. fieldwork-bucking.jpg below).
+         Each band has a real image slot -- Ledger, Chip-Drop and Storm Radar
+         now use Nick's supplied photos (static/images/tool-ledger.jpg,
+         tool-chip-drop.jpg [rotated 90° from his original portrait upload
+         per his request], tool-storm-radar.jpg). "The App" band still has
+         no supplied photo, so it keeps the labelled placeholder box until
+         one exists -- swap it for a real <img> the same way once supplied,
+         matching the pattern used elsewhere for photos, e.g.
+         fieldwork-bucking.jpg below.
          Mobile collapses to a plain stacked column (image below text) per
          Nick's own "I understand phone is different" -- alternating
          left/right only reads as intentional once there's room for it. -->
@@ -1496,8 +1498,8 @@ def public_homepage():
             <div class="space-y-16 md:space-y-24">
                 <!-- 1. Ledger -->
                 <div class="flex flex-col md:flex-row items-center gap-8 md:gap-12">
-                    <div class="w-full md:w-1/2 aspect-video rounded-2xl border-2 border-dashed border-violet-500/30 bg-violet-500/5 flex items-center justify-center text-center p-6 shrink-0">
-                        <span class="text-violet-400/70 text-xs font-mono uppercase tracking-wider">Image placeholder — Ledger screenshot goes here</span>
+                    <div class="w-full md:w-1/2 aspect-video rounded-2xl overflow-hidden shrink-0">
+                        <img src="/static/images/tool-ledger.jpg" alt="Tracking job costs and quotes" class="w-full h-full object-cover" loading="lazy">
                     </div>
                     <div class="w-full md:w-1/2">
                         <div class="text-[11px] font-mono uppercase tracking-widest text-violet-400 font-bold mb-2">Financial Tool</div>
@@ -1509,8 +1511,8 @@ def public_homepage():
 
                 <!-- 2. Chip-Drop (reversed) -->
                 <div class="flex flex-col md:flex-row-reverse items-center gap-8 md:gap-12">
-                    <div class="w-full md:w-1/2 aspect-video rounded-2xl border-2 border-dashed border-orange-500/30 bg-orange-500/5 flex items-center justify-center text-center p-6 shrink-0">
-                        <span class="text-orange-400/70 text-xs font-mono uppercase tracking-wider">Image placeholder — Chip-Drop screenshot goes here</span>
+                    <div class="w-full md:w-1/2 aspect-video rounded-2xl overflow-hidden shrink-0">
+                        <img src="/static/images/tool-chip-drop.jpg" alt="Woodchip ready for a local drop spot" class="w-full h-full object-cover" loading="lazy">
                     </div>
                     <div class="w-full md:w-1/2">
                         <div class="text-[11px] font-mono uppercase tracking-widest text-orange-400 font-bold mb-2">Site Network</div>
@@ -1522,8 +1524,8 @@ def public_homepage():
 
                 <!-- 3. Storm Radar -->
                 <div class="flex flex-col md:flex-row items-center gap-8 md:gap-12">
-                    <div class="w-full md:w-1/2 aspect-video rounded-2xl border-2 border-dashed border-amber-500/30 bg-amber-500/5 flex items-center justify-center text-center p-6 shrink-0">
-                        <span class="text-amber-400/70 text-xs font-mono uppercase tracking-wider">Image placeholder — Storm Radar screenshot goes here</span>
+                    <div class="w-full md:w-1/2 aspect-video rounded-2xl overflow-hidden shrink-0">
+                        <img src="/static/images/tool-storm-radar.jpg" alt="Forestry England stormy weather warning sign" class="w-full h-full object-cover" loading="lazy">
                     </div>
                     <div class="w-full md:w-1/2">
                         <div class="text-[11px] font-mono uppercase tracking-widest text-amber-400 font-bold mb-2">Emergency Alerts</div>
@@ -4659,11 +4661,15 @@ def free_dashboard(request: Request):
     if account.get("free_lead_ref"):
         lead = database.get_lead_by_reference(account["free_lead_ref"])
         if lead:
+            import notifications
+            filed_date = notifications._format_filed_date(lead.get("registered_date"))
+            filed_row = f'<p class="m-0 mb-2.5 text-sm"><span class="text-slate-400 font-bold">Application filed:</span> <span class="text-slate-100">{filed_date}</span></p>' if filed_date else ""
             lead_html = f"""
             <div class="bg-slate-800/50 border-l-4 border-emerald-500 rounded-r-xl p-5">
                 <p class="m-0 mb-2.5 text-sm"><span class="text-slate-400 font-bold">Reference:</span> <span class="text-slate-100">{lead.get('reference', 'N/A')}</span></p>
                 <p class="m-0 mb-2.5 text-sm"><span class="text-slate-400 font-bold">Address:</span> <span class="text-slate-100">{lead.get('address', 'N/A')}</span></p>
                 <p class="m-0 mb-2.5 text-sm"><span class="text-slate-400 font-bold">Source:</span> <span class="text-slate-100">{lead.get('council_source', 'N/A')}</span></p>
+                {filed_row}
                 <p class="m-0 text-sm"><span class="text-slate-400 font-bold">Description:</span><br>
                    <span class="text-slate-300 text-[13px] leading-relaxed">{lead.get('summary', 'No summary available.')}</span></p>
             </div>
@@ -4799,6 +4805,7 @@ def contractor_dashboard(request: Request):
     active_badge = "<span style='background:rgba(16,185,129,0.12); color:#34d399; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:bold;'>ACTIVE PARTNER</span>" if sub.get("active") else "<span style='background:#1e293b; color:#94a3b8; padding:3px 8px; border-radius:12px; font-size:11px;'>FREE TIER</span>"
 
     # Format leads table
+    import notifications
     lead_rows = ""
     for l in leads:
         lead_id = l.get("id") or l.get("ref")
@@ -4806,7 +4813,12 @@ def contractor_dashboard(request: Request):
         addr = l.get("addr", "")
         summary = l.get("summary", "")
         dispatched_at = str(l.get("dispatched_at", ""))[:16]
-        
+        # Sep 10 2026, Nick's ask ("give as much info as we can... date it
+        # was placed"): registered_date is the real council filing date,
+        # now selected by get_contractor_dashboard_data above.
+        filed_date = notifications._format_filed_date(l.get("registered_date"))
+        filed_line = f"<br><span style='font-size:11px; color:#94a3b8;'>Filed: {filed_date}</span>" if filed_date else ""
+
         # Google Street View direct link (Sep 9 2026: shared with the
         # purchase-confirmation email via database.street_view_url, so both
         # give a real Street View pano link when the address geocodes,
@@ -4845,7 +4857,7 @@ def contractor_dashboard(request: Request):
                     <span style="font-size:10px; background:#1e293b; color:#94a3b8; padding:2px 6px; border-radius:4px; font-weight:bold;">REF: {ref}</span>
                     {agent_badge}
                     <h4 style="margin:4px 0 2px 0; font-size:15px; color:#e2e8f0;">{addr}</h4>
-                    <span style="font-size:11px; color:#94a3b8;">Dispatched: {dispatched_at}</span>{applicant_line}
+                    <span style="font-size:11px; color:#94a3b8;">Dispatched: {dispatched_at}</span>{filed_line}{applicant_line}
                 </div>
                 <div style="display:flex; gap:6px; flex-wrap:wrap;">
                     <a href="/generate-letter/{urllib.parse.quote(ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Letter</a>

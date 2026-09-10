@@ -190,6 +190,49 @@ def _street_view_link_html(address: str) -> str:
     return f'To {verb}, click here: <a href="{url}" style="color: #0ea5e9;">{label}</a>{caveat}'
 
 
+def _format_filed_date(registered_date) -> str:
+    """Sep 10 2026, Nick's ask ("give as much info as we can... date and
+    time if possible"): registered_date (the real date the council
+    received/validated the application) has been a DB column and scraped
+    field since Sep 3 2026, but was never SELECTed by burn_lead_inventory
+    or redeem_free_lead_code, so it never reached the lead-detail emails.
+    Councils publish a DATE, not a time, so this only ever shows a date --
+    no fabricated time. Handles both a real date object (from psycopg2)
+    and a plain string gracefully; returns "" (caller omits the row
+    entirely) when nothing was captured for this lead."""
+    if not registered_date:
+        return ""
+    try:
+        return registered_date.strftime("%-d %B %Y")
+    except AttributeError:
+        return str(registered_date)
+
+
+def _free_tools_and_subscribe_html(reference: str) -> str:
+    """Sep 10 2026, Nick's ask: "what can we offer them free help wise in
+    the purchase email? how can we encourage them to subscribe?" Reuses
+    two tools that already exist and are already free once a lead is
+    owned (main.py's /generate-letter and /generate-street-flyer, both
+    gated on the lead's status already being 'claimed' -- exactly the
+    state this lead is in by the time either email sends), rather than
+    inventing something new. The subscribe line is a soft, single-line
+    upsell, not a hard sell -- this is a receipt-style email, not a
+    marketing blast."""
+    ref_q = requests.utils.quote(reference or "")
+    return f"""
+        <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:6px; padding:14px; margin:20px 0;">
+            <p style="margin:0 0 8px 0; font-size:13px; color:#065f46;"><strong>Free help winning this job:</strong></p>
+            <p style="margin:0; font-size:13px;">
+                <a href="{PUBLIC_APP_URL}/generate-letter/{ref_q}" style="color:#059669; font-weight:bold; margin-right:16px;">Generate a homeowner intro letter →</a>
+                <a href="{PUBLIC_APP_URL}/generate-street-flyer/{ref_q}" style="color:#059669; font-weight:bold;">Generate a street flyer →</a>
+            </p>
+        </div>
+        <p style="font-size:13px; color:#64748b; border-top:1px solid #e5e7eb; padding-top:14px; margin-top:4px;">
+            Jobs like this land in our system daily. <a href="{PUBLIC_APP_URL}/pricing" style="color:#059669; font-weight:bold;">Subscribe from £29/mo</a> and get matching leads sent to you automatically, instead of waiting or paying one at a time.
+        </p>
+    """
+
+
 def send_purchased_lead_email(customer_email: str, lead_data: dict):
     """Emails the completely unlocked lead details to the buyer after a successful Stripe payment."""
     if not RESEND_API_KEY:
@@ -227,6 +270,9 @@ def send_purchased_lead_email(customer_email: str, lead_data: dict):
     else:
         agent_row = '<p style="margin: 10px 0 0 0; color: #94a3b8;">Agent/contractor status: not confirmed — the council record didn\'t clearly show one way or the other.</p>'
 
+    filed_date = _format_filed_date(lead_data.get("registered_date"))
+    filed_row = f'<p style="margin: 0 0 10px 0;"><strong>Application filed:</strong> {filed_date}</p>' if filed_date else ""
+
     html = f"""
     <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
         <h2 style="color: #059669; margin-top: 0;">Lead Unlocked Successfully!</h2>
@@ -236,6 +282,7 @@ def send_purchased_lead_email(customer_email: str, lead_data: dict):
             <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {lead_data.get('reference', 'N/A')}</p>
             <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {lead_data.get('address', 'N/A')}</p>
             <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source', 'N/A')}</p>
+            {filed_row}
             <p style="margin: 0 0 10px 0;"><strong>Estimated Value Grade:</strong> {lead_data.get('lead_score', 'Medium').title()}</p>
             {applicant_row}
             <p style="margin: 0;"><strong>Description / Summary:</strong><br/>
@@ -250,6 +297,7 @@ def send_purchased_lead_email(customer_email: str, lead_data: dict):
         <p style="font-size: 12px; color: #94a3b8;">
             Note: UK councils do not publish a homeowner's phone number or email address on planning applications. This lead includes everything that is legally published: the address, the applicant name (when the council records it), and the application details above.
         </p>
+        {_free_tools_and_subscribe_html(lead_data.get('reference', ''))}
     </div>
     """
     
@@ -325,6 +373,9 @@ def send_free_lead_granted_email(customer_email: str, lead_data: dict, unsubscri
         if unsubscribe_url else ""
     )
 
+    filed_date = _format_filed_date(lead_data.get("registered_date"))
+    filed_row = f'<p style="margin: 0 0 10px 0;"><strong>Application filed:</strong> {filed_date}</p>' if filed_date else ""
+
     html = f"""
     <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
         <h2 style="color: #059669; margin-top: 0;">Your free lead is confirmed!</h2>
@@ -334,6 +385,7 @@ def send_free_lead_granted_email(customer_email: str, lead_data: dict, unsubscri
             <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {lead_data.get('reference', 'N/A')}</p>
             <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {lead_data.get('address', 'N/A')}</p>
             <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source', 'N/A')}</p>
+            {filed_row}
             <p style="margin: 0 0 10px 0;"><strong>Estimated Value Grade:</strong> {lead_data.get('lead_score', 'Medium').title()}</p>
             {applicant_row}
             <p style="margin: 0;"><strong>Description / Summary:</strong><br/>
@@ -348,6 +400,7 @@ def send_free_lead_granted_email(customer_email: str, lead_data: dict, unsubscri
         <p style="font-size: 12px; color: #94a3b8;">
             Note: UK councils do not publish a homeowner's phone number or email address on planning applications. This lead includes everything that is legally published: the address, the applicant name (when the council records it), and the application details above.
         </p>
+        {_free_tools_and_subscribe_html(lead_data.get('reference', ''))}
         {unsub_html}
     </div>
     """
@@ -494,7 +547,7 @@ def send_cold_email_1(email: str, lead_data: dict, code: str, director_name: str
         <p style="margin:0 0 14px 0;">{director_line}</p>
         <p style="margin:0 0 14px 0;">Found a live tree job near {area} that nobody's claimed yet.</p>
         <p style="margin:0 0 14px 0;">{council} logged {work} this week (ref {ref}). No tree surgeon's listed as the agent on it yet.</p>
-        <p style="margin:0 0 14px 0;">It's a live, unclaimed job on the council's register — we've already pulled it, verified it and set it aside for you, so you're not the one trawling every council portal yourself. Nobody's contacted the homeowner yet. It's yours, free, no card needed: <a href="{link}" style="color:#059669;">{link}</a></p>
+        <p style="margin:0 0 14px 0;">Nobody's contacted the homeowner yet — it's still fully unclaimed. It's yours, free, no card needed: <a href="{link}" style="color:#059669;">{link}</a></p>
         <p style="margin:0 0 14px 0;">Your code: <strong style="font-family:monospace; letter-spacing:1px;">{code}</strong> — enter it on that page to unlock the full address.</p>
         <p style="margin:0 0 14px 0;">I run TreeKey — we scan every UK council's planning register daily for tree work and pass on jobs like this before most contractors even know they exist.</p>
         <p style="margin:0 0 20px 0;">More in a few days if it's useful. No obligation either way.</p>
