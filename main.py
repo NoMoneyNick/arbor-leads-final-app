@@ -1594,7 +1594,7 @@ def public_homepage(request: Request):
                      ballooning to an oversized column on wide desktop screens. -->
                 <div class="flex flex-col md:flex-row-reverse items-center gap-8 md:gap-12">
                     <div class="w-full md:w-1/2 flex justify-center shrink-0">
-                        <div class="w-full max-w-sm aspect-[3/4] rounded-2xl overflow-hidden">
+                        <div class="w-full max-w-[19.2rem] aspect-[3/4] rounded-2xl overflow-hidden">
                             <img src="/static/images/tool-app.jpg" alt="TreeKey installed as a home-screen app, showing the live lead feed" class="w-full h-full object-cover" loading="lazy">
                         </div>
                     </div>
