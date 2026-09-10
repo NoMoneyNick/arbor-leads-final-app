@@ -287,6 +287,91 @@ def _list_unsubscribe_headers(unsubscribe_url: str) -> Optional[Dict[str, str]]:
     }
 
 
+def _extract_street_level(address: str) -> str:
+    """Cold Email 1's whole persuasion mechanism (see COLD_EMAIL_SEQUENCE.md,
+    "Variant A -- proof of surveillance") depends on a real street name, not
+    a vague postcode area -- that specificity is what proves a human
+    actually looked at the register instead of mail-merging a blast. But
+    the exact house number / full address is deliberately held back until
+    they click through and get the code, same principle as
+    _blur_address_to_area just one level less blurred. Strips a leading
+    house number/building identifier off the first address segment, keeps
+    street + locality, drops the postcode segment entirely."""
+    import re
+    if not address:
+        return "your area"
+    postcode_re = re.compile(r'^[A-Z]{1,2}[0-9][A-Z0-9]?\s*[0-9][A-Z]{2}$', re.I)
+    parts = [p.strip() for p in address.split(",") if p.strip()]
+    parts = [p for p in parts if not postcode_re.match(p)]
+    if parts:
+        parts[0] = re.sub(r'^\s*\d+[A-Za-z]?\s+', '', parts[0])
+    return ", ".join(parts) if parts else "your area"
+
+
+def send_cold_email_1(email: str, lead_data: dict, code: str, director_name: str = "",
+                       company_name: str = "", unsubscribe_url: str = "") -> bool:
+    """Sep 10 2026: the actual first-touch cold-outreach email, built from
+    the copy Nick approved after the full cross-LLM ranking exercise --
+    COLD_EMAIL_SEQUENCE.md's "Final Verdict" section, Final Email 1 with
+    the revised opening ("Public notice, not a directory lead."). This is
+    NOT a variant of the free-lead-code confirmation email above -- it's a
+    different email for a different moment in the funnel (cold outreach to
+    someone who's never touched the site, vs. confirming a signup someone
+    just completed) and per the approved copy's own design notes
+    (Variant C, "Pattern Interrupt": plain, terse, doesn't read like
+    marketing HTML precisely because it isn't styled like marketing HTML)
+    it is deliberately near-plain-text, not a branded card. Don't
+    "improve" this one by making it look more like a template -- that
+    would work against the exact mechanism the copy is built on.
+
+    Real tokens only, same honesty standard enforced everywhere else in
+    this project (PROJECT_STATE.md items 11-13, the banned "racing against
+    N other firms" line): {{recent_tpo_council}}/{{recent_tpo_work}}/
+    {{recent_tpo_ref}} come directly off the real reserved lead, and
+    {{recent_tpo_street}} is the real street via _extract_street_level, not
+    a placeholder. The code + a tappable link are both included so this
+    works as an actual functional send, not just a copy preview -- the
+    email references a lead that is genuinely reserved and genuinely
+    redeemable with the code shown.
+
+    Unsubscribe styled per COLD_EMAIL_SEQUENCE.md's explicit instruction:
+    very small, pushed well below the sign-off, visually separated."""
+    director_line = f"{director_name}," if director_name else f"Found this for {company_name},"
+    street = _extract_street_level(lead_data.get("address", ""))
+    work = (lead_data.get("summary") or "tree work").strip().rstrip(".")
+    if len(work) > 100:
+        work = work[:97].rstrip() + "..."
+    council = (lead_data.get("council_source") or "the council").replace(" Council", "") + " Council"
+    ref = lead_data.get("reference") or "on record"
+    link = f"{PUBLIC_APP_URL}/free-account"
+
+    subject = f"{street}, filed this week, unclaimed"
+    unsub_html = (
+        f'<p style="font-size:10px; color:#9ca3af; margin-top:40px; padding-top:10px; '
+        f'border-top:1px solid #eee;"><a href="{unsubscribe_url}" style="color:#9ca3af;">Unsubscribe</a></p>'
+        if unsubscribe_url else ""
+    )
+    # Deliberately plain: system font stack, no border/card, no logo, no
+    # colour blocks -- this is meant to read like an email a person typed,
+    # per the copy's own "pattern interrupt" design rationale above.
+    html = f"""
+    <div style="font-family: -apple-system, Segoe UI, Arial, sans-serif; max-width: 560px; margin: auto; padding: 8px; color:#1f2937; font-size:15px; line-height:1.5;">
+        <p style="margin:0 0 14px 0;">{director_line}</p>
+        <p style="margin:0 0 14px 0;">Public notice, not a directory lead.</p>
+        <p style="margin:0 0 14px 0;">{council} logged {work} on {street} this week (ref {ref}). No tree surgeon's listed as agent yet.</p>
+        <p style="margin:0 0 14px 0;">It's on the public register, so anyone can see it, but nobody's called the homeowner first. It's yours, free, no card: <a href="{link}" style="color:#059669;">{link}</a></p>
+        <p style="margin:0 0 14px 0;">Your code: <strong style="font-family:monospace; letter-spacing:1px;">{code}</strong> — enter it on that page to view the full details.</p>
+        <p style="margin:0 0 14px 0;">I run TreeKey. We watch every UK council register daily and sell each lead once, then it's gone from the platform for good.</p>
+        <p style="margin:0 0 14px 0;">More in a few days if useful. No obligation.</p>
+        <p style="margin:0;">Nick, TreeKey (treekey.uk)</p>
+        {unsub_html}
+    </div>
+    """
+    return send_transactional_email(to_email=email, subject=subject, html_body=html,
+                                     from_label="Nick from TreeKey <leads@treekey.uk>",
+                                     headers=_list_unsubscribe_headers(unsubscribe_url))
+
+
 def _blur_address_to_area(address: str) -> str:
     """Sep 5 2026, free-signup teaser emails: shows the general area (the
     postcode outcode, e.g. "NG22") without the street/house-number detail

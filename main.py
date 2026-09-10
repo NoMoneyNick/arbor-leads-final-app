@@ -4252,13 +4252,21 @@ def _make_unsubscribe_url(recipient_email: str) -> str:
 
 
 def _issue_free_lead_code(email: str, phone: str, lat: float, lon: float,
-                           client_ip: str, device_id: str) -> RedirectResponse:
+                           client_ip: str, device_id: str, email_style: str = "confirmation",
+                           director_name: str = "", company_name: str = "") -> RedirectResponse:
     """Sep 10 2026: the shared "reserve a lead, mint a code, email it" path,
     used by both a fresh full-form /api/free-signup submission and the
     one-click /api/request-new-code button shown after a code expires (see
     that route below -- Nick's ask was explicit that a lapsed-code visitor
     should NOT have to retype their postcode/phone, so this takes already-
-    resolved lat/lon/phone rather than re-deriving them from a form)."""
+    resolved lat/lon/phone rather than re-deriving them from a form).
+
+    email_style picks which template mints the email around the same real
+    reserve+code: "confirmation" (default, real /free-account funnel) or
+    "cold_email_1" (Nick's ask, 10 Sep 2026: a functional test send of the
+    actual approved cold-outreach Email 1 copy, real code and real link
+    included, used only by the /api/cold-email-1-test helper below -- not
+    reachable from any public page)."""
     # One live reservation per email at a time -- stops stacking up
     # multiple reservations instead of using or waiting out the current one.
     if database.has_active_unexpired_code(email):
@@ -4322,13 +4330,48 @@ def _issue_free_lead_code(email: str, phone: str, lat: float, lon: float,
         return RedirectResponse(url="/free-account?error=Something+went+wrong+generating+your+code.+Please+try+again.", status_code=303)
 
     import notifications
-    notifications.send_free_lead_code_email(email, reserved, code_row["code"], expires_hours=72.0,
-                                              unsubscribe_url=_make_unsubscribe_url(email))
+    if email_style == "cold_email_1":
+        notifications.send_cold_email_1(email, reserved, code_row["code"], director_name=director_name,
+                                          company_name=company_name, unsubscribe_url=_make_unsubscribe_url(email))
+    else:
+        notifications.send_free_lead_code_email(email, reserved, code_row["code"], expires_hours=72.0,
+                                                  unsubscribe_url=_make_unsubscribe_url(email))
 
     response = RedirectResponse(url=f"/free-account?sent={urllib.parse.quote(email)}", status_code=303)
     response.set_cookie(key="treekey_device_id", value=device_id, max_age=86400 * 365,
                          httponly=True, secure=True, samesite="lax")
     return response
+
+
+@app.get("/api/cold-email-1-test")
+def cold_email_1_test(request: Request, email: str = Query(...), postcode: str = Query(...),
+                       name: str = Query(""), company: str = Query("")):
+    """Sep 10 2026, Nick's ask verbatim: "I want you to cold email me...
+    naming me specifically and mentioning an area near me, and giving me a
+    code and a link to tap" -- a manual test send of the real, approved
+    cold-outreach Email 1 (see notifications.send_cold_email_1) using a
+    genuinely reserved lead and a genuinely redeemable code, not a mockup.
+
+    Deliberately NOT linked from any page -- the actual cold-outreach
+    system (enriching a list of real prospects and sending this at scale)
+    is not built yet; this exists only so this one email can be tested on
+    demand. It reuses every abuse guard _issue_free_lead_code already has
+    (rate limit, one active code per email, request cap, IP/device/phone
+    checks, daily circuit-breaker) since it burns the exact same real
+    inventory a public signup would -- so it's no more exposed than the
+    already-public /free-account form, just not advertised anywhere. Safe
+    to delete this route once you're done evaluating the email; nothing
+    else depends on it."""
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        return PlainTextResponse("Too many attempts. Please wait a minute and try again.", status_code=429)
+    resolved = database.resolve_location(postcode)
+    if resolved.get("lat") is None:
+        return PlainTextResponse(f"Couldn't resolve {postcode!r} to a UK postcode/outcode.", status_code=400)
+    device_id = request.cookies.get("treekey_device_id") or secrets.token_hex(16)
+    return _issue_free_lead_code(email, phone="", lat=resolved["lat"], lon=resolved["lon"],
+                                  client_ip=client_ip, device_id=device_id,
+                                  email_style="cold_email_1", director_name=name, company_name=company)
 
 
 @app.post("/api/free-signup")
