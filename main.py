@@ -1524,14 +1524,14 @@ def public_homepage(request: Request):
          tool gets its own distinct treatment instead of looking like four
          interchangeable FAQ entries. (Sep 10 2026: Nick asked for pricing to
          sit ABOVE this section again, so this block now follows Pricing.)
-         Each band has a real image slot -- Ledger, Chip-Drop and Storm Radar
-         now use Nick's supplied photos (static/images/tool-ledger.jpg,
-         tool-chip-drop.jpg [rotated 90° from his original portrait upload
-         per his request], tool-storm-radar.jpg). "The App" band still has
-         no supplied photo, so it keeps the labelled placeholder box until
-         one exists -- swap it for a real <img> the same way once supplied,
-         matching the pattern used elsewhere for photos, e.g.
-         fieldwork-bucking.jpg below.
+         Each band has a real image slot -- all 4 now use Nick's supplied
+         photos: static/images/tool-ledger.jpg, tool-chip-drop.jpg [rotated
+         90° from his original portrait upload per his request],
+         tool-storm-radar.jpg, and tool-app.jpg (a hand-holding-phone shot
+         of TreeKey installed as a home-screen app, added Sep 10 2026 --
+         kept at its own aspect-[3/4] portrait ratio rather than forced into
+         the other 3 bands' 16:9 box, per his explicit ask not to
+         stretch/crop it out of its real dimensions or perspective).
          Mobile collapses to a plain stacked column (image below text) per
          Nick's own "I understand phone is different" -- alternating
          left/right only reads as intentional once there's room for it. -->
@@ -1583,9 +1583,20 @@ def public_homepage(request: Request):
                 </div>
 
                 <!-- 4. The App (reversed) -->
+                <!-- Sep 10 2026: Nick's own hand-holding-phone photo (portrait,
+                     phone screen showing the real dashboard) -- deliberately
+                     NOT forced into the shared 16:9 aspect-video box the other
+                     3 bands use, per his ask to keep its own dimensions/
+                     perspective rather than stretching or cropping it into a
+                     landscape shape it was never shot in. aspect-[3/4] matches
+                     the source photo closely enough that object-cover needs
+                     almost no crop, and max-w-sm keeps a portrait image from
+                     ballooning to an oversized column on wide desktop screens. -->
                 <div class="flex flex-col md:flex-row-reverse items-center gap-8 md:gap-12">
-                    <div class="w-full md:w-1/2 aspect-video rounded-2xl border-2 border-dashed border-emerald-500/30 bg-emerald-500/5 flex items-center justify-center text-center p-6 shrink-0">
-                        <span class="text-emerald-400/70 text-xs font-mono uppercase tracking-wider">Image placeholder — The App screenshot goes here</span>
+                    <div class="w-full md:w-1/2 flex justify-center shrink-0">
+                        <div class="w-full max-w-sm aspect-[3/4] rounded-2xl overflow-hidden">
+                            <img src="/static/images/tool-app.jpg" alt="TreeKey installed as a home-screen app, showing the live lead feed" class="w-full h-full object-cover" loading="lazy">
+                        </div>
                     </div>
                     <div class="w-full md:w-1/2">
                         <div class="text-[11px] font-mono uppercase tracking-widest text-emerald-400 font-bold mb-2">Mobile Access</div>
