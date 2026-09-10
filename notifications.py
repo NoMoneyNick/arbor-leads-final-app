@@ -390,7 +390,7 @@ def send_cold_email_1(email: str, lead_data: dict, code: str, director_name: str
         <p style="margin:0 0 14px 0;">{director_line}</p>
         <p style="margin:0 0 14px 0;">Found a live tree job near {area} that nobody's claimed yet.</p>
         <p style="margin:0 0 14px 0;">{council} logged {work} this week (ref {ref}). No tree surgeon's listed as the agent on it yet.</p>
-        <p style="margin:0 0 14px 0;">It's sitting on the council's public planning register right now, free for anyone to look up, but nobody's called the homeowner first. It's yours, free, no card needed: <a href="{link}" style="color:#059669;">{link}</a></p>
+        <p style="margin:0 0 14px 0;">It's sitting on the council's public planning register right now, free for anyone to look up, but nobody's contacted the homeowner first. It's yours, free, no card needed: <a href="{link}" style="color:#059669;">{link}</a></p>
         <p style="margin:0 0 14px 0;">Your code: <strong style="font-family:monospace; letter-spacing:1px;">{code}</strong> — enter it on that page to unlock the full address.</p>
         <p style="margin:0 0 14px 0;">I run TreeKey — we scan every UK council's planning register daily for tree work and pass on jobs like this before most contractors even know they exist.</p>
         <p style="margin:0 0 20px 0;">More in a few days if it's useful. No obligation either way.</p>

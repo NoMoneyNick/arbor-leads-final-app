@@ -533,7 +533,7 @@ Ran the comparison prompt against all entries Nick collected: Sonnet 5 (V1/V2/V3
 
 {{recent_tpo_council}} logged {{recent_tpo_work}} on {{recent_tpo_street}} this week (ref {{recent_tpo_ref}}). No tree surgeon's listed as agent yet.
 
-It's on the public register, so anyone can see it, but nobody's called the homeowner first. It's yours, free, no card: [link]. There's a printable letter on the site too, so you can be at the door before anyone else knows the job exists.
+It's on the public register, so anyone can see it, but nobody's contacted the homeowner first. It's yours, free, no card: [link]. There's a printable letter on the site too, so you can be at the door before anyone else knows the job exists.
 
 I run TreeKey. We watch every UK council register daily and sell each lead once, then it's gone from the platform for good.
 
@@ -596,7 +596,7 @@ Public notice, not a directory lead.
 
 {{recent_tpo_council}} logged {{recent_tpo_work}} on {{recent_tpo_street}} this week (ref {{recent_tpo_ref}}). No tree surgeon's listed as agent yet.
 
-It's on the public register, so anyone can see it, but nobody's called the homeowner first. It's yours, free, no card: [link]. There's a printable letter on the site too, so you can be at the door before anyone else knows the job exists.
+It's on the public register, so anyone can see it, but nobody's contacted the homeowner first. It's yours, free, no card: [link]. There's a printable letter on the site too, so you can be at the door before anyone else knows the job exists.
 
 I run TreeKey. We watch every UK council register daily and sell each lead once, then it's gone from the platform for good.
 
@@ -607,3 +607,14 @@ Nick, TreeKey
 **Fallback, director name missing:** open with "Found this for {{company_name}}," instead of "{{director_name}},", everything else unchanged.
 
 Final Email 2 and Final Email 3 stand as written above, unchanged.
+
+---
+---
+
+# Live-test corrections (Sonnet 5, 10 Sep 2026)
+
+Nick had this Final Email 1 actually sent to a real inbox with a real reserved lead and code. Two things the copy-only ranking exercise couldn't catch, only a real read could:
+
+1. **"nobody's called the homeowner first"** — factually inconsistent with this product's own repeatedly-stated fact that leads never include a phone number (councils don't publish one). "Called" implies a phone action nothing here actually offers. This is the SAME issue V2's own notes (line 171 above) said had already been removed ("'calls first' language removed") — it quietly came back in the Cross-LLM Synthesis / Final Verdict passes above and both are now corrected to "contacted". Treat "called the homeowner" / "calls first" as a banned phrase in any future draft or edit pass, same category as the "racing against N other firms" line above — this is now the second wording fix that had to be re-applied after resurfacing.
+2. **"Public notice, not a directory lead."** — read as unexplained jargon to an actual recipient with no prior context ("I don't even know if tree surgeons will know what a public notice is, or a directory lead"), not the pattern-interrupt hook it looked like on paper. Dropped from the live send. What Nick's own reaction confirmed DOES work: a real, recognisable place name in the opening line ("I recognise Banstead, that's near me") is what signals genuine individual attention — not an unexplained phrase. Live version opens with "Found a live tree job near {{area}} that nobody's claimed yet." instead.
+3. **Street-level address detail removed entirely, replaced with the postcode-district area name** (e.g. "Reigate and Banstead" rather than a street name). Not a copy preference — a real send using the actual scraped `{{recent_tpo_street}}` value leaked the FULL address (house number, street, town, county, postcode) into the email, because that field isn't reliably comma-delimited the way it reads in this document's examples. The specificity mechanism still works at area level (confirmed by Nick's own reaction above) without the leak risk, so this document's remaining `{{recent_tpo_street}}` token should be treated as unsafe to use verbatim in a real send from here on -- resolve to an area/district name instead, never the raw scraped address.

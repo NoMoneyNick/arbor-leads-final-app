@@ -4369,6 +4369,20 @@ def cold_email_1_test(request: Request, email: str = Query(...), postcode: str =
     if resolved.get("lat") is None:
         return PlainTextResponse(f"Couldn't resolve {postcode!r} to a UK postcode/outcode.", status_code=400)
     device_id = request.cookies.get("treekey_device_id") or secrets.token_hex(16)
+    # Sep 10 2026, CRITICAL FIX: this route skipped create_or_update_limbo_
+    # account, unlike the real /api/free-signup path. Nick's live test
+    # redeemed a code fine (the lead genuinely flipped to 'claimed' in the
+    # database) but then hit a blank /free-account page with zero
+    # explanation -- root cause was record_free_lead_grant being a no-op
+    # UPDATE against a limbo_accounts row that never existed for this test
+    # email, so /free-dashboard found no account and silently bounced back
+    # to the blank form. A real cold-email click always has this row by
+    # the time they redeem (the real form creates it first); this test
+    # helper now does the same so a test send behaves exactly like the
+    # real flow it's meant to be previewing.
+    database.create_or_update_limbo_account(email=email, name=name or None, phone=None,
+                                             outcode=resolved["outcode"], lat=resolved["lat"], lon=resolved["lon"],
+                                             company_name=company or None)
     return _issue_free_lead_code(email, phone="", lat=resolved["lat"], lon=resolved["lon"],
                                   client_ip=client_ip, device_id=device_id,
                                   email_style="cold_email_1", director_name=name, company_name=company)
@@ -4420,7 +4434,24 @@ async def free_signup(request: Request):
             }.get(result["reason"], "Something went wrong redeeming that code. Please try again.")
             return RedirectResponse(url=f"/free-account?error={urllib.parse.quote(reason_copy)}", status_code=303)
 
-        database.record_free_lead_grant(email, result["lead"]["reference"])
+        # Sep 10 2026, CRITICAL FIX: this return value used to be ignored.
+        # record_free_lead_grant is an UPDATE against limbo_accounts -- if
+        # no row exists for this email (found live: a cold-email-1-test
+        # recipient with no account yet, now fixed at the source, but this
+        # is the general safety net for any other way that could happen),
+        # it's a silent no-op, and the unconditional redirect to
+        # /free-dashboard below used to send them straight into a dead end:
+        # that page looks up the account, finds nothing, and silently
+        # bounces back to a blank /free-account form -- no error, no
+        # explanation, even though the lead itself really was claimed.
+        # Nick hit exactly this live. Now checked, with a real (if unusual)
+        # error message instead of a page that looks like nothing happened.
+        if not database.record_free_lead_grant(email, result["lead"]["reference"]):
+            logger.error(f"[Free Signup] Code redeemed for {email} but record_free_lead_grant found no "
+                         f"limbo_accounts row -- lead {result['lead']['reference']} is claimed but ungranted.")
+            return RedirectResponse(
+                url="/free-account?error=Your+code+worked+and+the+job+is+now+yours%2C+but+we+couldn%27t+load+your+account+to+show+it.+Please+contact+contact%40treekey.uk+with+your+email+so+we+can+fix+this+manually.",
+                status_code=303)
         response = RedirectResponse(url="/free-dashboard", status_code=303)
         response.set_cookie(key="treekey_contractor_session", value=_sign_session_cookie(email),
                              max_age=86400 * 30, httponly=True, secure=True, samesite="lax")
