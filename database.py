@@ -3523,20 +3523,35 @@ def clear_lead_flag_for_email(email: str) -> int:
     if not SURL or not email:
         return 0
     email = email.strip().lower()
+    # Sep 10 2026: a "+" typed directly into a URL (rather than submitted
+    # through an HTML form, which correctly percent-encodes it to %2B) gets
+    # decoded back to a literal space by the standard query-string parser
+    # -- "foo+bar@x.com" pasted straight into an address bar arrives here
+    # as "foo bar@x.com". Confirmed live: this tripped Nick up three times
+    # in a row on a +alias test address. Rather than keep making him
+    # remember to type %2B, try the space-restored-to-plus variant too if
+    # the literal string finds nothing -- this only ever matches an
+    # existing already-redeemed row, it can't create or misfire onto
+    # anything new.
+    candidates = [email]
+    if " " in email:
+        candidates.append(email.replace(" ", "+"))
     try:
         conn = get_db_conn()
         cur = conn.cursor()
         try:
-            cur.execute("""
-                UPDATE free_lead_codes
-                SET ip_address = NULL, device_id = NULL
-                WHERE email = %s AND redeemed_at IS NOT NULL
-                RETURNING id;
-            """, (email,))
-            rows = cur.fetchall()
+            cleared_ids = set()
+            for candidate in candidates:
+                cur.execute("""
+                    UPDATE free_lead_codes
+                    SET ip_address = NULL, device_id = NULL
+                    WHERE email = %s AND redeemed_at IS NOT NULL
+                    RETURNING id;
+                """, (candidate,))
+                cleared_ids.update(r[0] for r in cur.fetchall())
             conn.commit()
-            logger.info(f"[Admin] Cleared IP/device fingerprint on {len(rows)} free_lead_codes row(s) for {email}")
-            return len(rows)
+            logger.info(f"[Admin] Cleared IP/device fingerprint on {len(cleared_ids)} free_lead_codes row(s) for {email}")
+            return len(cleared_ids)
         finally:
             cur.close()
             conn.close()
