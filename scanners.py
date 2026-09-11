@@ -370,17 +370,76 @@ def _resolve_vertical(text: str) -> Optional[str]:
 # not the plan's full candidate list assumed sight-unseen.
 _STRUCTURED_TREE_APP_TYPES = {"trees"}
 
+# Sep 11 2026, Nick's ask after a live example surfaced during a job-category
+# audit: PL/26/02939/HB -- "Listed building application for the removal &
+# re-building of central chimney serving Kiln Cottage; remedial works
+# including re-pointing to north elevation chimney serving The Buttery;
+# structural alterations to join three chimneys into single monolithic
+# structure" -- got sold as a TREE lead. Zero tree content anywhere in it.
+#
+# Root cause: this went through Tier 2 above. Tier 1 (TREE_GOLD, real
+# keyword match) correctly found nothing. Tier 2 then trusted the source
+# portal's own `app_type` field ALONE, with no text corroboration at all --
+# and evidently the source data had this genuine chimney/listed-building
+# application filed under an app_type of "Trees" (a data-quality problem on
+# the council/PlanIt side, not something this codebase can prevent at the
+# source). Tier 2 was deliberately built this permissive (see the Sep 2
+# comment above) because real tree work is sometimes just bare arborist
+# shorthand with no describable keyword ("T1 - Cherry - Reduce height by
+# 4m.") -- so simply requiring a Tier-1-style positive match would defeat
+# the entire point of Tier 2 and lose that genuine recall.
+#
+# Nick's instruction: fix this preemptively, not one leaked example at a
+# time -- "fine to have too many filters and not need them than to go
+# through it one by one." So rather than patch this single chimney case,
+# this is a general NEGATIVE list: unambiguous building-fabric / other-
+# development terms that have no arboricultural meaning at all, used ONLY
+# to veto Tier 2's blind app_type trust. Deliberately NOT applied to Tier 1
+# (a real keyword match there is already positive evidence) and deliberately
+# safe to over-include: a lead vetoed here does not get silently dropped --
+# every `vertical is None` result already routes to Tier 3 (LLM) then Tier 4
+# (human review queue) at every call site, so the worst case of a
+# false-positive veto is one extra review step, never a lost lead. That
+# asymmetry (blocking Tier 2 costs almost nothing; NOT blocking it sold a
+# chimney repair as a tree job) is why this list can be broad.
+NON_TREE_EXCLUSION_GOLD = [
+    # Building fabric / structural repair -- no vegetation meaning at all
+    "chimney", "re-pointing", "repointing", "render", "rendering", "cladding",
+    "roof repair", "re-roofing", "reroofing", "roof replacement", "roof covering",
+    "window replacement", "replacement windows", "door replacement", "replacement doors",
+    "damp proofing", "damp-proofing", "structural alterations", "structural repairs",
+    "listed building consent",
+    # New-build / extension-type development -- no vegetation meaning at all
+    "conservatory", "loft conversion", "garage conversion", "single storey extension",
+    "two storey extension", "rear extension", "side extension", "porch extension",
+    "new dwelling", "erection of a dwelling", "detached dwelling", "outbuilding",
+    "summerhouse", "garden room",
+    # Infrastructure / hard landscaping -- no vegetation meaning at all
+    "solar panel", "photovoltaic", "dropped kerb", "hard standing", "driveway",
+    "swimming pool", "telecoms mast", "telecommunications mast", "satellite dish",
+    "shopfront", "advertisement hoarding", "digital advertisement", "illuminated sign",
+]
+
 
 def _resolve_vertical_with_structured_fields(text: str, app_type: Optional[str] = None) -> Optional[str]:
     """Tier 1 (keyword, via _resolve_vertical) + Tier 2 (structured field)
     vertical resolution. Falls back to Tier 1 alone whenever no app_type is
     supplied, so every call site without one (paid-API loop, GLA, Leeds --
     none of which have a confirmed equivalent field, see the module comment
-    above _STRUCTURED_TREE_APP_TYPES) is completely unaffected."""
+    above _STRUCTURED_TREE_APP_TYPES) is completely unaffected.
+
+    Sep 11 2026: Tier 2's app_type-only match is now vetoed when the
+    description hits NON_TREE_EXCLUSION_GOLD (see that list's comment) --
+    an app_type claiming "Trees" is no longer enough on its own when the
+    actual description is unambiguously about something else. A vetoed
+    item returns None here exactly like "no match at all" always did, so it
+    still reaches Tier 3/4 review rather than being discarded."""
     tier1 = _resolve_vertical(text)
     if tier1 is not None:
         return tier1
     if app_type and str(app_type).strip().lower() in _STRUCTURED_TREE_APP_TYPES:
+        if _keyword_hit(text or "", NON_TREE_EXCLUSION_GOLD):
+            return None
         return "tree"
     return None
 

@@ -3791,6 +3791,89 @@ def admin_reclassify_audit(request: Request, secret: Optional[str] = Query(None)
             <a href="/admin/lead-audit?secret={secret or ''}&view=general" style="color:#044332;">← General/Other residual sample</a> &nbsp;|&nbsp;
             <a href="/admin/lead-volume-report?secret={secret or ''}" style="color:#044332;">Volume report</a> &nbsp;|&nbsp;
             <a href="/admin/cleanup-stale-leads?secret={secret or ''}" style="color:#044332;">Delete historical stale leads</a> &nbsp;|&nbsp;
+            <a href="/admin/vertical-audit?secret={secret or ''}" style="color:#044332;">Vertical audit (non-tree leaks)</a> &nbsp;|&nbsp;
+            <a href="/admin?secret={secret or ''}" style="color:#044332;">Admin home</a>
+        </p>
+    </body></html>
+    """)
+
+
+@app.get("/admin/vertical-audit", response_class=HTMLResponse)
+def admin_vertical_audit(request: Request, secret: Optional[str] = Query(None)):
+    """Sep 11 2026, Nick's ask after PL/26/02939/HB -- a chimney/listed-
+    building application with zero tree content -- turned up tagged as a
+    tree lead. Root cause (fixed in scanners.py): Tier 2 of the vertical
+    classifier trusted PlanIt's own `app_type` field alone, with no text
+    corroboration, and that source field was apparently wrong for this
+    record. The scanners.py fix stops this happening to NEW leads going
+    forward (scanners.NON_TREE_EXCLUSION_GOLD now vetoes a bare app_type
+    trust when the description is unambiguously about something else) --
+    this page is the other half: "we will rescan" -- scanning every lead
+    ALREADY sitting in the table (not just new ones going forward) for the
+    same pattern, so any other chimney/extension/driveway-type leaks that
+    got in before today's fix can actually be found and looked at.
+
+    Read-only -- nothing is re-tagged, hidden, or deleted here. Flags a
+    currently-"tree" lead (no vertical:hmo tag) whose summary hits the same
+    NON_TREE_EXCLUSION_GOLD list the scanner now uses to gate new inserts.
+    A flag here is a "worth a human look" signal, not an automatic verdict
+    -- the same list can, rarely, hit a real tree lead that incidentally
+    mentions a building-fabric word (e.g. "reduce crown for clearance from
+    chimney"), so each one is listed with its full summary for a human to
+    actually read before deciding whether to fix or ignore it."""
+    verify_admin_or_secret(request, secret)
+
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT reference, summary, tags, status, discovered_at, registered_date
+            FROM leads;
+        """)
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+
+    total_scanned = 0
+    hmo_excluded = 0
+    flagged = []
+    for reference, summary, tags, status, discovered_at, registered_date in rows:
+        tags = tags or []
+        if "vertical:hmo" in tags:
+            hmo_excluded += 1
+            continue
+        total_scanned += 1
+        if scanners._keyword_hit(summary or "", scanners.NON_TREE_EXCLUSION_GOLD):
+            flagged.append((reference, summary or "", status, discovered_at, registered_date))
+
+    flagged_rows_html = "".join([
+        f"""
+        <tr>
+            <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px; font-family:monospace;">{reference or ''}</td>
+            <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{summary}</td>
+            <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px;">{status or ''}</td>
+        </tr>"""
+        for reference, summary, status, discovered_at, registered_date in flagged
+    ])
+
+    return HTMLResponse(f"""
+    <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:1250px; margin:auto;">
+        <h2 style="color:#044332;">Vertical Audit — Non-Tree Leaks in the Tree Bucket</h2>
+        <p style="color:#64748b; font-size:13px;">Read-only. Scanned all {total_scanned} tree-vertical leads ({hmo_excluded} HMO-vertical excluded) for the same building-fabric/other-development pattern behind PL/26/02939/HB (a chimney/listed-building application that got wrongly tagged as tree work).</p>
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin:16px 0; display:inline-block;">
+            <div style="font-size:12px; color:#64748b;">Flagged for a human look</div>
+            <div style="font-size:28px; font-weight:800; color:{'#dc2626' if flagged else '#059669'};">{len(flagged)}</div>
+        </div>
+        <p style="color:#b45309; font-size:12px; background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:10px;">
+            A flag here means the summary contains a building-fabric/other-development term (chimney, extension, driveway, etc.) — it's a "worth checking" signal, not an automatic verdict. A real tree lead can rarely still mention one of these incidentally (e.g. clearance from a chimney) — read the Summary column before acting on any row.
+        </p>
+        <table style="width:100%; border-collapse:collapse; font-size:13px; background:white; border:1px solid #e2e8f0;">
+            <tr style="background:#f1f5f9;"><th style="padding:8px; text-align:left;">Ref</th><th style="padding:8px; text-align:left;">Summary</th><th style="padding:8px; text-align:left;">Status</th></tr>
+            {flagged_rows_html or '<tr><td colspan="3" style="padding:8px;">None found.</td></tr>'}
+        </table>
+        <p style="margin-top:24px;">
+            <a href="/admin/reclassify-audit?secret={secret or ''}" style="color:#044332;">← Reclassification audit</a> &nbsp;|&nbsp;
             <a href="/admin?secret={secret or ''}" style="color:#044332;">Admin home</a>
         </p>
     </body></html>
