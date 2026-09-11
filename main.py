@@ -3519,7 +3519,7 @@ def admin_lead_audit(request: Request, secret: Optional[str] = Query(None), view
                 rows_html += f"""
                 <tr>
                     <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px; font-family:monospace;">{reference or ''}</td>
-                    <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{(summary or '')[:200]}</td>
+                    <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{summary or ''}</td>
                     <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px;">{status or ''}</td>
                 </tr>"""
         pct = f"{(residual_total / total_scanned * 100):.1f}%" if total_scanned else "0%"
@@ -3719,7 +3719,7 @@ def admin_reclassify_audit(request: Request, secret: Optional[str] = Query(None)
             <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px; font-family:monospace;">{reference or ''}</td>
             <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px;">{old_key} → <b>{new_key}</b></td>
             <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px;">{conf}</td>
-            <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{(summary or '')[:180]}</td>
+            <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{summary or ''}</td>
         </tr>"""
 
     date_rows_html = ""
@@ -3728,7 +3728,7 @@ def admin_reclassify_audit(request: Request, secret: Optional[str] = Query(None)
         <tr>
             <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px; font-family:monospace;">{reference or ''}</td>
             <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px; color:#b45309;">{reason}</td>
-            <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{(summary or '')[:150]}</td>
+            <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{summary or ''}</td>
         </tr>"""
 
     return HTMLResponse(f"""
