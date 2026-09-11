@@ -3441,7 +3441,8 @@ def admin_lead_audit(request: Request, secret: Optional[str] = Query(None), view
             candidates = cur.fetchall()
         else:
             cur.execute("""
-                SELECT reference, address, summary, lead_score, discovered_at, registered_date, status, source_type, council_source
+                SELECT reference, address, summary, lead_score, discovered_at, registered_date, status,
+                       COALESCE(lead_source_type, 'council_planning') as source_type, council_source
                 FROM leads
                 ORDER BY COALESCE(registered_date, discovered_at) ASC NULLS LAST
                 LIMIT 500;
