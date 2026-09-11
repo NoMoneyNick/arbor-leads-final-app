@@ -717,6 +717,20 @@ def init_db():
             # actual migration that adds the column live, same pattern as
             # every other column added to an already-live table on this list.
             "ALTER TABLE limbo_accounts ADD COLUMN IF NOT EXISTS company_name TEXT;",
+            # Sep 11 2026, Nick's ask ("we should have a 'i agree to terms
+            # and conditions' button"): every account-creation path
+            # (register_or_update_subscription for a paid subscriber,
+            # free_signup for a limbo/free account) now requires the
+            # checkbox and records exactly when it was ticked -- a real
+            # timestamp, not just a boolean, so there's an actual record of
+            # consent if it's ever disputed, matching how a clickwrap
+            # agreement is meant to work (browsewrap -- "by using this site
+            # you agree" with no checkbox -- is legally weaker). NULL means
+            # either a pre-migration row (existing customers were never
+            # shown this checkbox and are not retroactively un-consented --
+            # see admin_terms_consent_audit) or, if seen on a NEW row, a bug.
+            "ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ;",
+            "ALTER TABLE limbo_accounts ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ;",
         ]
         failed_ddl = _run_ddl_statements_resiliently(conn, resilience_cols, phase_label="Phase1-columns")
 
@@ -3537,6 +3551,40 @@ def create_or_update_limbo_account(email: str, name: str = None, phone: str = No
         return None
 
 
+def record_free_account_terms_acceptance(email: str) -> bool:
+    """Sep 11 2026, Nick's ask ("we should have an 'I agree to terms and
+    conditions' button"): stamps terms_accepted_at on a limbo_accounts row
+    the first time its owner ticks the checkbox. COALESCE means a repeat
+    visit (re-requesting an expired code, redeeming a cold-email code
+    against an account TreeKey pre-created) never overwrites an earlier
+    real acceptance timestamp with a later one -- the first tick is the
+    one that counts as the consent record.
+
+    Called unconditionally from /api/free-signup once the checkbox is
+    confirmed checked server-side, AFTER the caller has confirmed the
+    limbo_accounts row exists (this is an UPDATE, not an INSERT -- calling
+    it before the row is created is a silent no-op, rowcount 0)."""
+    if not SURL or not email:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE limbo_accounts
+                SET terms_accepted_at = COALESCE(terms_accepted_at, NOW())
+                WHERE email = %s;
+            """, (email.strip().lower(),))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Terms] Error recording free-account terms acceptance for {email}: {e}")
+        return False
+
+
 def get_limbo_account(email: str) -> Optional[dict]:
     if not SURL or not email:
         return None
@@ -4237,6 +4285,38 @@ def register_or_update_subscription(customer_email: str, outcode: str, tier: str
             conn.close()
     except Exception as e:
         logger.error(f"[Subscription] Error registering subscription for {customer_email}: {e}")
+        return False
+
+
+def record_subscription_terms_acceptance(email: str) -> bool:
+    """Sep 11 2026, Nick's ask ("we should have an 'I agree to terms and
+    conditions' button"): the paid-subscriber counterpart to
+    record_free_account_terms_acceptance. Called from the Stripe webhook
+    right after register_or_update_subscription succeeds -- by that point
+    checkout_post has already server-side rejected the checkout if the
+    checkbox on the /checkout/{plan_key} area-selector form wasn't ticked,
+    so this just stamps when the row that consent applies to actually
+    landed. COALESCE keeps the FIRST acceptance timestamp across any later
+    plan-change/renewal webhook that re-runs this upsert, same reasoning
+    as the free-account version."""
+    if not SURL or not email:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE contractor_subscriptions
+                SET terms_accepted_at = COALESCE(terms_accepted_at, NOW())
+                WHERE customer_email = %s;
+            """, (email.strip().lower(),))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Terms] Error recording subscription terms acceptance for {email}: {e}")
         return False
 
 

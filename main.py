@@ -3138,6 +3138,16 @@ def checkout(plan_key: str, request: Request):
         </select>
         <div class="hint">You'll only be matched to jobs at the size(s) you choose — change this any time from your dashboard</div>
 
+        <!-- Sep 11 2026, Nick's ask ("we should have an 'i agree to terms
+             and conditions' button"): a real clickwrap checkbox, required
+             server-side too (see checkout_post) not just via the browser's
+             `required` attribute -- see database.record_subscription_terms_
+             acceptance for where/how this gets stamped with a timestamp. -->
+        <label style="display:flex; align-items:flex-start; gap:10px; margin:-8px 0 20px 0; cursor:pointer; font-weight:400; font-size:13px; color:#cbd5e1;">
+            <input type="checkbox" name="agree_terms" value="yes" required style="width:auto; margin:2px 0 0 0; flex-shrink:0; accent-color:#10b981;">
+            <span>I agree to TreeKey's <a href="/terms-of-service" target="_blank" style="color:#34d399;">Terms of Service</a> and <a href="/privacy-policy" target="_blank" style="color:#34d399;">Privacy Policy</a>.</span>
+        </label>
+
         <button type="submit">Continue to Secure Payment →</button>
     </form>
     <p style="text-align:center; margin-top:16px; font-size:12px; color:#64748b;">
@@ -3151,11 +3161,28 @@ def checkout(plan_key: str, request: Request):
 
 
 @app.post("/checkout/{plan_key}")
-async def checkout_post(plan_key: str, outcode: str = Form(...), radius: int = Form(15), job_size: str = Form("all")):
+async def checkout_post(plan_key: str, outcode: str = Form(...), radius: int = Form(15), job_size: str = Form("all"),
+                         agree_terms: Optional[str] = Form(None)):
     """Handles the area form submission, then redirects to Stripe with outcode in metadata."""
     plan = payments.PLANS.get(plan_key)
     if not plan:
         return HTMLResponse("<h3>Invalid plan.</h3>", status_code=404)
+
+    # Sep 11 2026, Nick's ask: server-side enforcement of the terms
+    # checkbox -- the form's `required` attribute alone is a client-side
+    # convenience, not a real gate (trivially bypassed by disabling JS or
+    # posting directly), so this is the actual check that matters. Sends
+    # them back to the same form (outcode preserved via query param so
+    # they don't have to retype it) rather than failing silently.
+    if agree_terms not in ("yes", "on", "true", "1"):
+        return HTMLResponse(
+            "<html><body style='font-family:sans-serif; text-align:center; padding:60px; background:#020617; color:#e2e8f0;'>"
+            "<h1>Please accept the Terms of Service</h1>"
+            "<p>You need to tick the Terms of Service / Privacy Policy checkbox to continue.</p>"
+            f"<a href='/checkout/{plan_key}?outcode={urllib.parse.quote(outcode)}' style='color:#34d399;'>← Go back and try again</a>"
+            "</body></html>",
+            status_code=400
+        )
 
     # Server-side radius cap — the form previously offered the same 10-50mi choice to
     # every plan with nothing enforcing it, so a cheap tier could select (and receive
@@ -5462,6 +5489,20 @@ def free_account_signup_page(request: Request, error: Optional[str] = None, sent
             <input type="text" name="postcode" placeholder="e.g. NG22" required>
             <label class="text-xs font-bold text-slate-300">Already have a code from our email? Enter it here, otherwise leave blank:</label>
             <input type="text" name="code" placeholder="e.g. 4F91A2C0" value="{code_val}" style="text-transform:uppercase;">
+            <!-- Sep 11 2026, Nick's ask ("we should have an 'i agree to
+                 terms and conditions' button"): required here too, and
+                 enforced server-side in free_signup (see
+                 database.record_free_account_terms_acceptance). Inline
+                 style deliberately, not new Tailwind utility classes --
+                 static/tailwind.css is precompiled and only contains
+                 classes already scanned in at some past build (see the
+                 Sep 10 "reduce the box 20%" incident); an unusual class
+                 combo like this can silently render as nothing until
+                 someone reruns the build on Nick's machine. -->
+            <label style="display:flex; align-items:flex-start; gap:10px; margin-bottom:16px; cursor:pointer; font-weight:400; font-size:13px; color:#cbd5e1;">
+                <input type="checkbox" name="agree_terms" value="yes" required style="width:auto; margin:2px 0 0 0; flex-shrink:0; accent-color:#10b981;">
+                <span>I agree to TreeKey's <a href="/terms-of-service" target="_blank" style="color:#34d399;">Terms of Service</a> and <a href="/privacy-policy" target="_blank" style="color:#34d399;">Privacy Policy</a>.</span>
+            </label>
             <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3.5 rounded-lg font-bold text-[15px] cursor-pointer w-full transition-colors">Get My Free Lead →</button>
         </form>
         <div class="text-center mt-4 pt-3 sm:mt-5 sm:pt-4 border-t border-slate-800 text-xs text-slate-400">
@@ -5664,9 +5705,25 @@ async def free_signup(request: Request):
     phone = (form.get("phone") or "").strip()
     postcode_input = (form.get("postcode") or "").strip()
     code_input = (form.get("code") or "").strip().upper()
+    terms_ticked = (form.get("agree_terms") or "").strip().lower() in ("yes", "on", "true", "1")
 
     if not email or "@" not in email:
         return RedirectResponse(url="/free-account?error=Please+enter+a+valid+email.", status_code=303)
+
+    # Sep 11 2026, Nick's ask: server-side enforcement of the terms
+    # checkbox on the main /free-account form. postcode_input is only ever
+    # non-empty when this POST came from that full form (name/company/
+    # email/phone/postcode/code/agree_terms all together) -- the smaller
+    # "check your email, enter your code" continuation form has no
+    # postcode field and never shows the checkbox either, because whoever
+    # reaches that step already ticked it moments earlier on the full
+    # form that got them there. Gating on postcode_input rather than
+    # code_input means a cold-email link (which pre-fills code_input but
+    # still renders the full form with the checkbox) is correctly required
+    # to tick it, while the genuine two-step continuation isn't asked to
+    # tick a box it was never shown.
+    if postcode_input and not terms_ticked:
+        return RedirectResponse(url="/free-account?error=Please+tick+the+Terms+of+Service+checkbox+to+continue.", status_code=303)
 
     device_id = request.cookies.get("treekey_device_id") or secrets.token_hex(16)
 
@@ -5720,6 +5777,16 @@ async def free_signup(request: Request):
         except Exception as e:
             logger.error(f"[Free Signup] send_free_lead_granted_email failed for {email}: {e}")
 
+        # Sep 11 2026: only stamp consent if the checkbox was actually
+        # ticked on THIS submission (terms_ticked) -- this branch is also
+        # reached by the smaller "enter your code" continuation form,
+        # which has no checkbox at all because consent was already
+        # captured on the earlier full-form submission that led here.
+        # COALESCE inside record_free_account_terms_acceptance means this
+        # never overwrites that earlier real timestamp anyway.
+        if terms_ticked:
+            database.record_free_account_terms_acceptance(email)
+
         response = RedirectResponse(url="/free-dashboard", status_code=303)
         response.set_cookie(key="treekey_contractor_session", value=_sign_session_cookie(email),
                              max_age=86400 * 30, httponly=True, secure=True, samesite="lax")
@@ -5748,6 +5815,14 @@ async def free_signup(request: Request):
                                                         company_name=company_name or None)
     if not account:
         return RedirectResponse(url="/free-account?error=Something+went+wrong+creating+your+account.+Please+try+again.", status_code=303)
+
+    # Sep 11 2026: this is the actual account-creation path (the row now
+    # exists), and postcode_input being non-empty (checked above) already
+    # confirms this came from the full form with the checkbox -- so
+    # terms_ticked is guaranteed true by this point (the early return
+    # above would have fired otherwise). Stamped here rather than earlier
+    # so it only ever applies to a row that's confirmed to exist.
+    database.record_free_account_terms_acceptance(email)
 
     # Already redeemed their one lifetime free lead -- straight to their
     # dashboard rather than a scary error, this is a perfectly normal

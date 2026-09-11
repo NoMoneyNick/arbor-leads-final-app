@@ -371,6 +371,16 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
             logger.info(f"[Stripe] Subscription registered for {mask(customer_email)} ({sub_tier} in {sub_location_input} ±{sub_radius}mi, job_size={sub_job_size}): {reg_ok}")
             if reg_ok:
                 _mark_stripe_event_fulfilled(event_id)
+                # Sep 11 2026, Nick's ask ("we should have an 'i agree to
+                # terms and conditions' button"): checkout_post already
+                # server-side rejected this checkout entirely if the
+                # /checkout/{plan_key} form's checkbox wasn't ticked, so by
+                # the time Stripe fires this webhook consent has already
+                # happened -- this just stamps when the row it applies to
+                # actually landed. COALESCE inside the function means a
+                # later plan-change webhook re-running this never
+                # overwrites the original acceptance timestamp.
+                database.record_subscription_terms_acceptance(customer_email)
 
         logger.info(f"[Stripe] Payment complete — {mask(customer_email)} — £{amount / 100:.2f}")
         return {"event": "payment_complete", "email": customer_email,
