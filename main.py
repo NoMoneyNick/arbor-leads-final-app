@@ -3253,6 +3253,151 @@ def admin_simulate_leads(request: Request, secret: Optional[str] = Query(None),
     """)
 
 
+@app.get("/admin/lead-volume-report", response_class=HTMLResponse)
+def admin_lead_volume_report(request: Request, secret: Optional[str] = Query(None)):
+    """Sep 11 2026, Nick's ask (verbatim: "do we generate enough of a
+    specific job in every area to justify packages specific to jobs? ...
+    35 stump jobs nationally is not worthy of a package"): the actual
+    data needed to decide the new package structure, instead of guessing.
+    Pulls EVERY lead ever scanned (not just currently-unclaimed ones --
+    the question here is "how many of this job type get generated", a
+    rate, not "how many are available to sell right now") and breaks it
+    down by job category (scanners.classify_job_category -- the same
+    felling/stump_grinding/hedge_work/crown_work/storm_emergency/general
+    classifier already used on the live marketplace, so this report and
+    the site agree on what a "stump job" is), by postcode AREA (the 1-2
+    letter prefix, e.g. "NG" -- the natural regional bucket since that's
+    what a subscriber actually types in at signup), and by month, so
+    Nick can see both the national total AND whether a low national count
+    is hiding a real regional cluster.
+
+    Read-only, no leads touched. Deliberately excludes HMO-vertical leads
+    (tags containing 'vertical:hmo') -- that's a separate non-tree
+    business line and has no bearing on TreeKey's tree-surgeon packages.
+    Rows scanned before the tags column existed have no vertical tag at
+    all and are assumed tree (TreeKey's original and still primary
+    vertical) rather than silently dropped.
+
+    Size (small/medium/large) counts are shown for context but flagged
+    with an explicit caveat: this reflects the OLD keyword-match-or-
+    default-to-small classifier, not the refiltering/"unknown" cascade
+    agreed on Sep 11 -- expect the small/medium/large split to shift once
+    that ships, so don't treat today's split as final."""
+    verify_admin_or_secret(request, secret)
+
+    import re
+    import datetime
+    from collections import defaultdict
+
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT address, summary, lead_score, discovered_at, registered_date, tags
+            FROM leads;
+        """)
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    AREA_RE = re.compile(r'\b([A-Z]{1,2})[0-9][A-Z0-9]?\s*[0-9][A-Z]{2}\b')
+
+    def _as_dt(v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            try:
+                v = datetime.datetime.fromisoformat(v.replace("Z", "+00:00"))
+            except Exception:
+                return None
+        if isinstance(v, datetime.date) and not isinstance(v, datetime.datetime):
+            return datetime.datetime(v.year, v.month, v.day, tzinfo=datetime.timezone.utc)
+        if isinstance(v, datetime.datetime):
+            return v if v.tzinfo else v.replace(tzinfo=datetime.timezone.utc)
+        return None
+
+    total_leads = 0
+    hmo_excluded = 0
+    earliest = None
+    cat_stats = defaultdict(lambda: {"all": 0, "d90": 0, "d30": 0, "areas": defaultdict(int), "sizes": defaultdict(int)})
+    size_totals = defaultdict(int)
+
+    for address, summary, lead_score, discovered_at, registered_date, tags in rows:
+        tags = tags or []
+        if "vertical:hmo" in tags:
+            hmo_excluded += 1
+            continue
+        total_leads += 1
+
+        clock = _as_dt(registered_date) or _as_dt(discovered_at)
+        if clock and (earliest is None or clock < earliest):
+            earliest = clock
+        days_old = (now - clock).days if clock else None
+
+        cat = scanners.classify_job_category(summary or "")
+        key = cat["key"]
+        label = cat["label"]
+        stat = cat_stats[key]
+        stat["label"] = label
+        stat["all"] += 1
+        if days_old is not None and days_old <= 90:
+            stat["d90"] += 1
+        if days_old is not None and days_old <= 30:
+            stat["d30"] += 1
+        size = (lead_score or "small")
+        stat["sizes"][size] += 1
+        size_totals[size] += 1
+
+        m = AREA_RE.search((address or "").upper())
+        if m:
+            stat["areas"][m.group(1)] += 1
+
+    span_days = (now - earliest).days if earliest else 0
+    span_note = f"{span_days} days of real scan history (since {earliest.date().isoformat()})" if earliest else "no dated leads found"
+
+    def _top_areas(areas: dict, n=6):
+        return ", ".join(f"{a} ({c})" for a, c in sorted(areas.items(), key=lambda x: -x[1])[:n]) or "—"
+
+    rows_html = ""
+    for key in sorted(cat_stats.keys(), key=lambda k: -cat_stats[k]["all"]):
+        s = cat_stats[key]
+        sizes = s["sizes"]
+        rows_html += f"""
+        <tr>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0; font-weight:bold;">{s['label']}</td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0; text-align:center;">{s['all']}</td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0; text-align:center;">{s['d90']}</td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0; text-align:center;">{s['d30']}</td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0; font-size:12px;">{_top_areas(s['areas'])}</td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0; font-size:12px;">S:{sizes.get('small',0)} M:{sizes.get('medium',0)} L:{sizes.get('large',0)}</td>
+        </tr>"""
+
+    return HTMLResponse(f"""
+    <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:1100px; margin:auto;">
+        <h2 style="color:#044332;">Lead Volume &amp; Category Report</h2>
+        <p style="color:#64748b; font-size:13px;">Read-only. Covers {span_note}. {total_leads} tree-vertical leads counted ({hmo_excluded} HMO-vertical leads excluded — different business line).</p>
+        <p style="color:#b45309; font-size:12px; background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:10px;">
+            Caveat: the Small/Medium/Large split below is from the OLD classifier (keyword match, defaults to Small when nothing matches) —
+            it will shift once the new refiltering/"Unknown" cascade ships. Don't treat today's split as final; DO treat the category totals and regional clustering as real.
+        </p>
+        <table style="width:100%; border-collapse:collapse; font-size:13px; background:white; border-radius:10px; overflow:hidden; border:1px solid #e2e8f0;">
+            <tr style="background:#f1f5f9;">
+                <th style="padding:10px; text-align:left;">Category</th>
+                <th style="padding:10px;">All-time</th>
+                <th style="padding:10px;">Last 90 days</th>
+                <th style="padding:10px;">Last 30 days</th>
+                <th style="padding:10px; text-align:left;">Top regions (postcode area: count)</th>
+                <th style="padding:10px; text-align:left;">Size split</th>
+            </tr>
+            {rows_html}
+        </table>
+        <p style="margin-top:24px;"><a href="/admin?secret={secret or ''}" style="color:#044332;">← Back to Admin</a></p>
+    </body></html>
+    """)
+
+
 @app.get("/admin/clear-lead-flag")
 def admin_clear_lead_flag(request: Request, secret: Optional[str] = Query(None), email: str = Query(...)):
     """Admin/debug-only, Sep 10 2026 (Nick's ask: "it's our system, can't we
