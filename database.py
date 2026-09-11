@@ -4554,17 +4554,42 @@ def classify_job_category(summary: str) -> dict:
 # produced a false positive on a real example during testing (see
 # PROJECT_STATE.md). Tested against 11 real General/Other examples from
 # Nick's own screenshots before shipping -- all 11 passed.
+# Sep 11 2026 follow-up, after running this over the full live dataset
+# (/admin/reclassify-audit, 3281 real leads) and reading the actual
+# results with Nick:
+#   1. "arboricultural" (crown_work GUESS) was a false-positive magnet --
+#      it matched boilerplate "arboricultural method statement" wording in
+#      condition-DISCHARGE planning applications (paperwork, not a real
+#      job -- e.g. "Submission of details required by condition 4
+#      (arboricultural method statement...)"), wrongly tagging them
+#      crown_work. Removed.
+#   2. "branch"/"limb" promoted from GUESS to STEMS ("likely" instead of
+#      "guess") -- real, decent signals, not weak guesses.
+#   3. felling's list was missing plain "remove"/"removal"/"removed" (the
+#      "remov" fragment covers all of those in one go) and "to ground
+#      level" -- a huge share of real felling leads use exactly this
+#      wording ("T1 Silver Birch: Remove.", "Remove to ground level")
+#      rather than "removal of"/"take down"/"fell". A bare "remov"
+#      fragment was deliberately avoided earlier for fear of catching
+#      "deadwood removal" (crown work, not felling) -- but that's safe
+#      now: crown_work is checked BEFORE felling in both STEMS and GUESS,
+#      and crown_work's STEMS list already contains "deadwood", "branch"
+#      and "limb", so any removal wording that's actually about a branch/
+#      limb/deadwood, not the whole tree, is caught by crown_work first
+#      and felling never gets a look at it. "epicormic" added to
+#      crown_work's STEMS for the same reason -- always a
+#      pruning/maintenance term, never a whole-tree felling one.
 _CASCADE_STEM_ORDER = ("stump_grinding", "hedge_work", "crown_work", "felling")
 _CASCADE_STEMS = {
     "stump_grinding": ("stump",),
     "hedge_work": ("hedge", "leylandii"),
-    "crown_work": ("reduc", "crown", "canopy", "prun", "pollard", "thin", "lift", "lop", "cut back", "trim", "deadwood"),
-    "felling": ("tree removal", "chop down", "cut down", "sever", "removal of the tree", "take-down"),
+    "crown_work": ("reduc", "crown", "canopy", "prun", "pollard", "thin", "lift", "lop", "cut back", "trim", "deadwood", "branch", "limb", "epicormic"),
+    "felling": ("tree removal", "chop down", "cut down", "sever", "removal of the tree", "take-down", "remov", "to ground level"),
 }
 _CASCADE_GUESS = {
     "stump_grinding": ("stump",),
     "hedge_work": ("hedge",),
-    "crown_work": ("crown", "canopy", "reduc", "prun", "branch", "limb", "deadwood", "arboricultural"),
+    "crown_work": ("crown", "canopy", "reduc", "prun", "deadwood"),
     "felling": ("fell", "chainsaw", "clear felling", "dismantl"),
 }
 
