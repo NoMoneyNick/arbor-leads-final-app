@@ -3290,6 +3290,15 @@ def admin_lead_volume_report(request: Request, secret: Optional[str] = Query(Non
     all and are assumed tree (TreeKey's original and still primary
     vertical) rather than silently dropped.
 
+    Sep 11 2026 update: now uses database.classify_job_category_cascade
+    (Filter1 exact-match -> Filter2 broader stems -> Filter3 educated
+    guess -> General/Other) instead of Filter1 alone, so these totals
+    reflect the fuller picture Nick asked for rather than under-counting
+    real crown/felling/stump/hedge work that was just phrased differently.
+    Each category's count is broken down by confidence (matched/likely/
+    guess) so Nick can see how much of a category's volume is a sure
+    thing vs an educated guess.
+
     Size (small/medium/large) counts are shown for context but flagged
     with an explicit caveat: this reflects the OLD keyword-match-or-
     default-to-small classifier, not the refiltering/"unknown" cascade
@@ -3333,7 +3342,7 @@ def admin_lead_volume_report(request: Request, secret: Optional[str] = Query(Non
     total_leads = 0
     hmo_excluded = 0
     earliest = None
-    cat_stats = defaultdict(lambda: {"all": 0, "d90": 0, "d30": 0, "areas": defaultdict(int), "sizes": defaultdict(int)})
+    cat_stats = defaultdict(lambda: {"all": 0, "d90": 0, "d30": 0, "areas": defaultdict(int), "sizes": defaultdict(int), "conf": defaultdict(int)})
     size_totals = defaultdict(int)
 
     for address, summary, lead_score, discovered_at, registered_date, tags in rows:
@@ -3348,12 +3357,13 @@ def admin_lead_volume_report(request: Request, secret: Optional[str] = Query(Non
             earliest = clock
         days_old = (now - clock).days if clock else None
 
-        cat = database.classify_job_category(summary or "")
+        cat = database.classify_job_category_cascade(summary or "")
         key = cat["key"]
         label = cat["label"]
         stat = cat_stats[key]
         stat["label"] = label
         stat["all"] += 1
+        stat["conf"][cat.get("confidence", "matched")] += 1
         if days_old is not None and days_old <= 90:
             stat["d90"] += 1
         if days_old is not None and days_old <= 30:
@@ -3376,6 +3386,8 @@ def admin_lead_volume_report(request: Request, secret: Optional[str] = Query(Non
     for key in sorted(cat_stats.keys(), key=lambda k: -cat_stats[k]["all"]):
         s = cat_stats[key]
         sizes = s["sizes"]
+        conf = s["conf"]
+        conf_note = f"matched:{conf.get('matched',0)} likely:{conf.get('likely',0)} guess:{conf.get('guess',0)}" if key != "general" else f"none:{conf.get('none',0)}"
         rows_html += f"""
         <tr>
             <td style="padding:10px; border-bottom:1px solid #e2e8f0; font-weight:bold;">{s['label']}</td>
@@ -3384,12 +3396,13 @@ def admin_lead_volume_report(request: Request, secret: Optional[str] = Query(Non
             <td style="padding:10px; border-bottom:1px solid #e2e8f0; text-align:center;">{s['d30']}</td>
             <td style="padding:10px; border-bottom:1px solid #e2e8f0; font-size:12px;">{_top_areas(s['areas'])}</td>
             <td style="padding:10px; border-bottom:1px solid #e2e8f0; font-size:12px;">S:{sizes.get('small',0)} M:{sizes.get('medium',0)} L:{sizes.get('large',0)}</td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0; font-size:11px; color:#64748b;">{conf_note}</td>
         </tr>"""
 
     return HTMLResponse(f"""
-    <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:1100px; margin:auto;">
+    <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:1250px; margin:auto;">
         <h2 style="color:#044332;">Lead Volume &amp; Category Report</h2>
-        <p style="color:#64748b; font-size:13px;">Read-only. Covers {span_note}. {total_leads} tree-vertical leads counted ({hmo_excluded} HMO-vertical leads excluded — different business line).</p>
+        <p style="color:#64748b; font-size:13px;">Read-only. Covers {span_note}. {total_leads} tree-vertical leads counted ({hmo_excluded} HMO-vertical leads excluded — different business line). Categorised with the 3-tier cascade (Filter1 exact match → Filter2 broader stems → Filter3 educated guess).</p>
         <p style="color:#b45309; font-size:12px; background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:10px;">
             Caveat: the Small/Medium/Large split below is from the OLD classifier (keyword match, defaults to Small when nothing matches) —
             it will shift once the new refiltering/"Unknown" cascade ships. Don't treat today's split as final; DO treat the category totals and regional clustering as real.
@@ -3402,9 +3415,11 @@ def admin_lead_volume_report(request: Request, secret: Optional[str] = Query(Non
                 <th style="padding:10px;">Last 30 days</th>
                 <th style="padding:10px; text-align:left;">Top regions (postcode area: count)</th>
                 <th style="padding:10px; text-align:left;">Size split</th>
+                <th style="padding:10px; text-align:left;">Classifier confidence</th>
             </tr>
             {rows_html}
         </table>
+        <p style="margin-top:16px;"><a href="/admin/reclassify-audit?secret={secret or ''}" style="color:#044332;">View full reclassification + date safety audit →</a></p>
         <p style="margin-top:24px;"><a href="/admin?secret={secret or ''}" style="color:#044332;">← Back to Admin</a></p>
     </body></html>
     """)
@@ -3430,12 +3445,15 @@ def admin_lead_audit(request: Request, secret: Optional[str] = Query(None), view
     customer -- but this proves that directly with real counts instead
     of trusting that the expiry logic is doing its job.
 
-    view=general: a sample of 30 leads that classify_job_category()
-    couldn't put into a specific category (the "General / Other Tree
-    Work" bucket that was 41% of everything in the volume report) --
-    so we can actually read what's hiding in there instead of guessing,
-    e.g. whether it's BS5837/planning-survey language that has no
-    category defined for it yet."""
+    view=general: Sep 11 2026 update -- now runs the full 3-tier cascade
+    (database.classify_job_category_cascade) over EVERY lead in the table
+    (not a capped sample) and excludes HMO-vertical leads (tags containing
+    'vertical:hmo' -- these were leaking into this view before, a real bug
+    Nick caught in a screenshot: 2 genuine HMO applications showing up in
+    what should be a tree-only sample). What's left is the TRUE residual --
+    what neither filter1's exact match, filter2's broader stems, nor
+    filter3's educated guess could place -- so the count shown is the real
+    size of what's left to hunt patterns in, not a 30-row guess at it."""
     verify_admin_or_secret(request, secret)
 
     import datetime
@@ -3445,10 +3463,9 @@ def admin_lead_audit(request: Request, secret: Optional[str] = Query(None), view
     try:
         if view == "general":
             cur.execute("""
-                SELECT reference, address, summary, status, discovered_at
+                SELECT reference, address, summary, status, discovered_at, tags
                 FROM leads
-                ORDER BY discovered_at DESC NULLS LAST
-                LIMIT 400;
+                ORDER BY discovered_at DESC NULLS LAST;
             """)
             candidates = cur.fetchall()
         else:
@@ -3482,27 +3499,38 @@ def admin_lead_audit(request: Request, secret: Optional[str] = Query(None), view
 
     if view == "general":
         rows_html = ""
+        total_scanned = 0
+        hmo_excluded = 0
+        residual_total = 0
         shown = 0
-        for reference, address, summary, status, discovered_at in candidates:
-            cat = database.classify_job_category(summary or "")
+        SHOW_CAP = 200
+        for reference, address, summary, status, discovered_at, tags in candidates:
+            tags = tags or []
+            if "vertical:hmo" in tags:
+                hmo_excluded += 1
+                continue
+            total_scanned += 1
+            cat = database.classify_job_category_cascade(summary or "")
             if cat["key"] != "general":
                 continue
-            shown += 1
-            if shown > 30:
-                break
-            rows_html += f"""
-            <tr>
-                <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px; font-family:monospace;">{reference or ''}</td>
-                <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{(summary or '')[:200]}</td>
-                <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px;">{status or ''}</td>
-            </tr>"""
+            residual_total += 1
+            if shown < SHOW_CAP:
+                shown += 1
+                rows_html += f"""
+                <tr>
+                    <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px; font-family:monospace;">{reference or ''}</td>
+                    <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{(summary or '')[:200]}</td>
+                    <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px;">{status or ''}</td>
+                </tr>"""
+        pct = f"{(residual_total / total_scanned * 100):.1f}%" if total_scanned else "0%"
         body = f"""
-        <h2 style="color:#044332;">General / Other — Sample of Uncategorized Leads</h2>
-        <p style="color:#64748b; font-size:13px;">Showing the first {shown} of the most recent 400 leads that classify_job_category() couldn't match to a specific category. Read the Summary column for language we should add to the keyword lists (BS5837, planning condition discharge, etc.).</p>
+        <h2 style="color:#044332;">General / Other — True Residual (all 3 filters applied)</h2>
+        <p style="color:#64748b; font-size:13px;">Scanned all {total_scanned} tree-vertical leads ({hmo_excluded} HMO-vertical leads excluded — fixed a bug where these were leaking into this view). <b>{residual_total}</b> ({pct}) still land in General/Other after Filter1 (exact match), Filter2 (broader stems) and Filter3 (educated guess) all found nothing. Showing {shown} of them below — read the Summary column for real patterns/wording we can add to the filters.</p>
         <table style="width:100%; border-collapse:collapse; font-size:13px; background:white; border:1px solid #e2e8f0;">
             <tr style="background:#f1f5f9;"><th style="padding:8px; text-align:left;">Ref</th><th style="padding:8px; text-align:left;">Summary</th><th style="padding:8px; text-align:left;">Status</th></tr>
             {rows_html}
         </table>
+        <p style="margin-top:16px;"><a href="/admin/reclassify-audit?secret={secret or ''}" style="color:#044332;">View full reclassification + date safety audit →</a></p>
         <p style="margin-top:16px;"><a href="/admin/lead-audit?secret={secret or ''}&view=stale" style="color:#044332;">View stale-date audit instead →</a></p>
         """
     else:
@@ -3566,66 +3594,283 @@ def admin_lead_audit(request: Request, secret: Optional[str] = Query(None), view
     """)
 
 
-@app.get("/admin/cleanup-stale-leads", response_class=HTMLResponse)
-def admin_cleanup_stale_leads(request: Request, secret: Optional[str] = Query(None), confirm: str = Query("no")):
-    """Sep 11 2026, Nick's ask after seeing the stale-date audit (86 leads
-    >180 days old still sitting at status='new'/blank -- the oldest from
-    2010, likely the historical-scrape issue he recalled Gemini flagging
-    about a month ago). This does NOT hard-delete rows -- it marks them
-    status='expired_historical' (a new, distinct value; nothing else in
-    this codebase writes to `status` besides the 'new' default, so this
-    can't collide with or be mistaken for anything else) so the data stays
-    for the record but stops counting as active/new anywhere. Same >180
-    day threshold as the audit report, which is already 3x+ longer than
-    the longest real statutory window (56 days), so there's no realistic
-    chance of touching a lead that could still be legitimately live.
+@app.get("/admin/reclassify-audit", response_class=HTMLResponse)
+def admin_reclassify_audit(request: Request, secret: Optional[str] = Query(None)):
+    """Sep 11 2026, Nick's ask, sent mid-build (verbatim): "once you have
+    built this filter run ALL leads through it. all the leads we have even
+    leads we think are correctly filtered. the filter should have a double
+    check for the date just incase."
 
-    Two-step confirm (GET with confirm=yes) rather than acting on first
-    load, since this is a real bulk UPDATE -- a bare GET link (e.g. an
-    email client's own link-preview fetch) should never be able to trigger
-    a data change by itself."""
+    Runs database.classify_job_category_cascade over EVERY lead in the
+    table -- not just the current General/Other bucket, and not a capped
+    sample -- including leads Filter1 already confidently classified, so
+    this genuinely re-checks the whole dataset rather than trusting that
+    "already categorised" means "correctly categorised". Read-only:
+    nothing is written back to any lead here -- this is a report to review
+    before deciding whether/how to act on it (e.g. before switching the
+    live marketplace/volume-report over to the cascade, or before
+    believing any of Filter3's "guess"-confidence calls).
+
+    Two things shown:
+    1. Reclassification -- compares Filter1-only (what's still live on
+       the site) against the full cascade for every lead, and reports how
+       many move out of General/Other at each confidence level (matched/
+       likely/guess), with a capped sample of the actual changed wording
+       so the guesses can be sanity-checked by eye, not just trusted.
+    2. Date double-check (Nick's specific ask) -- a SEPARATE, independent
+       safety pass over the same full scan: flags leads with no date at
+       all, a date in the future, or where registered_date and
+       discovered_at disagree by more than 30 days (one should normally
+       follow shortly after the other). This is not the same check as
+       /admin/cleanup-stale-leads' 56-day deletion rule (which already has
+       its own independent double-check requiring BOTH date columns to
+       agree) -- this is a broader "does this lead's date data make sense
+       at all" QA pass, so bad dates get surfaced here even on leads
+       nowhere near the deletion threshold."""
     verify_admin_or_secret(request, secret)
+
+    import datetime
+    from collections import defaultdict
 
     conn = database.get_db_conn()
     cur = conn.cursor()
     try:
         cur.execute("""
-            SELECT count(*) FROM leads
-            WHERE (status IS NULL OR status = 'new')
-              AND COALESCE(registered_date, discovered_at) < (NOW() - INTERVAL '180 days');
+            SELECT reference, summary, tags, registered_date, discovered_at
+            FROM leads;
         """)
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    def _as_dt(v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            try:
+                v = datetime.datetime.fromisoformat(v.replace("Z", "+00:00"))
+            except Exception:
+                return None
+        if isinstance(v, datetime.date) and not isinstance(v, datetime.datetime):
+            return datetime.datetime(v.year, v.month, v.day, tzinfo=datetime.timezone.utc)
+        if isinstance(v, datetime.datetime):
+            return v if v.tzinfo else v.replace(tzinfo=datetime.timezone.utc)
+        return None
+
+    total_scanned = 0
+    hmo_excluded = 0
+    conf_counts = defaultdict(int)
+    transition_counts = defaultdict(int)
+    changed_samples = []
+    date_missing = 0
+    date_future = 0
+    date_disagree = 0
+    date_anomaly_samples = []
+
+    for reference, summary, tags, registered_date, discovered_at in rows:
+        tags = tags or []
+        if "vertical:hmo" in tags:
+            hmo_excluded += 1
+            continue
+        total_scanned += 1
+
+        old_cat = database.classify_job_category(summary or "")
+        new_cat = database.classify_job_category_cascade(summary or "")
+        conf_counts[new_cat.get("confidence", "matched")] += 1
+
+        if old_cat["key"] != new_cat["key"]:
+            transition_counts[(old_cat["key"], new_cat["key"])] += 1
+            if len(changed_samples) < 150:
+                changed_samples.append((reference, old_cat["key"], new_cat["key"], new_cat.get("confidence", ""), summary or ""))
+
+        reg_dt = _as_dt(registered_date)
+        disc_dt = _as_dt(discovered_at)
+        if reg_dt is None and disc_dt is None:
+            date_missing += 1
+            if len(date_anomaly_samples) < 60:
+                date_anomaly_samples.append((reference, "no date at all", summary or ""))
+        elif (reg_dt and reg_dt > now) or (disc_dt and disc_dt > now):
+            date_future += 1
+            if len(date_anomaly_samples) < 60:
+                date_anomaly_samples.append((reference, "date in the future", summary or ""))
+        elif reg_dt and disc_dt and abs((reg_dt - disc_dt).days) > 30:
+            date_disagree += 1
+            if len(date_anomaly_samples) < 60:
+                date_anomaly_samples.append((reference, f"registered/discovered disagree by {abs((reg_dt - disc_dt).days)} days", summary or ""))
+
+    changed_total = sum(transition_counts.values())
+
+    trans_rows_html = ""
+    for (old_key, new_key), count in sorted(transition_counts.items(), key=lambda x: -x[1]):
+        trans_rows_html += f"""
+        <tr>
+            <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{old_key}</td>
+            <td style="padding:8px; border-bottom:1px solid #e2e8f0;">→ {new_key}</td>
+            <td style="padding:8px; border-bottom:1px solid #e2e8f0; text-align:center;">{count}</td>
+        </tr>"""
+
+    sample_rows_html = ""
+    for reference, old_key, new_key, conf, summary in changed_samples:
+        sample_rows_html += f"""
+        <tr>
+            <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px; font-family:monospace;">{reference or ''}</td>
+            <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px;">{old_key} → <b>{new_key}</b></td>
+            <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px;">{conf}</td>
+            <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{(summary or '')[:180]}</td>
+        </tr>"""
+
+    date_rows_html = ""
+    for reference, reason, summary in date_anomaly_samples:
+        date_rows_html += f"""
+        <tr>
+            <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px; font-family:monospace;">{reference or ''}</td>
+            <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px; color:#b45309;">{reason}</td>
+            <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{(summary or '')[:150]}</td>
+        </tr>"""
+
+    return HTMLResponse(f"""
+    <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:1250px; margin:auto;">
+        <h2 style="color:#044332;">Full Reclassification + Date Safety Audit</h2>
+        <p style="color:#64748b; font-size:13px;">Read-only — nothing written back to any lead. Ran the 3-tier cascade over ALL {total_scanned} tree-vertical leads ({hmo_excluded} HMO-vertical excluded), including leads Filter1 already confidently placed — not just the current General/Other bucket.</p>
+
+        <h3 style="color:#044332; margin-top:28px;">1. Reclassification</h3>
+        <div style="display:flex; gap:16px; margin-bottom:16px; flex-wrap:wrap;">
+            <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:14px 18px;">
+                <div style="font-size:12px; color:#64748b;">Confidence: matched (Filter1)</div>
+                <div style="font-size:22px; font-weight:800;">{conf_counts.get('matched',0)}</div>
+            </div>
+            <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:14px 18px;">
+                <div style="font-size:12px; color:#64748b;">Confidence: likely (Filter2)</div>
+                <div style="font-size:22px; font-weight:800; color:#0284c7;">{conf_counts.get('likely',0)}</div>
+            </div>
+            <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:14px 18px;">
+                <div style="font-size:12px; color:#64748b;">Confidence: guess (Filter3)</div>
+                <div style="font-size:22px; font-weight:800; color:#d97706;">{conf_counts.get('guess',0)}</div>
+            </div>
+            <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:14px 18px;">
+                <div style="font-size:12px; color:#64748b;">Still General/Other (none)</div>
+                <div style="font-size:22px; font-weight:800; color:#64748b;">{conf_counts.get('none',0)}</div>
+            </div>
+        </div>
+        <p style="color:#64748b; font-size:13px;"><b>{changed_total}</b> leads changed category vs the Filter1-only classifier still live on the site (all moved OUT of General/Other — the cascade never overrides a confident Filter1 match, only fills in what Filter1 missed).</p>
+        <table style="width:100%; border-collapse:collapse; font-size:13px; background:white; border:1px solid #e2e8f0; margin-bottom:20px;">
+            <tr style="background:#f1f5f9;"><th style="padding:8px; text-align:left;">Was</th><th style="padding:8px; text-align:left;">Now</th><th style="padding:8px;">Count</th></tr>
+            {trans_rows_html or '<tr><td colspan="3" style="padding:8px;">No changes.</td></tr>'}
+        </table>
+        <p style="color:#64748b; font-size:12px;">Sample of changed leads (up to 150) — read the Summary column to sanity-check the "guess" ones especially before trusting them:</p>
+        <table style="width:100%; border-collapse:collapse; font-size:12px; background:white; border:1px solid #e2e8f0; margin-bottom:28px;">
+            <tr style="background:#f1f5f9;"><th style="padding:8px; text-align:left;">Ref</th><th style="padding:8px; text-align:left;">Change</th><th style="padding:8px; text-align:left;">Confidence</th><th style="padding:8px; text-align:left;">Summary</th></tr>
+            {sample_rows_html or '<tr><td colspan="4" style="padding:8px;">None.</td></tr>'}
+        </table>
+
+        <h3 style="color:#044332;">2. Date Double-Check (independent of category)</h3>
+        <p style="color:#64748b; font-size:13px;">Same full scan, checked for date data that doesn't add up on its own terms. Not the same as the 56-day deletion rule below (which has its own separate double-check) — this is a broader "does this lead's date data make sense at all" pass, so bad dates get surfaced even on leads nowhere near the deletion threshold.</p>
+        <div style="display:flex; gap:16px; margin-bottom:16px; flex-wrap:wrap;">
+            <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:14px 18px;">
+                <div style="font-size:12px; color:#64748b;">No date at all</div>
+                <div style="font-size:22px; font-weight:800; color:{'#dc2626' if date_missing else '#059669'};">{date_missing}</div>
+            </div>
+            <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:14px 18px;">
+                <div style="font-size:12px; color:#64748b;">Date in the future</div>
+                <div style="font-size:22px; font-weight:800; color:{'#dc2626' if date_future else '#059669'};">{date_future}</div>
+            </div>
+            <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:14px 18px;">
+                <div style="font-size:12px; color:#64748b;">registered_date/discovered_at disagree &gt;30 days</div>
+                <div style="font-size:22px; font-weight:800; color:{'#dc2626' if date_disagree else '#059669'};">{date_disagree}</div>
+            </div>
+        </div>
+        <table style="width:100%; border-collapse:collapse; font-size:12px; background:white; border:1px solid #e2e8f0;">
+            <tr style="background:#f1f5f9;"><th style="padding:8px; text-align:left;">Ref</th><th style="padding:8px; text-align:left;">Issue</th><th style="padding:8px; text-align:left;">Summary</th></tr>
+            {date_rows_html or '<tr><td colspan="3" style="padding:8px;">None found.</td></tr>'}
+        </table>
+
+        <p style="margin-top:24px;">
+            <a href="/admin/lead-audit?secret={secret or ''}&view=general" style="color:#044332;">← General/Other residual sample</a> &nbsp;|&nbsp;
+            <a href="/admin/lead-volume-report?secret={secret or ''}" style="color:#044332;">Volume report</a> &nbsp;|&nbsp;
+            <a href="/admin/cleanup-stale-leads?secret={secret or ''}" style="color:#044332;">Delete historical stale leads</a> &nbsp;|&nbsp;
+            <a href="/admin?secret={secret or ''}" style="color:#044332;">Admin home</a>
+        </p>
+    </body></html>
+    """)
+
+
+@app.get("/admin/cleanup-stale-leads", response_class=HTMLResponse)
+def admin_cleanup_stale_leads(request: Request, secret: Optional[str] = Query(None), confirm: str = Query("no")):
+    """Sep 11 2026, Nick's ask after seeing the stale-date audit (86 leads
+    >180 days old still sitting at status='new'/blank -- the oldest from
+    2010, likely the historical-scrape issue he recalled Gemini flagging
+    about a month ago). Follow-up ask, verbatim: "can you remove the
+    historical leads, anything over the 8 weeks from planning application
+    filling mark should be deleted anyway correct?" -- confirmed correct
+    and now a real hard DELETE, not the earlier soft status-flag:
+
+    56 days (8 weeks) is the right threshold because it's not an arbitrary
+    number -- it's the LONGEST statutory window the app itself already
+    recognises for any lead (see database.calculate_lead_freshness): TPO-
+    flagged leads get 56 days, standard planning notices get 42 days, and
+    domestic get 7. Using 56 days as the single deletion cut-off means a
+    lead is only ever deleted after even its longest-possible legitimate
+    life has expired -- nothing that could still be legitimately live/
+    sellable under the app's own rules gets touched.
+
+    Double date check (Nick's ask: "the filter should have a double check
+    for the date just incase"): a lead is only eligible if BOTH date
+    columns confirm staleness, not just whichever one happens to be
+    populated. The original query used COALESCE(registered_date,
+    discovered_at) -- if only one column agreed the lead was stale and the
+    other (if present) actually looked recent, that would still have
+    deleted it. This version requires the MORE RECENT of the two available
+    dates to also be past 56 days, so a lead is protected unless every
+    date on it says it's stale.
+
+    Still scoped to status 'new'/blank only -- a lead that was ever
+    purchased/claimed/dispatched is never touched by this, deleted or
+    otherwise, regardless of age. This IS a real, irreversible DELETE (not
+    a status flag) so the two-step confirm (GET with confirm=yes) stays --
+    a bare GET link (e.g. an email client's own link-preview fetch) must
+    never be able to trigger it by itself."""
+    verify_admin_or_secret(request, secret)
+
+    STALE_SQL_WHERE = """
+        (status IS NULL OR status = 'new')
+        AND COALESCE(registered_date, discovered_at) < (NOW() - INTERVAL '56 days')
+        AND COALESCE(discovered_at, registered_date) < (NOW() - INTERVAL '56 days')
+    """
+
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(f"SELECT count(*) FROM leads WHERE {STALE_SQL_WHERE};")
         preview_count = cur.fetchone()[0]
 
-        updated_count = None
+        deleted_count = None
         if confirm == "yes" and preview_count > 0:
-            cur.execute("""
-                UPDATE leads
-                SET status = 'expired_historical'
-                WHERE (status IS NULL OR status = 'new')
-                  AND COALESCE(registered_date, discovered_at) < (NOW() - INTERVAL '180 days');
-            """)
-            updated_count = cur.rowcount
+            cur.execute(f"DELETE FROM leads WHERE {STALE_SQL_WHERE};")
+            deleted_count = cur.rowcount
             conn.commit()
     finally:
         cur.close()
         conn.close()
 
-    if updated_count is not None:
+    if deleted_count is not None:
         body = f"""
         <h2 style="color:#044332;">Cleanup Complete</h2>
         <p style="color:#065f46; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:14px;">
-            Marked <b>{updated_count}</b> stale lead{'s' if updated_count != 1 else ''} as <code>expired_historical</code>. Nothing was deleted — the rows are still in the table for the record, just no longer counted as active/new anywhere (including the volume report and audit above).
+            Permanently deleted <b>{deleted_count}</b> stale lead{'s' if deleted_count != 1 else ''} — over 56 days (8 weeks) old by BOTH available date fields, and never purchased/claimed (status still 'new'/blank throughout).
         </p>
         """
     else:
         body = f"""
-        <h2 style="color:#044332;">Cleanup Stale Leads</h2>
-        <p style="color:#64748b; font-size:13px;">This will mark leads as <code>expired_historical</code> (not delete them) when they're both still sitting at status 'new'/blank AND over 180 days old by registered/discovered date — the same rule as the stale-date audit.</p>
+        <h2 style="color:#044332;">Delete Historical Stale Leads</h2>
+        <p style="color:#64748b; font-size:13px;">This PERMANENTLY DELETES leads that are all of: still sitting at status 'new'/blank (never purchased or claimed), AND over 56 days (8 weeks) old by registered_date, AND over 56 days old by discovered_at (whichever of the two is present — this is the "double check" so one stray date field can't wrongly protect or wrongly delete a lead). 56 days is the longest statutory freshness window the app recognises anywhere (TPO leads), so nothing still legitimately sellable can be caught by this.</p>
         <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin:16px 0;">
-            <div style="font-size:12px; color:#64748b;">Leads that would be affected right now</div>
+            <div style="font-size:12px; color:#64748b;">Leads that would be permanently deleted right now</div>
             <div style="font-size:28px; font-weight:800; color:{'#dc2626' if preview_count else '#059669'};">{preview_count}</div>
         </div>
-        {"<a href='/admin/cleanup-stale-leads?secret=" + (secret or '') + "&confirm=yes' style='background:#059669; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block;'>Confirm — mark these " + str(preview_count) + " as expired_historical</a>" if preview_count else "<p style='color:#059669;'>Nothing to clean up.</p>"}
+        {"<a href='/admin/cleanup-stale-leads?secret=" + (secret or '') + "&confirm=yes' style='background:#dc2626; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block;'>Confirm — permanently delete these " + str(preview_count) + " leads</a>" if preview_count else "<p style='color:#059669;'>Nothing to clean up.</p>"}
         """
 
     return HTMLResponse(f"""

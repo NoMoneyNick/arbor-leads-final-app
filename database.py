@@ -4520,6 +4520,83 @@ def classify_job_category(summary: str) -> dict:
     return dict(_GENERAL_CATEGORY)
 
 
+# Sep 11 2026, Nick's ask, verbatim: "currently we have a filter to put leads
+# into the correct obvious definition. this is filter one, its simple and
+# broad / i want you then to set up a 2nd level filter for general/other
+# leads that do not get caught by filter 1... / if these 2 filters both fail
+# i want you to set up a best guess system that looks at all the other
+# details on the lead, words, numbers anything and if there is anything to
+# go on it makes a educated guess. / any leads this system does not catch we
+# put back into the general/other file." Reviewing real General/Other leads
+# (/admin/lead-audit?view=general) showed genuine crown/felling/stump/hedge
+# work described in wording filter 1 doesn't catch -- "height reduction"
+# not "crown reduction", "crown reduce" not "crown reduction", word-order-
+# flipped "tree removal" instead of "removal of", bare "deadwood removal".
+# This adds two more, progressively looser passes on top of filter 1:
+#   Filter 1 (classify_job_category above): exact-phrase match. Confidence
+#       "matched".
+#   Filter 2 (below): broader single-word/short-fragment "stems" per
+#       category -- still fairly specific, just not requiring filter 1's
+#       exact phrasing. Confidence "likely".
+#   Filter 3 (below): last-resort loose single-word matches, used only when
+#       filters 1 and 2 both find nothing. Confidence "guess".
+# A lead none of the three catch stays "general" (confidence "none") and is
+# left in General/Other for a human to review -- this never force-fits a
+# category it can't support, exactly like filter 1.
+#
+# Order matters within filters 2 and 3: crown_work is checked BEFORE
+# felling in both -- otherwise "deadwood removal" (crown-maintenance work)
+# gets misread as a full felling job, confirmed against a real example.
+# felling's own stem/guess lists deliberately avoid a bare "remov" fragment
+# for the same reason. "tree work" was deliberately left OUT of crown_work's
+# guess list -- it's a substring of boilerplate phrases like "tree works
+# schedule" that carry no real category signal on their own; including it
+# produced a false positive on a real example during testing (see
+# PROJECT_STATE.md). Tested against 11 real General/Other examples from
+# Nick's own screenshots before shipping -- all 11 passed.
+_CASCADE_STEM_ORDER = ("stump_grinding", "hedge_work", "crown_work", "felling")
+_CASCADE_STEMS = {
+    "stump_grinding": ("stump",),
+    "hedge_work": ("hedge", "leylandii"),
+    "crown_work": ("reduc", "crown", "canopy", "prun", "pollard", "thin", "lift", "lop", "cut back", "trim", "deadwood"),
+    "felling": ("tree removal", "chop down", "cut down", "sever", "removal of the tree", "take-down"),
+}
+_CASCADE_GUESS = {
+    "stump_grinding": ("stump",),
+    "hedge_work": ("hedge",),
+    "crown_work": ("crown", "canopy", "reduc", "prun", "branch", "limb", "deadwood", "arboricultural"),
+    "felling": ("fell", "chainsaw", "clear felling", "dismantl"),
+}
+
+
+def classify_job_category_cascade(summary: str) -> dict:
+    """3-tier cascade on top of classify_job_category -- see the comment
+    above for the full design rationale. Returns the same shape as
+    classify_job_category PLUS a "confidence" key: "matched" (filter 1,
+    exact phrase), "likely" (filter 2, broader stem), "guess" (filter 3,
+    last-resort loose word), or "none" (all three found nothing -- stayed
+    General/Other)."""
+    base = classify_job_category(summary)
+    if base["key"] != "general":
+        base = dict(base)
+        base["confidence"] = "matched"
+        return base
+
+    text = (summary or "").lower()
+    for key in _CASCADE_STEM_ORDER:
+        if any(s in text for s in _CASCADE_STEMS[key]):
+            cat = JOB_CATEGORIES[key]
+            return {"key": key, "label": cat["label"], "icon": cat["icon"], "color": cat["color"], "confidence": "likely"}
+    for key in _CASCADE_STEM_ORDER:
+        if any(s in text for s in _CASCADE_GUESS[key]):
+            cat = JOB_CATEGORIES[key]
+            return {"key": key, "label": cat["label"], "icon": cat["icon"], "color": cat["color"], "confidence": "guess"}
+
+    result = dict(_GENERAL_CATEGORY)
+    result["confidence"] = "none"
+    return result
+
+
 def _sort_key_discovered_at(lead: dict) -> float:
     """Descending-time sort key (most recent first) for use as the secondary
     key alongside urgency in get_marketplace_leads_with_freshness. Missing
