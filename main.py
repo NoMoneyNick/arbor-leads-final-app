@@ -3427,7 +3427,163 @@ def admin_lead_volume_report(request: Request, secret: Optional[str] = Query(Non
             {rows_html}
         </table>
         <p style="margin-top:16px;"><a href="/admin/reclassify-audit?secret={secret or ''}" style="color:#044332;">View full reclassification + date safety audit →</a></p>
+        <p style="margin-top:16px;"><a href="/admin/lead-value-report?secret={secret or ''}" style="color:#044332;">View value tier × size report →</a></p>
         <p style="margin-top:24px;"><a href="/admin?secret={secret or ''}" style="color:#044332;">← Back to Admin</a></p>
+    </body></html>
+    """)
+
+
+@app.get("/admin/lead-value-report", response_class=HTMLResponse)
+def admin_lead_value_report(request: Request, secret: Optional[str] = Query(None)):
+    """Sep 11 2026, Nick's ask (verbatim: "can you triple filter again and
+    divide the new high value leads into sub categories to define them in
+    however you see fit ... if there are high value small jobs, high value
+    medium, and large then separate them up too"): a THIRD classification
+    dimension -- VALUE TIER (scanners.classify_lead_value_tier, elite /
+    priority / standard) -- cross-tabbed against the existing SIZE split
+    (lead_score, small/medium/large) already stored on every lead, so Nick
+    can see real counts for every combination (e.g. "Elite + Small",
+    "Priority + Large") rather than guessing at how many high-value leads
+    of each size actually exist. This is the number he needs before
+    designing package tiers/pricing around lead value rather than just
+    lead count.
+
+    Value tier is recomputed live from summary text on every request (it's
+    cheap -- same keyword-cascade approach as everything else in this
+    file) rather than stored, since the wordlists are new today and will
+    likely be tuned; nothing is written back to the leads table by this
+    report, and status is not filtered on, so counts are all-time (matches
+    the volume report's own convention) with 90/30-day columns for
+    context. HMO-vertical leads excluded, same convention as the other
+    reports -- different business line, not part of "how many high-value
+    tree leads do we generate".
+
+    Read-only. A handful of real reference numbers are shown per cell (not
+    just the count) so Nick can click into the admin lead list and
+    spot-check that a given tier assignment actually looks right to him --
+    he explicitly said he'd want to review the wordlists' real output,
+    not just take them on trust."""
+    verify_admin_or_secret(request, secret)
+
+    import datetime
+    from collections import defaultdict
+
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT reference, summary, lead_score, discovered_at, registered_date, tags
+            FROM leads;
+        """)
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    def _as_dt(v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            try:
+                v = datetime.datetime.fromisoformat(v.replace("Z", "+00:00"))
+            except Exception:
+                return None
+        if isinstance(v, datetime.date) and not isinstance(v, datetime.datetime):
+            return datetime.datetime(v.year, v.month, v.day, tzinfo=datetime.timezone.utc)
+        if isinstance(v, datetime.datetime):
+            return v if v.tzinfo else v.replace(tzinfo=datetime.timezone.utc)
+        return None
+
+    TIERS = ["elite", "priority", "standard"]
+    SIZES = ["large", "medium", "small"]
+    TIER_LABELS = {"elite": "Elite", "priority": "Priority", "standard": "Standard"}
+
+    total_leads = 0
+    hmo_excluded = 0
+    # grid[tier][size] = {"all": n, "d90": n, "d30": n, "refs": [..]}
+    grid = defaultdict(lambda: defaultdict(lambda: {"all": 0, "d90": 0, "d30": 0, "refs": []}))
+    tier_totals = defaultdict(int)
+    size_totals = defaultdict(int)
+
+    for reference, summary, lead_score, discovered_at, registered_date, tags in rows:
+        tags = tags or []
+        if "vertical:hmo" in tags:
+            hmo_excluded += 1
+            continue
+        total_leads += 1
+
+        clock = _as_dt(registered_date) or _as_dt(discovered_at)
+        days_old = (now - clock).days if clock else None
+
+        tier = scanners.classify_lead_value_tier(summary or "")["tier"]
+        size = (lead_score or "small")
+        if size not in SIZES:
+            size = "small"
+
+        cell = grid[tier][size]
+        cell["all"] += 1
+        if days_old is not None and days_old <= 90:
+            cell["d90"] += 1
+        if days_old is not None and days_old <= 30:
+            cell["d30"] += 1
+        if len(cell["refs"]) < 5 and reference:
+            cell["refs"].append(reference)
+
+        tier_totals[tier] += 1
+        size_totals[size] += 1
+
+    def _cell_html(tier, size):
+        c = grid[tier][size]
+        if c["all"] == 0:
+            return """<td style="padding:10px; border:1px solid #e2e8f0; text-align:center; color:#cbd5e1;">0</td>"""
+        refs_note = ", ".join(c["refs"]) + (" …" if c["all"] > len(c["refs"]) else "")
+        return f"""<td style="padding:10px; border:1px solid #e2e8f0; text-align:center;">
+            <div style="font-size:20px; font-weight:bold; color:#044332;">{c['all']}</div>
+            <div style="font-size:11px; color:#64748b;">90d:{c['d90']} · 30d:{c['d30']}</div>
+            <div style="font-size:10px; color:#94a3b8; margin-top:4px; word-break:break-all;">{refs_note}</div>
+        </td>"""
+
+    grid_rows_html = ""
+    for tier in TIERS:
+        cells = "".join(_cell_html(tier, size) for size in SIZES)
+        grid_rows_html += f"""
+        <tr>
+            <td style="padding:10px; border:1px solid #e2e8f0; font-weight:bold; background:#f8fafc;">{TIER_LABELS[tier]}</td>
+            {cells}
+            <td style="padding:10px; border:1px solid #e2e8f0; text-align:center; font-weight:bold;">{tier_totals.get(tier, 0)}</td>
+        </tr>"""
+
+    size_total_cells = "".join(
+        f"""<td style="padding:10px; border:1px solid #e2e8f0; text-align:center; font-weight:bold;">{size_totals.get(s, 0)}</td>"""
+        for s in SIZES
+    )
+
+    return HTMLResponse(f"""
+    <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:1100px; margin:auto;">
+        <h2 style="color:#044332;">Lead Value Tier × Size Report</h2>
+        <p style="color:#64748b; font-size:13px;">Read-only, nothing written to the leads table. {total_leads} tree-vertical leads counted, all-time ({hmo_excluded} HMO-vertical leads excluded — different business line). Value tier is a new 3rd dimension separate from job category and job size — see scanners.classify_lead_value_tier for the exact wordlists.</p>
+        <p style="color:#b45309; font-size:12px; background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:10px;">
+            Elite = statutory/technical weight (BS5837, Arboricultural Method Statement, TPO, felling licence) or genuine urgency (Dead &amp; Dangerous). Priority = bigger scale/commercial context (development, conservation area, multiple trees, woodland) without Elite's forcing hand. Standard = ordinary domestic work, no elevated signal. Wordlists are new today — click through the sample references below to spot-check a few before trusting the split for pricing.
+        </p>
+        <table style="width:100%; border-collapse:collapse; font-size:13px; background:white; border-radius:10px; overflow:hidden; border:1px solid #e2e8f0;">
+            <tr style="background:#f1f5f9;">
+                <th style="padding:10px; text-align:left;">Value tier ↓ / Size →</th>
+                <th style="padding:10px;">Large</th>
+                <th style="padding:10px;">Medium</th>
+                <th style="padding:10px;">Small</th>
+                <th style="padding:10px;">Tier total</th>
+            </tr>
+            {grid_rows_html}
+            <tr style="background:#f8fafc;">
+                <td style="padding:10px; border:1px solid #e2e8f0; font-weight:bold;">Size total</td>
+                {size_total_cells}
+                <td style="padding:10px; border:1px solid #e2e8f0; text-align:center; font-weight:bold;">{total_leads}</td>
+            </tr>
+        </table>
+        <p style="margin-top:16px;"><a href="/admin/lead-volume-report?secret={secret or ''}" style="color:#044332;">← Back to volume &amp; category report</a></p>
+        <p style="margin-top:8px;"><a href="/admin?secret={secret or ''}" style="color:#044332;">← Back to Admin</a></p>
     </body></html>
     """)
 

@@ -495,6 +495,76 @@ def _is_confirmed_non_tree_exclusion(text: str) -> bool:
     return not _keyword_hit(text or "", TREE_POSITIVE_OVERRIDE_GOLD)
 
 
+# ---------------------------------------------------------------------------
+# Sep 11 2026, Nick's ask: a THIRD classification dimension, independent of
+# both job category (crown_work/felling/hedge_work/stump_grinding --
+# database.classify_job_category_cascade) and job SIZE (small/medium/large,
+# score_lead above) -- VALUE TIER. Nick's own reasoning, corroborated by
+# real research this session (Gemini's Oak Lane discharge-of-conditions
+# example; the £600-1000+/day crew-cost figures found independently in two
+# places; Arbtalk's own "value over volume, not job count" consensus): a
+# lead's worth to a contractor isn't just how physically big the job is --
+# it's how legally or time urgent it is. A single TPO tree blocking a
+# developer's build, or a Dead & Dangerous emergency notice, can be a
+# "small" job by labour but commands premium pricing and closes fast,
+# because the customer has no real choice but to act now. That's a
+# genuinely separate axis from size (a lead can be small-and-elite,
+# large-and-standard, etc.), which is why it's its own 3-tier cascade --
+# same "triple filter" shape as classify_job_category_cascade -- rather
+# than folded into score_lead's existing large/medium/small buckets.
+#
+# Tier 1 (ELITE): terms that mean either real statutory/technical weight
+# (a qualified consultant is legally required, not just useful -- BS5837,
+# an Arboricultural Method Statement, a felling licence, a TPO) or genuine
+# time pressure (Dead & Dangerous 5-day notices). These are the leads
+# that convert fast and at premium prices because the customer has no
+# real alternative to acting now.
+# Tier 2 (PRIORITY): signals of bigger scale or commercial context
+# (development, commercial, estate, site clearance, multiple trees,
+# woodland) without the stronger legal/urgency weight of Tier 1 -- likely
+# worth more than an average one-off domestic job, but not a forced hand.
+# Tier 3 (STANDARD): no elevated signal -- ordinary domestic tree work.
+#
+# Deliberately NOT built by re-using TREE_POSITIVE_OVERRIDE_GOLD wholesale
+# even though several terms overlap -- that list exists to answer a
+# different question ("is this tree-related at all, despite an exclusion
+# hit") and coupling the two would mean a future edit made for THAT
+# reason silently changes value tiers too. Explicit, separate lists, same
+# as this file's existing verticals/categories.
+VALUE_TIER_ELITE = [
+    "arboricultural method statement", "arboricultural impact assessment",
+    "arboricultural report", "tree protection plan",
+    "bs5837", "bs 5837", "felling licence",
+    "tree preservation order", "tpo",
+    "ancient tree", "veteran tree", "root protection area",
+    "dead and dangerous", "dangerous tree", "5 day notice",
+    "emergency works to tree", "emergency tree work",
+    "woodland management plan", "group tpo", "woodland tpo",
+]
+VALUE_TIER_PRIORITY = [
+    "conservation area", "section 211", "s211",
+    "site clearance", "development", "commercial", "estate",
+    "multiple trees", "several trees", "group of trees",
+    "woodland", "woodland clearance", "woodland management",
+]
+
+
+def classify_lead_value_tier(summary: str) -> dict:
+    """3-tier cascade (same shape as database.classify_job_category_cascade)
+    scoring a lead's VALUE independent of its physical size -- see the
+    module comment above for the full reasoning. Tier 1 (ELITE) checked
+    first so a lead matching both ELITE and PRIORITY signals scores at its
+    highest tier, not diluted. Returns a dict so the caller always has a
+    stable shape to work with (mirrors classify_job_category_cascade's own
+    return shape), 'rank' included for easy sorting in a report."""
+    text = summary or ""
+    if _keyword_hit(text, VALUE_TIER_ELITE):
+        return {"tier": "elite", "label": "Elite", "rank": 3}
+    if _keyword_hit(text, VALUE_TIER_PRIORITY):
+        return {"tier": "priority", "label": "Priority", "rank": 2}
+    return {"tier": "standard", "label": "Standard", "rank": 1}
+
+
 def _resolve_vertical_with_structured_fields(text: str, app_type: Optional[str] = None) -> Optional[str]:
     """Tier 1 (keyword, via _resolve_vertical) + Tier 2 (structured field)
     vertical resolution. Falls back to Tier 1 alone whenever no app_type is
