@@ -2589,6 +2589,13 @@ def pricing(request: Request):
             </p>
         </div>
 
+        <!-- Sep 11 2026, Nick's ask: same lead-quality promise as the
+             marketplace page, so it's visible wherever a customer is deciding
+             to pay, not just at the point of picking an individual lead. -->
+        <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-emerald-200">
+            <b>Lead-Quality Promise:</b> Every lead is filtered to confirm it's genuine tree work before it's dispatched. On the rare chance a non-tree lead slips through, screenshot it and email <a href="mailto:contact@treekey.uk" class="underline hover:text-emerald-100">contact@treekey.uk</a> &mdash; we'll swap it for a correct lead or refund it.
+        </div>
+
         <h2 class="text-[22px] mt-10 mb-4 text-white font-bold">Why TreeKey is the Opposite of Directories</h2>
         <table class="comparison-table">
             <thead>
@@ -3964,6 +3971,138 @@ def admin_cleanup_stale_leads(request: Request, secret: Optional[str] = Query(No
     """)
 
 
+# Sep 11 2026, Nick's ask after reviewing the 83-row /admin/vertical-audit
+# output line by line: "yes pull non tree leaks out and fix it so it cant
+# happen again." The "fix it so it can't happen again" half is already done
+# in scanners.py (NON_TREE_EXCLUSION_GOLD gates new inserts at the source --
+# tightened the same day after this exact review showed some of its own
+# terms, driveway/outbuilding/conservatory/bare render, were themselves too
+# broad and flagging genuine tree leads). This is the "pull them out" half:
+# a hand-reviewed, hardcoded list of the 19 references confirmed as genuine
+# non-tree leaks by reading each full summary, not just the keyword flag --
+# the other ~62 flagged rows in that audit were false positives of the
+# (now-fixed) filter and are not in this list.
+CONFIRMED_NON_TREE_LEAK_REFS = [
+    "7/2026/5314", "7/2026/5183", "26/03029/DISCON", "26/02900/DISCON",
+    "26/02818/DISCON", "26/P/1118/S73", "2026/1320", "R26/0799", "2026/2825",
+    "363567", "363510", "2026/2926", "26/01845/VAR", "22/02549/CND003",
+    "73398", "MC/26/1461", "26/0716/DTC", "26/0075", "26/0665",
+]
+
+
+@app.get("/admin/remove-non-tree-leaks", response_class=HTMLResponse)
+def admin_remove_non_tree_leaks(request: Request, secret: Optional[str] = Query(None), confirm: str = Query("no")):
+    """Pulls the CONFIRMED_NON_TREE_LEAK_REFS list above out of active
+    dispatch/marketplace. Mechanism: every live customer-facing query
+    (marketplace listing, purchase-by-reference, subscriber dispatch
+    matching -- see the repeated `status = 'new' OR status IS NULL` guard
+    throughout database.py) filters strictly on lead status. Vertical tags
+    ('vertical:hmo' etc.) are NOT wired into any live selection query --
+    they're only read by these admin audit pages -- so tagging alone would
+    not actually have removed anything a customer could see or buy. Moving
+    status off 'new' is what actually takes effect everywhere at once.
+
+    Uses a distinct status ('non_tree_removed') rather than a DELETE, so
+    nothing is lost and this is trivially reversible if one of the 19 turns
+    out to be wrong on a second look -- unlike cleanup-stale-leads, this is
+    editorial judgement on live data, not an expired statutory window, so
+    keeping the row is the safer default.
+
+    Scoping, same caution as cleanup-stale-leads: only leads STILL at status
+    'new'/blank are touched. Any of the 19 that have since been purchased/
+    claimed are left untouched and listed separately -- those need the new
+    Lead-Quality Promise remedy (replacement or refund to the customer who
+    bought it), a real financial/customer action, not a silent status flip.
+    Same two-step confirm=yes gate as every other mutating admin route here."""
+    verify_admin_or_secret(request, secret)
+
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT reference, status, summary FROM leads WHERE reference = ANY(%s);
+        """, (CONFIRMED_NON_TREE_LEAK_REFS,))
+        rows = cur.fetchall()
+        found_refs = {r[0] for r in rows}
+        removable = [r for r in rows if (r[1] is None or r[1] == 'new')]
+        already_actioned = [r for r in rows if not (r[1] is None or r[1] == 'new')]
+        missing_refs = [ref for ref in CONFIRMED_NON_TREE_LEAK_REFS if ref not in found_refs]
+
+        removed_count = None
+        if confirm == "yes" and removable:
+            removable_refs = [r[0] for r in removable]
+            cur.execute("""
+                UPDATE leads SET status = 'non_tree_removed'
+                WHERE reference = ANY(%s) AND (status IS NULL OR status = 'new');
+            """, (removable_refs,))
+            removed_count = cur.rowcount
+            conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+    def _rows_html(rs):
+        return "".join([
+            f"""<tr>
+                <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px; font-family:monospace;">{ref}</td>
+                <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px;">{status or '(new)'}</td>
+                <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{(summary or '')[:160]}</td>
+            </tr>"""
+            for ref, status, summary in rs
+        ])
+
+    already_actioned_block = ""
+    if already_actioned:
+        already_actioned_block = f"""
+        <p style="color:#92400e; font-size:13px; background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:10px; margin-top:16px;">
+            <b>{len(already_actioned)} of the 19 are already past status 'new'</b> (purchased/claimed/etc.) -- left untouched here on purpose. If a customer already has one of these, that's the Lead-Quality Promise case: replace or refund them directly.
+        </p>
+        <table style="width:100%; border-collapse:collapse; font-size:13px; background:white; border:1px solid #e2e8f0;">
+            <tr style="background:#f1f5f9;"><th style="padding:8px; text-align:left;">Ref</th><th style="padding:8px; text-align:left;">Status</th><th style="padding:8px; text-align:left;">Summary</th></tr>
+            {_rows_html(already_actioned)}
+        </table>
+        """
+
+    missing_block = ""
+    if missing_refs:
+        missing_block = f"""
+        <p style="color:#64748b; font-size:12px; margin-top:16px;">Not found in the leads table (already deleted, e.g. by the stale-leads cleanup, or a reference typo): {', '.join(missing_refs)}</p>
+        """
+
+    if removed_count is not None:
+        body = f"""
+        <h2 style="color:#044332;">Non-Tree Leaks Removed</h2>
+        <p style="color:#065f46; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:14px;">
+            Pulled <b>{removed_count}</b> confirmed non-tree lead{'s' if removed_count != 1 else ''} out of active dispatch/marketplace (status set to 'non_tree_removed'). Nothing was deleted -- reversible if needed.
+        </p>
+        {already_actioned_block}
+        {missing_block}
+        """
+    else:
+        body = f"""
+        <h2 style="color:#044332;">Remove Confirmed Non-Tree Leaks</h2>
+        <p style="color:#64748b; font-size:13px;">Hand-reviewed list of 19 references confirmed as genuine non-tree leaks from the /admin/vertical-audit sample (chimney/extension/loft-conversion/etc. applications with no real tree content). This pulls the ones still at status 'new'/blank out of active dispatch/marketplace by setting status to 'non_tree_removed' -- not a delete, fully reversible.</p>
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin:16px 0;">
+            <div style="font-size:12px; color:#64748b;">Still active (status new/blank) -- will be removed</div>
+            <div style="font-size:28px; font-weight:800; color:{'#dc2626' if removable else '#059669'};">{len(removable)}</div>
+        </div>
+        <table style="width:100%; border-collapse:collapse; font-size:13px; background:white; border:1px solid #e2e8f0;">
+            <tr style="background:#f1f5f9;"><th style="padding:8px; text-align:left;">Ref</th><th style="padding:8px; text-align:left;">Status</th><th style="padding:8px; text-align:left;">Summary</th></tr>
+            {_rows_html(removable) or '<tr><td colspan="3" style="padding:8px;">None currently active.</td></tr>'}
+        </table>
+        {already_actioned_block}
+        {missing_block}
+        {"<a href='/admin/remove-non-tree-leaks?secret=" + (secret or '') + "&confirm=yes' style='background:#dc2626; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block; margin-top:16px;'>Confirm — pull these " + str(len(removable)) + " out of dispatch/marketplace</a>" if removable else ""}
+        """
+
+    return HTMLResponse(f"""
+    <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:1000px; margin:auto;">
+        {body}
+        <p style="margin-top:24px;"><a href="/admin/vertical-audit?secret={secret or ''}" style="color:#044332;">← Back to Vertical Audit</a></p>
+    </body></html>
+    """)
+
+
 @app.get("/admin/clear-lead-flag")
 def admin_clear_lead_flag(request: Request, secret: Optional[str] = Query(None), email: str = Query(...)):
     """Admin/debug-only, Sep 10 2026 (Nick's ask: "it's our system, can't we
@@ -4335,6 +4474,13 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
 
         <div class="bg-sky-500/10 border border-sky-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-sky-200">
             <b>Single-Sale Guarantee:</b> Every lead purchased below is immediately removed from the live marketplace and burned permanently. You are the ONLY contractor who will receive the property data.
+        </div>
+
+        <!-- Sep 11 2026, Nick's ask: a customer-facing promise covering the rare
+             case a non-tree lead slips past our filters, so it's clear this
+             gets made right rather than customers having to guess/argue. -->
+        <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-emerald-200">
+            <b>Lead-Quality Promise:</b> Every lead is filtered to confirm it's genuine tree work before it's listed. On the rare chance a non-tree lead slips through, screenshot it and email <a href="mailto:contact@treekey.uk" class="underline hover:text-emerald-100">contact@treekey.uk</a> &mdash; we'll swap it for a correct lead or refund it.
         </div>
 
         {search_html}
@@ -8817,7 +8963,8 @@ async def terms_of_service():
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">4. Subscriptions, Pricing, and Payment</h2>
         <p class="mb-2">Access to Leads is provided on the subscription plans, credit packages, and pricing displayed on the Service at the time of purchase. Prices and plan structures may change; changes will not affect a billing period already paid for.</p>
         <p class="mb-2">Payments are processed by Stripe. By subscribing, you authorize recurring charges for the plan you select until you cancel. Subscriptions may be cancelled via your account settings, or by emailing contact@treekey.uk, effective at the end of the current billing period.</p>
-        <p class="mb-4 border-l-4 border-amber-500 pl-4 bg-amber-500/10 py-3 text-slate-200"><strong>Refunds.</strong> Because you are granted immediate access to proprietary Lead data the moment you subscribe or purchase a single lead, all payments &mdash; subscription and one-off purchases alike &mdash; are non-refundable, including for unused portions of a billing cycle. Nothing in this clause affects any statutory right you may have that cannot lawfully be excluded.</p>
+        <p class="mb-4 border-l-4 border-amber-500 pl-4 bg-amber-500/10 py-3 text-slate-200"><strong>Refunds.</strong> Because you are granted immediate access to proprietary Lead data the moment you subscribe or purchase a single lead, all payments &mdash; subscription and one-off purchases alike &mdash; are non-refundable, including for unused portions of a billing cycle, save for the Lead-Quality Promise below. Nothing in this clause affects any statutory right you may have that cannot lawfully be excluded.</p>
+        <p class="mb-4 border-l-4 border-emerald-500 pl-4 bg-emerald-500/10 py-3 text-slate-200"><strong>Lead-Quality Promise.</strong> Every Lead is automatically filtered to confirm it describes genuine tree work before it is listed or dispatched. On the rare occasion a Lead that is not genuine tree work reaches you despite this, notify us at <strong>contact@treekey.uk</strong> with a screenshot of the Lead, and we will, at your choice, issue a replacement Lead of equivalent value or a refund for that Lead.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">5. Lead Accuracy &mdash; No Warranty</h2>
         <p class="mb-2">Lead information reflects data available to Tree Key at the time of discovery or last check and is not guaranteed to be current, complete, or accurate. In particular, we do not guarantee that: the underlying planning application remains active or undetermined; no contractor has since been engaged by the applicant, whether or not this is reflected in the public record; contact or applicant details are current or correct; or that use of a Lead will result in a successful quote, contract, or completed job.</p>
@@ -8892,6 +9039,8 @@ async def faq_page():
              "No. Subscriptions are a rolling monthly agreement &mdash; cancel any time from your account settings with zero penalty and no further charges from the next billing date."),
             ("Can I get a refund?",
              "Because you get immediate access to the Lead data itself the moment you subscribe or buy, payments are non-refundable &mdash; the same policy that applies to unused portions of a billing cycle. Full detail is in our <a href=\"/terms-of-service\" class=\"text-emerald-400 underline\">Terms of Service</a>."),
+            ("What if a lead turns out not to be tree work at all?",
+             "Every lead is filtered to confirm it's genuine tree work before it's listed or dispatched, so this is rare &mdash; but if one slips through, screenshot it and email <strong>contact@treekey.uk</strong>. We'll issue you a correct replacement lead or a refund for that lead."),
         ]),
         ("How Matching Works", [
             ("How do you decide which leads I get?",
