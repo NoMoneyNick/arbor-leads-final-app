@@ -3262,7 +3262,7 @@ def admin_lead_volume_report(request: Request, secret: Optional[str] = Query(Non
     Pulls EVERY lead ever scanned (not just currently-unclaimed ones --
     the question here is "how many of this job type get generated", a
     rate, not "how many are available to sell right now") and breaks it
-    down by job category (scanners.classify_job_category -- the same
+    down by job category (database.classify_job_category -- the same
     felling/stump_grinding/hedge_work/crown_work/storm_emergency/general
     classifier already used on the live marketplace, so this report and
     the site agree on what a "stump job" is), by postcode AREA (the 1-2
@@ -3336,7 +3336,7 @@ def admin_lead_volume_report(request: Request, secret: Optional[str] = Query(Non
             earliest = clock
         days_old = (now - clock).days if clock else None
 
-        cat = scanners.classify_job_category(summary or "")
+        cat = database.classify_job_category(summary or "")
         key = cat["key"]
         label = cat["label"]
         stat = cat_stats[key]
