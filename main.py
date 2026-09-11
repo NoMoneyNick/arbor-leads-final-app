@@ -871,10 +871,22 @@ def public_homepage(request: Request):
     # database.get_outcode_area_label instead of a generic "X area"
     # placeholder. The full address still only appears after purchase / on
     # an actual subscriber's own dashboard leads (see /dashboard).
+    #
+    # Sep 11 2026, Nick's catch: the real council application REFERENCE was
+    # still being printed here (e.g. "23/00568/WTCA") -- that's the exact
+    # search key on the council's own public planning portal, which hands
+    # back the full case file including the address. Printing it pre-
+    # purchase was functionally the same leak as the raw address, just one
+    # extra (trivial) step for anyone who knows to search it. Replaced with
+    # the job category (Felling & Removal / Crown Work / etc, via the same
+    # classify_job_category used on the marketplace) -- genuinely useful to
+    # a visitor, identifies nothing. The real reference still shows, as
+    # before, only after purchase (Letter tool, dashboard) or on internal
+    # admin-only pages.
     lead_rows = "".join([
         f"""<tr class='border-b border-slate-700/50 hover:bg-slate-800/50 transition-colors'>
             <td class='p-4 text-emerald-400 font-mono text-xs'>
-                {l['reference'] or 'TPO-STATUTORY'}<br>
+                {database.classify_job_category(l['summary'])['label']}<br>
                 <span class='text-slate-400 font-sans'>{l['council_source'] or ''}</span>
             </td>
             <td class='p-4 text-slate-200 text-sm max-w-md'>
@@ -907,7 +919,7 @@ def public_homepage(request: Request):
         f"""<div class='hidden sm:grid grid-cols-[56px_48px_84px_1fr_80px_28px] gap-3 items-center px-4 py-2.5 border-b border-emerald-900/40 text-xs font-mono'>
             <span class='text-emerald-700'>{(l['discovered_at'].strftime('%d %b') if l['discovered_at'] else '--')}</span>
             <span class='text-emerald-600'>{(l['discovered_at'].strftime('%H:%M') if l['discovered_at'] else '--:--')}</span>
-            <span class='text-emerald-600 truncate'>{((l['reference'] or l['council_source'] or 'TPO'))[:10]}</span>
+            <span class='text-emerald-600 truncate'>{(database.classify_job_category(l['summary'])['label'])[:12]}</span>
             <span class='text-slate-300 truncate'>{l['area_label']}</span>
             <span class='text-right'>
                 <span class='text-amber-400 font-bold text-[10px] uppercase tracking-wide'>{l['lead_score']} job</span>
@@ -3550,6 +3562,76 @@ def admin_lead_audit(request: Request, secret: Optional[str] = Query(None), view
     <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:1200px; margin:auto;">
         {body}
         <p style="margin-top:24px;"><a href="/admin?secret={secret or ''}" style="color:#044332;">← Back to Admin</a></p>
+    </body></html>
+    """)
+
+
+@app.get("/admin/cleanup-stale-leads", response_class=HTMLResponse)
+def admin_cleanup_stale_leads(request: Request, secret: Optional[str] = Query(None), confirm: str = Query("no")):
+    """Sep 11 2026, Nick's ask after seeing the stale-date audit (86 leads
+    >180 days old still sitting at status='new'/blank -- the oldest from
+    2010, likely the historical-scrape issue he recalled Gemini flagging
+    about a month ago). This does NOT hard-delete rows -- it marks them
+    status='expired_historical' (a new, distinct value; nothing else in
+    this codebase writes to `status` besides the 'new' default, so this
+    can't collide with or be mistaken for anything else) so the data stays
+    for the record but stops counting as active/new anywhere. Same >180
+    day threshold as the audit report, which is already 3x+ longer than
+    the longest real statutory window (56 days), so there's no realistic
+    chance of touching a lead that could still be legitimately live.
+
+    Two-step confirm (GET with confirm=yes) rather than acting on first
+    load, since this is a real bulk UPDATE -- a bare GET link (e.g. an
+    email client's own link-preview fetch) should never be able to trigger
+    a data change by itself."""
+    verify_admin_or_secret(request, secret)
+
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT count(*) FROM leads
+            WHERE (status IS NULL OR status = 'new')
+              AND COALESCE(registered_date, discovered_at) < (NOW() - INTERVAL '180 days');
+        """)
+        preview_count = cur.fetchone()[0]
+
+        updated_count = None
+        if confirm == "yes" and preview_count > 0:
+            cur.execute("""
+                UPDATE leads
+                SET status = 'expired_historical'
+                WHERE (status IS NULL OR status = 'new')
+                  AND COALESCE(registered_date, discovered_at) < (NOW() - INTERVAL '180 days');
+            """)
+            updated_count = cur.rowcount
+            conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+    if updated_count is not None:
+        body = f"""
+        <h2 style="color:#044332;">Cleanup Complete</h2>
+        <p style="color:#065f46; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:14px;">
+            Marked <b>{updated_count}</b> stale lead{'s' if updated_count != 1 else ''} as <code>expired_historical</code>. Nothing was deleted — the rows are still in the table for the record, just no longer counted as active/new anywhere (including the volume report and audit above).
+        </p>
+        """
+    else:
+        body = f"""
+        <h2 style="color:#044332;">Cleanup Stale Leads</h2>
+        <p style="color:#64748b; font-size:13px;">This will mark leads as <code>expired_historical</code> (not delete them) when they're both still sitting at status 'new'/blank AND over 180 days old by registered/discovered date — the same rule as the stale-date audit.</p>
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin:16px 0;">
+            <div style="font-size:12px; color:#64748b;">Leads that would be affected right now</div>
+            <div style="font-size:28px; font-weight:800; color:{'#dc2626' if preview_count else '#059669'};">{preview_count}</div>
+        </div>
+        {"<a href='/admin/cleanup-stale-leads?secret=" + (secret or '') + "&confirm=yes' style='background:#059669; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block;'>Confirm — mark these " + str(preview_count) + " as expired_historical</a>" if preview_count else "<p style='color:#059669;'>Nothing to clean up.</p>"}
+        """
+
+    return HTMLResponse(f"""
+    <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:900px; margin:auto;">
+        {body}
+        <p style="margin-top:24px;"><a href="/admin/lead-audit?secret={secret or ''}" style="color:#044332;">← Back to Stale-Date Audit</a></p>
     </body></html>
     """)
 
