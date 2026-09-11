@@ -3398,6 +3398,161 @@ def admin_lead_volume_report(request: Request, secret: Optional[str] = Query(Non
     """)
 
 
+@app.get("/admin/lead-audit", response_class=HTMLResponse)
+def admin_lead_audit(request: Request, secret: Optional[str] = Query(None), view: str = Query("stale")):
+    """Sep 11 2026, Nick's ask following the volume report's suspicious
+    "since 2010-08-02" figure -- he recalled Gemini once flagged the
+    scraper surfacing historical results, not just current ones, and
+    wants to actually know (not be told to assume) whether stale rows
+    have made it into the live `leads` table and, critically, whether
+    any of them are still sitting in a state that could reach a paying
+    customer.
+
+    view=stale: the 50 oldest rows in the whole table by
+    registered_date/discovered_at, plus counts of how many rows are
+    >180 days and >730 days old, split by `status`. The status split is
+    the actual safety check -- calculate_lead_freshness() already treats
+    anything past its statutory window (42/56 days) or its 7-day domestic
+    window as tier="expired" and every render path skips those, so an
+    old row sitting at status='new'/NULL is NOT automatically reaching a
+    customer -- but this proves that directly with real counts instead
+    of trusting that the expiry logic is doing its job.
+
+    view=general: a sample of 30 leads that classify_job_category()
+    couldn't put into a specific category (the "General / Other Tree
+    Work" bucket that was 41% of everything in the volume report) --
+    so we can actually read what's hiding in there instead of guessing,
+    e.g. whether it's BS5837/planning-survey language that has no
+    category defined for it yet."""
+    verify_admin_or_secret(request, secret)
+
+    import datetime
+
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        if view == "general":
+            cur.execute("""
+                SELECT reference, address, summary, status, discovered_at
+                FROM leads
+                ORDER BY discovered_at DESC NULLS LAST
+                LIMIT 400;
+            """)
+            candidates = cur.fetchall()
+        else:
+            cur.execute("""
+                SELECT reference, address, summary, lead_score, discovered_at, registered_date, status, source_type, council_source
+                FROM leads
+                ORDER BY COALESCE(registered_date, discovered_at) ASC NULLS LAST
+                LIMIT 500;
+            """)
+            all_rows_for_counts = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    def _as_dt(v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            try:
+                v = datetime.datetime.fromisoformat(v.replace("Z", "+00:00"))
+            except Exception:
+                return None
+        if isinstance(v, datetime.date) and not isinstance(v, datetime.datetime):
+            return datetime.datetime(v.year, v.month, v.day, tzinfo=datetime.timezone.utc)
+        if isinstance(v, datetime.datetime):
+            return v if v.tzinfo else v.replace(tzinfo=datetime.timezone.utc)
+        return None
+
+    if view == "general":
+        rows_html = ""
+        shown = 0
+        for reference, address, summary, status, discovered_at in candidates:
+            cat = database.classify_job_category(summary or "")
+            if cat["key"] != "general":
+                continue
+            shown += 1
+            if shown > 30:
+                break
+            rows_html += f"""
+            <tr>
+                <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px; font-family:monospace;">{reference or ''}</td>
+                <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{(summary or '')[:200]}</td>
+                <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px;">{status or ''}</td>
+            </tr>"""
+        body = f"""
+        <h2 style="color:#044332;">General / Other — Sample of Uncategorized Leads</h2>
+        <p style="color:#64748b; font-size:13px;">Showing the first {shown} of the most recent 400 leads that classify_job_category() couldn't match to a specific category. Read the Summary column for language we should add to the keyword lists (BS5837, planning condition discharge, etc.).</p>
+        <table style="width:100%; border-collapse:collapse; font-size:13px; background:white; border:1px solid #e2e8f0;">
+            <tr style="background:#f1f5f9;"><th style="padding:8px; text-align:left;">Ref</th><th style="padding:8px; text-align:left;">Summary</th><th style="padding:8px; text-align:left;">Status</th></tr>
+            {rows_html}
+        </table>
+        <p style="margin-top:16px;"><a href="/admin/lead-audit?secret={secret or ''}&view=stale" style="color:#044332;">View stale-date audit instead →</a></p>
+        """
+    else:
+        over_180 = {"new_or_null": 0, "other_status": 0}
+        over_730 = {"new_or_null": 0, "other_status": 0}
+        oldest_rows_html = ""
+        for i, (reference, address, summary, lead_score, discovered_at, registered_date, status, source_type, council_source) in enumerate(all_rows_for_counts):
+            clock = _as_dt(registered_date) or _as_dt(discovered_at)
+            days_old = (now - clock).days if clock else None
+            bucket = "new_or_null" if (status is None or str(status).lower() == "new") else "other_status"
+            if days_old is not None and days_old > 180:
+                over_180[bucket] += 1
+            if days_old is not None and days_old > 730:
+                over_730[bucket] += 1
+            if i < 50:
+                age = f"{days_old} days" if days_old is not None else "unknown"
+                oldest_rows_html += f"""
+                <tr>
+                    <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px; font-family:monospace;">{reference or ''}</td>
+                    <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px;">{age}</td>
+                    <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px;">{status or '(none)'}</td>
+                    <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px;">{source_type or ''}</td>
+                    <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px;">{council_source or ''}</td>
+                    <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{(summary or '')[:150]}</td>
+                </tr>"""
+        body = f"""
+        <h2 style="color:#044332;">Stale-Date Audit</h2>
+        <p style="color:#64748b; font-size:13px;">Checked the 500 oldest rows in the whole table by registered/discovered date.</p>
+        <div style="display:flex; gap:16px; margin-bottom:20px; flex-wrap:wrap;">
+            <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:14px 18px;">
+                <div style="font-size:12px; color:#64748b;">&gt;180 days old, status still 'new'/blank</div>
+                <div style="font-size:24px; font-weight:800; color:{'#dc2626' if over_180['new_or_null'] else '#059669'};">{over_180['new_or_null']}</div>
+            </div>
+            <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:14px 18px;">
+                <div style="font-size:12px; color:#64748b;">&gt;180 days old, other status (already resolved/removed)</div>
+                <div style="font-size:24px; font-weight:800;">{over_180['other_status']}</div>
+            </div>
+            <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:14px 18px;">
+                <div style="font-size:12px; color:#64748b;">&gt;730 days (2yr) old, status still 'new'/blank</div>
+                <div style="font-size:24px; font-weight:800; color:{'#dc2626' if over_730['new_or_null'] else '#059669'};">{over_730['new_or_null']}</div>
+            </div>
+        </div>
+        <p style="color:#b45309; font-size:12px; background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:10px;">
+            Note: even a row stuck at status='new' from years ago should already be invisible to customers -- calculate_lead_freshness() marks anything past its statutory window (42/56 days) or domestic 7-day window as expired, and every marketplace/dispatch render path skips expired leads. A non-zero red number above means old rows exist in the table (a data-hygiene issue worth cleaning up), not necessarily that a customer could buy one -- but if you want that double-checked directly, say so and I'll trace that path specifically rather than relying on this inference.
+        </p>
+        <table style="width:100%; border-collapse:collapse; font-size:12px; background:white; border:1px solid #e2e8f0;">
+            <tr style="background:#f1f5f9;">
+                <th style="padding:8px; text-align:left;">Ref</th><th style="padding:8px; text-align:left;">Age</th><th style="padding:8px; text-align:left;">Status</th>
+                <th style="padding:8px; text-align:left;">Source</th><th style="padding:8px; text-align:left;">Council</th><th style="padding:8px; text-align:left;">Summary</th>
+            </tr>
+            {oldest_rows_html}
+        </table>
+        <p style="margin-top:16px;"><a href="/admin/lead-audit?secret={secret or ''}&view=general" style="color:#044332;">View General/Other sample instead →</a></p>
+        """
+
+    return HTMLResponse(f"""
+    <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:1200px; margin:auto;">
+        {body}
+        <p style="margin-top:24px;"><a href="/admin?secret={secret or ''}" style="color:#044332;">← Back to Admin</a></p>
+    </body></html>
+    """)
+
+
 @app.get("/admin/clear-lead-flag")
 def admin_clear_lead_flag(request: Request, secret: Optional[str] = Query(None), email: str = Query(...)):
     """Admin/debug-only, Sep 10 2026 (Nick's ask: "it's our system, can't we
