@@ -3827,32 +3827,20 @@ def admin_vertical_audit(request: Request, secret: Optional[str] = Query(None)):
     -- the same list can, rarely, hit a real tree lead that incidentally
     mentions a building-fabric word (e.g. "reduce crown for clearance from
     chimney"), so each one is listed with its full summary for a human to
-    actually read before deciding whether to fix or ignore it."""
+    actually read before deciding whether to fix or ignore it.
+
+    Sep 11 2026: this now calls database.scan_non_tree_leaks(exclude_seen=
+    False) -- the same function the autonomous daily cycle uses (with
+    exclude_seen=True there, so it only ever emails Nick about a given
+    lead once). Passing False here means this manual page always shows
+    the FULL current picture regardless of what's already been reported,
+    for whenever Nick wants to look himself rather than wait for the
+    digest -- "ofcourse i have the option to check."."""
     verify_admin_or_secret(request, secret)
 
-    conn = database.get_db_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute("""
-            SELECT reference, summary, tags, status, discovered_at, registered_date
-            FROM leads;
-        """)
-        rows = cur.fetchall()
-    finally:
-        cur.close()
-        conn.close()
-
-    total_scanned = 0
-    hmo_excluded = 0
-    flagged = []
-    for reference, summary, tags, status, discovered_at, registered_date in rows:
-        tags = tags or []
-        if "vertical:hmo" in tags:
-            hmo_excluded += 1
-            continue
-        total_scanned += 1
-        if scanners._keyword_hit(summary or "", scanners.NON_TREE_EXCLUSION_GOLD):
-            flagged.append((reference, summary or "", status, discovered_at, registered_date))
+    flagged_raw = database.scan_non_tree_leaks(exclude_seen=False)
+    total_scanned = len(flagged_raw)  # kept as a variable name for template compatibility below
+    flagged = flagged_raw
 
     flagged_rows_html = "".join([
         f"""
@@ -3861,13 +3849,13 @@ def admin_vertical_audit(request: Request, secret: Optional[str] = Query(None)):
             <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{summary}</td>
             <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px;">{status or ''}</td>
         </tr>"""
-        for reference, summary, status, discovered_at, registered_date in flagged
+        for reference, summary, status in flagged
     ])
 
     return HTMLResponse(f"""
     <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:1250px; margin:auto;">
         <h2 style="color:#044332;">Vertical Audit — Non-Tree Leaks in the Tree Bucket</h2>
-        <p style="color:#64748b; font-size:13px;">Read-only. Scanned all {total_scanned} tree-vertical leads ({hmo_excluded} HMO-vertical excluded) for the same building-fabric/other-development pattern behind PL/26/02939/HB (a chimney/listed-building application that got wrongly tagged as tree work).</p>
+        <p style="color:#64748b; font-size:13px;">Read-only. Scans every tree-vertical lead (HMO-vertical and already-removed leads excluded) for the same building-fabric/other-development pattern behind PL/26/02939/HB (a chimney/listed-building application that got wrongly tagged as tree work). This same check also now runs automatically every day (see run_full_autonomous_cycle) and emails a digest when it finds something new -- this page shows everything currently flagged, including anything already reported.</p>
         <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin:16px 0; display:inline-block;">
             <div style="font-size:12px; color:#64748b;">Flagged for a human look</div>
             <div style="font-size:28px; font-weight:800; color:{'#dc2626' if flagged else '#059669'};">{len(flagged)}</div>
@@ -3880,6 +3868,7 @@ def admin_vertical_audit(request: Request, secret: Optional[str] = Query(None)):
             {flagged_rows_html or '<tr><td colspan="3" style="padding:8px;">None found.</td></tr>'}
         </table>
         <p style="margin-top:24px;">
+            <a href="/admin/remove-non-tree-leaks?secret={secret or ''}" style="color:#044332;">→ Remove confirmed non-tree leaks</a> &nbsp;|&nbsp;
             <a href="/admin/reclassify-audit?secret={secret or ''}" style="color:#044332;">← Reclassification audit</a> &nbsp;|&nbsp;
             <a href="/admin?secret={secret or ''}" style="color:#044332;">Admin home</a>
         </p>
@@ -3921,29 +3910,21 @@ def admin_cleanup_stale_leads(request: Request, secret: Optional[str] = Query(No
     otherwise, regardless of age. This IS a real, irreversible DELETE (not
     a status flag) so the two-step confirm (GET with confirm=yes) stays --
     a bare GET link (e.g. an email client's own link-preview fetch) must
-    never be able to trigger it by itself."""
+    never be able to trigger it by itself.
+
+    Sep 11 2026: this same check (database.cleanup_stale_leads, exact same
+    SQL) now also runs automatically every day as part of
+    run_full_autonomous_cycle -- Nick's ask: "these systems should kick in
+    ... repeat day after day autonomously... not just this scan, but all
+    the scans." This page stays as the on-demand manual version (same
+    underlying function, so the numbers always agree) for whenever Nick
+    wants to look himself rather than wait for the daily cycle."""
     verify_admin_or_secret(request, secret)
 
-    STALE_SQL_WHERE = """
-        (status IS NULL OR status = 'new')
-        AND COALESCE(registered_date, discovered_at) < (NOW() - INTERVAL '56 days')
-        AND COALESCE(discovered_at, registered_date) < (NOW() - INTERVAL '56 days')
-    """
-
-    conn = database.get_db_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute(f"SELECT count(*) FROM leads WHERE {STALE_SQL_WHERE};")
-        preview_count = cur.fetchone()[0]
-
-        deleted_count = None
-        if confirm == "yes" and preview_count > 0:
-            cur.execute(f"DELETE FROM leads WHERE {STALE_SQL_WHERE};")
-            deleted_count = cur.rowcount
-            conn.commit()
-    finally:
-        cur.close()
-        conn.close()
+    preview_count = database.count_stale_leads()
+    deleted_count = None
+    if confirm == "yes" and preview_count > 0:
+        deleted_count = database.cleanup_stale_leads()["deleted"]
 
     if deleted_count is not None:
         body = f"""
@@ -4013,7 +3994,19 @@ def admin_remove_non_tree_leaks(request: Request, secret: Optional[str] = Query(
     claimed are left untouched and listed separately -- those need the new
     Lead-Quality Promise remedy (replacement or refund to the customer who
     bought it), a real financial/customer action, not a silent status flip.
-    Same two-step confirm=yes gate as every other mutating admin route here."""
+    Same two-step confirm=yes gate as every other mutating admin route here.
+
+    Sep 11 2026: on confirm=yes this now also marks everything ELSE
+    currently flagged by database.scan_non_tree_leaks as audit:non_tree_seen
+    -- i.e. the rest of today's ~83-row batch that isn't in the confirmed-19
+    list (the ~62 false positives of the pre-narrowing filter, already
+    reviewed by hand). Without this, the autonomous daily digest (see
+    run_full_autonomous_cycle) would re-report that same already-reviewed
+    batch as "new" the very first time it runs. Uses database.
+    remove_non_tree_leaks for the actual mutation -- the exact same
+    function the autonomous cycle would call if this were ever promoted to
+    fully automatic, so this manual path and the automatic path can never
+    drift apart."""
     verify_admin_or_secret(request, secret)
 
     conn = database.get_db_conn()
@@ -4022,24 +4015,23 @@ def admin_remove_non_tree_leaks(request: Request, secret: Optional[str] = Query(
         cur.execute("""
             SELECT reference, status, summary FROM leads WHERE reference = ANY(%s);
         """, (CONFIRMED_NON_TREE_LEAK_REFS,))
-        rows = cur.fetchall()
-        found_refs = {r[0] for r in rows}
-        removable = [r for r in rows if (r[1] is None or r[1] == 'new')]
-        already_actioned = [r for r in rows if not (r[1] is None or r[1] == 'new')]
-        missing_refs = [ref for ref in CONFIRMED_NON_TREE_LEAK_REFS if ref not in found_refs]
-
-        removed_count = None
-        if confirm == "yes" and removable:
-            removable_refs = [r[0] for r in removable]
-            cur.execute("""
-                UPDATE leads SET status = 'non_tree_removed'
-                WHERE reference = ANY(%s) AND (status IS NULL OR status = 'new');
-            """, (removable_refs,))
-            removed_count = cur.rowcount
-            conn.commit()
+        preview_rows = cur.fetchall()
     finally:
         cur.close()
         conn.close()
+
+    found_refs = {r[0] for r in preview_rows}
+    removable = [r for r in preview_rows if (r[1] is None or r[1] == 'new')]
+    already_actioned = [r for r in preview_rows if not (r[1] is None or r[1] == 'new')]
+    missing_refs = [ref for ref in CONFIRMED_NON_TREE_LEAK_REFS if ref not in found_refs]
+
+    removed_count = None
+    also_marked_seen = None
+    if confirm == "yes" and removable:
+        result = database.remove_non_tree_leaks(CONFIRMED_NON_TREE_LEAK_REFS)
+        removed_count = len(result["removed"])
+        rest_still_flagged = [ref for ref, _summary, _status in database.scan_non_tree_leaks(exclude_seen=True)]
+        also_marked_seen = database.mark_leads_audit_seen(rest_still_flagged)
 
     def _rows_html(rs):
         return "".join([
@@ -4074,6 +4066,7 @@ def admin_remove_non_tree_leaks(request: Request, secret: Optional[str] = Query(
         <h2 style="color:#044332;">Non-Tree Leaks Removed</h2>
         <p style="color:#065f46; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:14px;">
             Pulled <b>{removed_count}</b> confirmed non-tree lead{'s' if removed_count != 1 else ''} out of active dispatch/marketplace (status set to 'non_tree_removed'). Nothing was deleted -- reversible if needed.
+            Also marked <b>{also_marked_seen}</b> other already-reviewed flagged lead{'s' if also_marked_seen != 1 else ''} as seen, so tomorrow's autonomous digest only reports genuinely new ones going forward.
         </p>
         {already_actioned_block}
         {missing_block}
@@ -7911,6 +7904,50 @@ def run_full_autonomous_cycle():
         notifications.send_daily_warning_digest()
     except Exception as e:
         logger.error(f"[AUTO] Daily warning digest error: {e}")
+
+    # Sep 11 2026, Nick's ask (verbatim): "these systems should kick in in
+    # sync, in order and repeat day after day autonomously. not just this
+    # scan, but all the scans, all the filters all the tests all of it on
+    # the whole business... this should all be happening automatically,
+    # fail safe systems." These two were manual-only admin buttons until
+    # today; both now ride this same once-a-day cycle, same "wrap in
+    # try/except so one failing step never blocks the rest" pattern as
+    # every step above.
+    #
+    # Stale-lead cleanup is fully automatic -- deterministic date math, no
+    # judgement call, and scoped to status 'new'/blank only, so there's no
+    # false-positive risk to guard against (see database.cleanup_stale_leads).
+    try:
+        stale_result = database.cleanup_stale_leads()
+        if stale_result.get("deleted"):
+            logger.info(f"[AUTO] Deleted {stale_result['deleted']} stale lead(s) (56+ days, never purchased).")
+    except Exception as e:
+        logger.error(f"[AUTO] Stale-lead cleanup error: {e}")
+
+    # Non-tree-leak scan is automatic for DETECTION, deliberately NOT for
+    # removal. Unlike the stale-lead check above, this is a keyword
+    # heuristic that -- proven live on Sep 11's 83-row review -- can flag a
+    # real tree lead incidentally (~75% of that first pass were false
+    # positives of an over-broad filter, since fixed but the underlying
+    # method is still a heuristic, not a certainty). Auto-deleting a real,
+    # sellable lead because of a wrongly-tuned keyword would be a worse
+    # failure than a one-day delay for a human glance, so this only scans,
+    # tags what it found so it's never re-reported, and emails Nick a
+    # digest -- exactly the "I have the option to check" Nick asked to
+    # keep. The actual pull-from-marketplace step stays a deliberate,
+    # reviewed action via /admin/remove-non-tree-leaks (which calls the
+    # same database.remove_non_tree_leaks this would call if this step
+    # were ever promoted to fully automatic).
+    try:
+        newly_flagged = database.scan_non_tree_leaks(exclude_seen=True)
+        if newly_flagged:
+            sent = notifications.send_non_tree_leak_digest(newly_flagged)
+            if sent:
+                database.mark_leads_audit_seen([ref for ref, _summary, _status in newly_flagged])
+            else:
+                logger.warning("[AUTO] Non-tree leak digest failed to send -- leaving flagged leads unmarked so they're retried next cycle instead of silently lost.")
+    except Exception as e:
+        logger.error(f"[AUTO] Non-tree leak scan error: {e}")
 
     database.set_system_state("last_autonomous_cycle_at", datetime.datetime.utcnow().isoformat() + "Z")
     logger.info("[AUTO] Autonomous daily cycle fully complete.")

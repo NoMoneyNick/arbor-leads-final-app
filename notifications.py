@@ -15,6 +15,21 @@ ALERT_BATCH_THRESHOLD = 5
 SCORE_TAG = {"small": "Small", "medium": "Medium", "large": "Large"}
 SCORE_LABEL = {"small": "Small — £19", "medium": "Medium — £29", "large": "Large — £49"}
 
+# Sep 11 2026, Nick's ask: a small, quiet line on every lead a customer
+# actually receives (purchase confirmation, free-lead grant, subscriber
+# dispatch digest) covering the rare case our filters let a non-tree lead
+# through. Deliberately small/muted per Nick's own wording ("the lead
+# message should be small") -- the marketplace/pricing/FAQ/ToS pages carry
+# the full-size version of this same promise; this is just the reminder at
+# the point they actually open a lead.
+_NOT_WHAT_YOU_EXPECTED_HTML = (
+    '<b>Not what you were expecting?</b> Every lead is filtered to confirm '
+    "it's genuine tree work before it reaches you, so this is rare — but if "
+    'this one isn\'t, screenshot it and email <a href="mailto:contact@treekey.uk" '
+    'style="color:#059669;">contact@treekey.uk</a> and we\'ll issue a correct '
+    'lead or a refund.'
+)
+
 
 def _agent_status_badge(lead: dict) -> str:
     """Aug 30 2026: has_agent is now captured on some leads (mesh_scrapers.py's
@@ -297,10 +312,13 @@ def send_purchased_lead_email(customer_email: str, lead_data: dict):
         <p style="font-size: 12px; color: #94a3b8;">
             Note: UK councils do not publish a homeowner's phone number or email address on planning applications. This lead includes everything that is legally published: the address, the applicant name (when the council records it), and the application details above.
         </p>
+        <p style="font-size: 11px; color: #94a3b8; margin-top: 14px; padding-top: 10px; border-top: 1px solid #f1f5f9;">
+            {_NOT_WHAT_YOU_EXPECTED_HTML}
+        </p>
         {_free_tools_and_subscribe_html(lead_data.get('reference', ''))}
     </div>
     """
-    
+
     try:
         res = requests.post(
             "https://api.resend.com/emails",
@@ -399,6 +417,9 @@ def send_free_lead_granted_email(customer_email: str, lead_data: dict, unsubscri
         </p>
         <p style="font-size: 12px; color: #94a3b8;">
             Note: UK councils do not publish a homeowner's phone number or email address on planning applications. This lead includes everything that is legally published: the address, the applicant name (when the council records it), and the application details above.
+        </p>
+        <p style="font-size: 11px; color: #94a3b8; margin-top: 14px; padding-top: 10px; border-top: 1px solid #f1f5f9;">
+            {_NOT_WHAT_YOU_EXPECTED_HTML}
         </p>
         {_free_tools_and_subscribe_html(lead_data.get('reference', ''))}
         {unsub_html}
@@ -969,8 +990,12 @@ def dispatch_lead_alerts(city: str, leads: list):
                     {rows}
                 </table>
 
-                <div style="margin-top:24px; padding:16px; background:#f8fafc; border-radius:8px; text-align:center; font-size:13px; color:#64748b;">
-                    Have an idea or want a new tool built for your business? 
+                <p style="font-size: 11px; color: #94a3b8; margin-top: 18px;">
+                    {_NOT_WHAT_YOU_EXPECTED_HTML}
+                </p>
+
+                <div style="margin-top:12px; padding:16px; background:#f8fafc; border-radius:8px; text-align:center; font-size:13px; color:#64748b;">
+                    Have an idea or want a new tool built for your business?
                     <a href="{PUBLIC_APP_URL}/suggestions" style="color:#044332; font-weight:bold;">Submit a Suggestion →</a>
                 </div>
             </div>
@@ -1372,4 +1397,61 @@ def send_daily_warning_digest() -> bool:
         logging.warning(f"[WARNING DIGEST] Sent digest covering {total} recurring issue(s) to {TEST_EMAIL}.")
     else:
         logging.error("[WARNING DIGEST] FAILED to send — not throttling, will retry on next cycle.")
+    return sent_ok
+
+
+def send_non_tree_leak_digest(flagged: list) -> bool:
+    """Sep 11 2026, Nick's ask: the vertical-audit non-tree-leak scan
+    (database.scan_non_tree_leaks) now runs automatically every day as part
+    of the autonomous cycle instead of only via the manual /admin/
+    vertical-audit page -- but per that function's own caveat, a flag is a
+    "worth a human look" signal, not an automatic verdict (a real tree lead
+    can rarely mention a building-fabric word incidentally), so nothing
+    gets auto-removed. This is the "give Nick the option to check" half:
+    one quiet email, same 'silent on a quiet day' principle as
+    send_daily_warning_digest, listing only leads flagged for the FIRST
+    time today (the caller already filters via exclude_seen=True, so a
+    lead already reported once -- whether later removed or deliberately
+    left alone -- never appears in a second digest).
+
+    `flagged` is a list of (reference, summary, status) tuples, same shape
+    database.scan_non_tree_leaks returns. Sends nothing and returns False
+    if the list is empty."""
+    if not flagged:
+        logging.info("[NON-TREE LEAK DIGEST] Nothing newly flagged — no email sent.")
+        return False
+
+    total = len(flagged)
+    rows_html = "".join([
+        f"<tr><td style='padding:6px 0; color:#0f172a; font-weight:700; font-family:monospace; font-size:12px;'>{reference or ''}</td>"
+        f"<td style='padding:6px 0 6px 12px; color:#334155; font-size:13px;'>{(summary or '')[:160]}</td>"
+        f"<td style='padding:6px 0 6px 12px; color:#64748b; font-size:11px; white-space:nowrap;'>{status or '(new)'}</td></tr>"
+        for reference, summary, status in flagged
+    ])
+    subject = f"{total} new possible non-tree lead{'s' if total != 1 else ''} worth a look"
+    html_body = f"""
+    <div style="font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width:640px; margin:auto; padding:0; border:2px solid #cbd5e1; border-radius:14px; overflow:hidden; background:#ffffff;">
+        <div style="background:#0f172a; color:#ffffff; padding:20px; text-align:center;">
+            <h1 style="margin:0; font-size:18px; font-weight:800;">Non-Tree Leak Check</h1>
+            <p style="margin:6px 0 0 0; font-size:13px; opacity:0.85;">{total} lead{'s' if total != 1 else ''} in the tree bucket newly mention a building-fabric/other-development term (chimney, extension, driveway, etc.) — flagged automatically today, not yet reviewed.</p>
+        </div>
+        <div style="padding:24px 22px;">
+            <table style="width:100%; border-collapse:collapse; border-top:1px solid #e2e8f0;">{rows_html}</table>
+            <p style="font-size:12px; color:#64748b; margin-top:16px; line-height:1.5;">
+                This is a "worth checking" signal, not a verdict — a real tree lead can rarely mention one of these words incidentally (e.g. clearance from a chimney). Read each summary, then use the links below for anything genuinely not tree work. Each of these is reported here once and won't repeat tomorrow even if left as-is.
+            </p>
+            <p style="text-align:center; margin-top:8px;">
+                <a href="{PUBLIC_APP_URL}/admin/vertical-audit" style="color:#059669; font-weight:700; text-decoration:none; font-size:13px;">Review in Vertical Audit →</a>
+            </p>
+            <p style="font-size:12px; color:#94a3b8; text-align:center; margin-top:16px;">
+                Vector Data Labs Automated Resilience Sentry • Host: Render Production
+            </p>
+        </div>
+    </div>
+    """
+    sent_ok = send_resend_email(subject, html_body)
+    if sent_ok:
+        logging.warning(f"[NON-TREE LEAK DIGEST] Sent digest covering {total} newly-flagged lead(s) to {TEST_EMAIL}.")
+    else:
+        logging.error("[NON-TREE LEAK DIGEST] FAILED to send — leads stay flagged, will retry next cycle since they aren't marked seen until the email is at least attempted... see caller.")
     return sent_ok

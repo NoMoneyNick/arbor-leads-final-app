@@ -1310,6 +1310,174 @@ def resync_all_lead_tags(commit_every: int = 500) -> dict:
             "note": "full resync complete -- every lead's tags recomputed from current column values."}
 
 
+# ---------------------------------------------------------------------------
+# Sep 11 2026, Nick's ask (verbatim): "these systems should kick in in sync,
+# in order and repeat day after day autonomously... ofcourse i have the
+# option to check but this should all be happening automatically, fail safe
+# systems." The stale-lead cleanup and non-tree-leak scan used to only exist
+# as manual admin buttons (main.py's /admin/cleanup-stale-leads and
+# /admin/vertical-audit); extracted here so the EXACT same tested logic can
+# be called both from those admin pages (for an on-demand look) and from
+# run_full_autonomous_cycle in main.py (so they just happen every day without
+# anyone visiting a URL).
+# ---------------------------------------------------------------------------
+
+STALE_LEAD_SQL_WHERE = """
+    (status IS NULL OR status = 'new')
+    AND COALESCE(registered_date, discovered_at) < (NOW() - INTERVAL '56 days')
+    AND COALESCE(discovered_at, registered_date) < (NOW() - INTERVAL '56 days')
+"""
+
+
+def count_stale_leads() -> int:
+    """Preview count for STALE_LEAD_SQL_WHERE -- see cleanup_stale_leads for
+    the full reasoning (56-day double date-check, status 'new'/blank only)."""
+    conn = get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(f"SELECT count(*) FROM leads WHERE {STALE_LEAD_SQL_WHERE};")
+        return cur.fetchone()[0]
+    finally:
+        cur.close()
+        conn.close()
+
+
+def cleanup_stale_leads() -> dict:
+    """Permanently DELETEs leads over 56 days (8 weeks) old by BOTH
+    available date fields, still sitting at status 'new'/blank (never
+    purchased/claimed). 56 days is the longest statutory freshness window
+    the app recognises anywhere (TPO leads) -- see calculate_lead_freshness
+    -- so nothing still legitimately sellable is ever caught by this. Safe
+    to run unattended: fully deterministic, no keyword/judgement call
+    involved, and the status scoping means a purchased lead is never
+    touched regardless of age."""
+    conn = get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(f"DELETE FROM leads WHERE {STALE_LEAD_SQL_WHERE};")
+        deleted = cur.rowcount
+        conn.commit()
+        return {"deleted": deleted}
+    finally:
+        cur.close()
+        conn.close()
+
+
+def scan_non_tree_leaks(exclude_seen: bool = True) -> list:
+    """Scans every tree-vertical lead for scanners.NON_TREE_EXCLUSION_GOLD
+    hits -- the same pattern behind PL/26/02939/HB (a chimney/listed-
+    building application wrongly tagged as tree work). Always excludes
+    vertical:hmo-tagged leads (a different business line) and leads already
+    status='non_tree_removed' (already actioned). When exclude_seen=True
+    (the autonomous cycle's use -- see run_full_autonomous_cycle) also skips
+    any lead already tagged 'audit:non_tree_seen', so the daily digest only
+    ever reports a given lead ONCE, not every day it's left un-actioned.
+    The admin /admin/vertical-audit page passes exclude_seen=False so a
+    human can still see the full current picture on demand regardless of
+    what's already been reported.
+
+    IMPORTANT, same caveat as the admin page this replaces: a flag here is
+    a 'worth a human look' signal, not an automatic verdict -- the keyword
+    list can, rarely, hit a real tree lead that incidentally mentions a
+    building-fabric word. That's exactly why this function only ever
+    RETURNS candidates; nothing calling it may auto-remove based on this
+    alone (see mark_leads_audit_seen / remove_non_tree_leaks)."""
+    import scanners as _scanners
+    conn = get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT reference, summary, tags, status FROM leads;")
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+    flagged = []
+    for reference, summary, tags, status in rows:
+        tags = tags or []
+        if "vertical:hmo" in tags:
+            continue
+        if status == "non_tree_removed":
+            continue
+        if exclude_seen and "audit:non_tree_seen" in tags:
+            continue
+        if _scanners._keyword_hit(summary or "", _scanners.NON_TREE_EXCLUSION_GOLD):
+            flagged.append((reference, summary or "", status))
+    return flagged
+
+
+def mark_leads_audit_seen(refs: list) -> int:
+    """Appends the 'audit:non_tree_seen' tag to each given lead reference
+    (without disturbing its other tags), so scan_non_tree_leaks's default
+    exclude_seen=True never re-reports it again -- whether the outcome was
+    'removed' or 'reviewed and kept'. Used by /admin/remove-non-tree-leaks
+    (confirm=yes) to close the loop on a whole reviewed batch in one go, and
+    by remove_non_tree_leaks below."""
+    if not refs:
+        return 0
+    conn = get_db_conn()
+    cur = conn.cursor()
+    updated = 0
+    try:
+        cur.execute("SELECT reference, tags FROM leads WHERE reference = ANY(%s);", (refs,))
+        rows = cur.fetchall()
+        for reference, tags in rows:
+            tags = tags or []
+            if "audit:non_tree_seen" not in tags:
+                cur.execute("UPDATE leads SET tags = %s WHERE reference = %s;",
+                            (tags + ["audit:non_tree_seen"], reference))
+                updated += 1
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+    return updated
+
+
+def remove_non_tree_leaks(refs: list) -> dict:
+    """Pulls hand-confirmed non-tree leaks out of active dispatch/
+    marketplace. Every live customer-facing query filters strictly on
+    `status = 'new' OR status IS NULL` (marketplace listing, purchase-by-
+    reference, subscriber dispatch matching -- see the repeated guard
+    throughout this file), so status is what actually removes a lead from
+    everything a customer can see or buy; vertical tags are informational
+    only and not wired into any live selection query. Uses a distinct
+    status ('non_tree_removed') rather than a DELETE -- nothing is lost,
+    and it's trivially reversible if one of these turns out to be wrong on
+    a second look, unlike cleanup_stale_leads which is an expired statutory
+    window, not editorial judgement.
+
+    Only refs still at status 'new'/blank are touched -- any that have
+    since been purchased/claimed are reported separately as
+    'already_actioned' and left untouched, since that's a refund/
+    replacement case for a human (the Lead-Quality Promise), not a status
+    flip. Every found ref (removed or already_actioned) is also tagged
+    audit:non_tree_seen so it never resurfaces in a future scan."""
+    if not refs:
+        return {"removed": [], "already_actioned": [], "not_found": list(refs)}
+    conn = get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT reference, status FROM leads WHERE reference = ANY(%s);", (refs,))
+        rows = cur.fetchall()
+        found_status = {r[0]: r[1] for r in rows}
+        removable = [ref for ref, status in found_status.items() if status is None or status == 'new']
+        already_actioned = [ref for ref, status in found_status.items() if ref not in removable]
+        not_found = [ref for ref in refs if ref not in found_status]
+
+        if removable:
+            cur.execute("""
+                UPDATE leads SET status = 'non_tree_removed'
+                WHERE reference = ANY(%s) AND (status IS NULL OR status = 'new');
+            """, (removable,))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+    mark_leads_audit_seen(removable + already_actioned)
+    return {"removed": removable, "already_actioned": already_actioned, "not_found": not_found}
+
+
 def resync_region_tags(batch_size: int = 2000) -> dict:
     """Sep 2 2026: one-time correction pass for every lead already carrying
     region:unclassified from before region resolution was made
