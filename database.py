@@ -4579,12 +4579,29 @@ def classify_job_category(summary: str) -> dict:
 #      and felling never gets a look at it. "epicormic" added to
 #      crown_work's STEMS for the same reason -- always a
 #      pruning/maintenance term, never a whole-tree felling one.
+#
+# Sep 11 2026, second follow-up -- Nick caught a live false positive
+# (26/02818/DISCON, a condition-DISCHARGE planning filing, wrongly tagged
+# crown_work) and the actual cause was worse than a wording gap: the bare
+# 3-5 letter fragments "lop"/"thin"/"limb"/"sever" are substrings of
+# ordinary English words that have nothing to do with tree work --
+# "lop" is inside "deve-LOP-ment"/"redeve-LOP-ment"/"enve-LOP-e" (both
+# extremely common in planning-application boilerplate), "thin" is inside
+# "no-THIN-g"/"some-THIN-g"/"any-THIN-g"/"every-THIN-g", "limb" is inside
+# "c-LIMB-ing", and "sever" is inside "se-VER-al" -- wait, "sever" is the
+# first 5 letters of "several". Confirmed all four collisions directly
+# (see PROJECT_STATE.md). Fixed by requiring a space on the side that
+# actually distinguishes the real word from the accidental collision
+# (checked against real examples from Nick's data before shipping --
+# still matches "To lop two Oak Trees", "Crown thin by 15%", "remove one
+# limb", "sever the trunk", still safely excludes "redevelopment"/
+# "nothing"/"climbing"/"several").
 _CASCADE_STEM_ORDER = ("stump_grinding", "hedge_work", "crown_work", "felling")
 _CASCADE_STEMS = {
     "stump_grinding": ("stump",),
     "hedge_work": ("hedge", "leylandii"),
-    "crown_work": ("reduc", "crown", "canopy", "prun", "pollard", "thin", "lift", "lop", "cut back", "trim", "deadwood", "branch", "limb", "epicormic"),
-    "felling": ("tree removal", "chop down", "cut down", "sever", "removal of the tree", "take-down", "remov", "to ground level"),
+    "crown_work": ("reduc", "crown", "canopy", "prun", "pollard", " thin", "lift", "lop ", "cut back", "trim", "deadwood", "branch", " limb", "epicormic"),
+    "felling": ("tree removal", "chop down", "cut down", "sever ", "severed", "severing", "removal of the tree", "take-down", "remov", "to ground level"),
 }
 _CASCADE_GUESS = {
     "stump_grinding": ("stump",),
