@@ -402,20 +402,43 @@ _STRUCTURED_TREE_APP_TYPES = {"trees"}
 # false-positive veto is one extra review step, never a lost lead. That
 # asymmetry (blocking Tier 2 costs almost nothing; NOT blocking it sold a
 # chimney repair as a tree job) is why this list can be broad.
+#
+# Sep 11 2026 follow-up: a live 83-row /admin/vertical-audit sample showed
+# four of these terms were themselves generating false positives on GENUINE
+# tree leads (a tree job description very often mentions a driveway, an
+# outbuilding, or a conservatory as incidental context -- "crown lift over
+# driveway", "roots damaging the driveway", "tree overhangs the
+# conservatory"). Fixed the same way this codebase already fixes an
+# over-broad term elsewhere: narrow it or drop it, rather than keep it
+# bare-broad. Verified against the real sample before removing/narrowing:
+#   - "driveway": by far the worst offender, caused the bulk of the 83
+#     flags. Removed entirely -- too common in real tree-job phrasing.
+#   - "outbuilding" (bare): caused false positives; its genuine non-tree
+#     catches are independently covered by other terms already in this list
+#     (e.g. "single storey extension" / "rear extension"). Removed.
+#   - "conservatory" (bare): zero genuine true positives observed in the
+#     sample, only false positives on tree jobs that mention a nearby
+#     conservatory as context. Removed.
+#   - "render" / "rendering" (bare): had one genuine true positive
+#     (26/02818/DISCON's planning-condition name, "(Render of External
+#     Walls)") but also a false positive on a real tree-crown-vs-building
+#     job describing "risking render/gutter/roof abrasion". Narrowed to the
+#     specific phrase instead of dropping it, since the phrase still catches
+#     the genuine case without vetoing ordinary tree-job wording.
 NON_TREE_EXCLUSION_GOLD = [
     # Building fabric / structural repair -- no vegetation meaning at all
-    "chimney", "re-pointing", "repointing", "render", "rendering", "cladding",
+    "chimney", "re-pointing", "repointing", "render of external walls", "cladding",
     "roof repair", "re-roofing", "reroofing", "roof replacement", "roof covering",
     "window replacement", "replacement windows", "door replacement", "replacement doors",
     "damp proofing", "damp-proofing", "structural alterations", "structural repairs",
     "listed building consent",
     # New-build / extension-type development -- no vegetation meaning at all
-    "conservatory", "loft conversion", "garage conversion", "single storey extension",
+    "loft conversion", "garage conversion", "single storey extension",
     "two storey extension", "rear extension", "side extension", "porch extension",
-    "new dwelling", "erection of a dwelling", "detached dwelling", "outbuilding",
+    "new dwelling", "erection of a dwelling", "detached dwelling",
     "summerhouse", "garden room",
     # Infrastructure / hard landscaping -- no vegetation meaning at all
-    "solar panel", "photovoltaic", "dropped kerb", "hard standing", "driveway",
+    "solar panel", "photovoltaic", "dropped kerb", "hard standing",
     "swimming pool", "telecoms mast", "telecommunications mast", "satellite dish",
     "shopfront", "advertisement hoarding", "digital advertisement", "illuminated sign",
 ]
