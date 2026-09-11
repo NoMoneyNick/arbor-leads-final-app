@@ -443,6 +443,57 @@ NON_TREE_EXCLUSION_GOLD = [
     "shopfront", "advertisement hoarding", "digital advertisement", "illuminated sign",
 ]
 
+# Sep 11 2026, Nick's ask (via a real example Gemini surfaced, and Nick then
+# asked directly whether I agreed with the reasoning): "Discharge of
+# Conditions" (DISCON/CND/S73/VAR-type reference numbers) applications are
+# one of the single highest-value lead types this app can find -- a
+# developer legally can't start building until they clear a condition like
+# "no development shall commence... until an Arboricultural Method
+# Statement... has been approved", so when that discharge application hits
+# the council portal, the developer is under real time pressure to hire a
+# tree consultant RIGHT NOW. That's exactly the shape of 26/02818/DISCON,
+# a real lead in this database.
+#
+# The bug this caught: a discharge-of-conditions filing routinely bundles
+# MANY unrelated conditions into one submission -- 26/02818/DISCON's real
+# text discharges "(Material Samples)... (Render of External Walls)...
+# (Construction of Site Access)... (Arboricultural Method Statement)...
+# (Landscaping Scheme)..." all in the same filing. NON_TREE_EXCLUSION_GOLD
+# only ever checked "does this contain a building-fabric term" -- it never
+# checked whether the SAME text also contains unambiguous tree-specific
+# legal language, so "(Render of External Walls)" alone was enough to veto
+# a lead that also plainly says "(Arboricultural Method Statement)". That
+# put 26/02818/DISCON on the confirmed-non-tree-leak removal list on Sep 11
+# -- exactly the wrong call, and the exact opposite of the lead type Nick
+# most wants TreeKey to catch. Caught before any live removal happened (see
+# main.py's CONFIRMED_NON_TREE_LEAK_REFS, trimmed the same day).
+#
+# Fix: these terms are UK arboricultural/planning technical terms that do
+# not appear in a genuinely non-tree filing -- BS5837 is literally the
+# British Standard for trees on development sites. If any of these hit,
+# the NON_TREE_EXCLUSION_GOLD veto never fires, no matter what other
+# building-fabric terms are also present in the same bundled filing.
+TREE_POSITIVE_OVERRIDE_GOLD = [
+    "arboricultural method statement", "arboricultural impact assessment",
+    "arboricultural report", "arboricultural implications",
+    "tree protection plan", "tree survey", "tree constraints",
+    "root protection area", "bs5837", "bs 5837",
+    "tree preservation order", "tpo", "felling licence",
+]
+
+
+def _is_confirmed_non_tree_exclusion(text: str) -> bool:
+    """Shared 'genuinely worth excluding' check used by both Tier 2's veto
+    (_resolve_vertical_with_structured_fields, below) and the retroactive
+    scan (database.scan_non_tree_leaks): a NON_TREE_EXCLUSION_GOLD hit only
+    counts if the SAME text has no TREE_POSITIVE_OVERRIDE_GOLD hit -- see
+    that list's comment for why (a bundled discharge-of-conditions filing
+    can legitimately contain both a building-fabric term AND a genuine
+    arboricultural condition in the same submission)."""
+    if not _keyword_hit(text or "", NON_TREE_EXCLUSION_GOLD):
+        return False
+    return not _keyword_hit(text or "", TREE_POSITIVE_OVERRIDE_GOLD)
+
 
 def _resolve_vertical_with_structured_fields(text: str, app_type: Optional[str] = None) -> Optional[str]:
     """Tier 1 (keyword, via _resolve_vertical) + Tier 2 (structured field)
@@ -461,7 +512,7 @@ def _resolve_vertical_with_structured_fields(text: str, app_type: Optional[str] 
     if tier1 is not None:
         return tier1
     if app_type and str(app_type).strip().lower() in _STRUCTURED_TREE_APP_TYPES:
-        if _keyword_hit(text or "", NON_TREE_EXCLUSION_GOLD):
+        if _is_confirmed_non_tree_exclusion(text or ""):
             return None
         return "tree"
     return None

@@ -3963,11 +3963,27 @@ def admin_cleanup_stale_leads(request: Request, secret: Optional[str] = Query(No
 # non-tree leaks by reading each full summary, not just the keyword flag --
 # the other ~62 flagged rows in that audit were false positives of the
 # (now-fixed) filter and are not in this list.
+# Sep 11 2026 correction: 7 refs pulled from the original 19 (DISCON x3,
+# S73, VAR, CND003, DTC). Root cause: a discharge-of-conditions/variation
+# filing routinely bundles many unrelated conditions into one submission,
+# and NON_TREE_EXCLUSION_GOLD only ever checked "does this contain a
+# building-fabric term" -- never whether the SAME text also contains
+# unambiguous tree-specific legal language. 26/02818/DISCON's real text
+# discharges "(Render of External Walls)... (Arboricultural Method
+# Statement)..." in the same filing -- the render phrase alone vetoed a
+# lead that plainly also has genuine arb content, exactly backwards from
+# what Nick wants (see scanners.TREE_POSITIVE_OVERRIDE_GOLD's comment --
+# this exact scenario, a developer legally blocked from starting work
+# until an Arboricultural Method Statement is discharged, is one of
+# TreeKey's highest-value lead types). Confirmed wrong for 26/02818/DISCON
+# specifically (its full text is on record and unambiguous); the other 6
+# share the same bundled-filing reference pattern (DISCON/S73/VAR/CND-style
+# refs) so they're held back pending a fresh /admin/vertical-audit re-scan
+# under the now-fixed logic rather than assumed wrong without re-reading
+# their text.
 CONFIRMED_NON_TREE_LEAK_REFS = [
-    "7/2026/5314", "7/2026/5183", "26/03029/DISCON", "26/02900/DISCON",
-    "26/02818/DISCON", "26/P/1118/S73", "2026/1320", "R26/0799", "2026/2825",
-    "363567", "363510", "2026/2926", "26/01845/VAR", "22/02549/CND003",
-    "73398", "MC/26/1461", "26/0716/DTC", "26/0075", "26/0665",
+    "7/2026/5314", "7/2026/5183", "2026/1320", "R26/0799", "2026/2825",
+    "363567", "363510", "2026/2926", "73398", "MC/26/1461", "26/0075", "26/0665",
 ]
 
 
@@ -4074,7 +4090,7 @@ def admin_remove_non_tree_leaks(request: Request, secret: Optional[str] = Query(
     else:
         body = f"""
         <h2 style="color:#044332;">Remove Confirmed Non-Tree Leaks</h2>
-        <p style="color:#64748b; font-size:13px;">Hand-reviewed list of 19 references confirmed as genuine non-tree leaks from the /admin/vertical-audit sample (chimney/extension/loft-conversion/etc. applications with no real tree content). This pulls the ones still at status 'new'/blank out of active dispatch/marketplace by setting status to 'non_tree_removed' -- not a delete, fully reversible.</p>
+        <p style="color:#64748b; font-size:13px;">Hand-reviewed list of {len(CONFIRMED_NON_TREE_LEAK_REFS)} references confirmed as genuine non-tree leaks from the /admin/vertical-audit sample (chimney/extension/loft-conversion/etc. applications with no real tree content). This pulls the ones still at status 'new'/blank out of active dispatch/marketplace by setting status to 'non_tree_removed' -- not a delete, fully reversible via <a href="/admin/restore-non-tree-leaks?secret={secret or ''}">/admin/restore-non-tree-leaks</a>. 7 refs originally on this list (discharge-of-conditions/variation types) were pulled back out Sep 11 after one of them -- 26/02818/DISCON -- turned out to be a genuine, high-value tree lead wrongly caught by an exclusion-list bug (see the code comment); the other 6 need a fresh look under the fixed logic before any go back on this list.</p>
         <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin:16px 0;">
             <div style="font-size:12px; color:#64748b;">Still active (status new/blank) -- will be removed</div>
             <div style="font-size:28px; font-weight:800; color:{'#dc2626' if removable else '#059669'};">{len(removable)}</div>
@@ -4092,6 +4108,109 @@ def admin_remove_non_tree_leaks(request: Request, secret: Optional[str] = Query(
     <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:1000px; margin:auto;">
         {body}
         <p style="margin-top:24px;"><a href="/admin/vertical-audit?secret={secret or ''}" style="color:#044332;">← Back to Vertical Audit</a></p>
+    </body></html>
+    """)
+
+
+# Sep 11 2026: undo tool for admin_remove_non_tree_leaks, built the same
+# day the TREE_POSITIVE_OVERRIDE_GOLD bug was found -- 26/02818/DISCON was
+# on the confirmed-removal list before that fix landed, so if this route
+# was ever clicked before the fix, it needs an equally simple way to put
+# things back. Restores by REFERENCE list, defaulting to the 6 refs still
+# under a cloud (see CONFIRMED_NON_TREE_LEAK_REFS's comment) via the
+# `refs` query param -- pass a comma-separated list to restore something
+# else instead, or `refs=all` to restore every lead currently sitting at
+# status='non_tree_removed' regardless of reference (the broadest option,
+# for "just put everything back, we'll re-review from scratch").
+_SUSPECT_DISCHARGE_REFS_SEP11 = [
+    "26/03029/DISCON", "26/02900/DISCON", "26/02818/DISCON",
+    "26/P/1118/S73", "26/01845/VAR", "22/02549/CND003", "26/0716/DTC",
+]
+
+
+@app.get("/admin/restore-non-tree-leaks", response_class=HTMLResponse)
+def admin_restore_non_tree_leaks(request: Request, secret: Optional[str] = Query(None),
+                                  confirm: str = Query("no"), refs: Optional[str] = Query(None)):
+    """Undoes database.remove_non_tree_leaks -- see that function and
+    database.restore_non_tree_leaks for the mechanism (status back to
+    'new', audit:non_tree_seen tag stripped so it can be re-flagged if
+    still genuinely wrong). Defaults to the 7 discharge-of-conditions/
+    variation-type refs flagged as suspect Sep 11 (safe to run even if none
+    of them were ever actually removed -- restore_non_tree_leaks only
+    touches rows currently at status='non_tree_removed', everything else
+    is reported as not_removed and left alone)."""
+    verify_admin_or_secret(request, secret)
+
+    if refs == "all":
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT reference FROM leads WHERE status = 'non_tree_removed';")
+            target_refs = [r[0] for r in cur.fetchall()]
+        finally:
+            cur.close()
+            conn.close()
+    elif refs:
+        target_refs = [r.strip() for r in refs.split(",") if r.strip()]
+    else:
+        target_refs = _SUSPECT_DISCHARGE_REFS_SEP11
+
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT reference, status, summary FROM leads WHERE reference = ANY(%s);", (target_refs,))
+        preview_rows = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+
+    currently_removed = [r for r in preview_rows if r[1] == 'non_tree_removed']
+    not_removed = [r for r in preview_rows if r[1] != 'non_tree_removed']
+    missing = [ref for ref in target_refs if ref not in {r[0] for r in preview_rows}]
+
+    restored_count = None
+    if confirm == "yes" and currently_removed:
+        result = database.restore_non_tree_leaks(target_refs)
+        restored_count = len(result["restored"])
+
+    def _rows_html(rs):
+        return "".join([
+            f"""<tr>
+                <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px; font-family:monospace;">{ref}</td>
+                <td style="padding:8px; border-bottom:1px solid #e2e8f0; font-size:11px;">{status or ''}</td>
+                <td style="padding:8px; border-bottom:1px solid #e2e8f0;">{(summary or '')[:160]}</td>
+            </tr>"""
+            for ref, status, summary in rs
+        ])
+
+    if restored_count is not None:
+        body = f"""
+        <h2 style="color:#044332;">Non-Tree Leaks Restored</h2>
+        <p style="color:#065f46; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:14px;">
+            Restored <b>{restored_count}</b> lead{'s' if restored_count != 1 else ''} back to status 'new' -- live in marketplace/dispatch again, and eligible to be re-flagged by a future scan if still genuinely wrong.
+        </p>
+        """
+    else:
+        body = f"""
+        <h2 style="color:#044332;">Restore Non-Tree Leaks</h2>
+        <p style="color:#64748b; font-size:13px;">Defaults to the 7 discharge-of-conditions/variation-type refs pulled back Sep 11 after 26/02818/DISCON turned out to be a genuine tree lead wrongly excluded (see /admin/remove-non-tree-leaks). Pass ?refs=REF1,REF2 for a different list, or ?refs=all to restore every currently-removed lead.</p>
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin:16px 0;">
+            <div style="font-size:12px; color:#64748b;">Currently removed (status='non_tree_removed') -- will be restored</div>
+            <div style="font-size:28px; font-weight:800; color:{'#dc2626' if currently_removed else '#059669'};">{len(currently_removed)}</div>
+        </div>
+        <table style="width:100%; border-collapse:collapse; font-size:13px; background:white; border:1px solid #e2e8f0;">
+            <tr style="background:#f1f5f9;"><th style="padding:8px; text-align:left;">Ref</th><th style="padding:8px; text-align:left;">Status</th><th style="padding:8px; text-align:left;">Summary</th></tr>
+            {_rows_html(currently_removed) or '<tr><td colspan="3" style="padding:8px;">None of these are currently removed -- nothing to restore (they were likely never actioned).</td></tr>'}
+        </table>
+        {f'<p style="color:#64748b; font-size:12px; margin-top:12px;">{len(not_removed)} of these refs exist but are at a different status (never removed, or actioned some other way) -- left alone.</p>' if not_removed else ''}
+        {f'<p style="color:#64748b; font-size:12px;">Not found: {", ".join(missing)}</p>' if missing else ''}
+        {"<a href='/admin/restore-non-tree-leaks?secret=" + (secret or '') + "&confirm=yes" + (f"&refs={refs}" if refs else "") + "' style='background:#059669; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block; margin-top:16px;'>Confirm — restore these " + str(len(currently_removed)) + " leads</a>" if currently_removed else ""}
+        """
+
+    return HTMLResponse(f"""
+    <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:1000px; margin:auto;">
+        {body}
+        <p style="margin-top:24px;"><a href="/admin/remove-non-tree-leaks?secret={secret or ''}" style="color:#044332;">← Back to Remove Non-Tree Leaks</a></p>
     </body></html>
     """)
 

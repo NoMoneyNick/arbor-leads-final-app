@@ -1400,7 +1400,7 @@ def scan_non_tree_leaks(exclude_seen: bool = True) -> list:
             continue
         if exclude_seen and "audit:non_tree_seen" in tags:
             continue
-        if _scanners._keyword_hit(summary or "", _scanners.NON_TREE_EXCLUSION_GOLD):
+        if _scanners._is_confirmed_non_tree_exclusion(summary or ""):
             flagged.append((reference, summary or "", status))
     return flagged
 
@@ -1476,6 +1476,51 @@ def remove_non_tree_leaks(refs: list) -> dict:
 
     mark_leads_audit_seen(removable + already_actioned)
     return {"removed": removable, "already_actioned": already_actioned, "not_found": not_found}
+
+
+def restore_non_tree_leaks(refs: list) -> dict:
+    """Undoes remove_non_tree_leaks for the given references: only touches
+    leads currently at status='non_tree_removed' (never overwrites a
+    status a human/customer action set since, e.g. if it was somehow
+    purchased while removed -- shouldn't be possible since removed leads
+    are excluded from every live query, but this stays defensive anyway),
+    flips them back to 'new' so they're live in marketplace/dispatch again,
+    and also strips the 'audit:non_tree_seen' tag so a future scan can
+    re-flag them if something is still genuinely wrong -- restoring a lead
+    should put it back to exactly its pre-removal state, not leave it
+    permanently invisible to future audits.
+
+    Built Sep 11 2026 alongside the TREE_POSITIVE_OVERRIDE_GOLD fix, for
+    the case where /admin/remove-non-tree-leaks had already been run
+    before that fix landed -- see main.py's CONFIRMED_NON_TREE_LEAK_REFS
+    comment for the real example (26/02818/DISCON) that made this
+    necessary."""
+    if not refs:
+        return {"restored": [], "not_removed": list(refs)}
+    conn = get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT reference, status, tags FROM leads WHERE reference = ANY(%s);", (refs,))
+        rows = cur.fetchall()
+        found = {r[0]: (r[1], r[2] or []) for r in rows}
+        restorable = [ref for ref, (status, _tags) in found.items() if status == 'non_tree_removed']
+        not_removed = [ref for ref in refs if ref not in restorable]
+
+        if restorable:
+            cur.execute("""
+                UPDATE leads SET status = 'new'
+                WHERE reference = ANY(%s) AND status = 'non_tree_removed';
+            """, (restorable,))
+            for ref in restorable:
+                tags = found[ref][1]
+                if "audit:non_tree_seen" in tags:
+                    new_tags = [t for t in tags if t != "audit:non_tree_seen"]
+                    cur.execute("UPDATE leads SET tags = %s WHERE reference = %s;", (new_tags, ref))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+    return {"restored": restorable, "not_removed": not_removed}
 
 
 def resync_region_tags(batch_size: int = 2000) -> dict:
