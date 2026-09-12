@@ -195,6 +195,74 @@ PLANS = {
 }
 
 
+def _resolve_live_single_lead_price(lead_id: str) -> Optional[dict]:
+    """Sep 12 2026, Nick's explicit ask ("everything... adjusted
+    automatically in real time... that way a price decay would work IF
+    that's what we choose"): computes the exact amount to charge for a
+    single-lead checkout directly from THAT lead's current row, via the
+    same database.calculate_lead_freshness() the marketplace card itself
+    uses to display a price. Previously the charged amount came from a
+    static plan_key -> Stripe price_data lookup (the freshness/checkout
+    mismatch bug fixed earlier today made those two numbers agree, but
+    both were still frozen at whatever they were when the page rendered).
+    This closes the gap all the way: the price is recalculated fresh at
+    the literal moment someone clicks buy, straight from the database, so
+    there's no snapshot anywhere to go stale, and it's also the one piece
+    of plumbing a future genuine decay-price or value-tier-based pricing
+    model needs -- once that's decided, it changes what this function
+    returns, not any Stripe-side configuration.
+
+    Deliberately fails CLOSED, not open: if the lead can't be found, has
+    already been sold, or the DB is unreachable, this returns None and the
+    caller refuses the whole checkout (existing "Payment System
+    Unavailable" page) rather than falling back to a possibly-wrong static
+    price -- a failed checkout the customer can retry is a far smaller
+    problem than charging an amount that doesn't match what's actually for
+    sale, which is the exact class of bug this whole pass exists to kill."""
+    try:
+        import database
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT summary, status, lead_source_type, discovered_at, registered_date
+                FROM leads WHERE id = %s;
+            """, (lead_id,))
+            row = cur.fetchone()
+        finally:
+            cur.close()
+            conn.close()
+        if not row:
+            logger.warning(f"[Stripe] Live price lookup: lead_id={lead_id} not found (deleted or already sold).")
+            return None
+        summary, status, source_type, discovered_at, registered_date = row
+        fresh = database.calculate_lead_freshness(
+            discovered_at, planning_status=status or "pending", summary=summary or "",
+            source_type=source_type or "council_planning", registered_date=registered_date
+        )
+        price_pounds = fresh.get("price", 0) or 0
+        if price_pounds <= 0:
+            logger.warning(f"[Stripe] Live price lookup: lead_id={lead_id} is expired/zero-price -- refusing checkout.")
+            return None
+        # Sep 12 2026: also re-resolve which plan_key applies RIGHT NOW (not
+        # whichever one was embedded in the checkout link at page-load
+        # time), so the Stripe product name/description shown to the
+        # customer can never disagree with the amount they're actually
+        # charged, even if they sat on the page long enough to cross a
+        # freshness-tier boundary (e.g. Flash Hot -> Active).
+        live_plan_key = fresh.get("plan_key")
+        live_plan = PLANS.get(live_plan_key) if live_plan_key else None
+        return {
+            "amount_pence": int(price_pounds) * 100,
+            "plan_key": live_plan_key,
+            "name": live_plan["name"] if live_plan else "Single Lead Unlock",
+            "description": live_plan["description"] if live_plan else "Exclusive planning lead.",
+        }
+    except Exception as e:
+        logger.error(f"[Stripe] Live price lookup failed for lead_id={lead_id}: {e}")
+        return None
+
+
 def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = None, radius: int = 15,
                              full_postcode: str = None, job_size: str = None) -> Optional[str]:
     """
@@ -211,10 +279,28 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
         return None
 
     try:
+        unit_amount = plan["amount"]
+        product_name = plan["name"]
+        product_description = plan["description"]
+        if lead_id:
+            # Single-lead purchase: charge the live price (and use the live
+            # product name/description), not whatever was static/embedded
+            # in the checkout link at page-load time -- see
+            # _resolve_live_single_lead_price's own docstring. Refuse the
+            # whole checkout on any failure rather than silently falling
+            # back to a possibly stale or wrong static amount.
+            live = _resolve_live_single_lead_price(lead_id)
+            if live is None:
+                logger.error(f"[Stripe] Refusing checkout for lead_id={lead_id} -- no valid live price available.")
+                return None
+            unit_amount = live["amount_pence"]
+            product_name = live["name"]
+            product_description = live["description"]
+
         price_data = {
             "currency": "gbp",
-            "product_data": {"name": plan["name"], "description": plan["description"]},
-            "unit_amount": plan["amount"],
+            "product_data": {"name": product_name, "description": product_description},
+            "unit_amount": unit_amount,
         }
         if plan["mode"] == "subscription":
             price_data["recurring"] = {"interval": "month"}

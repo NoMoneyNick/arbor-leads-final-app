@@ -1270,6 +1270,84 @@ def backfill_lead_tags(batch_size: int = 500) -> dict:
             "note": "re-run if 'updated' == batch_size -- there may be more rows left untagged."}
 
 
+def backfill_lead_size_and_price(batch_size: int = 1000) -> dict:
+    """Sep 12 2026, Nick's explicit instruction: "every lead we currently
+    have [must be] put through the same filters as the new leads we get."
+    scanners.score_lead() computes size + one-off price ONCE, at scan/
+    insert time, and both are stored permanently on the leads row --
+    deploying a fixed classifier (e.g. today's LARGE_KEYWORDS/VALUE_TIER
+    keyword-overlap fix) never retroactively touches already-scanned
+    leads, only ones scanned from that point on. This sweeps every
+    existing lead through the CURRENT score_lead() and corrects
+    lead_score/lead_price wherever they've drifted from what today's logic
+    would produce.
+
+    Every row already has a non-null score/price, so there's no natural
+    "still blank" WHERE clause to filter on the way backfill_lead_tags
+    uses `tags = '{}'` -- progress is tracked instead via a persisted id
+    watermark (system_state['size_price_backfill_cursor_id']). Once the
+    cursor reaches the top of the table this is a true no-op on every
+    later call (0 rows selected), cheap enough to run every autonomous
+    cycle forever going forward -- which is what actually satisfies
+    Nick's ask on an ongoing basis, not just as a one-time fix.
+
+    IMPORTANT: a forward-only cursor does NOT re-check leads already
+    passed. If score_lead()/its keyword lists change again in future,
+    reset the cursor to 0 (see /admin/reset-size-price-backfill-cursor) so
+    every lead gets swept again under the new logic."""
+    if not SURL:
+        return {"error": "no database configured"}
+    raw_cursor = get_system_state("size_price_backfill_cursor_id")
+    try:
+        cursor_id = int(raw_cursor) if raw_cursor else 0
+    except (TypeError, ValueError):
+        cursor_id = 0
+    updated = 0
+    unchanged = 0
+    errors = 0
+    max_id_seen = cursor_id
+    try:
+        import scanners as _scanners  # only imported when there's actually work to do
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT id, summary, lead_score, lead_price FROM leads
+                WHERE id > %s ORDER BY id ASC LIMIT %s;
+            """, (cursor_id, batch_size))
+            rows = cur.fetchall()
+            if not rows:
+                return {"updated": 0, "unchanged": 0, "errors": 0, "batch_size": batch_size,
+                        "cursor_id": cursor_id,
+                        "note": "no leads past the current cursor -- fully caught up."}
+            for lead_id, summary, old_score, old_price in rows:
+                max_id_seen = max(max_id_seen, lead_id)
+                try:
+                    new_score, new_price = _scanners.score_lead(summary)
+                    if new_score != old_score or new_price != old_price:
+                        cur.execute(
+                            "UPDATE leads SET lead_score = %s, lead_price = %s WHERE id = %s;",
+                            (new_score, new_price, lead_id)
+                        )
+                        updated += 1
+                    else:
+                        unchanged += 1
+                except Exception as row_err:
+                    errors += 1
+                    logger.warning(f"[SizePriceBackfill] error on lead {lead_id}: {row_err}")
+            set_system_state("size_price_backfill_cursor_id", str(max_id_seen))
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[SizePriceBackfill] error: {e}")
+        return {"error": str(e), "updated": updated, "unchanged": unchanged, "errors": errors}
+    return {"updated": updated, "unchanged": unchanged, "errors": errors, "batch_size": batch_size,
+            "cursor_id": max_id_seen,
+            "note": "re-run if updated+unchanged == batch_size -- there may be more rows past this cursor."}
+
+
 def resync_all_lead_tags(commit_every: int = 500) -> dict:
     """Sep 2 2026: same 'recompute every row, not just untagged ones'
     pattern as resync_all_partner_tags -- added for the agent_type/
@@ -4582,6 +4660,18 @@ def get_closest_unallocated_leads(outcode: str, limit: int = 5) -> list:
         return []
 
 
+def _true_unlock_price(plan_key: str) -> int:
+    """Sep 12 2026: the real, currently-charged pound amount for a given
+    single-lead plan_key, read straight from the same payments.PLANS dict
+    /checkout/{plan_key} itself uses. See calculate_lead_freshness's own
+    docstring for why this exists -- anything displayed as a lead's price
+    must come from here, never a separately hand-typed number, or it can
+    silently drift out of sync with what the customer is actually charged."""
+    import payments
+    plan = payments.PLANS.get(plan_key)
+    return (plan["amount"] // 100) if plan else 0
+
+
 def calculate_lead_freshness(discovered_at, planning_status: str = "pending", summary: str = "", source_type: str = "council_planning", registered_date=None) -> dict:
     """
     Calculates statutory lead freshness, countdown timer, color badge, and dynamic decay price:
@@ -4598,6 +4688,23 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
     leads carry this so far (see _insert_lead's docstring in scanners.py);
     every other source leaves it None and this falls back to discovered_at
     exactly as before this parameter existed.
+
+    Sep 12 2026 fix: every "price" below used to be a separate hand-typed
+    number, meant to show a decaying urgency price as a lead ages. But the
+    amount Stripe actually charges at /checkout/{plan_key} is fixed per
+    plan_key (payments.PLANS[plan_key]['amount'] -- only 3 real price
+    points exist: £19/£29/£49) and nothing kept the two in sync. Found
+    while re-checking pricing end to end: this had drifted into real,
+    live mismatches between what the marketplace card advertises and what
+    checkout actually charges -- Council Clearance/Final Determination
+    advertised "£9" while checkout charged £19; Domestic Active advertised
+    "£25" while checkout charged £19; Domestic Flash Hot advertised "£35"
+    while checkout charged £29; Granted advertised "£25" while checkout
+    charged £29. Every "price" value now comes from _true_unlock_price(),
+    which reads the same PLANS dict checkout itself uses, so the two can
+    never drift apart again. If a genuinely different price per freshness
+    tier is wanted, that needs its own real Stripe price/plan_key -- a
+    pricing decision, not a display-layer fix.
     """
     import datetime
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -4608,7 +4715,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "badge_color": "#059669",
             "badge_bg": "#ecfdf5",
             "badge_text": "Officially Approved (Ready to Fell)",
-            "price": 25,
+            "price": _true_unlock_price("single_lead_medium"),
             "days_left": "Approved by Council",
             "plan_key": "single_lead_medium"
         }
@@ -4657,7 +4764,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
                 "badge_color": "#059669",
                 "badge_bg": "#ecfdf5",
                 "badge_text": "Fresh Homeowner Quote (Urgent: Day 0–2)",
-                "price": 35,
+                "price": _true_unlock_price("single_lead_medium"),
                 "days_left": f"{days_left} days left before quote closes",
                 "plan_key": "single_lead_medium"
             }
@@ -4667,7 +4774,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
                 "badge_color": "#d97706",
                 "badge_bg": "#fffbeb",
                 "badge_text": "Active Homeowner Quote (Day 3–7)",
-                "price": 25,
+                "price": _true_unlock_price("single_lead_small"),
                 "days_left": f"{days_left} days left before quote closes",
                 "plan_key": "single_lead_small"
             }
@@ -4695,7 +4802,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "badge_color": "#dc2626",
             "badge_bg": "#fef2f2",
             "badge_text": "Flash Hot (Day 0–3 • 0 Competitors Aware)",
-            "price": 29,
+            "price": _true_unlock_price("single_lead_medium"),
             "days_left": f"{days_left} days left in consultation",
             "plan_key": "single_lead_medium"
         }
@@ -4705,7 +4812,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "badge_color": "#d97706",
             "badge_bg": "#fffbeb",
             "badge_text": "Prime Quoting Window (Day 4–14)",
-            "price": 19,
+            "price": _true_unlock_price("single_lead_small"),
             "days_left": f"{days_left} days left in consultation",
             "plan_key": "single_lead_small"
         }
@@ -4715,7 +4822,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "badge_color": "#ca8a04",
             "badge_bg": "#fefce8",
             "badge_text": f"Late Window Clearance (Closing Soon)",
-            "price": 9,
+            "price": _true_unlock_price("single_lead_small"),
             "days_left": f"{days_left} days until determination",
             "plan_key": "single_lead_small"
         }
@@ -4725,7 +4832,7 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "badge_color": "#64748b",
             "badge_bg": "#f8fafc",
             "badge_text": f"Final Determination (Day 43–56)",
-            "price": 9,
+            "price": _true_unlock_price("single_lead_small"),
             "days_left": f"{days_left} days left",
             "plan_key": "single_lead_small"
         }

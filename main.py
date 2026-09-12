@@ -8187,32 +8187,21 @@ def run_master_daily_pipeline():
             throttle_hours=12.0
         )
 
-    # Stage 2: Secondary Lead Quality & Pricing Normalization
-    try:
-        conn = database.get_db_conn(); cur = conn.cursor()
-        cur.execute("""
-            UPDATE leads
-            SET lead_price = CASE
-                WHEN lead_score = 'large' THEN 35
-                WHEN lead_score = 'medium' THEN 25
-                ELSE 19
-            END
-            WHERE lead_price IS NULL OR lead_price = 0;
-        """)
-        conn.commit(); cur.close(); conn.close()
-        logger.info("[PIPELINE] Stage 2 Complete: Lead quality and pricing integrity verified.")
-    except Exception as e:
-        logger.error(f"[PIPELINE] Stage 2 error: {e}")
-        import notifications
-        notifications.send_system_incident_alert(
-            category="DATABASE & PRICING",
-            title="LEAD PRICING NORMALIZATION (STAGE 2) FAILED",
-            description=f"WARNING: Lead pricing normalization query failed: {str(e)[:150]}",
-            impact="Newly ingested leads may lack standardized pricing tiers.",
-            action_required="Check PostgreSQL database connectivity and leads table schema.",
-            severity="WARNING",
-            throttle_hours=12.0
-        )
+    # Stage 2 (REMOVED Sep 12 2026, Nick's explicit instruction to delete
+    # anything tied to old/redundant pricing once it's confirmed safe to
+    # drop): this used to backfill lead_price for any NULL/0-price row with
+    # its own hand-typed scale (large=35/medium=25/small=19) -- a THIRD,
+    # different price scale from scanners.score_lead()'s real returned
+    # prices (75/50/25), found while auditing pricing end to end the same
+    # day as the freshness-price/checkout-charge mismatch fix. It's fully
+    # redundant now: every lead insert already sets lead_price straight
+    # from score_lead() (see scanners.py's _insert_lead), so a NULL/0 price
+    # should never occur on a normal insert, and the new
+    # database.backfill_lead_size_and_price() step below (which recomputes
+    # BOTH lead_score and lead_price from the current classifier, not just
+    # rows sitting at NULL/0) already sweeps up any stray legacy rows this
+    # used to catch, using the correct up-to-date price scale instead of
+    # this stale one.
 
     # Stage 3: New Contractor Discovery Sweep
     try:
@@ -8288,6 +8277,25 @@ def run_full_autonomous_cycle():
                 break
     except Exception as e:
         logger.error(f"[AUTO] backfill_partner_tags error: {e}")
+
+    # Sep 12 2026, Nick's explicit instruction ("every lead we currently
+    # have [must be] put through the same filters as the new leads we
+    # get"): sweeps every existing lead's SIZE/PRICE through today's fixed
+    # classifier. See database.backfill_lead_size_and_price's own docstring
+    # -- self-throttling via a persisted id cursor, so once it's fully
+    # caught up this becomes a true no-op every cycle, cheap to leave
+    # running forever. Loop-until-drained follows the exact same pattern
+    # as every backfill above; "done" checks updated+unchanged (not just
+    # updated) since a fully-caught-up batch still returns real rows that
+    # matched already, not zero.
+    try:
+        for _ in range(20):
+            result = database.backfill_lead_size_and_price(batch_size=1000)
+            done = result.get("updated", 0) + result.get("unchanged", 0)
+            if done < 1000:
+                break
+    except Exception as e:
+        logger.error(f"[AUTO] backfill_lead_size_and_price error: {e}")
 
     try:
         research.enrich_existing_partners(limit=0)
@@ -8564,6 +8572,40 @@ def pipeline_status(secret: Optional[str] = Query(None)):
     }
 
 
+@app.get("/admin/run-size-price-backfill-now")
+def run_size_price_backfill_now(secret: Optional[str] = Query(None)):
+    """Sep 12 2026: Nick triggered the full autonomous cycle just to get
+    database.backfill_lead_size_and_price() to run, but that backfill is
+    one of the LAST steps in run_full_autonomous_cycle -- it only starts
+    after the full nationwide council scan (run_master_daily_pipeline,
+    ~309 councils, the genuinely slow part) and the tag/region/partner
+    backfills ahead of it in the maintenance pass all finish first. This
+    runs JUST the size/price backfill, directly, synchronously, so it
+    returns real numbers in seconds instead of however long a full cycle
+    takes -- does not touch _PIPELINE_LOCK/_pipeline_state at all (it's a
+    plain DB sweep, not a scan), so it's safe to call even while a full
+    cycle triggered separately is still running elsewhere. Loops until
+    caught up or 20 batches, same cap as every other backfill loop here."""
+    verify_cron_secret(secret)
+    totals = {"updated": 0, "unchanged": 0, "errors": 0, "batches_run": 0}
+    last_result = None
+    for _ in range(20):
+        result = database.backfill_lead_size_and_price(batch_size=1000)
+        last_result = result
+        totals["updated"] += result.get("updated", 0)
+        totals["unchanged"] += result.get("unchanged", 0)
+        totals["errors"] += result.get("errors", 0)
+        totals["batches_run"] += 1
+        done = result.get("updated", 0) + result.get("unchanged", 0)
+        if done < 1000:
+            break
+    return {
+        "status": "complete" if (last_result and last_result.get("updated", 0) + last_result.get("unchanged", 0) < 1000) else "stopped_at_20_batches -- run again to continue",
+        "totals": totals,
+        "cursor_id": last_result.get("cursor_id") if last_result else None,
+    }
+
+
 @app.get("/reset-pipeline-lock")
 def reset_pipeline_lock(secret: Optional[str] = Query(None)):
     """Sep 1 2026: manual escape hatch for a stuck lock, so restarting a
@@ -8588,6 +8630,29 @@ def reset_pipeline_lock(secret: Optional[str] = Query(None)):
         "status": "reset",
         "was_running": was_running,
         "warning": "This does not stop the old scan's background thread if it's still alive -- it only allows a new trigger to start. If the old scan wasn't actually hung, you may now have two scans running at once."
+    }
+
+
+@app.get("/admin/reset-size-price-backfill-cursor")
+def reset_size_price_backfill_cursor(secret: Optional[str] = Query(None)):
+    """Sep 12 2026: database.backfill_lead_size_and_price() tracks progress
+    with a forward-only id watermark, so once it reaches the top of the
+    leads table it stops re-checking anything below that id -- correct for
+    normal day-to-day operation (cheap, self-throttling), but WRONG the
+    next time scanners.score_lead()/its keyword lists change again: those
+    already-passed leads would silently keep their now-outdated size/price
+    forever unless the cursor is reset. Hit this manually right after any
+    future change to that classifier logic, then either wait for the next
+    autonomous cycle or call /trigger-autonomous-cycle to sweep everything
+    again immediately."""
+    verify_cron_secret(secret)
+    old_cursor = database.get_system_state("size_price_backfill_cursor_id")
+    database.set_system_state("size_price_backfill_cursor_id", "0")
+    return {
+        "status": "reset",
+        "old_cursor_id": old_cursor,
+        "new_cursor_id": "0",
+        "note": "every lead will be re-checked against the current classifier on the next backfill_lead_size_and_price pass (next autonomous cycle, or /trigger-autonomous-cycle to run it now)."
     }
 
 
