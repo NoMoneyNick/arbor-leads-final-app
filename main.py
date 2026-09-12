@@ -9447,7 +9447,16 @@ async def faq_page():
             ("How do I log in? Why no password?",
              "Tree Key is passwordless by design &mdash; enter your email and we send you a secure, one-tap login link (valid 15 minutes). There's no password database that could ever be breached. If you're reading the email on a different device than the one you want to log in on, the email also includes a 6-digit code you can type in instead of clicking the link."),
             ("Is WhatsApp involved?",
-             "Two places: our Elite tier includes zero-minute instant WhatsApp lead alerts alongside email, and the Chip-Drop directory gives you a direct WhatsApp link to message a drop site's contact. There isn't yet a general WhatsApp support line &mdash; for anything else, email is the way to reach us."),
+             # Sep 12 2026, Nick's ask ("remove whatsapp feature... off
+             # anything public until its built and deployed, including any
+             # statements that are untrue"): this previously described the
+             # Settings-page WhatsApp forward-button as an Elite-exclusive
+             # "zero-minute instant" alert. Neither is true -- it's a
+             # forward-to-yourself link inside the normal lead email (any
+             # subscriber can turn it on from Settings, not just Elite), not
+             # real-time push delivery. Reworded to describe exactly what
+             # it is.
+             "Two places: in Settings, any subscriber can turn on a one-tap 'Forward on WhatsApp' button next to each lead email, so you can send it straight to your crew. The Chip-Drop directory also gives you a direct WhatsApp link to message a drop site's contact. There isn't yet a general WhatsApp support line &mdash; for anything else, email is the way to reach us."),
             ("Do you have testimonials from other contractors?",
              "Not yet &mdash; we're a young platform and would rather wait for genuine results than publish anything that isn't real. That'll change as more contractors come through the platform."),
         ]),

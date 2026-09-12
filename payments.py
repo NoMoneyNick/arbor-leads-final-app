@@ -93,11 +93,27 @@ PLANS = {
     },
     "treekey_elite": {
         "name": "TreeKey Elite (All-Access Partner)",
-        "description": "100% Unrestricted Access to ALL categories across 30 miles + Zero-Minute Instant WhatsApp Alerts + RAMS Legal Pack + Automated Direct Mailouts.",
+        # Sep 12 2026, Nick's explicit ask ("remove whatsapp feature and
+        # letter sending feature off anything public until its built and
+        # deployed... including any statements that are untrue"): this
+        # description previously promised three things that don't exist in
+        # the codebase at all -- "Zero-Minute Instant WhatsApp Alerts" (the
+        # real mechanism is a forward-to-yourself link inside the normal
+        # email, not push delivery, and isn't even Elite-exclusive --
+        # notifications.py's own comments say so), "RAMS Legal Pack" (no
+        # RAMS generator exists anywhere -- it's on the未-built backlog),
+        # and "Automated Direct Mailouts" (no letter-sending code exists at
+        # all -- it's on the not-yet-built backlog). Reworded to only claim
+        # what this tier actually, verifiably does today: full category
+        # access at the widest radius, and top-priority dispatch
+        # (TIER_PRIORITY is real and does put Elite ahead of lower tiers in
+        # the dispatch order). Add real features back to this line only
+        # once they're actually built and deployed, never before.
+        "description": "100% Unrestricted Access to ALL categories across 30 miles + top-priority lead dispatch, ahead of every lower tier.",
         "amount": 17900,  # £179/month
         "mode": "subscription",
         "badge": "VIP All-Access",
-        "real_world_roi": "Complete business operating system. First-mover WhatsApp dispatch before competitors even know the job exists."
+        "real_world_roi": "Complete business operating system. First look at every new lead in your category before lower tiers see it."
     },
     # Homepage general-ledger tiers (radius-based, distinct from the tailored tiers above)
     "sole_trader": {
@@ -128,7 +144,15 @@ PLANS = {
         "amount": 29900,  # £299/month
         "mode": "subscription",
         "badge": "Regional Elite",
-        "real_world_roi": "50-mile radial boundary with first-priority API routing and a dedicated account manager."
+        # Sep 12 2026, same pass as treekey_elite above: "a dedicated
+        # account manager" isn't real -- there's no support-staff/account-
+        # management system anywhere in this codebase, and nothing to make
+        # one true (a solo non-technical founder can't dedicate a named
+        # person to each Regional Elite subscriber). Dropped rather than
+        # reworded, per the same "remove until built and deployed" rule.
+        # The radius and priority-routing claims stay -- both real (
+        # TIER_MAX_RADIUS=50 for this tier, TIER_PRIORITY dispatch weighting).
+        "real_world_roi": "50-mile radial boundary with first-priority API routing."
     },
     # Single Lead Pay-As-You-Go Purchases (Single-Sale Inventory Burn)
     # Aug 30 2026: all three single-lead tiers previously promised "homeowner
