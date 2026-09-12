@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Session token usage</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --track:          #eceae4;
+    --series-1:       #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --track:          #2c2b28;
+      --series-1:       #3987e5;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --track:          #2c2b28;
+    --series-1:       #3987e5;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface-1); }
+  .viz-root {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--surface-1);
+    padding: 28px 24px 20px;
+    max-width: 640px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 2px 0;
+  }
+  .sub {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    margin: 0 0 22px 0;
+  }
+  .row { margin-bottom: 16px; }
+  .row .label-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 5px;
+  }
+  .row .cat {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .row .pct {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+  .track {
+    background: var(--track);
+    border-radius: 4px;
+    height: 14px;
+    overflow: hidden;
+  }
+  .fill {
+    background: var(--series-1);
+    height: 100%;
+    border-radius: 4px;
+  }
+  .foot {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--track);
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <h1>Where this session's tokens went</h1>
+  <p class="sub">Effective cost — weighted so a generated word counts more than a re-read one</p>
+
+  <div class="row">
+    <div class="label-line"><span class="cat">Claude's instructions (system prompt + tool list, re-read every turn)</span><span class="pct">67%</span></div>
+    <div class="track"><div class="fill" style="width:67%"></div></div>
+  </div>
+  <div class="row">
+    <div class="label-line"><span class="cat">Conversation, replies &amp; coordinating tools</span><span class="pct">20%</span></div>
+    <div class="track"><div class="fill" style="width:20%"></div></div>
+  </div>
+  <div class="row">
+    <div class="label-line"><span class="cat">Working with project files (reading/editing code, running tests)</span><span class="pct">11%</span></div>
+    <div class="track"><div class="fill" style="width:11%"></div></div>
+  </div>
+  <div class="row">
+    <div class="label-line"><span class="cat">Web research (search &amp; page fetches)</span><span class="pct">0.7%</span></div>
+    <div class="track"><div class="fill" style="width:0.7%"></div></div>
+  </div>
+  <div class="row">
+    <div class="label-line"><span class="cat">Remembering facts about you</span><span class="pct">0.2%</span></div>
+    <div class="track"><div class="fill" style="width:0.2%"></div></div>
+  </div>
+  <div class="row">
+    <div class="label-line"><span class="cat">Syncing files to your computer</span><span class="pct">0.2%</span></div>
+    <div class="track"><div class="fill" style="width:0.2%"></div></div>
+  </div>
+
+  <div class="foot">Covers the recent portion of this session (since the last time it was condensed) — 485 model turns.</div>
+</div>
+</body>
+</html>
