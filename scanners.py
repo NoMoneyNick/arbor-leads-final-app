@@ -22,12 +22,34 @@ UK_PLANNING_API_KEY = os.getenv("UK_PLANNING_API_KEY", "").strip()
 
 
 
+# Sep 12 2026 audit (Nick: "fix the small/large issue"): this list used to
+# also contain "tpo", "tree preservation order", "conservation area",
+# "development", "commercial", "dangerous tree", "estate", "application to
+# carry out works", "section 211", "s211", "bs5837", "bs 5837" and
+# "arboricultural impact" -- every one of those is also a VALUE_TIER_ELITE
+# or VALUE_TIER_PRIORITY keyword (see that list below), and every one of
+# them is a LEGAL/PROCEDURAL marker that carries no physical-scale
+# information on its own: a TPO, a conservation-area designation, a
+# "dangerous tree" 5-day notice, or a BS5837 survey can just as easily
+# apply to a single small tree in a back garden as to a multi-tree site.
+# Because those terms were shared with the value-tier lists, a lead hitting
+# an Elite/Priority value keyword was almost automatically scored "large"
+# for size too, regardless of the actual physical scope of the job -- real
+# admin data showed 555/625 (89%) of Elite-tier leads landing in the Large
+# size bucket, which is the classifier confound, not a genuine finding
+# about job size. Removed all of them from LARGE_KEYWORDS so SIZE and VALUE
+# are actually independent dimensions, per classify_lead_value_tier's own
+# docstring claim (which was previously false for the "large" bucket).
+# What's left below is genuine physical-scale language -- tree count/area
+# ("several trees", "multiple trees", "group of trees", "woodland" and its
+# variants) or site-scope ("site clearance", "demolition", "contaminated")
+# -- which can and often will still co-occur with a high value tier (a
+# woodland clearance genuinely is both bigger AND more valuable), but no
+# longer gets forced there by a purely legal/procedural keyword alone.
 LARGE_KEYWORDS = [
-    "tpo", "tree preservation order", "conservation area", "woodland",
-    "development", "several trees", "multiple trees", "commercial",
-    "site clearance", "site works", "dangerous tree", "estate",
-    "demolition", "contaminated", "application to carry out works",
-    "section 211", "s211", "bs5837", "bs 5837", "arboricultural impact",
+    "woodland", "several trees", "multiple trees",
+    "site clearance", "site works",
+    "demolition", "contaminated",
     "woodland clearance", "group of trees", "woodland management"
 ]
 MEDIUM_KEYWORDS = [
@@ -166,6 +188,36 @@ def _keyword_hit(text: str, keywords) -> bool:
     return bool(pattern.search(s))
 
 
+# Sep 12 2026: real UK planning-application text almost always states an
+# actual tree count in the "Nno." shorthand councils/agents use (e.g.
+# "3no. mature oak trees", "12no. trees", "1no. tree in rear garden" --
+# all real phrasings seen in this codebase's own test fixtures), rather
+# than the words "multiple"/"several" that LARGE_KEYWORDS matches on. That
+# gap was masked for years by the LARGE_KEYWORDS/VALUE_TIER overlap bug
+# fixed above -- a 12-tree felling application usually also mentions
+# "development" or "conservation area", which used to fake a "large"
+# result for the wrong reason. Once those legal-only terms were removed
+# from LARGE_KEYWORDS, this gap became visible for real (caught by
+# test_size_value_independence.py while verifying the fix, not guessed at
+# in advance) -- a literal 12-tree felling job was scoring "small" purely
+# because it uses "12no." rather than the word "multiple". This regex adds
+# genuine tree-count as its own independent scale signal so the fix above
+# doesn't just relocate the confound into a new blind spot. Only matches
+# digit-immediately-before-"no" (no case of "no. 12345" reads as a tree
+# count), so it doesn't collide with reference numbers or the "5 day
+# notice" VALUE_TIER_ELITE phrase. Threshold of 4+ trees for "large" is a
+# first-cut judgement call, not derived from real data -- worth revisiting
+# once there's real job-size ground truth to calibrate against.
+_TREE_COUNT_RE = re.compile(r'\b(\d{1,3})\s*no\.?\b')
+
+
+def _extract_tree_count(text: str) -> int:
+    """Largest 'Nno.' tree count found in the text, or 0 if none."""
+    s = str(text or "").lower()
+    counts = [int(m) for m in _TREE_COUNT_RE.findall(s)]
+    return max(counts) if counts else 0
+
+
 def score_lead(summary: str) -> tuple:
     """
     Classifies a planning application as small / medium / large
@@ -173,7 +225,7 @@ def score_lead(summary: str) -> tuple:
     Returns: (lead_score: str, lead_price: int)
     """
     s = summary or ""
-    if _keyword_hit(s, LARGE_KEYWORDS):
+    if _keyword_hit(s, LARGE_KEYWORDS) or _extract_tree_count(s) >= 4:
         return "large", 75
     elif _keyword_hit(s, MEDIUM_KEYWORDS):
         return "medium", 50

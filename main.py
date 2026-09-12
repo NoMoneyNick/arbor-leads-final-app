@@ -2312,10 +2312,35 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
         _remaining = AUTONOMOUS_CYCLE_HOURS - _hours_since_cycle
         _next_cycle_note = f"next one due in ~{_remaining:.0f}h"
 
+    # Sep 12 2026: the "next cycle due" countdown above (_next_cycle_note)
+    # deliberately keys off whichever of started/finished is more recent,
+    # to stop a restart-interrupted cycle from re-firing every 2 minutes
+    # (see _autonomous_scheduler_loop's own comment). That's correct for
+    # THROTTLING, but it means a cycle that starts, then crashes (now
+    # alerted on, see _dispatch_locked_scan's _wrapped()) still shows this
+    # reassuring green banner with a plausible-sounding "next due in ~Xh" --
+    # exactly what made Nick's real "no new leads for days" problem look
+    # like a healthy, ticking-along system on the one page meant to surface
+    # it. Detected directly from the same two timestamps already computed
+    # above: not currently running, but the most recent START is newer than
+    # the most recent FINISH means that attempt ended without completing.
+    _last_attempt_crashed = (
+        not _pipeline_state.get("running")
+        and last_cycle_started_at
+        and (not last_cycle_at or last_cycle_started_at > last_cycle_at)
+    )
+
     if _pipeline_state.get("running"):
         pipeline_banner = f"""<div style='background:#fef3c7; border:1px solid #f59e0b; border-radius:10px;
             padding:12px 18px; margin-bottom:18px; font-size:14px;'>
             &#9203; <b>Autonomous cycle running right now</b> (started {html.escape(str(_pipeline_state.get('started_at') or '?'))}) -- scanning, tagging, and enriching in the background.
+        </div>"""
+    elif _last_attempt_crashed:
+        pipeline_banner = f"""<div style='background:#fee2e2; border:1px solid #dc2626; border-radius:10px;
+            padding:12px 18px; margin-bottom:18px; font-size:14px;'>
+            &#128680; <b>Last autonomous cycle attempt did not finish.</b> It started {_time_ago(last_cycle_started_at)} but the last one to actually
+            complete was {_time_ago(last_cycle_at)} -- nothing since then has been fully scanned/tagged/enriched. A CRITICAL incident email should
+            already be in your inbox for this. Check Render logs for the traceback, then use /trigger-autonomous-cycle to retry once fixed.
         </div>"""
     else:
         pipeline_banner = f"""<div style='background:#ecfdf5; border:1px solid #10b981; border-radius:10px;
@@ -3493,13 +3518,14 @@ def admin_lead_value_report(request: Request, secret: Optional[str] = Query(None
     verify_admin_or_secret(request, secret)
 
     import datetime
+    import re
     from collections import defaultdict
 
     conn = database.get_db_conn()
     cur = conn.cursor()
     try:
         cur.execute("""
-            SELECT reference, summary, lead_score, discovered_at, registered_date, tags
+            SELECT reference, summary, lead_score, discovered_at, registered_date, tags, address
             FROM leads;
         """)
         rows = cur.fetchall()
@@ -3508,6 +3534,14 @@ def admin_lead_value_report(request: Request, secret: Optional[str] = Query(None
         conn.close()
 
     now = datetime.datetime.now(datetime.timezone.utc)
+    # Sep 12 2026, Nick's ask after seeing the real numbers: the all-time
+    # totals here are polluted by the volume report's own "5885 days since
+    # 2010" anomaly (a handful of bad historical dates, not a real 16-year
+    # scan history), and a national total hides whether any one region has
+    # enough supply to fill a radius-based tier's quota. Same postcode-AREA
+    # regex the volume report already uses, and a per-tier Last-30-days
+    # total (the trustworthy current run-rate, not all-time) alongside it.
+    AREA_RE = re.compile(r'\b([A-Z]{1,2})[0-9][A-Z0-9]?\s*[0-9][A-Z]{2}\b')
 
     def _as_dt(v):
         if v is None:
@@ -3532,9 +3566,11 @@ def admin_lead_value_report(request: Request, secret: Optional[str] = Query(None
     # grid[tier][size] = {"all": n, "d90": n, "d30": n, "refs": [..]}
     grid = defaultdict(lambda: defaultdict(lambda: {"all": 0, "d90": 0, "d30": 0, "refs": []}))
     tier_totals = defaultdict(int)
+    tier_d30_totals = defaultdict(int)
     size_totals = defaultdict(int)
+    tier_areas = defaultdict(lambda: defaultdict(int))
 
-    for reference, summary, lead_score, discovered_at, registered_date, tags in rows:
+    for reference, summary, lead_score, discovered_at, registered_date, tags, address in rows:
         tags = tags or []
         if "vertical:hmo" in tags:
             hmo_excluded += 1
@@ -3555,11 +3591,16 @@ def admin_lead_value_report(request: Request, secret: Optional[str] = Query(None
             cell["d90"] += 1
         if days_old is not None and days_old <= 30:
             cell["d30"] += 1
+            tier_d30_totals[tier] += 1
         if len(cell["refs"]) < 5 and reference:
             cell["refs"].append(reference)
 
         tier_totals[tier] += 1
         size_totals[size] += 1
+
+        m = AREA_RE.search((address or "").upper())
+        if m:
+            tier_areas[tier][m.group(1)] += 1
 
     def _cell_html(tier, size):
         c = grid[tier][size]
@@ -3572,6 +3613,9 @@ def admin_lead_value_report(request: Request, secret: Optional[str] = Query(None
             <div style="font-size:10px; color:#94a3b8; margin-top:4px; word-break:break-all;">{refs_note}</div>
         </td>"""
 
+    def _top_areas(areas: dict, n=6):
+        return ", ".join(f"{a} ({c})" for a, c in sorted(areas.items(), key=lambda x: -x[1])[:n]) or "—"
+
     grid_rows_html = ""
     for tier in TIERS:
         cells = "".join(_cell_html(tier, size) for size in SIZES)
@@ -3580,6 +3624,8 @@ def admin_lead_value_report(request: Request, secret: Optional[str] = Query(None
             <td style="padding:10px; border:1px solid #e2e8f0; font-weight:bold; background:#f8fafc;">{TIER_LABELS[tier]}</td>
             {cells}
             <td style="padding:10px; border:1px solid #e2e8f0; text-align:center; font-weight:bold;">{tier_totals.get(tier, 0)}</td>
+            <td style="padding:10px; border:1px solid #e2e8f0; text-align:center; font-weight:bold; color:#044332;">{tier_d30_totals.get(tier, 0)}</td>
+            <td style="padding:10px; border:1px solid #e2e8f0; font-size:12px;">{_top_areas(tier_areas[tier])}</td>
         </tr>"""
 
     size_total_cells = "".join(
@@ -3600,15 +3646,22 @@ def admin_lead_value_report(request: Request, secret: Optional[str] = Query(None
                 <th style="padding:10px;">Large</th>
                 <th style="padding:10px;">Medium</th>
                 <th style="padding:10px;">Small</th>
-                <th style="padding:10px;">Tier total</th>
+                <th style="padding:10px;">Tier total (all-time)</th>
+                <th style="padding:10px;">Last 30 days</th>
+                <th style="padding:10px; text-align:left;">Top regions (postcode area: count)</th>
             </tr>
             {grid_rows_html}
             <tr style="background:#f8fafc;">
                 <td style="padding:10px; border:1px solid #e2e8f0; font-weight:bold;">Size total</td>
                 {size_total_cells}
                 <td style="padding:10px; border:1px solid #e2e8f0; text-align:center; font-weight:bold;">{total_leads}</td>
+                <td style="padding:10px; border:1px solid #e2e8f0; text-align:center; font-weight:bold;">{sum(tier_d30_totals.values())}</td>
+                <td style="padding:10px; border:1px solid #e2e8f0;"></td>
             </tr>
         </table>
+        <p style="color:#64748b; font-size:12px; margin-top:10px;">
+            "All-time" here inherits the volume report's own date-anomaly caveat (a handful of bad historical dates make the true span look like 16 years) — treat <b>Last 30 days</b> as the trustworthy current national run-rate per tier, not the all-time column. Top regions shows where each tier's supply actually concentrates, since a fixed-radius tier's real quota depends on local density, not the national total.
+        </p>
         <p style="margin-top:16px;"><a href="/admin/lead-volume-report?secret={secret or ''}" style="color:#044332;">← Back to volume &amp; category report</a></p>
         <p style="margin-top:8px;"><a href="/admin?secret={secret or ''}" style="color:#044332;">← Back to Admin</a></p>
     </body></html>
@@ -8432,6 +8485,43 @@ def _dispatch_locked_scan(target_fn, action_name: str) -> dict:
             target_fn()
         except Exception as e:
             logger.error(f"[{action_name}] Unhandled error: {e}")
+            # Sep 12 2026: this used to be a silent log-only catch. Found
+            # while investigating Nick's "admin stats aren't live updating"
+            # report -- the real cause wasn't a stale/cached page (the admin
+            # dashboard runs a fresh SELECT count(*) every load), it's that
+            # run_full_autonomous_cycle() can die here partway through
+            # (anywhere between its own start-stamp and its own finish-
+            # stamp, e.g. inside the unwrapped _check_for_silent_source_
+            # failures() call) and the ONLY trace left behind used to be
+            # this one server log line -- nobody watches Render logs day to
+            # day, so a cycle could keep crashing every single day
+            # indefinitely with the admin banner still showing a healthy
+            # "next one due in ~Xh" (it only reads last_autonomous_cycle_
+            # started_at, which gets re-stamped on every attempt whether or
+            # not that attempt ever finishes). Every OTHER failure mode in
+            # this pipeline (Stage 1/2/3 inside run_master_daily_pipeline)
+            # already emails an incident alert -- this whole-cycle-level
+            # catch was the one gap. Wrapped in its own try/except so a
+            # failure to send the alert itself can't mask the original error.
+            try:
+                import notifications
+                notifications.send_system_incident_alert(
+                    category="AUTONOMOUS CYCLE",
+                    title=f"{action_name.upper()} CRASHED BEFORE FINISHING",
+                    description=f"'{action_name}' raised an unhandled error and stopped partway through: {str(e)[:150]}",
+                    impact=(
+                        "This run did not complete -- whatever came after the failure point "
+                        "(scan stages, tag/enrichment maintenance, stale-lead cleanup, etc.) did "
+                        "not run this cycle. If this is the daily autonomous cycle specifically, "
+                        "the completion timestamp was never updated, so the admin dashboard's "
+                        "'next cycle due' countdown will look healthy even though nothing finished."
+                    ),
+                    action_required="Check Render runtime logs for the traceback, fix the underlying issue, then hit /trigger-autonomous-cycle (or /trigger-daily-pipeline) to retry manually.",
+                    severity="CRITICAL",
+                    throttle_hours=6.0,
+                )
+            except Exception as alert_e:
+                logger.error(f"[{action_name}] Also failed to send crash alert: {alert_e}")
         finally:
             _pipeline_state["running"] = False
             _PIPELINE_LOCK.release()
