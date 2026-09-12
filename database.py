@@ -290,7 +290,7 @@ def init_db():
                 customer_email TEXT UNIQUE NOT NULL,
                 customer_name TEXT,
                 phone TEXT,
-                tier TEXT DEFAULT 'climber_domestic',
+                tier TEXT DEFAULT 'starter',
                 center_outcode TEXT NOT NULL,
                 radius_miles INT DEFAULT 15,
                 stripe_subscription_id TEXT,
@@ -2051,30 +2051,26 @@ def reset_monthly_quotas_if_needed() -> int:
 
 
 # ── Tier quotas: realistic monthly lead limits per plan ───────────────────────
+# Sep 12 2026 tier consolidation -- see payments.py PLANS' own comment for
+# the full reasoning. stump_pro/climber_domestic/sole_trader/commercial_pro/
+# regional_elite retired; "starter" and "growth" are their replacements.
 TIER_QUOTAS = {
-    "stump_pro": 3,
-    "climber_domestic": 5,
+    "starter": 6,
+    "growth": 10,
     "arb_consultant": 8,
-    "commercial_forestry": 12,
-    "treekey_elite": 18,
-    "sole_trader": 5,
-    "commercial_pro": 14,
-    "regional_elite": 25,
+    "commercial_forestry": 14,
+    "treekey_elite": 20,
 }
 
 # ── Tier radius caps: server-side enforcement so a cheaper tier can't select a
 # larger radius than it's entitled to (the checkout form previously offered the
-# same 10-50mi choice to every plan with nothing enforcing it). Elite (30mi) and
-# Regional Elite (50mi) match the radius figures already advertised in their copy.
+# same 10-50mi choice to every plan with nothing enforcing it).
 TIER_MAX_RADIUS = {
-    "stump_pro": 15,
-    "climber_domestic": 15,
+    "starter": 15,
+    "growth": 20,
     "arb_consultant": 20,
-    "commercial_forestry": 25,
-    "treekey_elite": 30,
-    "sole_trader": 15,
-    "commercial_pro": 25,
-    "regional_elite": 50,
+    "commercial_forestry": 30,
+    "treekey_elite": 45,
 }
 
 # ── Tier dispatch priority: higher tiers are sold "priority routing" (e.g. Elite's
@@ -2083,13 +2079,10 @@ TIER_MAX_RADIUS = {
 # seniority — ties within the same priority band still resolve by subscribed_at.
 TIER_PRIORITY = {
     "treekey_elite": 5,
-    "regional_elite": 5,
     "commercial_forestry": 4,
-    "commercial_pro": 4,
     "arb_consultant": 3,
-    "climber_domestic": 2,
-    "sole_trader": 2,
-    "stump_pro": 1,
+    "growth": 2,
+    "starter": 1,
 }
 
 
@@ -3480,7 +3473,7 @@ def lead_distance_miles(sub_lat: float, sub_lon: float, lead_address: str) -> Op
     return None
 
 
-def simulate_customer_leads(location_input: str, tier: str = "climber_domestic", job_size: str = "all",
+def simulate_customer_leads(location_input: str, tier: str = "starter", job_size: str = "all",
                              radius: float = None, limit: int = 10) -> dict:
     """Sep 8 2026, Nick's ask: "let's do some dummy runs ... you tell me what
     exactly I would receive by email". A read-only simulation of the real
@@ -4309,7 +4302,7 @@ def get_lead_by_reference(reference: str) -> Optional[dict]:
         return None
 
 
-def register_or_update_subscription(customer_email: str, outcode: str, tier: str = "climber_domestic",
+def register_or_update_subscription(customer_email: str, outcode: str, tier: str = "starter",
                                      stripe_sub_id: str = None, radius: int = 15, name: str = None, phone: str = None,
                                      job_size_preference: str = "all") -> bool:
     """Registers or updates a contractor subscription with seniority timestamp, lat/lon pin, and tier quota.
@@ -4682,9 +4675,34 @@ def _true_unlock_price(plan_key: str) -> int:
     return (plan["amount"] // 100) if plan else 0
 
 
+def _single_lead_plan_key(is_hot: bool, value_tier: str) -> str:
+    """Sep 12 2026, pricing relaunch: the single price grid for one-off
+    leads, combining freshness (is_hot) with scanners.classify_lead_value_
+    tier's 'elite'/'priority'/'standard'. Six scenarios, four real price
+    points (two are shared, since they land on the same amount):
+
+                    Fresh (hot)              Older
+        Standard    single_lead_medium £29   single_lead_small    £19
+        Priority    single_lead_priority £39 single_lead_medium   £29
+        Elite       single_lead_large £49    single_lead_priority £39
+
+    Only one genuinely new plan_key (single_lead_priority, £39) -- the
+    other three already existed and were already Stripe-tested."""
+    if value_tier == "elite":
+        return "single_lead_large" if is_hot else "single_lead_priority"
+    elif value_tier == "priority":
+        return "single_lead_priority" if is_hot else "single_lead_medium"
+    else:
+        return "single_lead_medium" if is_hot else "single_lead_small"
+
+
 def calculate_lead_freshness(discovered_at, planning_status: str = "pending", summary: str = "", source_type: str = "council_planning", registered_date=None) -> dict:
     """
-    Calculates statutory lead freshness, countdown timer, color badge, and dynamic decay price:
+    Calculates statutory lead freshness, countdown timer, color badge, and
+    dynamic decay price. Price now depends on BOTH freshness and the lead's
+    value tier (see _single_lead_plan_key above) -- these bands describe
+    the Standard-value case; Priority/Elite leads price higher at the same
+    age:
     - Flash Hot (Day 0-3): £29 unlock (0 competitors aware)
     - Active Quoting (Day 4-14): £19 unlock (Prime window)
     - Clearance / Late Window (Day 15-30): £9 unlock (Consultation closing)
@@ -4702,32 +4720,40 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
     Sep 12 2026 fix: every "price" below used to be a separate hand-typed
     number, meant to show a decaying urgency price as a lead ages. But the
     amount Stripe actually charges at /checkout/{plan_key} is fixed per
-    plan_key (payments.PLANS[plan_key]['amount'] -- only 3 real price
-    points exist: £19/£29/£49) and nothing kept the two in sync. Found
-    while re-checking pricing end to end: this had drifted into real,
-    live mismatches between what the marketplace card advertises and what
-    checkout actually charges -- Council Clearance/Final Determination
-    advertised "£9" while checkout charged £19; Domestic Active advertised
-    "£25" while checkout charged £19; Domestic Flash Hot advertised "£35"
-    while checkout charged £29; Granted advertised "£25" while checkout
-    charged £29. Every "price" value now comes from _true_unlock_price(),
-    which reads the same PLANS dict checkout itself uses, so the two can
-    never drift apart again. If a genuinely different price per freshness
-    tier is wanted, that needs its own real Stripe price/plan_key -- a
-    pricing decision, not a display-layer fix.
+    plan_key (payments.PLANS[plan_key]['amount']) and nothing kept the two
+    in sync. Found while re-checking pricing end to end: this had drifted
+    into real, live mismatches between what the marketplace card
+    advertises and what checkout actually charges -- Council Clearance/
+    Final Determination advertised "£9" while checkout charged £19;
+    Domestic Active advertised "£25" while checkout charged £19; Domestic
+    Flash Hot advertised "£35" while checkout charged £29; Granted
+    advertised "£25" while checkout charged £29. Every "price" value now
+    comes from _true_unlock_price(), which reads the same PLANS dict
+    checkout itself uses, so the two can never drift apart again.
+
+    Sep 12 2026, second pass (pricing relaunch): plan_key selection used to
+    depend only on freshness ("hot" vs "older"). It now also factors in
+    scanners.classify_lead_value_tier(summary) -- a lead carrying genuine
+    statutory/legal weight or urgency (Elite) or bigger scale/commercial
+    context (Priority) is worth more to a buyer than an ordinary domestic
+    job at the same age, and the old flat pricing couldn't tell them apart.
+    See _single_lead_plan_key() below for the exact price grid.
     """
     import datetime
+    import scanners as _scanners
     now = datetime.datetime.now(datetime.timezone.utc)
-    
+    value_tier = _scanners.classify_lead_value_tier(summary).get("tier", "standard")
+
     if planning_status and planning_status.lower() in ["granted", "approved"]:
+        granted_key = _single_lead_plan_key(is_hot=True, value_tier=value_tier)
         return {
             "tier": "granted",
             "badge_color": "#059669",
             "badge_bg": "#ecfdf5",
             "badge_text": "Officially Approved (Ready to Fell)",
-            "price": _true_unlock_price("single_lead_medium"),
+            "price": _true_unlock_price(granted_key),
             "days_left": "Approved by Council",
-            "plan_key": "single_lead_medium"
+            "plan_key": granted_key
         }
     days_old = 0
 
@@ -4769,24 +4795,26 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
                 "plan_key": "expired"
             }
         elif days_old <= 2:
+            hot_key = _single_lead_plan_key(is_hot=True, value_tier=value_tier)
             return {
                 "tier": "flash_hot",
                 "badge_color": "#059669",
                 "badge_bg": "#ecfdf5",
                 "badge_text": "Fresh Homeowner Quote (Urgent: Day 0–2)",
-                "price": _true_unlock_price("single_lead_medium"),
+                "price": _true_unlock_price(hot_key),
                 "days_left": f"{days_left} days left before quote closes",
-                "plan_key": "single_lead_medium"
+                "plan_key": hot_key
             }
         else:
+            older_key = _single_lead_plan_key(is_hot=False, value_tier=value_tier)
             return {
                 "tier": "active",
                 "badge_color": "#d97706",
                 "badge_bg": "#fffbeb",
                 "badge_text": "Active Homeowner Quote (Day 3–7)",
-                "price": _true_unlock_price("single_lead_small"),
+                "price": _true_unlock_price(older_key),
                 "days_left": f"{days_left} days left before quote closes",
-                "plan_key": "single_lead_small"
+                "plan_key": older_key
             }
 
 
@@ -4807,44 +4835,48 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
         }
 
     if days_old <= 3:
+        hot_key = _single_lead_plan_key(is_hot=True, value_tier=value_tier)
         return {
             "tier": "flash_hot",
             "badge_color": "#dc2626",
             "badge_bg": "#fef2f2",
             "badge_text": "Flash Hot (Day 0–3 • 0 Competitors Aware)",
-            "price": _true_unlock_price("single_lead_medium"),
+            "price": _true_unlock_price(hot_key),
             "days_left": f"{days_left} days left in consultation",
-            "plan_key": "single_lead_medium"
+            "plan_key": hot_key
         }
     elif days_old <= 14:
+        older_key = _single_lead_plan_key(is_hot=False, value_tier=value_tier)
         return {
             "tier": "active",
             "badge_color": "#d97706",
             "badge_bg": "#fffbeb",
             "badge_text": "Prime Quoting Window (Day 4–14)",
-            "price": _true_unlock_price("single_lead_small"),
+            "price": _true_unlock_price(older_key),
             "days_left": f"{days_left} days left in consultation",
-            "plan_key": "single_lead_small"
+            "plan_key": older_key
         }
     elif days_old <= 42:
+        older_key = _single_lead_plan_key(is_hot=False, value_tier=value_tier)
         return {
             "tier": "clearance",
             "badge_color": "#ca8a04",
             "badge_bg": "#fefce8",
             "badge_text": f"Late Window Clearance (Closing Soon)",
-            "price": _true_unlock_price("single_lead_small"),
+            "price": _true_unlock_price(older_key),
             "days_left": f"{days_left} days until determination",
-            "plan_key": "single_lead_small"
+            "plan_key": older_key
         }
     else:
+        older_key = _single_lead_plan_key(is_hot=False, value_tier=value_tier)
         return {
             "tier": "clearance",
             "badge_color": "#64748b",
             "badge_bg": "#f8fafc",
             "badge_text": f"Final Determination (Day 43–56)",
-            "price": _true_unlock_price("single_lead_small"),
+            "price": _true_unlock_price(older_key),
             "days_left": f"{days_left} days left",
-            "plan_key": "single_lead_small"
+            "plan_key": older_key
         }
 
 

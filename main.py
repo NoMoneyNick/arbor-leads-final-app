@@ -1827,9 +1827,9 @@ def public_homepage(request: Request):
                 if (data.status === "ok") {{
                     document.getElementById('postcodeInput').value = data.postcode;
                     document.getElementById('radiusReadout').innerHTML = `RADIAL BOUNDARY: ${{data.radius_miles || (rad/1609.34).toFixed(1)}} MILES`;
-                    document.getElementById('btn-checkout-sole').href = `/checkout/sole_trader?outcode=${{data.postcode}}`;
-                    document.getElementById('btn-checkout-pro').href = `/checkout/commercial_pro?outcode=${{data.postcode}}`;
-                    document.getElementById('btn-checkout-elite').href = `/checkout/regional_elite?outcode=${{data.postcode}}`;
+                    document.getElementById('btn-checkout-sole').href = `/checkout/starter?outcode=${{data.postcode}}`;
+                    document.getElementById('btn-checkout-pro').href = `/checkout/commercial_forestry?outcode=${{data.postcode}}`;
+                    document.getElementById('btn-checkout-elite').href = `/checkout/treekey_elite?outcode=${{data.postcode}}`;
                     const issueNoticeA = data.council_source_issue ? `<div class="text-amber-400 text-xs border border-amber-700/50 bg-amber-900/20 rounded px-2 py-1 mb-2">&#9888; ${{data.council_source_issue}}</div>` : '';
                     document.getElementById('targetIntel').innerHTML = `${{issueNoticeA}}<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>`;
                     renderAreaNotices(data.area_notices, data.postcode);
@@ -1899,9 +1899,9 @@ def public_homepage(request: Request):
                     currentCircle.setLatLng([data.lat, data.lng]);
                     currentCircle.setRadius(radVal);
                     document.getElementById("radiusReadout").innerHTML = `RADIAL BOUNDARY: ${{ (radVal/1609.34).toFixed(1) }} MILES`;
-                    document.getElementById('btn-checkout-sole').href = `/checkout/sole_trader?outcode=${{data.postcode}}`;
-                    document.getElementById('btn-checkout-pro').href = `/checkout/commercial_pro?outcode=${{data.postcode}}`;
-                    document.getElementById('btn-checkout-elite').href = `/checkout/regional_elite?outcode=${{data.postcode}}`;
+                    document.getElementById('btn-checkout-sole').href = `/checkout/starter?outcode=${{data.postcode}}`;
+                    document.getElementById('btn-checkout-pro').href = `/checkout/commercial_forestry?outcode=${{data.postcode}}`;
+                    document.getElementById('btn-checkout-elite').href = `/checkout/treekey_elite?outcode=${{data.postcode}}`;
                     const issueNoticeB = data.council_source_issue ? `<div class="text-amber-400 text-xs border border-amber-700/50 bg-amber-900/20 rounded px-2 py-1 mb-2">&#9888; ${{data.council_source_issue}}</div>` : '';
                     document.getElementById("targetIntel").innerHTML = `${{issueNoticeB}}<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>`;
                     renderAreaNotices(data.area_notices, data.postcode);
@@ -2506,7 +2506,7 @@ def pricing(request: Request):
         if plan["mode"] == "subscription":
             price_display = f"£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal; color:#94a3b8;'>/month</span>"
             roi_box = f"<div style='background:rgba(16,185,129,0.1); border-left:3px solid #059669; padding:10px; font-size:12px; color:#a7f3d0; text-align:left; margin:14px 0; border-radius:4px;'><b>Real-World Math:</b> {plan.get('real_world_roi', '')}</div>"
-            highlight = "border:2px solid #059669; box-shadow:0 8px 24px rgba(5,150,105,0.15);" if key == "climber_domestic" else "border:1px solid #334155;"
+            highlight = "border:2px solid #059669; box-shadow:0 8px 24px rgba(5,150,105,0.15);" if key == "starter" else "border:1px solid #334155;"
 
             sub_cards += f"""
             <div style="{highlight} border-radius:16px; padding:24px; background:#0f172a; display:flex; flex-direction:column; justify-content:space-between; margin-bottom:16px;">
@@ -3245,7 +3245,7 @@ async def checkout_post(plan_key: str, outcode: str = Form(...), radius: int = F
 
 @app.get("/admin/simulate-leads", response_class=HTMLResponse)
 def admin_simulate_leads(request: Request, secret: Optional[str] = Query(None),
-                          location: Optional[str] = None, tier: str = "climber_domestic",
+                          location: Optional[str] = None, tier: str = "starter",
                           job_size: str = "all", radius: Optional[float] = None):
     """Sep 8 2026, Nick's ask (verbatim: "let's do some dummy runs, i will
     pretend i from a specific location and package and you would tell me

@@ -50,22 +50,37 @@ def _mark_stripe_event_fulfilled(event_id: str) -> None:
 
 # ── Pricing Plans (5 Tailored Packages + Single Purchase Marketplace) ─────────
 # All amounts in pence (GBP)
+#
+# Sep 12 2026, tier consolidation (Nick's go-ahead): the old 8-tier lineup
+# had two overlapping families that grew separately -- a "tailored" set
+# (Stump Pro, Climber Domestic, Arb Consultant, Commercial & Forestry,
+# Elite) and a "homepage" set (Sole Trader, Commercial Pro, Regional Elite)
+# that duplicated it with near-identical copy at the same price points.
+# Retired: stump_pro (its one job type is just a filter inside any tier,
+# not worth a dedicated £29 product -- confirmed too small a volume in the
+# lead-volume report), climber_domestic + sole_trader (both £49/mo,
+# functionally the same tier), commercial_pro (folded into
+# commercial_forestry), regional_elite (folded into treekey_elite).
+# "starter" and "growth" below are new, replacing the retired ones.
+# arb_consultant/commercial_forestry/treekey_elite keys are KEPT (not
+# renamed) so nothing else referencing them elsewhere breaks -- only their
+# price/copy changed.
 PLANS = {
-    "stump_pro": {
-        "name": "TreeKey Stump Pro",
-        "description": "Dedicated to stump grinding contractors. Filtered exclusively for felling & stump removal applications with gate clearance checks.",
-        "amount": 2900,   # £29/month
-        "mode": "subscription",
-        "badge": "Stump Specialists",
-        "real_world_roi": "One £150 stump job per month gives a 5x ROI."
-    },
-    "climber_domestic": {
-        "name": "TreeKey Climber (Domestic)",
-        "description": "For 1-2 van tree surgeons. Daily domestic crown reductions, pollards, garden felling, 1-tap homeowner letters, and Street View briefs.",
-        "amount": 4900,   # £49/month
+    "starter": {
+        "name": "TreeKey Starter",
+        "description": "For 1-2 van operators. Domestic and small commercial jobs, every job type, 1-tap homeowner letters and Street View briefs.",
+        "amount": 3900,   # £39/month
         "mode": "subscription",
         "badge": "Most Popular",
-        "real_world_roi": "Less than half a tank of diesel (£49/mo). One £400 job every 6 months pays for the entire year with a 4x net return."
+        "real_world_roi": "Less than a tank of diesel (£39/mo). One £400 job every few months pays for the year many times over."
+    },
+    "growth": {
+        "name": "TreeKey Growth",
+        "description": "For established 2-3 man crews wanting more volume and a wider net across a bigger area.",
+        "amount": 7900,   # £79/month
+        "mode": "subscription",
+        "badge": "Growing Crews",
+        "real_world_roi": "One extra job a month at this volume comfortably covers the subscription."
     },
     "arb_consultant": {
         "name": "TreeKey Consultant (Planning & Survey)",
@@ -78,7 +93,7 @@ PLANS = {
         # for enriching a lead's developer applicant). Only the two
         # deliverables the pipeline actually produces are listed.
         "description": "For qualified arborists (TechArb/MICFor). Developer condition 7 discharges and BS5837 impact assessment planning intelligence.",
-        "amount": 8900,   # £89/month
+        "amount": 9900,   # £99/month (was £89)
         "mode": "subscription",
         "badge": "Planning & Surveyors",
         "real_world_roi": "One £800 developer method statement report every 3 months gives a 3x ROI on pure desktop work."
@@ -86,7 +101,7 @@ PLANS = {
     "commercial_forestry": {
         "name": "TreeKey Commercial & Forestry",
         "description": "For heavy machinery operators & commercial outfits. Multi-tree site clearances (3+), Ash Dieback blocks, and B2B institutional tenders.",
-        "amount": 13900,  # £139/month
+        "amount": 15900,  # £159/month (was £139; also replaces retired commercial_pro)
         "mode": "subscription",
         "badge": "Heavy Commercial",
         "real_world_roi": "One commercial job won per year (£3,000–£15,000) covers your subscription for 2–5 years."
@@ -109,50 +124,11 @@ PLANS = {
         # (TIER_PRIORITY is real and does put Elite ahead of lower tiers in
         # the dispatch order). Add real features back to this line only
         # once they're actually built and deployed, never before.
-        "description": "100% Unrestricted Access to ALL categories across 30 miles + top-priority lead dispatch, ahead of every lower tier.",
-        "amount": 17900,  # £179/month
+        "description": "100% Unrestricted Access to ALL categories across 45 miles + top-priority lead dispatch and first look at Elite-value leads, ahead of every lower tier.",
+        "amount": 24900,  # £249/month (was £179; also replaces retired regional_elite)
         "mode": "subscription",
         "badge": "VIP All-Access",
         "real_world_roi": "Complete business operating system. First look at every new lead in your category before lower tiers see it."
-    },
-    # Homepage general-ledger tiers (radius-based, distinct from the tailored tiers above)
-    "sole_trader": {
-        "name": "TreeKey Sole Trader",
-        "description": "Perfect for one-man bands and local startups aiming to grow steadily.",
-        "amount": 4900,   # £49/month
-        "mode": "subscription",
-        "badge": "Sole Trader",
-        "real_world_roi": "One job pays for the month."
-    },
-    "commercial_pro": {
-        "name": "TreeKey Commercial Pro",
-        "description": "The sweet spot for established 3-man crews hunting lucrative clearances.",
-        "amount": 14900,  # £149/month
-        "mode": "subscription",
-        "badge": "Best for Crews",  # was "Most Popular" — duplicated climber_domestic's badge on the same pricing page
-        # Aug 30 2026: was "The average commercial site clearance pays
-        # £2,500+" -- stated as a verified average with no source behind it,
-        # the same pattern as the fabricated lead-count stats fixed
-        # elsewhere this pass. Reworded to match the hypothetical framing
-        # used by every other tier's real_world_roi (an illustrative "if you
-        # land one job at £X" calculation, not an asserted statistic).
-        "real_world_roi": "One commercial site clearance landed at £2,500 pays for the year."
-    },
-    "regional_elite": {
-        "name": "TreeKey Regional Elite",
-        "description": "For massive operations running multiple crews across a wide geographic spread.",
-        "amount": 29900,  # £299/month
-        "mode": "subscription",
-        "badge": "Regional Elite",
-        # Sep 12 2026, same pass as treekey_elite above: "a dedicated
-        # account manager" isn't real -- there's no support-staff/account-
-        # management system anywhere in this codebase, and nothing to make
-        # one true (a solo non-technical founder can't dedicate a named
-        # person to each Regional Elite subscriber). Dropped rather than
-        # reworded, per the same "remove until built and deployed" rule.
-        # The radius and priority-routing claims stay -- both real (
-        # TIER_MAX_RADIUS=50 for this tier, TIER_PRIORITY dispatch weighting).
-        "real_world_roi": "50-mile radial boundary with first-priority API routing."
     },
     # Single Lead Pay-As-You-Go Purchases (Single-Sale Inventory Burn)
     # Aug 30 2026: all three single-lead tiers previously promised "homeowner
@@ -168,26 +144,42 @@ PLANS = {
     # name and agent status shown *when the council recorded them* (see
     # notifications.py's send_purchased_lead_email, which now says exactly
     # that on a per-lead basis rather than promising it here as a given).
+    # Sep 12 2026 rename: these were previously named/described by job SIZE
+    # ("Domestic Maintenance", "Standard Felling", "Commercial/Site
+    # Clearance/TPO") but calculate_lead_freshness() (database.py) has never
+    # actually selected between them by size -- only by how fresh the notice
+    # is (flash_hot vs active/clearance) and, from today, by the lead's
+    # value tier (scanners.classify_lead_value_tier). The old names were
+    # never true; renamed to match what actually decides the price, so the
+    # checkout page never claims a job category the lead may not match.
     "single_lead_small": {
-        "name": "Single Lead Unlock (Domestic Maintenance)",
+        "name": "Single Lead Unlock (Entry)",
         "description": "100% Exclusive unshared planning lead. Once purchased, this lead is permanently deleted from all systems and never sold again.",
-        "amount": 1900,   # £19 one-off
+        "amount": 1900,   # £19 one-off -- Standard value, past its freshest window
         "mode": "payment",
         "badge": "Single Purchase",
         "real_world_roi": "Instant unlocked property address and application details, plus a Street View brief. Applicant name included when the council has published one."
     },
     "single_lead_medium": {
-        "name": "Single Lead Unlock (Standard Felling / Tree Removal)",
-        "description": "100% Exclusive unshared felling lead. Permanently burned from inventory upon purchase.",
-        "amount": 2900,   # £29 one-off
+        "name": "Single Lead Unlock (Standard)",
+        "description": "100% Exclusive unshared planning lead. Permanently burned from inventory upon purchase.",
+        "amount": 2900,   # £29 one-off -- Standard value fresh, or Priority value past its freshest window
+        "mode": "payment",
+        "badge": "Single Purchase",
+        "real_world_roi": "Instant unlocked property address and application details, plus a Street View brief. Applicant name included when the council has published one."
+    },
+    "single_lead_priority": {
+        "name": "Single Lead Unlock (Priority)",
+        "description": "100% Exclusive unshared planning lead with elevated statutory/legal weight or scale. Permanently burned from inventory upon purchase.",
+        "amount": 3900,   # £39 one-off -- Priority value fresh, or Elite value past its freshest window
         "mode": "payment",
         "badge": "Single Purchase",
         "real_world_roi": "Instant unlocked property address and application details, plus a Street View brief. Applicant name included when the council has published one."
     },
     "single_lead_large": {
-        "name": "Single Lead Unlock (Commercial / Site Clearance / TPO)",
-        "description": "100% Exclusive high-value commercial or developer planning lead. Burned from inventory immediately upon purchase.",
-        "amount": 4900,   # £49 one-off
+        "name": "Single Lead Unlock (Elite)",
+        "description": "100% Exclusive high-value planning lead -- statutory weight or genuine urgency. Burned from inventory immediately upon purchase.",
+        "amount": 4900,   # £49 one-off -- Elite value, freshest window
         "mode": "payment",
         "badge": "Single Purchase",
         "real_world_roi": "Instant unlocked property address and full planning specs. Applicant name included when the council has published one."
@@ -461,7 +453,7 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
 
         # 2. If this was a subscription, register with seniority timestamp
         if not lead_id:
-            sub_tier = metadata.get("tier", "climber_domestic")
+            sub_tier = metadata.get("tier", "starter")
             # Sep 8 2026: prefer the full postcode when the customer gave one
             # (metadata.full_postcode) -- register_or_update_subscription's
             # resolve_location geocodes that to an exact pin instead of just
@@ -513,9 +505,8 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
         new_amount = new_price.get("unit_amount")
         import database
         # Best-effort reverse-match of the new Stripe price back to a PLANS tier by
-        # amount. A couple of tiers share a price point (e.g. sole_trader/climber_domestic
-        # are both £49/mo), so an ambiguous match is flagged for manual review rather
-        # than guessed at.
+        # amount. If a future price change ever makes two tiers share a point, an
+        # ambiguous match is flagged for manual review rather than guessed at.
         matches = [k for k, v in PLANS.items() if v["mode"] == "subscription" and v["amount"] == new_amount]
         if len(matches) == 1:
             new_tier = matches[0]

@@ -1,0 +1,14 @@
+{
+  "template_id": 12345,
+  "recipient": {
+    "firstname": "Example",
+    "lastname": "Recipient",
+    "address1": "1 Example Street",
+    "city": "London",
+    "postcode": "SW1A 1AA",
+    "country": "GB",
+    "business_name": "Example Tree Services",
+    "business_phone": "REPLACE_WITH_BUSINESS_PHONE",
+    "notice_reference": "EXAMPLE-001"
+  }
+}
