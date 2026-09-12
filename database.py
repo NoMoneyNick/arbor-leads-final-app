@@ -1294,18 +1294,26 @@ def backfill_lead_size_and_price(batch_size: int = 1000) -> dict:
     IMPORTANT: a forward-only cursor does NOT re-check leads already
     passed. If score_lead()/its keyword lists change again in future,
     reset the cursor to 0 (see /admin/reset-size-price-backfill-cursor) so
-    every lead gets swept again under the new logic."""
+    every lead gets swept again under the new logic.
+
+    Sep 12 2026 fix: leads.id is a UUID primary key, not an incrementing
+    integer (confirmed against the CREATE TABLE in this file). The first
+    live run crashed every batch with "operator does not exist: uuid >
+    integer" because the cursor was being compared/stored as a Python int.
+    UUIDs have no chronological order, but comparing their TEXT form is
+    still a stable, gap-free total order -- exactly what a forward-only
+    sweep needs (it doesn't matter what order rows are visited in, only
+    that every row is visited exactly once and the sweep terminates). The
+    cursor is now a plain string, compared via id::text, defaulting to
+    "0" (a valid lower bound for any UUID's hex text)."""
     if not SURL:
         return {"error": "no database configured"}
     raw_cursor = get_system_state("size_price_backfill_cursor_id")
-    try:
-        cursor_id = int(raw_cursor) if raw_cursor else 0
-    except (TypeError, ValueError):
-        cursor_id = 0
+    cursor_val = raw_cursor if raw_cursor else "0"
     updated = 0
     unchanged = 0
     errors = 0
-    max_id_seen = cursor_id
+    max_id_seen = cursor_val
     try:
         import scanners as _scanners  # only imported when there's actually work to do
         conn = get_db_conn()
@@ -1313,15 +1321,17 @@ def backfill_lead_size_and_price(batch_size: int = 1000) -> dict:
         try:
             cur.execute("""
                 SELECT id, summary, lead_score, lead_price FROM leads
-                WHERE id > %s ORDER BY id ASC LIMIT %s;
-            """, (cursor_id, batch_size))
+                WHERE id::text > %s ORDER BY id::text ASC LIMIT %s;
+            """, (cursor_val, batch_size))
             rows = cur.fetchall()
             if not rows:
                 return {"updated": 0, "unchanged": 0, "errors": 0, "batch_size": batch_size,
-                        "cursor_id": cursor_id,
+                        "cursor_id": cursor_val,
                         "note": "no leads past the current cursor -- fully caught up."}
             for lead_id, summary, old_score, old_price in rows:
-                max_id_seen = max(max_id_seen, lead_id)
+                lead_id_str = str(lead_id)
+                if lead_id_str > max_id_seen:
+                    max_id_seen = lead_id_str
                 try:
                     new_score, new_price = _scanners.score_lead(summary)
                     if new_score != old_score or new_price != old_price:
@@ -1335,7 +1345,7 @@ def backfill_lead_size_and_price(batch_size: int = 1000) -> dict:
                 except Exception as row_err:
                     errors += 1
                     logger.warning(f"[SizePriceBackfill] error on lead {lead_id}: {row_err}")
-            set_system_state("size_price_backfill_cursor_id", str(max_id_seen))
+            set_system_state("size_price_backfill_cursor_id", max_id_seen)
             conn.commit()
         finally:
             cur.close()

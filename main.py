@@ -8592,6 +8592,13 @@ def run_size_price_backfill_now(secret: Optional[str] = Query(None)):
     for _ in range(20):
         result = database.backfill_lead_size_and_price(batch_size=1000)
         last_result = result
+        if result.get("error"):
+            return {
+                "status": "error",
+                "error": result["error"],
+                "totals": totals,
+                "note": "stopped after this batch failed -- nothing past this point was processed. If a full autonomous cycle is running at the same time, that's the most likely cause (DB connection contention) -- wait for it to finish (check https://treekey.uk/pipeline-status?secret=... ) and try again.",
+            }
         totals["updated"] += result.get("updated", 0)
         totals["unchanged"] += result.get("unchanged", 0)
         totals["errors"] += result.get("errors", 0)
