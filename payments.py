@@ -532,7 +532,7 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
         logger.info(f"[Stripe] Subscription cancelled - customer {customer_id}")
         import database
         if subscription_id:
-            database.unlock_territory_by_subscription(subscription_id)
+            database.deactivate_subscription_on_cancellation(subscription_id)
         return {"event": "subscription_cancelled", "customer_id": customer_id}
 
     elif event_type == "invoice.payment_failed":

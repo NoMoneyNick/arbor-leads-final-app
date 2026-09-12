@@ -266,16 +266,14 @@ def init_db():
                 UNIQUE (api_name, period_month)
             );
 
-            CREATE TABLE IF NOT EXISTS territory_claims (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                outcode TEXT UNIQUE NOT NULL,
-                customer_email TEXT NOT NULL,
-                customer_name TEXT,
-                stripe_subscription_id TEXT,
-                active BOOLEAN DEFAULT TRUE,
-                claimed_at TIMESTAMPTZ DEFAULT NOW(),
-                expires_at TIMESTAMPTZ
-            );
+            # Sep 12 2026: the territory_claims table (whole-district lock
+            # feature) was deleted per Nick's explicit call -- it's part of
+            # the old system we are deleting, and claim_territory_atomically
+            # was never even called anywhere in the live codebase, so nothing
+            # was ever really locked in production. Deliberately NOT running
+            # a live DROP TABLE against the production database here: an
+            # unused leftover table costs nothing, but a destructive
+            # migration carries risk for zero benefit.
 
             CREATE TABLE IF NOT EXISTS contractor_suggestions (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -581,7 +579,6 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_partners_created ON potential_partners(created_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_partners_company_number ON potential_partners(company_number);",
             "CREATE INDEX IF NOT EXISTS idx_leads_source_type ON leads(lead_source_type);",
-            "CREATE INDEX IF NOT EXISTS idx_territory_outcode ON territory_claims(outcode);",
             "CREATE INDEX IF NOT EXISTS idx_unclassified_status ON unclassified_applications(status, discovered_at ASC);",
             "CREATE INDEX IF NOT EXISTS idx_system_warnings_lookup ON system_warnings(category, title, occurred_at DESC);",
         ]
@@ -694,8 +691,8 @@ def init_db():
             # 8AA"); lat/lon above then get the exact postcodes.io pin instead
             # of just the outcode centroid when it's present. center_outcode is
             # still always kept as the bare outcode (derived even from a full
-            # postcode) since territory_claims and the existing prefix-matching
-            # logic in dispatch_lead_alerts are keyed on outcode, not full
+            # postcode) since the existing prefix-matching logic in
+            # dispatch_lead_alerts is keyed on outcode, not full
             # postcode -- this only adds precision, it doesn't change what
             # "your territory" means. job_size_preference lets a contractor
             # only be matched to jobs at the scale they actually want.
@@ -787,7 +784,6 @@ def init_db():
             "ALTER TABLE leads ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE payments ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE api_usage ENABLE ROW LEVEL SECURITY;",
-            "ALTER TABLE territory_claims ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE contractor_subscriptions ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE lead_dispatches ENABLE ROW LEVEL SECURITY;",
             "ALTER TABLE contractor_suggestions ENABLE ROW LEVEL SECURITY;",
@@ -2520,71 +2516,18 @@ def increment_api_usage(api_name: str = "UK Planning API", increment: int = 1, c
     return out
 
 
-def is_territory_claimed(outcode: str, conn=None) -> bool:
-    """Checks whether a given UK postcode district is already locked by an active subscriber.
-
-    Sep 9 2026: optional `conn` lets a caller that already has a connection
-    open (api_check_postcode, on every map click) reuse it instead of
-    opening yet another one -- see the matching note on
-    classify_leads_by_radius. Callers that don't pass one keep the old
-    self-contained open/close behaviour."""
-    if not SURL or not outcode:
-        return False
-    owns_conn = conn is None
-    try:
-        if owns_conn:
-            conn = get_db_conn()
-        cur = conn.cursor()
-        try:
-            cur.execute("SELECT active FROM territory_claims WHERE outcode = %s AND active = TRUE", (outcode.strip().upper(),))
-            row = cur.fetchone()
-            return bool(row and row[0])
-        finally:
-            cur.close()
-            if owns_conn:
-                conn.close()
-    except Exception as e:
-        logger.error(f"[Territory] Check error for {outcode}: {e}")
-        return False
-
-
-def claim_territory_atomically(outcode: str, customer_email: str, stripe_sub_id: str = "") -> bool:
-    """
-    Atomically claims a 15-mile radial territory district for a paying customer.
-    Prevents race conditions: returns True if successfully locked, False if already claimed.
-    """
-    if not SURL or not outcode:
-        return False
-    try:
-        conn = get_db_conn()
-        cur = conn.cursor()
-        try:
-            cur.execute("""
-                INSERT INTO territory_claims (outcode, customer_email, stripe_subscription_id, active, claimed_at)
-                VALUES (%s, %s, %s, TRUE, NOW())
-                ON CONFLICT (outcode) DO UPDATE SET
-                    customer_email = EXCLUDED.customer_email,
-                    stripe_subscription_id = EXCLUDED.stripe_subscription_id,
-                    active = TRUE,
-                    claimed_at = NOW()
-                WHERE territory_claims.active = FALSE
-                RETURNING id;
-            """, (outcode.strip().upper(), customer_email.strip().lower(), stripe_sub_id))
-            row = cur.fetchone()
-            conn.commit()
-            return bool(row)
-        finally:
-            cur.close()
-            conn.close()
-    except Exception as e:
-        logger.error(f"[Territory] Atomic claim error for {outcode}: {e}")
-        return False
-
-
-def unlock_territory_by_subscription(stripe_sub_id: str) -> bool:
-    """
-    Unlocks a territory when a customer's Stripe subscription is cancelled or fails.
-    """
+def deactivate_subscription_on_cancellation(stripe_sub_id: str) -> bool:
+    """Sep 12 2026: split out of the old unlock_territory_by_subscription,
+    which bundled this together with the now-deleted whole-district
+    territory-lock feature (Nick's explicit call: "that post code lockout
+    is part of the old system we are supposed to be deleting, i dont want
+    it" -- claim_territory_atomically was never even called anywhere, so
+    nothing was ever really locked in production). This half of that old
+    function is NOT dead code, though -- it's what login/dashboard gating
+    (get_contractor_subscription) actually reads, and before that original
+    fix this stayed active=TRUE forever after cancellation (ghost session
+    persisted). Kept as its own function so deleting the territory-lock
+    feature doesn't silently reintroduce that bug."""
     if not SURL or not stripe_sub_id:
         return False
     try:
@@ -2592,53 +2535,23 @@ def unlock_territory_by_subscription(stripe_sub_id: str) -> bool:
         cur = conn.cursor()
         try:
             cur.execute("""
-                UPDATE territory_claims
-                SET active = FALSE
-                WHERE stripe_subscription_id = %s
-                RETURNING outcode;
-            """, (stripe_sub_id,))
-            row = cur.fetchone()
-            # Also deactivate the subscription record itself — this is what login/dashboard
-            # gating (get_contractor_subscription) actually reads, and previously stayed
-            # active=TRUE forever after cancellation (ghost session persisted).
-            cur.execute("""
                 UPDATE contractor_subscriptions
                 SET active = FALSE
-                WHERE stripe_subscription_id = %s;
+                WHERE stripe_subscription_id = %s
+                RETURNING id;
             """, (stripe_sub_id,))
+            row = cur.fetchone()
             conn.commit()
             if row:
-                logger.info(f"[Territory] Unlocked territory {row[0]} due to subscription cancellation: {stripe_sub_id}")
+                logger.info(f"[Subscription] Deactivated on cancellation: {stripe_sub_id}")
                 return True
             return False
         finally:
             cur.close()
             conn.close()
     except Exception as e:
-        logger.error(f"[Territory] Unlock error for sub {stripe_sub_id}: {e}")
+        logger.error(f"[Subscription] Deactivation error for sub {stripe_sub_id}: {e}")
         return False
-
-
-def get_active_territory_claims() -> list:
-    """
-    Returns a list of dictionaries containing active territory claims for lead routing.
-    Format: [{"outcode": "NG22", "customer_email": "...", "customer_name": "..."}]
-    """
-    if not SURL:
-        return []
-    try:
-        conn = get_db_conn()
-        cur = conn.cursor()
-        try:
-            cur.execute("SELECT outcode, customer_email, customer_name FROM territory_claims WHERE active = TRUE;")
-            rows = cur.fetchall()
-            return [{"outcode": r[0], "customer_email": r[1], "customer_name": r[2]} for r in rows]
-        finally:
-            cur.close()
-            conn.close()
-    except Exception as e:
-        logger.error(f"[Territory] Error fetching active claims: {e}")
-        return []
 
 
 def save_contractor_suggestion(name: str, contact: str, suggestion_text: str) -> bool:

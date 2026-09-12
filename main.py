@@ -489,9 +489,9 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
 
     # Sep 9 2026, Nick's ask: cut the lag on map clicks -- this endpoint
     # already has `conn` open for the queries above, so hand it straight
-    # into classify_leads_by_radius and is_territory_claimed below instead
-    # of each opening (and this function then closing) its own separate
-    # connection. See the matching notes on both functions in database.py.
+    # into classify_leads_by_radius below instead of it opening (and this
+    # function then closing) its own separate connection. See the matching
+    # note on that function in database.py.
     radius_split = database.classify_leads_by_radius(wide_pool_addresses, target_lat, target_lng, radius, conn=conn)
 
     # Sep 8 2026, Nick's ask: the radar's "Intercepted Notices" panel should
@@ -529,13 +529,8 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
     min_val = selected_leads * 450
     max_val = selected_leads * 1450
 
-    # Check territory exclusivity in real-time -- still on the same `conn`
-    # opened above (see the classify_leads_by_radius note), closed just
-    # after this instead of opening yet another fresh connection for it.
-    is_claimed = database.is_territory_claimed(display_pc, conn=conn)
     cur.close()
     conn.close()
-    exclusivity_label = "&#128274; Locked (Claimed by Local Partner)" if is_claimed else "&#9989; Available (Unclaimed)"
 
     # Sep 3 2026: see _COUNCIL_SOURCE_ISSUES above -- None for every normal
     # district, a plain-English disclosure note for the handful confirmed
@@ -551,13 +546,11 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
         "radius_miles": radius,
         "is_covered": True,
         "is_england": True,
-        "is_claimed": is_claimed,
         "selected_area_leads": selected_leads,
         "connected_area_leads": connected_leads,
         "total_leads_in_scope": selected_leads + connected_leads,
         "est_min_val": f"{min_val:,}",
         "est_max_val": f"{max_val:,}",
-        "exclusivity_status": exclusivity_label,
         "council_source_issue": council_source_issue,
         "area_notices": area_notices
     }
@@ -1660,7 +1653,12 @@ def public_homepage(request: Request):
             <div class="space-y-6">
                 <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
                     <h3 class="text-lg font-bold text-white mb-2">Are these leads exclusive?</h3>
-                    <p class="text-slate-400 leading-relaxed">Yes. We operate on a strict <strong>Radial Territory Exclusivity</strong> model. You set your base postcode and an operating radius (up to 50 miles). As long as you have remaining monthly quota, you are the <em>only</em> contractor we notify about jobs in your area.</p>
+                    <!-- Sep 12 2026: reworded off the old "Radial Territory Exclusivity"
+                         claim, which described a whole-district lock that was never
+                         actually built/live. This now describes what's genuinely true
+                         today: atomic claim-and-burn dispatch (record_lead_dispatch_and_burn
+                         in database.py) means a lead only ever reaches one contractor. -->
+                    <p class="text-slate-400 leading-relaxed">Yes. Every lead is sent to exactly one contractor and then permanently removed from the system — it's never shown to, or sold to, anyone else. That applies to both subscription alerts and one-off Marketplace purchases.</p>
                 </div>
                 
                 <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
@@ -1670,7 +1668,7 @@ def public_homepage(request: Request):
                 
                 <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
                     <h3 class="text-lg font-bold text-white mb-2">Am I tied into a long contract?</h3>
-                    <p class="text-slate-400 leading-relaxed">No. The territory lockout is a rolling monthly agreement. You can cancel instantly at any time with zero penalty. If you don't want a subscription, you can unlock leads one-by-one via the Marketplace, though you won't get territory exclusivity.</p>
+                    <p class="text-slate-400 leading-relaxed">No. Subscriptions are a rolling monthly agreement — cancel instantly at any time with zero penalty. If you'd rather not subscribe at all, you can unlock leads one-by-one via the Marketplace instead.</p>
                 </div>
             </div>
         </div>
