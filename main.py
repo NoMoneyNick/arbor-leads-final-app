@@ -529,6 +529,15 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
     min_val = selected_leads * 450
     max_val = selected_leads * 1450
 
+    # Sep 12 2026, Nick's ask ("give me a system that ... must be logically
+    # sound"): a simple traffic-light read on how contested this area
+    # already is, using the SAME open `conn` (avoids reintroducing the
+    # multi-connection-per-click issue fixed above) -- additional_quota=0
+    # here since the visitor hasn't picked a tier yet; the tier-specific,
+    # authoritative check happens server-side at actual checkout
+    # (checkout_post), this is only a preview.
+    capacity_status = database.get_area_capacity_status(display_pc, radius, additional_quota=0, conn=conn).get("status", "unknown")
+
     cur.close()
     conn.close()
 
@@ -551,6 +560,7 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
         "total_leads_in_scope": selected_leads + connected_leads,
         "est_min_val": f"{min_val:,}",
         "est_max_val": f"{max_val:,}",
+        "capacity_status": capacity_status,
         "council_source_issue": council_source_issue,
         "area_notices": area_notices
     }
@@ -1512,7 +1522,7 @@ def public_homepage(request: Request):
                 <div class="text-center md:text-left">
                     <p class="text-white font-bold text-sm">Not ready for a subscription? Buy leads one at a time instead.</p>
                     <p class="text-slate-400 text-sm mt-1">
-                        From <span class="text-emerald-400 font-bold">£19</span> · <span class="text-slate-300 font-bold">£29</span> · <span class="text-slate-300 font-bold">£49</span> depending on job size — no commitment, browse and buy only the ones you want.
+                        From <span class="text-emerald-400 font-bold">£19</span> · <span class="text-slate-300 font-bold">£29</span> · <span class="text-slate-300 font-bold">£39</span> · <span class="text-slate-300 font-bold">£49</span> depending on freshness and value — no commitment, browse and buy only the ones you want.
                         These aren't your only options either — <a href="/pricing" class="text-slate-300 hover:text-white underline">see the full range of packages</a> tailored to your trade.
                     </p>
                 </div>
@@ -1786,6 +1796,23 @@ def public_homepage(request: Request):
         // /api/check-postcode response (area_notices) rather than a
         // sitewide list -- same anonymised outcode-level area, never a
         // street address.
+        // Sep 12 2026, Nick's ask ("give me a system that's ... simple"):
+        // a single traffic-light word instead of explaining the dispatch
+        // queue/tier-priority mechanics on the homepage. Backed by a real
+        // check (database.get_area_capacity_status) -- this isn't
+        // decorative, it reflects actual committed subscriber quota vs
+        // real recent lead volume for the area.
+        function capacityBadgeHtml(status) {{
+            const map = {{
+                open:    {{ dot: 'bg-emerald-500', text: 'text-emerald-400', label: 'Open for new subscribers' }},
+                limited: {{ dot: 'bg-amber-500',   text: 'text-amber-400',   label: 'Limited slots left' }},
+                full:    {{ dot: 'bg-rose-500',    text: 'text-rose-400',    label: 'Fully subscribed — Marketplace only' }},
+            }};
+            const s = map[status];
+            if (!s) return '';
+            return `<div class="flex items-center gap-2 text-xs mt-1 ${{s.text}}"><span class="h-1.5 w-1.5 rounded-full ${{s.dot}}"></span>${{s.label}}</div>`;
+        }}
+
         function renderAreaNotices(notices, areaLabel) {{
             const label = document.getElementById('noticesAreaLabel');
             if (label) label.textContent = areaLabel ? `Intercepted Notices — ${{areaLabel}}` : 'Intercepted Notices';
@@ -1829,7 +1856,7 @@ def public_homepage(request: Request):
                     document.getElementById('btn-checkout-pro').href = `/checkout/commercial_forestry?outcode=${{data.postcode}}`;
                     document.getElementById('btn-checkout-elite').href = `/checkout/treekey_elite?outcode=${{data.postcode}}`;
                     const issueNoticeA = data.council_source_issue ? `<div class="text-amber-400 text-xs border border-amber-700/50 bg-amber-900/20 rounded px-2 py-1 mb-2">&#9888; ${{data.council_source_issue}}</div>` : '';
-                    document.getElementById('targetIntel').innerHTML = `${{issueNoticeA}}<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>`;
+                    document.getElementById('targetIntel').innerHTML = `${{issueNoticeA}}<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>${{capacityBadgeHtml(data.capacity_status)}}`;
                     renderAreaNotices(data.area_notices, data.postcode);
 
                     document.getElementById('statusBadge').innerHTML = `
@@ -1901,7 +1928,7 @@ def public_homepage(request: Request):
                     document.getElementById('btn-checkout-pro').href = `/checkout/commercial_forestry?outcode=${{data.postcode}}`;
                     document.getElementById('btn-checkout-elite').href = `/checkout/treekey_elite?outcode=${{data.postcode}}`;
                     const issueNoticeB = data.council_source_issue ? `<div class="text-amber-400 text-xs border border-amber-700/50 bg-amber-900/20 rounded px-2 py-1 mb-2">&#9888; ${{data.council_source_issue}}</div>` : '';
-                    document.getElementById("targetIntel").innerHTML = `${{issueNoticeB}}<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>`;
+                    document.getElementById("targetIntel").innerHTML = `${{issueNoticeB}}<span class="text-emerald-400 font-bold text-sm">${{data.selected_area_leads}} Active Leads</span> in radius<br><span class="text-slate-400 border-t border-slate-700 pt-1 mt-1 block">+ ${{data.connected_area_leads}} additional in connected zones</span>${{capacityBadgeHtml(data.capacity_status)}}`;
                     renderAreaNotices(data.area_notices, data.postcode);
 
                     setTimeout(() => {{
@@ -2601,7 +2628,7 @@ def pricing(request: Request):
 
         <h2 class="text-[22px] mt-8 mb-4 text-white font-bold">2. Or Buy As You Go (Single-Lead Marketplace)</h2>
         <p class="text-slate-400 text-[13px] -mt-2 mb-4">
-            Subscribers get priority allocation. Any unallocated leads flow into our single-purchase marketplace. Once bought, a lead is burned and never resold.
+            Active subscribers get an early-access alert the moment a matching lead is found, before it appears here. Once any lead is bought — by a subscriber or through this Marketplace — it's burned and never resold.
         </p>
         {single_cards}
 
@@ -2647,7 +2674,7 @@ def pricing(request: Request):
                 <tr>
                     <td><b class="text-white">Trade Cost Framing</b></td>
                     <td>Heavy fixed monthly directory listing fees (£120+/mo).</td>
-                    <td style="color:#6ee7b7; font-weight:bold;">Low £49/mo (less than half a tank of diesel). 1 job = 5x ROI.</td>
+                    <td style="color:#6ee7b7; font-weight:bold;">From £39/mo (less than a tank of diesel). One job easily covers it.</td>
                 </tr>
                 <tr>
                     <td><b class="text-white">Customer Ownership</b></td>
@@ -3064,8 +3091,36 @@ def checkout(plan_key: str, request: Request):
 
     # Single lead purchase — go straight to Stripe (no area needed)
     if lead_id or plan.get("mode") == "payment":
-        url = payments.create_checkout_session(plan_key, outcode or "GB", lead_id)
+        # Sep 15 2026: server-side subscriber discount, from the signed
+        # session cookie ONLY -- never a query param or anything else a
+        # visitor could set themselves. Anonymous visitors (no cookie, or
+        # an account with no active subscription) buy at full price
+        # exactly as before; account_email=None is a no-op for
+        # create_checkout_session. "Reserve only when checkout starts" is
+        # satisfied here too -- this whole branch, cookie check included,
+        # only runs once the buy click actually lands on /checkout, never
+        # from merely being logged in or viewing the marketplace.
+        account_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+        url = payments.create_checkout_session(plan_key, outcode or "GB", lead_id, account_email=account_email)
         if not url:
+            # Sep 15 2026: a lead purchase can now fail this early because
+            # the exclusive-purchase reservation was refused (someone else
+            # is already mid-checkout for it, or it just sold) -- an
+            # ordinary, expected outcome now that reservation happens
+            # before Stripe, not a system fault. Distinct, honest copy for
+            # that case rather than the generic "Payment System
+            # Unavailable" message, which stays for actual Stripe/DB
+            # failures on subscription checkout.
+            if lead_id:
+                return HTMLResponse(
+                    "<html><body style='font-family:sans-serif; text-align:center; padding:60px;'>"
+                    "<h1>This lead is no longer available</h1>"
+                    "<p>Someone else has already unlocked it, or is completing checkout right now. "
+                    "New leads are added continuously.</p>"
+                    "<a href='/marketplace'>Browse the Marketplace</a>"
+                    "</body></html>",
+                    status_code=409
+                )
             return HTMLResponse(
                 "<html><body style='font-family:sans-serif; text-align:center; padding:60px;'>"
                 "<h1>Payment System Unavailable</h1>"
@@ -3126,7 +3181,8 @@ def checkout(plan_key: str, request: Request):
     </div>
 
     <div class="lock-note">
-        Your leads are matched exclusively to your area. Once locked, no other contractor on the same tier will receive leads in your zone.
+        Every lead is sent to exactly one contractor and then permanently removed — never shared or resold.
+        We also check your area isn't already fully subscribed before taking payment.
     </div>
 
     <form method="POST" action="/checkout/{plan_key}">
@@ -3226,6 +3282,37 @@ async def checkout_post(plan_key: str, outcode: str = Form(...), radius: int = F
     location = database.resolve_location(raw_input)
     clean_outcode = location["outcode"] or raw_input[:4] or "GB"
     full_postcode = location["full_postcode"]
+
+    # Sep 12 2026, Nick's ask ("give me a system that ... must be logically
+    # sound"): register_or_update_subscription had no check at all on
+    # whether this area could actually support another subscription --
+    # unlimited Starter/Growth/Elite could stack on the same postcode with
+    # nothing to stop it. This is the real gate: block the actual purchase
+    # here (not just a cosmetic warning) if the area's already at or past
+    # what it realistically produces. See database.get_area_capacity_status
+    # for the full reasoning and thresholds. The Marketplace is completely
+    # unaffected by this -- it only ever shows genuinely unclaimed leads,
+    # so it can't be oversold regardless of how many subscribers exist.
+    new_quota = database.TIER_QUOTAS.get(plan_key, 5)
+    capacity = database.get_area_capacity_status(clean_outcode, radius, additional_quota=new_quota)
+    if capacity["status"] == "full":
+        return HTMLResponse(
+            f"""<html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#020617; color:#e2e8f0;">
+            <h1>This area is fully subscribed right now</h1>
+            <p style="color:#94a3b8; max-width:480px; margin:16px auto;">
+                Based on real recent activity in <b>{clean_outcode}</b>, the subscriber slots this area can realistically
+                support are already taken. We'd rather tell you that now than sell you a subscription that can't deliver.
+            </p>
+            <p style="color:#94a3b8; max-width:480px; margin:16px auto;">
+                You can still buy individual leads as they appear via the
+                <a href="/marketplace" style="color:#34d399;">Marketplace</a>, or
+                <a href="mailto:contact@treekey.uk?subject=Waitlist:%20{urllib.parse.quote(clean_outcode)}" style="color:#34d399;">email us to be notified</a>
+                if a slot opens up here.
+            </p>
+            <a href="/pricing" style="color:#34d399;">← Back to pricing</a>
+            </body></html>""",
+            status_code=200
+        )
 
     url = payments.create_checkout_session(plan_key, clean_outcode, radius=radius,
                                             full_postcode=full_postcode, job_size=job_size)
@@ -4537,6 +4624,24 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
     homepage radar's own endpoint) and a job-category button grid, both on
     top of the existing tier tabs rather than replacing them.
     """
+    # Sep 15 2026, Nick's exclusive-purchase reservation spec: an
+    # already-logged-in subscriber sees their real member price on the
+    # card itself (never just at Stripe checkout) -- computed the same
+    # server-side way create_checkout_session will apply it, from the
+    # verified session cookie only, never anything a viewer could fake via
+    # the URL. Anonymous visitors, or a logged-in account with no active
+    # subscription, see the standard price plus a sign-in link instead.
+    _viewer_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    _viewer_discount = database.get_subscriber_discount(_viewer_email) if _viewer_email else {"eligible": False, "discount_pct": 0}
+    # Sep 15 2026, Phase 3 (purchase-alert early access, replacing free
+    # dispatch): a real active-subscription check, kept deliberately
+    # separate from _viewer_discount above -- that one can read False for
+    # an active subscriber on a tier with no discount configured
+    # (TIER_DISCOUNT_PCT.get(tier, 0)), which must never also cost them
+    # their early-access window. Only an active subscription unlocks it.
+    _viewer_sub = database.get_contractor_subscription(_viewer_email) if _viewer_email else None
+    _viewer_is_subscriber = bool(_viewer_sub and _viewer_sub.get("active"))
+
     resolved = None
     search_error_html = ""
     resolved_note_html = ""
@@ -4555,6 +4660,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
         filter_tier=tier, limit=40, filter_category=category,
         target_lat=target_lat, target_lng=target_lng,
         radius_miles=float(radius) if (target_lat is not None and resolved and resolved["precision"] != "none") else None,
+        subscriber_early_access=_viewer_is_subscriber,
     )
 
     # Preserves whatever's already active (tier/category/search) while a
@@ -4648,6 +4754,17 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
         council = l["council"]
         unlock_fee = l["price"]
         plan_key = l["plan_key"]
+        # Whole-pounds display only (unlock_fee is already a whole-pound
+        # value from calculate_lead_freshness) -- matches the amount
+        # create_checkout_session will actually compute server-side from
+        # the same get_subscriber_discount call, just shown here first.
+        if _viewer_discount.get("eligible") and unlock_fee:
+            _member_fee = max(1, round(unlock_fee * (100 - _viewer_discount["discount_pct"]) / 100))
+            price_block_html = f"""<div class="text-lg text-slate-500 line-through leading-none">£{unlock_fee}</div><div class="text-2xl sm:text-3xl font-extrabold text-emerald-400">£{_member_fee}<span class="text-[11px] font-bold text-emerald-400 align-top ml-1">MEMBER</span></div>"""
+            member_link_html = ""
+        else:
+            price_block_html = f"""<div class="text-2xl sm:text-3xl font-extrabold text-emerald-400">£{unlock_fee}</div>"""
+            member_link_html = f"""<a href="/login?next={urllib.parse.quote(f'/checkout/{plan_key}?lead_id={lid}')}" class="text-[11px] text-slate-400 hover:text-emerald-400 underline">Already a member? Sign in for your discount</a>"""
         badge_bg = l["badge_bg"]
         badge_color = l["badge_color"]
         badge_text = l["badge_text"]
@@ -4765,12 +4882,13 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
 
                 <div class="sm:w-[210px] shrink-0 bg-slate-900/60 border border-emerald-900/50 rounded-xl p-4 flex sm:flex-col items-center sm:items-stretch justify-between sm:justify-start gap-3 text-center">
                     <div>
-                        <div class="text-2xl sm:text-3xl font-extrabold text-emerald-400">£{unlock_fee}</div>
+                        {price_block_html}
                         <div class="text-[11px] text-slate-400">{days_left}</div>
                     </div>
                     <a href="/checkout/{plan_key}?lead_id={lid}" class="bg-brand-green hover:bg-emerald-500 text-white px-5 py-3 rounded-lg no-underline font-bold text-[13px] transition-all duration-300 shadow-[0_0_20px_rgba(5,150,105,0.3)] hover:shadow-[0_0_30px_rgba(5,150,105,0.5)] inline-flex items-center justify-center gap-1.5 text-center">
                         Unlock Address &amp; Contacts →
                     </a>
+                    {member_link_html}
                     <div class="text-[10px] text-slate-500 sm:mt-1 hidden sm:block">
                         Single-Sale • burned on unlock
                     </div>
@@ -4821,6 +4939,10 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
         <div class="bg-sky-500/10 border border-sky-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-sky-200">
             <b>Single-Sale Guarantee:</b> Every lead purchased below is immediately removed from the live marketplace and burned permanently. You are the ONLY contractor who will receive the property data.
         </div>
+
+        {"" if _viewer_is_subscriber else f'''<div class="bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-amber-200">
+            <b>Subscriber Early Access:</b> Active subscribers see every new matching lead the moment it's found and get first crack at buying it. Brand-new leads open up here to everyone {database.EARLY_ACCESS_WINDOW_MINUTES} minutes later. <a href="/pricing" class="underline hover:text-amber-100 font-bold">See subscription tiers →</a>
+        </div>'''}
 
         <!-- Sep 11 2026, Nick's ask: a customer-facing promise covering the rare
              case a non-tree lead slips past our filters, so it's clear this
@@ -5162,7 +5284,7 @@ def settings_page(request: Request):
         <div class="card">
             {saved_banner}
             <h3 style="margin-top:0; font-size:16px;">Lead Notification Format</h3>
-            <p style="color:#94a3b8; font-size:13px;">How new leads are delivered when you're allocated one.</p>
+            <p style="color:#94a3b8; font-size:13px;">Adds a one-tap forward button to leads on your dashboard once you've unlocked them.</p>
             <form method="POST" action="/api/save-settings">
                 {opt("email", "Email only", "Standard lead-delivery email with Letter/Flyer tools.")}
                 {opt("whatsapp", "Email + WhatsApp forward buttons", "Adds a one-tap “Forward on WhatsApp” button next to each lead so you can send it straight to your crew.")}
@@ -5205,12 +5327,39 @@ async def save_settings(request: Request):
 #      the login page, and the pricing redirect below all now surface the
 #      free-lead-first path (/free-account) as an explicit alternative.
 
-def _login_session_response(verified_email: str) -> RedirectResponse:
+def _safe_next_url(next_url: Optional[str]) -> Optional[str]:
+    """Sep 15 2026: validates a `next` redirect target before it's ever
+    used -- must be a same-site relative path (starts with exactly one
+    '/', never '//' or a scheme like 'https:', both of which browsers will
+    happily treat as an off-site redirect). Returns None for anything that
+    doesn't pass, so callers can fall back to the normal dashboard routing
+    rather than ever redirecting somewhere Nick didn't build."""
+    if not next_url or not isinstance(next_url, str):
+        return None
+    if not next_url.startswith("/") or next_url.startswith("//") or next_url.startswith("/\\"):
+        return None
+    parsed = urllib.parse.urlparse(next_url)
+    if parsed.scheme or parsed.netloc:
+        return None
+    return next_url
+
+
+def _login_session_response(verified_email: str, next_url: Optional[str] = None) -> RedirectResponse:
     """Shared by both ways a login can be verified -- clicking the magic
     link (verify_login, GET) or typing the emailed OTP (verify_otp_route,
     POST) -- so the "which dashboard does this email land on" decision
     and session-cookie issuance lives in exactly one place instead of two
-    copies quietly drifting apart."""
+    copies quietly drifting apart.
+
+    Sep 15 2026, Nick's ask (login-gated lead discount): when a `next`
+    target was carried through the login flow (e.g. a subscriber clicked
+    "Already a member? Sign in for your discount" on a specific lead),
+    return them there instead of the normal dashboard routing below --
+    "signing in or viewing the lead shouldn't reserve it, reserve it only
+    when checkout starts" is satisfied automatically here, since this just
+    redirects back to the same /checkout/... URL, which only reserves the
+    lead once its own handler runs (and rechecks live availability then,
+    not from anything decided at login time)."""
     def _session_redirect(url: str) -> RedirectResponse:
         response = RedirectResponse(url=url, status_code=303)
         response.set_cookie(
@@ -5223,6 +5372,10 @@ def _login_session_response(verified_email: str) -> RedirectResponse:
         )
         return response
 
+    safe_next = _safe_next_url(next_url)
+    if safe_next:
+        return _session_redirect(safe_next)
+
     active_sub = database.get_contractor_subscription(verified_email)
     if active_sub and active_sub.get("active"):
         return _session_redirect("/dashboard")
@@ -5234,13 +5387,21 @@ def _login_session_response(verified_email: str) -> RedirectResponse:
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, error: Optional[str] = None):
+def login_page(request: Request, error: Optional[str] = None, next: Optional[str] = None):
     # Sep 9 2026, Nick's ask: "update our log in/sign in page to look like
     # our design including a redesign on the text boxes and removal of
     # emojis" -- brought onto the same dark Tailwind design system as the
     # homepage/marketplace (shared nav/footer, dark input styling, SVG
     # brand mark instead of the emoji, SVG lock instead of ).
     err_html = f"""<div class="bg-red-950/40 border border-red-500/40 text-red-300 px-3.5 py-2.5 rounded-lg mb-4 text-sm">{error}</div>""" if error else ""
+    # Sep 15 2026: carries a validated `next` target (e.g. a lead checkout
+    # URL, from the marketplace's "Already a member? Sign in for your
+    # discount" link) through both the magic-link and OTP forms below, so
+    # _login_session_response can send a subscriber straight back to what
+    # they were buying instead of the normal dashboard routing.
+    safe_next = _safe_next_url(next)
+    next_field_html = f"""<input type="hidden" name="next" value="{html.escape(safe_next)}">""" if safe_next else ""
+    next_note_html = """<p class="text-emerald-400 text-[13px] font-bold text-center m-0 mb-4">Sign in to see your member discount on that lead →</p>""" if safe_next else ""
     return f"""
     <!DOCTYPE html>
     <html lang="en-GB" class="scroll-smooth">
@@ -5268,6 +5429,7 @@ def login_page(request: Request, error: Optional[str] = None):
             <p class="text-slate-400 text-[13px] m-0">Zero-Password — enter your email, we'll send you a secure link</p>
         </div>
 
+        {next_note_html}
         {err_html}
 
         <!-- Sep 5 2026: was "Email or Phone" -- there's no SMS sending built
@@ -5276,6 +5438,7 @@ def login_page(request: Request, error: Optional[str] = None):
              phone number in the first place. Copy now matches what actually
              happens rather than promising a channel that doesn't exist. -->
         <form action="/api/request-magic-link" method="POST">
+            {next_field_html}
             <label class="text-xs font-bold text-slate-300">Email Address:</label>
             <input type="email" name="contact" placeholder="e.g. dave@apex-trees.co.uk" required autofocus>
             <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3.5 rounded-lg font-bold text-[15px] cursor-pointer w-full transition-colors">Send Secure Login Link →</button>
@@ -5307,16 +5470,29 @@ async def request_magic_link(request: Request):
 
     form = await request.form()
     contact = form.get("contact", "").strip().lower()
+    # Sep 15 2026: carry the validated `next` target (see /login's own
+    # comment) through to both the magic-link URL and the OTP form below,
+    # so whichever path the contractor finishes with still lands them back
+    # where they started rather than losing that on the first hop.
+    safe_next = _safe_next_url(form.get("next"))
 
     if not contact:
-        return RedirectResponse(url="/login?error=Please+enter+your+email+address", status_code=303)
-    
+        err_redirect = "/login?error=Please+enter+your+email+address"
+        if safe_next:
+            err_redirect += f"&next={urllib.parse.quote(safe_next)}"
+        return RedirectResponse(url=err_redirect, status_code=303)
+
     # Generate cryptographic token & OTP
     auth_data = database.create_magic_auth_token(contact)
     if not auth_data:
-        return RedirectResponse(url="/login?error=Could+not+generate+login+link.+Please+try+again.", status_code=303)
+        err_redirect = "/login?error=Could+not+generate+login+link.+Please+try+again."
+        if safe_next:
+            err_redirect += f"&next={urllib.parse.quote(safe_next)}"
+        return RedirectResponse(url=err_redirect, status_code=303)
 
     magic_url = f"{payments.PUBLIC_APP_URL}/verify-login?token={auth_data['token']}"
+    if safe_next:
+        magic_url += f"&next={urllib.parse.quote(safe_next)}"
     otp_code = auth_data["otp"]
 
     # Send Magic Link via Resend Email
@@ -5387,6 +5563,7 @@ async def request_magic_link(request: Request):
                 <p class="text-xs text-slate-400 mb-2.5"><b class="text-slate-300">On a different device than your inbox?</b> Enter the 6-digit code from the email:</p>
                 <form action="/api/verify-otp" method="POST">
                     <input type="hidden" name="email" value="{contact}">
+                    {f'<input type="hidden" name="next" value="{html.escape(safe_next)}">' if safe_next else ""}
                     <input type="text" name="otp" inputmode="numeric" pattern="[0-9]{{6}}" maxlength="6" placeholder="------" required autocomplete="one-time-code">
                     <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-none py-2.5 rounded-lg font-bold text-sm cursor-pointer w-full mt-2.5 transition-colors">Verify Code</button>
                 </form>
@@ -5402,7 +5579,7 @@ async def request_magic_link(request: Request):
 
 
 @app.get("/verify-login")
-def verify_login(request: Request, token: Optional[str] = None, otp: Optional[str] = None, email: Optional[str] = None):
+def verify_login(request: Request, token: Optional[str] = None, otp: Optional[str] = None, email: Optional[str] = None, next: Optional[str] = None):
     # OTP is a 6-digit code (1,000,000 possibilities) with no prior throttling — this
     # caps guessing attempts per IP the same way /check-postcode is protected.
     client_ip = request.client.host if request.client else "unknown"
@@ -5417,8 +5594,11 @@ def verify_login(request: Request, token: Optional[str] = None, otp: Optional[st
     # Paying subscribers land on the full dashboard, free-account signups on
     # theirs, everyone else gets nudged to subscribe -- see
     # _login_session_response above (Sep 5 2026 limbo-account distinction
-    # preserved as-is, just no longer duplicated inline here).
-    return _login_session_response(verified_email)
+    # preserved as-is, just no longer duplicated inline here). Sep 15 2026:
+    # `next` (validated inside _login_session_response) overrides all of
+    # that when present, e.g. returning a subscriber to the lead they were
+    # about to buy.
+    return _login_session_response(verified_email, next_url=next)
 
 
 @app.post("/api/verify-otp")
@@ -5436,6 +5616,7 @@ async def verify_otp_route(request: Request):
     form = await request.form()
     email = (form.get("email") or "").strip().lower()
     otp = (form.get("otp") or "").strip()
+    safe_next = _safe_next_url(form.get("next"))
 
     if not email or not otp:
         return RedirectResponse(url="/login?error=Enter+both+your+email+and+the+6-digit+code+from+the+email.", status_code=303)
@@ -5444,7 +5625,7 @@ async def verify_otp_route(request: Request):
     if not verified_email:
         return RedirectResponse(url="/login?error=That+code+is+wrong%2C+expired%2C+or+already+used.+Please+request+a+new+one.", status_code=303)
 
-    return _login_session_response(verified_email)
+    return _login_session_response(verified_email, next_url=safe_next)
 
 
 # ── Free "Limbo Account" Signup (Sep 5 2026, Nick's ask) ─────────────────────
@@ -6199,6 +6380,12 @@ def contractor_dashboard(request: Request):
     data = database.get_contractor_dashboard_data(session_email)
     sub = data["subscription"]
     leads = data["dispatched_leads"]
+    # Sep 15 2026: the WhatsApp-forward button (Settings > Lead Notification
+    # Format) used to live in the free-dispatch email, which no longer
+    # exists (Phase 3) -- moved here, the actual place a contractor now
+    # first sees a lead's real address, so the setting still does something
+    # rather than silently going dead.
+    wants_whatsapp = database.get_contractor_settings(session_email).get("notification_preference", "email") in ("whatsapp", "both")
     tier_name = sub.get("tier", "Free / Pay-As-You-Go").replace("_", " ").title()
     outcode = sub.get("outcode", "GB")
     active_badge = "<span style='background:rgba(16,185,129,0.12); color:#34d399; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:bold;'>ACTIVE PARTNER</span>" if sub.get("active") else "<span style='background:#1e293b; color:#94a3b8; padding:3px 8px; border-radius:12px; font-size:11px;'>FREE TIER</span>"
@@ -6253,6 +6440,13 @@ def contractor_dashboard(request: Request):
             agent_badge = "<span style='font-size:10px; background:#1e293b; color:#94a3b8; padding:2px 6px; border-radius:4px;'>AGENT STATUS UNCONFIRMED</span>"
         applicant_line = f"<br><span style='font-size:11px; color:#94a3b8;'>Applicant: {applicant_name}</span>" if applicant_name else ""
 
+        wa_button = ""
+        if wants_whatsapp:
+            wa_url = notifications.create_whatsapp_link(
+                ref, l.get("council", ""), addr, summary, l.get("score", "small"), l.get("price", 25)
+            )
+            wa_button = f"<a href='{wa_url}' target='_blank' style='background:#25D366; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;'>WhatsApp</a>"
+
         lead_rows += f"""
         <div style="background:#0f172a; border:1px solid #1e293b; border-radius:10px; padding:16px; margin-bottom:12px;">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
@@ -6260,12 +6454,13 @@ def contractor_dashboard(request: Request):
                     <span style="font-size:10px; background:#1e293b; color:#94a3b8; padding:2px 6px; border-radius:4px; font-weight:bold;">REF: {ref}</span>
                     {agent_badge}
                     <h4 style="margin:4px 0 2px 0; font-size:15px; color:#e2e8f0;">{addr}</h4>
-                    <span style="font-size:11px; color:#94a3b8;">Dispatched: {dispatched_at}</span>{filed_line}{applicant_line}
+                    <span style="font-size:11px; color:#94a3b8;">Received: {dispatched_at}</span>{filed_line}{applicant_line}
                 </div>
                 <div style="display:flex; gap:6px; flex-wrap:wrap;">
                     <a href="/generate-letter/{urllib.parse.quote(ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Letter</a>
                     <a href="/generate-street-flyer/{urllib.parse.quote(ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street Flyer</a>
                     <a href="{gmap_url}" target="_blank" title="Google's nearest available imagery for this address -- may be outdated or not show the exact property" style="background:#334155; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street View</a>
+                    {wa_button}
                 </div>
             </div>
             {street_view_caveat}
@@ -6275,7 +6470,10 @@ def contractor_dashboard(request: Request):
         </div>"""
 
     if not lead_rows:
-        lead_rows = "<div style='text-align:center; padding:32px; background:#0f172a; border-radius:10px; border:1px solid #1e293b;'><p style='color:#94a3b8; margin:0;'>No leads currently allocated. Your incoming planning intelligence will appear here in real-time.</p></div>"
+        # Sep 15 2026, Phase 3: leads are no longer given away automatically,
+        # so this empty state must tell a subscriber what to actually DO,
+        # not imply one will just show up on its own.
+        lead_rows = "<div style='text-align:center; padding:32px; background:#0f172a; border-radius:10px; border:1px solid #1e293b;'><p style='color:#94a3b8; margin:0;'>No leads purchased yet. Check your inbox for early-access alerts on matching leads, or <a href=\"/marketplace\" style=\"color:#34d399; font-weight:bold;\">browse the Marketplace</a> to unlock one directly.</p></div>"
 
     return f"""
     <!DOCTYPE html>
@@ -6346,10 +6544,10 @@ def contractor_dashboard(request: Request):
             </a>
         </div>
 
-        <!-- Dispatched Lead Inbox -->
-        <h3 style="color:#34d399; font-size:18px; margin:0 0 14px 0;">Your Exclusive Dispatched Leads ({len(leads)})</h3>
+        <!-- Purchased / Dispatched Lead Inbox -->
+        <h3 style="color:#34d399; font-size:18px; margin:0 0 14px 0;">Your Leads ({len(leads)})</h3>
         <p style="color:#94a3b8; font-size:13px; margin-top:-8px; margin-bottom:16px;">
-            These statutory planning notices were delivered exclusively to you and burned from all other systems.
+            Every lead below is exclusively yours -- burned from the Marketplace and every other system the moment you unlocked it.
         </p>
 
         {lead_rows}

@@ -216,8 +216,28 @@ def _resolve_live_single_lead_price(lead_id: str) -> Optional[dict]:
         conn = database.get_db_conn()
         cur = conn.cursor()
         try:
+            # Sep 15 2026 fix: this used to SELECT the `status` column (the
+            # claim-state: new/claimed/reserved -- for a lead still on sale
+            # this is always literally "new") and pass THAT into
+            # calculate_lead_freshness()'s planning_status parameter. That
+            # parameter is only ever checked for one thing: whether the
+            # council has actually granted/approved the application (see
+            # calculate_lead_freshness's "granted"/"approved" branch,
+            # database.py ~line 5078), in which case the lead is always
+            # priced at the fixed "granted" rate regardless of age. Passing
+            # the claim-state column instead of the real planning_status
+            # column meant that branch could never fire from here -- every
+            # live single-lead checkout for a genuinely granted/approved
+            # lead was silently mispriced using the ordinary age-decay
+            # bands instead, and the Stripe product name/description shown
+            # at checkout didn't say "Officially Approved" either. The
+            # marketplace listing query (get_marketplace_leads_with_
+            # freshness) already selects the real planning_status column
+            # correctly -- it just confusingly reuses "status" as the
+            # Python dict key for it, which is what hid this from a
+            # side-by-side code read. Selecting the real column here now.
             cur.execute("""
-                SELECT summary, status, lead_source_type, discovered_at, registered_date
+                SELECT summary, planning_status, lead_source_type, discovered_at, registered_date
                 FROM leads WHERE id = %s;
             """, (lead_id,))
             row = cur.fetchone()
@@ -227,9 +247,9 @@ def _resolve_live_single_lead_price(lead_id: str) -> Optional[dict]:
         if not row:
             logger.warning(f"[Stripe] Live price lookup: lead_id={lead_id} not found (deleted or already sold).")
             return None
-        summary, status, source_type, discovered_at, registered_date = row
+        summary, planning_status, source_type, discovered_at, registered_date = row
         fresh = database.calculate_lead_freshness(
-            discovered_at, planning_status=status or "pending", summary=summary or "",
+            discovered_at, planning_status=planning_status or "pending", summary=summary or "",
             source_type=source_type or "council_planning", registered_date=registered_date
         )
         price_pounds = fresh.get("price", 0) or 0
@@ -256,10 +276,34 @@ def _resolve_live_single_lead_price(lead_id: str) -> Optional[dict]:
 
 
 def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = None, radius: int = 15,
-                             full_postcode: str = None, job_size: str = None) -> Optional[str]:
+                             full_postcode: str = None, job_size: str = None,
+                             account_email: str = None) -> Optional[str]:
     """
     Creates a Stripe Checkout session for the given plan or single lead purchase.
     Returns the checkout URL to redirect the customer to.
+
+    Sep 15 2026, Nick's exclusive-purchase reservation spec: `account_email`
+    must be an email ALREADY VERIFIED by the caller (main.py's
+    _verify_session_cookie on the signed session cookie) -- never a raw form
+    field, and never whatever Stripe's own checkout later collects. It is
+    used for two things, both only for single-lead purchases: (1) looking up
+    a subscriber discount server-side via database.get_subscriber_discount,
+    and (2) recording who actually bought the lead on the audit-trail order
+    row. Anonymous purchases (account_email=None) still work exactly as
+    before, just at full price -- login is never required to buy a lead.
+
+    Single-lead purchases now go through the Available -> reserved -> sold
+    state machine (database.reserve_lead_for_checkout /
+    confirm_reserved_lead_sale) instead of only being checked for a valid
+    live price: the lead is atomically reserved for THIS checkout attempt
+    before Stripe is ever involved, so two customers racing for the same
+    lead can no longer both reach Stripe (previously only the webhook's
+    final burn_lead_inventory caught this, after one of them had already
+    paid -- see the "DOUBLE SALE RACE CONDITION" alert this used to rely on
+    for manual refunding). A reservation_token (not the Stripe session id,
+    which doesn't exist yet at this point) is generated up front and
+    threaded through Stripe metadata so the webhook can match this exact
+    checkout attempt back to its reservation and audit-trail order row.
     """
     if not stripe.api_key:
         logger.error("[Stripe] STRIPE_SECRET_KEY is not set.")
@@ -270,10 +314,16 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
         logger.error(f"[Stripe] Unknown plan: {plan_key}")
         return None
 
+    import uuid
+    import time
+    import database
+    reservation_token = None
+
     try:
         unit_amount = plan["amount"]
         product_name = plan["name"]
         product_description = plan["description"]
+        discount_pct = 0
         if lead_id:
             # Single-lead purchase: charge the live price (and use the live
             # product name/description), not whatever was static/embedded
@@ -288,6 +338,31 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
             unit_amount = live["amount_pence"]
             product_name = live["name"]
             product_description = live["description"]
+
+            # Atomically reserve the lead for THIS checkout attempt before
+            # Stripe is ever involved -- refuse the whole checkout (same
+            # pattern as the price-unavailable case above) rather than let
+            # a customer pay for a lead someone else is already buying.
+            reservation_token = uuid.uuid4().hex
+            reserved_ok = database.reserve_lead_for_checkout(
+                lead_id, account_email or "anonymous", reservation_token
+            )
+            if not reserved_ok:
+                logger.warning(f"[Stripe] Refusing checkout for lead_id={lead_id} -- could not reserve (already sold or reserved by another in-progress checkout).")
+                return None
+
+            # Server-side subscriber discount -- only ever computed from an
+            # already-verified account_email, never a checkout-collected
+            # email. Applied to the live price before Stripe ever sees it,
+            # so Stripe always charges the final, correct amount directly
+            # (no promo-code layer to keep in sync).
+            if account_email:
+                disc = database.get_subscriber_discount(account_email)
+                if disc.get("eligible"):
+                    discount_pct = disc.get("discount_pct", 0)
+                    if discount_pct > 0:
+                        unit_amount = max(1, round(unit_amount * (100 - discount_pct) / 100))
+                        product_description = f"{product_description} ({discount_pct}% member discount applied)"
 
         price_data = {
             "currency": "gbp",
@@ -329,6 +404,28 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
 
         if lead_id:
             session_params["metadata"]["lead_id"] = lead_id
+            session_params["metadata"]["reservation_token"] = reservation_token
+            if account_email:
+                session_params["metadata"]["account_email"] = account_email
+            if discount_pct:
+                session_params["metadata"]["discount_pct"] = str(discount_pct)
+
+            # Give Stripe's own expiry a matching, explicit cutoff (its
+            # default is 24h) so an abandoned checkout can't sit open far
+            # longer than the reservation that's holding the lead for it --
+            # see database.STRIPE_CHECKOUT_EXPIRY_MINUTES/RESERVATION_
+            # RELEASE_MINUTES's own comment for why the reservation side is
+            # deliberately a few minutes longer than this, not the same.
+            session_params["expires_at"] = int(time.time()) + database.STRIPE_CHECKOUT_EXPIRY_MINUTES * 60
+
+            # Audit-trail row, written now (before the Stripe redirect) so
+            # there's a durable record even if the customer never completes
+            # payment -- Nick's spec: "a record linking the buyer, lead,
+            # checkout, payment, price and fulfilment outcome."
+            database.record_order(
+                reservation_token, account_email, unit_amount,
+                lead_id=lead_id, plan=plan_key, status="pending"
+            )
 
         session = stripe.checkout.Session.create(**session_params)
         logger.info(f"[Stripe] Checkout session created for plan '{plan_key}' outcode={outcode} radius={radius}mi (lead_id={lead_id}): {session.id}")
@@ -362,6 +459,16 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
         logger.error(f"[Stripe] API error: {e}")
     except Exception as e:
         logger.error(f"[Stripe] Unexpected error: {e}", exc_info=True)
+
+    # Reached only on a failure AFTER the lead was reserved (Stripe itself
+    # rejected session creation, or raised unexpectedly) -- never on the
+    # success path above, which already returned. Without this, a Stripe-
+    # side failure here would leave the lead reserved-and-unavailable in
+    # the Marketplace for the full RESERVATION_RELEASE_MINUTES sweep window
+    # even though no checkout was ever actually created for it.
+    if reservation_token and lead_id:
+        database.release_lead_reservation(lead_id, reservation_token)
+        database.update_order_fulfillment(reservation_token, "failed", "stripe_session_creation_failed")
     return None
 
 
@@ -426,18 +533,85 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
         metadata = data.get("metadata", {})
         outcode = data.get("client_reference_id") or metadata.get("outcode")
         lead_id = metadata.get("lead_id")
-        
+        reservation_token = metadata.get("reservation_token")
+
         import database
         # 1. If this was a single lead purchase, execute the Single-Sale Inventory Burn
-        if lead_id:
+        if lead_id and reservation_token:
+            # Sep 15 2026: the reservation-based flow. This session was
+            # created after the exclusive-purchase reservation spec shipped,
+            # so a reservation was taken out atomically BEFORE Stripe was
+            # ever involved (payments.create_checkout_session) -- confirm
+            # THAT exact reservation now, rather than the old "first paid
+            # webhook to arrive wins" burn_lead_inventory check.
+            lead_data = database.confirm_reserved_lead_sale(lead_id, reservation_token, customer_email)
+            if lead_data:
+                logger.info(f"[Stripe] Lead {lead_id} sold to {mask(customer_email)} (reservation {reservation_token[:8]}...)")
+                notifications.send_purchased_lead_email(customer_email, lead_data)
+                database.update_order_fulfillment(reservation_token, "paid", "fulfilled")
+                _mark_stripe_event_fulfilled(event_id)
+            elif is_retry:
+                logger.info(f"[Stripe] Duplicate webhook delivery for already-processed lead {lead_id} ({mask(customer_email)}) — ignoring retry.")
+            else:
+                # Payment succeeded but this session's reservation is gone --
+                # expired past RESERVATION_RELEASE_MINUTES before payment
+                # completed, or (should be impossible, but treated the same
+                # way defensively) stolen by another session. Nick's spec:
+                # "automatically refund it without revealing the lead" --
+                # unlike the old flow, this is no longer a manual-only alert.
+                payment_intent_id = data.get("payment_intent")
+                refunded = False
+                refund_error = None
+                if payment_intent_id:
+                    try:
+                        stripe.Refund.create(
+                            payment_intent=payment_intent_id,
+                            reason="requested_by_customer",
+                            idempotency_key=f"tk_reservation_lost_{event_id}",
+                        )
+                        refunded = True
+                    except Exception as e:
+                        refund_error = str(e)
+                        logger.error(f"[Stripe] Auto-refund FAILED for lead {lead_id} / session {session_id}: {e}")
+                else:
+                    refund_error = "no payment_intent on the completed session"
+                database.update_order_fulfillment(
+                    reservation_token,
+                    "refunded" if refunded else "refund_failed",
+                    "reservation_lost_auto_refunded" if refunded else "reservation_lost_refund_failed",
+                )
+                logger.warning(f"[Stripe] Lead {lead_id} reservation lost before payment completed ({mask(customer_email)}) -- auto-refund {'succeeded' if refunded else 'FAILED: ' + str(refund_error)}.")
+                notifications.send_system_incident_alert(
+                    category="REVENUE & BILLING",
+                    title=(f"Lead reservation lost, auto-refunded {mask(customer_email)}" if refunded
+                           else f"REFUND FAILED: {mask(customer_email)} paid for a lead that's no longer available!"),
+                    description=(f"Customer {customer_email} paid £{amount / 100:.2f} for lead {lead_id}, but their reservation had "
+                                  f"already expired or been superseded by the time payment completed. "
+                                  + (f"An automatic Stripe refund was issued." if refunded
+                                     else f"The automatic refund attempt FAILED ({refund_error}) -- this needs manual action.")),
+                    impact=("Customer was refunded automatically; no lead was sent." if refunded
+                            else "Customer paid for a lead but did not receive it, and was NOT automatically refunded."),
+                    action_required=("No action required -- refunded automatically. Confirm in Stripe if you want to double check." if refunded
+                                      else "Manually refund the payment in Stripe or email the customer offering a credit."),
+                    severity="WARNING" if refunded else "CRITICAL",
+                    throttle_hours=0.0
+                )
+                _mark_stripe_event_fulfilled(event_id)
+        elif lead_id:
+            # Legacy path: a checkout session created before this deploy
+            # (no reservation_token in its metadata) may still be completing
+            # payment now -- fall back to the original burn-on-payment
+            # behaviour exactly as before, so an in-flight sale from the old
+            # flow isn't broken by this release. Every NEW checkout always
+            # carries a reservation_token (set unconditionally in
+            # create_checkout_session whenever lead_id is set), so this
+            # branch naturally stops being hit once old sessions expire.
             lead_data = database.burn_lead_inventory(lead_id, customer_email)
             if lead_data:
-                logger.info(f"[Stripe] Lead {lead_id} burned from inventory for {mask(customer_email)}")
+                logger.info(f"[Stripe] Lead {lead_id} burned from inventory for {mask(customer_email)} (legacy pre-reservation checkout)")
                 notifications.send_purchased_lead_email(customer_email, lead_data)
                 _mark_stripe_event_fulfilled(event_id)
             elif is_retry:
-                # Stripe redelivers the same event on timeout/non-2xx — this is an
-                # expected retry of an already-fulfilled purchase, not a real double-sale.
                 logger.info(f"[Stripe] Duplicate webhook delivery for already-processed lead {lead_id} ({mask(customer_email)}) — ignoring retry.")
             else:
                 logger.warning(f"[Stripe] Lead {lead_id} was already claimed or not found, but {mask(customer_email)} paid for it!")
@@ -488,6 +662,25 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
         return {"event": "payment_complete", "email": customer_email,
                 "session_id": session_id, "amount_pence": amount, "outcode": outcode, "lead_id": lead_id}
 
+    elif event_type == "checkout.session.expired":
+        # Sep 15 2026: releases the reservation immediately instead of
+        # waiting out the full RESERVATION_RELEASE_MINUTES passive sweep --
+        # only fires if this event type is enabled on the Stripe webhook
+        # endpoint's configuration; the passive sweep (database.
+        # release_expired_reservations, called opportunistically from
+        # notifications.dispatch_lead_alerts) is what actually guarantees
+        # an abandoned lead becomes available again, so nothing depends on
+        # Stripe sending this.
+        metadata = data.get("metadata", {})
+        lead_id = metadata.get("lead_id")
+        reservation_token = metadata.get("reservation_token")
+        if lead_id and reservation_token:
+            import database
+            released = database.release_lead_reservation(lead_id, reservation_token)
+            if released:
+                database.update_order_fulfillment(reservation_token, "expired", "checkout_abandoned")
+                logger.info(f"[Stripe] Checkout for lead {lead_id} expired unpaid -- reservation released immediately.")
+        return {"event": "checkout_expired"}
 
     elif event_type == "customer.subscription.created":
         customer_id = data.get("customer")

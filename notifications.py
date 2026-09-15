@@ -784,9 +784,36 @@ def create_whatsapp_link(lead_ref: str, city: str, address: str, summary: str,
 
 def dispatch_lead_alerts(city: str, leads: list):
     """
-    Sends email alerts for new leads.
-    1. Routes leads directly to paying customers if the lead falls in their locked outcode.
-    2. Sends a master digest to the Admin (TEST_EMAIL).
+    Sends purchase-alert emails for new leads to matching active subscribers.
+
+    Sep 15 2026, Phase 3 (Nick's spec, "replace free dispatch with purchase
+    alerts"): this used to give the #1 matching subscriber the lead for
+    free (database.record_lead_dispatch_and_burn), with quota-limited
+    seniority allocation and an adjacent-sector "overflow" top-up for
+    under-served subscribers. None of that exists anymore -- a lead is
+    never given away. Every ACTIVE subscriber whose area/category/job-size
+    matches gets the same early-access alert at the same time (Nick's own
+    closing note on the spec: "the same early-access window for all
+    subscribers... easier to explain and enforce than an elaborate queue
+    based on tier and seniority") with a real "unlock this lead" link into
+    the exact same reservation/checkout flow the Marketplace itself uses --
+    whoever actually completes checkout first is the only one who gets it,
+    enforced by database.reserve_lead_for_checkout, not by this function.
+    The lead stays unlisted to the public Marketplace for
+    database.EARLY_ACCESS_WINDOW_MINUTES (see get_marketplace_leads_with_
+    freshness), which is what makes "early access" a real subscriber
+    benefit rather than just a phrase.
+
+    IMPORTANT: unlike the old dispatch email, this one must NEVER reveal
+    the full street address or link to the address-revealing tools
+    (generate-letter/generate-street-flyer/WhatsApp forward) -- those are
+    what buying the lead pays for. Old dispatch could show them because
+    the recipient already owned the lead by the time the email sent; this
+    one goes out before any purchase, to every matching subscriber, so it
+    shows only the same redacted area-level info the Marketplace's own
+    pre-purchase cards show.
+
+    Also still sends the admin master digest for a big batch, unchanged.
     """
     if not leads:
         return
@@ -794,23 +821,32 @@ def dispatch_lead_alerts(city: str, leads: list):
     import database
     import re
 
-    # 0. Make sure this month's counters are reset before we check anyone's quota —
-    # otherwise a dispatch run that fires before the daily reset job would wrongly
-    # skip fully-eligible contractors using last month's exhausted count.
-    database.reset_monthly_quotas_if_needed()
+    # 0b. Sep 15 2026: passive sweep for the exclusive-purchase reservation
+    # state machine -- releases any lead whose checkout reservation expired
+    # (abandoned Stripe Checkout, or a checkout.session.expired event never
+    # arrived) back to 'new' so it's visible in the Marketplace again. Safe
+    # to call opportunistically and often; a no-op when nothing's expired.
+    database.release_expired_reservations()
 
-    # 1. Fetch active subscribers ordered strictly by Seniority (subscribed_at ASC)
+    # 1. Fetch active subscribers. Order no longer matters functionally
+    # (nobody "wins" a lead by being senior anymore -- every match gets the
+    # same alert), kept as-is since it's just a stable, already-correct
+    # source of the active subscriber list.
     subscribers = database.get_active_subscribers_by_seniority()
     customer_leads = {}       # {email: [leads]}
-    overflow_notices = {}     # {email: bool}
     customer_prefs = {}       # {email: notification_preference} — Contractor Portal Upgrades (Phase 2)
     customer_coords = {}      # {email: (lat, lon)} — Sep 8 2026, so the dispatch email can show "X.X miles away"
+    customer_discount = {}    # {email: discount dict} — Sep 15 2026, so the alert can show their real member price
 
     for lead in leads:
         addr = lead.get("addr", "").upper()
         lead_id = lead.get("id") or lead.get("ref") or lead.get("reference")
         lead_size = lead.get("lead_score") or "small"
         extracted_outcodes = [m.group(1) for m in re.finditer(r'\b([A-Z]{1,2}[0-9][A-Z0-9]?)\s*([0-9][A-Z]{2})\b', addr)]
+        # Sep 15 2026: the same redacted area-level label the Marketplace
+        # shows pre-purchase -- never the real address, which is exactly
+        # what buying the lead pays for.
+        lead["area_label"] = (extracted_outcodes[0] if extracted_outcodes else None) or f"{lead.get('council', '')} area".strip() or "Area unavailable"
 
         # Find matching subscribers for this lead's geographic area
         matching_subs = []
@@ -872,66 +908,34 @@ def dispatch_lead_alerts(city: str, leads: list):
                 matching_subs.append(sub)
 
 
-        # Seniority Allocation Rule:
-        # Longest-tenured subscriber gets the lead first, provided they haven't hit their monthly quota
+        # Sep 15 2026, Phase 3: every matching ACTIVE subscriber gets the
+        # same early-access alert for this lead -- no seniority winner, no
+        # quota check, nothing claimed or burned here. The lead stays
+        # status='new' and fully for sale; database.reserve_lead_for_
+        # checkout (inside payments.create_checkout_session) is what
+        # actually enforces that only the first to complete checkout gets
+        # it, exactly as it already does for a Marketplace purchase.
         for sub in matching_subs:
             email = sub["email"]
-            sub_id = sub["id"]
+            if email not in customer_leads:
+                customer_leads[email] = []
+                customer_prefs[email] = sub.get("notification_preference") or "email"
+                customer_coords[email] = (sub.get("lat"), sub.get("lon"))
+                customer_discount[email] = database.get_subscriber_discount(email)
+            customer_leads[email].append(lead)
 
-            # Quota enforcement — skip if at monthly limit
-            if sub.get("delivered", 0) >= sub.get("quota", 5):
-                logging.debug(f"[Quota] Skipping {email} — at monthly quota ({sub.get('delivered')}/{sub.get('quota')})")
-                continue
-
-            # Atomically burn and record dispatch
-            if database.record_lead_dispatch_and_burn(lead_id, sub_id, email, dispatch_type="seniority_standard"):
-                if email not in customer_leads:
-                    customer_leads[email] = []
-                    customer_prefs[email] = sub.get("notification_preference") or "email"
-                    customer_coords[email] = (sub.get("lat"), sub.get("lon"))
-                customer_leads[email].append(lead)
-                break  # Lead burned and dispatched to #1 senior subscriber; do NOT give to anyone else
-
-
-    # 2. Check for Under-Supplied Junior Subscribers & Dispatch Adjacent Overflows
-    for sub in subscribers:
-        email = sub["email"]
-        sub_id = sub["id"]
-        # If this subscriber received 0 leads this run and their monthly deliveries are low
-        if email not in customer_leads and sub.get("delivered", 0) < max(3, int(sub.get("quota", 20) * 0.2)):
-            overflow_leads = database.get_closest_unallocated_leads(sub["outcode"], limit=2)
-            if overflow_leads:
-                for ol in overflow_leads:
-                    ol_id = ol.get("id") or ol.get("ref")
-                    if database.record_lead_dispatch_and_burn(ol_id, sub_id, email, dispatch_type="overflow_compensation"):
-                        if email not in customer_leads:
-                            customer_leads[email] = []
-                            customer_prefs[email] = sub.get("notification_preference") or "email"
-                            customer_coords[email] = (sub.get("lat"), sub.get("lon"))
-                        customer_leads[email].append(ol)
-                        overflow_notices[email] = True
-
-    # 3. Dispatch Formatted Emails to Each Contractor
+    # 2. Dispatch Purchase-Alert Emails to Each Matching Contractor
     for email, routed_leads in customer_leads.items():
-        is_overflow = overflow_notices.get(email, False)
-        
-        notice_banner = """
+        disc = customer_discount.get(email) or {"eligible": False, "discount_pct": 0}
+        discount_line = (
+            f" As a {disc.get('tier', '').replace('_', ' ').title()} member, you get {disc['discount_pct']}% off when you're signed in."
+            if disc.get("eligible") else ""
+        )
+        notice_banner = f"""
         <div style="background:#f0fdf4; border-left:3px solid #059669; padding:10px; font-size:12px; color:#065f46; margin-bottom:16px;">
-            <b>Single-Sale Guarantee:</b> These leads have been delivered exclusively to you and burned from our public radar.
+            <b>Early Access:</b> These leads match your area and category and aren't visible on the public Marketplace yet. Whoever unlocks one first gets it -- exclusively, permanently removed from sale to anyone else.{discount_line}
         </div>
         """
-        if is_overflow:
-            notice_banner = """
-            <div style="background:#eff6ff; border-left:3px solid #3b82f6; padding:10px; font-size:12px; color:#1e40af; margin-bottom:16px;">
-                <b>Priority Overflow Match:</b> Council filings in your immediate sector were quiet today. To protect your subscription value, we have automatically routed you the highest-value unallocated tree applications from adjacent sectors at zero extra cost.
-            </div>
-            """
-
-        # Contractor Portal Upgrades (Phase 2, part 1): add a forward-to-WhatsApp
-        # button per lead when the contractor has opted into it in /settings. This
-        # is a click-to-forward convenience link (create_whatsapp_link), not push
-        # delivery via WhatsApp's Business API — no such integration exists here.
-        wants_whatsapp = customer_prefs.get(email, "email") in ("whatsapp", "both")
 
         # Sep 8 2026, Nick's proximity-system ask ("we have a large job 4.2
         # miles from your location"): reuses database.lead_distance_miles,
@@ -947,45 +951,51 @@ def dispatch_lead_alerts(city: str, leads: list):
             dist = database.lead_distance_miles(c_lat, c_lon, l.get("addr", ""))
             return f"{dist} mi" if dist is not None else "—"
 
-        def _wa_button(l):
-            if not wants_whatsapp:
-                return ""
-            wa = create_whatsapp_link(
-                l.get("ref", l.get("reference", "")), city, l.get("addr", ""),
-                l.get("summary", ""), l.get("lead_score", "small"), l.get("lead_price", 25)
-            )
-            return f"<a href='{wa}' style='background:#25D366; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px; margin-left:4px;'>WhatsApp</a>"
+        def _unlock_button(l):
+            # Sep 15 2026: plan_key here is a placeholder for Stripe's
+            # mode='payment' price shape only -- payments.create_checkout_
+            # session recomputes the REAL live price from the lead itself
+            # whenever lead_id is set (_resolve_live_single_lead_price),
+            # exactly like every Marketplace "Unlock" button already does.
+            ref = l.get("ref", l.get("reference", ""))
+            url = f"{PUBLIC_APP_URL}/checkout/single_lead_medium?lead_id={urllib.parse.quote(str(ref))}"
+            return f"<a href='{url}' style='background:#059669; color:white; padding:6px 14px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold; white-space:nowrap;'>Unlock →</a>"
 
         rows = "".join([
             f"<tr>"
             f"<td style='padding:8px;'>{SCORE_TAG.get(l.get('lead_score','small'), '')}</td>"
-            f"<td style='padding:8px;'><b>{l['addr']}</b></td>"
+            # Sep 15 2026: area-level only (never the street address) -- this
+            # email goes out BEFORE any purchase, to every matching
+            # subscriber, so it shows exactly what the Marketplace's own
+            # pre-purchase card shows, nothing more. The full address is
+            # what unlocking the lead pays for.
+            f"<td style='padding:8px;'><b>{l.get('area_label', 'Area unavailable')}</b></td>"
             f"<td style='padding:8px; white-space:nowrap; color:#044332; font-weight:bold;'>{_distance_cell(l)}</td>"
-            f"<td style='padding:8px;'>{l['summary'][:90]}...</td>"
+            # Sep 15 2026: routed through _redacted_summary (same as every
+            # other pre-purchase email) -- a raw scraped summary can
+            # restate the site address inline, and this email now goes out
+            # before any purchase.
+            f"<td style='padding:8px;'>{_redacted_summary(l.get('summary'))[:90]}...</td>"
             f"<td style='padding:8px; font-size:11px; white-space:nowrap;'>{_agent_status_badge(l)}</td>"
-            f"<td style='padding:8px; white-space:nowrap;'>"
-            f"<a href='{PUBLIC_APP_URL}/generate-letter/{urllib.parse.quote(l.get('ref', l.get('reference', '')))}' style='background:#044332; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px; margin-right:4px;'>Letter</a>"
-            f"<a href='{PUBLIC_APP_URL}/generate-street-flyer/{urllib.parse.quote(l.get('ref', l.get('reference', '')))}' style='background:#059669; color:white; padding:4px 8px; border-radius:4px; text-decoration:none; font-size:12px;'>Flyer</a>"
-            f"{_wa_button(l)}"
-            f"</td>"
+            f"<td style='padding:8px; white-space:nowrap;'>{_unlock_button(l)}</td>"
             f"</tr>"
             for l in routed_leads
         ])
         body = f"""
             <div style="font-family:sans-serif; max-width:640px; margin:auto; color:#0f172a;">
-                <h2 style="color:#044332; margin-bottom:4px;">TreeKey Intelligence — {len(routed_leads)} New Leads</h2>
-                <p style="color:#64748b; font-size:14px; margin-top:0;">Here are the latest statutory tree work applications registered for your crew. "Exclusive" means this lead is sent only to you — it does not mean the homeowner hasn't already engaged someone; check the Agent column below.</p>
+                <h2 style="color:#044332; margin-bottom:4px;">TreeKey Early Access — {len(routed_leads)} New Leads</h2>
+                <p style="color:#64748b; font-size:14px; margin-top:0;">New statutory tree work applications matching your area and category, ahead of the public Marketplace. Unlock one to reveal the full address and applicant details -- it's yours exclusively, permanently removed from sale to anyone else. "Exclusive" doesn't mean the homeowner hasn't already engaged someone; check the Agent column below.</p>
 
                 {notice_banner}
 
                 <table border='1' cellspacing='0' style='border-collapse:collapse; width:100%; font-size:13px; border-color:#e2e8f0;'>
                     <tr style='background:#f8fafc;'>
                         <th style='padding:8px; text-align:left;'>Type</th>
-                        <th style='padding:8px; text-align:left;'>Location</th>
+                        <th style='padding:8px; text-align:left;'>Area</th>
                         <th style='padding:8px; text-align:left;'>Distance</th>
                         <th style='padding:8px; text-align:left;'>Description</th>
                         <th style='padding:8px; text-align:left;'>Agent</th>
-                        <th style='padding:8px; text-align:left;'>Tool</th>
+                        <th style='padding:8px; text-align:left;'></th>
                     </tr>
                     {rows}
                 </table>
@@ -1008,13 +1018,13 @@ def dispatch_lead_alerts(city: str, leads: list):
                     json={
                         "from": "TreeKey Intelligence <leads@treekey.uk>",
                         "to": [email],
-                        "subject": f"{len(routed_leads)} New Exclusive Planning Leads for your Crew",
+                        "subject": f"{len(routed_leads)} New Leads Available in Your Area — Early Access",
                         "html": body
                     }
                 )
-                logging.info(f"[Seniority Lead Router] Successfully routed {len(routed_leads)} leads to customer {email}")
+                logging.info(f"[Purchase Alert] Sent {len(routed_leads)}-lead early-access alert to {email}")
             except Exception as e:
-                logging.error(f"[Seniority Lead Router] Failed to route to {email}: {e}")
+                logging.error(f"[Purchase Alert] Failed to alert {email}: {e}")
 
     # 2. Master Digest for Admin
     if len(leads) > ALERT_BATCH_THRESHOLD:

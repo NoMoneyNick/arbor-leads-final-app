@@ -728,6 +728,30 @@ def init_db():
             # see admin_terms_consent_audit) or, if seen on a NEW row, a bug.
             "ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ;",
             "ALTER TABLE limbo_accounts ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ;",
+            # Sep 12 2026, Nick's ask ("give me a system that ... must be
+            # logically sound" -> the exclusive-purchase reservation flow):
+            # leads previously only had a 2-state status (new/claimed) with
+            # no way to hold one during Stripe checkout without either (a)
+            # burning it before payment is confirmed (risks giving away a
+            # lead for a payment that never completes) or (b) not holding it
+            # at all (risks two people paying for the same lead at once,
+            # which is the exact "DOUBLE SALE RACE CONDITION" alert already
+            # in payments.py). These add a real 'reserved' state in between.
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserved_by_email TEXT;",
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserved_session_id TEXT;",
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserved_at TIMESTAMPTZ;",
+            # Sep 12 2026: the `payments` table has existed since the very
+            # first schema but nothing ever actually wrote to it (confirmed
+            # by grep -- zero INSERT/UPDATE anywhere). Extending it into the
+            # real order/audit record Nick's spec asks for ("a record
+            # linking the buyer, lead, checkout, payment, price and
+            # fulfilment outcome") rather than building a new table from
+            # scratch, since the shape (stripe_session_id, amount_pence,
+            # customer_email, status) was already 80% of the way there.
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS lead_id TEXT;",
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS account_email TEXT;",
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS fulfillment_outcome TEXT;",
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();",
         ]
         failed_ddl = _run_ddl_statements_resiliently(conn, resilience_cols, phase_label="Phase1-columns")
 
@@ -2624,6 +2648,268 @@ def burn_lead_inventory(lead_id: str, buyer_email: str) -> dict:
         return None
 
 
+# ── Exclusive-purchase reservation flow (Sep 12 2026) ─────────────────────────
+# Nick's spec, verbatim: "Use a durable purchase flow: Available -> reserved ->
+# sold. Reserve a lead atomically when an eligible customer starts checkout.
+# Allow only one active reservation per lead. Align reservation expiry with
+# Stripe Checkout expiry. Confirm the old checkout cannot still complete
+# before making the lead available again." This does NOT touch
+# burn_lead_inventory above -- that function is also used by the unrelated
+# free-lead-signup grant (main.py's free-account flow), which never goes
+# through Stripe checkout/reservation at all and must keep working exactly
+# as before. This is a parallel, additive path for the PAID single-lead
+# purchase flow only.
+#
+# STRIPE_CHECKOUT_EXPIRY_MINUTES is what payments.create_checkout_session
+# actually sets as the Stripe Checkout Session's own `expires_at` (Stripe's
+# minimum allowed value). RESERVATION_RELEASE_MINUTES is deliberately a few
+# minutes LONGER -- if both used the exact same number, a payment submitted
+# in the last instant before Stripe's own cutoff could still be processing
+# when our reservation is swept, which is exactly the "old checkout somehow
+# still completes after we gave the lead to someone else" race Nick's spec
+# calls out. The gap is the safety margin, not a mistake.
+STRIPE_CHECKOUT_EXPIRY_MINUTES = 30
+RESERVATION_RELEASE_MINUTES = 35
+
+
+def reserve_lead_for_checkout(lead_id: str, account_email: str, checkout_session_id: str) -> bool:
+    """Atomically reserves a lead for exactly one in-progress checkout.
+    Succeeds if the lead is genuinely available (status new/NULL) OR if a
+    PREVIOUS reservation on it has passed RESERVATION_RELEASE_MINUTES (a
+    single atomic UPDATE, not a separate check-then-reserve -- so there's no
+    window where two callers could both see "expired" and both win). Fails
+    (returns False) if the lead is already sold, or actively reserved by a
+    still-live checkout -- the caller (create_checkout_session) must refuse
+    the whole checkout rather than proceed, exactly like the existing
+    expired/sold-lead refusal it already does."""
+    if not SURL or not lead_id or not checkout_session_id:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE leads
+                SET status = 'reserved', reserved_by_email = %s,
+                    reserved_session_id = %s, reserved_at = NOW()
+                WHERE (id::text = %s OR reference = %s)
+                  AND (
+                    status = 'new' OR status IS NULL
+                    OR (status = 'reserved' AND reserved_at < NOW() - (%s * INTERVAL '1 minute'))
+                  )
+                RETURNING id;
+            """, (account_email, checkout_session_id, lead_id, lead_id, RESERVATION_RELEASE_MINUTES))
+            row = cur.fetchone()
+            conn.commit()
+            return bool(row)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Reservation] Error reserving lead {lead_id} for session {checkout_session_id}: {e}")
+        return False
+
+
+def release_lead_reservation(lead_id: str, checkout_session_id: str) -> bool:
+    """Releases a lead back to 'new' -- but ONLY the reservation that
+    belongs to this exact checkout session, never someone else's. Used when
+    a checkout is explicitly abandoned/cancelled (a Stripe checkout.session.
+    expired event, if wired up) rather than waiting for the passive sweep."""
+    if not SURL or not lead_id or not checkout_session_id:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE leads
+                SET status = 'new', reserved_by_email = NULL, reserved_session_id = NULL, reserved_at = NULL
+                WHERE (id::text = %s OR reference = %s) AND status = 'reserved' AND reserved_session_id = %s
+                RETURNING id;
+            """, (lead_id, lead_id, checkout_session_id))
+            row = cur.fetchone()
+            conn.commit()
+            return bool(row)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Reservation] Error releasing lead {lead_id} for session {checkout_session_id}: {e}")
+        return False
+
+
+def release_expired_reservations() -> int:
+    """Passive sweep -- safe to call opportunistically and often (same
+    pattern as reset_monthly_quotas_if_needed). Only acts on reservations
+    genuinely past RESERVATION_RELEASE_MINUTES, so it can never release a
+    reservation whose checkout might still legitimately complete. This
+    exists purely so an abandoned lead becomes visible in the Marketplace
+    again promptly, rather than relying only on the next reserve attempt's
+    own steal-if-expired check to notice."""
+    if not SURL:
+        return 0
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE leads
+                SET status = 'new', reserved_by_email = NULL, reserved_session_id = NULL, reserved_at = NULL
+                WHERE status = 'reserved' AND reserved_at < NOW() - (%s * INTERVAL '1 minute')
+                RETURNING id;
+            """, (RESERVATION_RELEASE_MINUTES,))
+            rows = cur.fetchall()
+            conn.commit()
+            count = len(rows)
+            if count > 0:
+                logger.info(f"[Reservation] Released {count} expired reservation(s) back to the Marketplace.")
+            return count
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Reservation] Error sweeping expired reservations: {e}")
+        return 0
+
+
+def confirm_reserved_lead_sale(lead_id: str, checkout_session_id: str, buyer_email: str) -> dict:
+    """The final 'sold' transition for the reservation-based paid flow --
+    the counterpart to burn_lead_inventory, but strict: only succeeds if
+    THIS checkout session is the one holding the reservation. This closes a
+    real gap in the old flow: previously ANY successful payment referencing
+    a lead_id could burn it (WHERE status='new'), with no check that the
+    payment came from the checkout that actually reserved it -- meaning a
+    confused/replayed webhook could in principle claim a lead never
+    reserved by that session. Returns the same field shape as
+    burn_lead_inventory (so notifications.send_purchased_lead_email works
+    unchanged) or None if this session's reservation is gone (expired,
+    stolen, or never existed) -- the caller (payments.py's webhook) treats
+    None here as "payment succeeded but we can't honour it" and must
+    auto-refund, never silently keep the money."""
+    if not SURL or not lead_id or not checkout_session_id:
+        return None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE leads
+                SET status = 'claimed'
+                WHERE (id::text = %s OR reference = %s) AND status = 'reserved' AND reserved_session_id = %s
+                RETURNING id, reference, address, summary, council_source, lead_score, lead_price,
+                          applicant_name, agent_name, agent_company, has_agent, registered_date;
+            """, (lead_id, lead_id, checkout_session_id))
+            row = cur.fetchone()
+            conn.commit()
+            if row:
+                logger.info(f"[Reservation] Lead {lead_id} sold to {buyer_email} via session {checkout_session_id}.")
+                return {
+                    "id": row[0], "reference": row[1], "address": row[2], "summary": row[3],
+                    "council_source": row[4], "lead_score": row[5], "lead_price": row[6],
+                    "applicant_name": row[7], "agent_name": row[8], "agent_company": row[9],
+                    "has_agent": row[10], "registered_date": row[11],
+                }
+            return None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Reservation] Error confirming sale of lead {lead_id} for session {checkout_session_id}: {e}")
+        return None
+
+
+def record_order(checkout_session_id: str, account_email: str, amount_pence: int, lead_id: str = None, plan: str = None, status: str = "pending") -> bool:
+    """The audit record Nick's spec asks for: 'a record linking the buyer,
+    lead, checkout, payment, price and fulfilment outcome.' Written at
+    checkout-CREATION time (before Stripe redirect), so there's a durable
+    row even if the customer never completes payment -- update_order_
+    fulfillment below fills in the outcome once the webhook fires. Reuses
+    the `payments` table, which existed in the schema already but (per grep)
+    was never actually written to anywhere until now."""
+    if not SURL or not checkout_session_id:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                INSERT INTO payments (stripe_session_id, plan, amount_pence, customer_email, account_email, lead_id, status, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (stripe_session_id) DO NOTHING;
+            """, (checkout_session_id, plan, amount_pence, account_email, account_email, lead_id, status))
+            conn.commit()
+            return True
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Order] Error recording order for session {checkout_session_id}: {e}")
+        return False
+
+
+def update_order_fulfillment(checkout_session_id: str, status: str, fulfillment_outcome: str) -> bool:
+    """Fills in what actually happened to an order recorded by record_order
+    -- called from the webhook once we know whether the lead was
+    successfully sold, or the payment had to be refunded because the
+    reservation couldn't be honoured."""
+    if not SURL or not checkout_session_id:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                UPDATE payments
+                SET status = %s, fulfillment_outcome = %s, updated_at = NOW()
+                WHERE stripe_session_id = %s;
+            """, (status, fulfillment_outcome, checkout_session_id))
+            conn.commit()
+            return True
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Order] Error updating fulfillment for session {checkout_session_id}: {e}")
+        return False
+
+
+def get_subscriber_discount(account_email: str) -> dict:
+    """Sep 12 2026, Nick's ask: discount eligibility must come from 'the
+    authenticated customer's subscription entitlement, not an email
+    supplied at checkout' -- this is that server-side check. Callers must
+    only ever pass an email that's already been verified via the signed
+    session cookie (main.py's _verify_session_cookie), never a raw form
+    field or whatever Stripe's own checkout later collects -- this function
+    has no way to enforce that itself, it just answers "does this exact
+    email have an active subscription" honestly.
+
+    TIER_DISCOUNT_PCT is deliberately simple for the first release (Nick's
+    ask: "the same early-access window for all subscribers, with tiers
+    differentiated by real tools, categories and discounts" -- kept as flat
+    numbers here rather than a formula, so the actual percentages are easy
+    to find and change in one place without hunting through checkout code."""
+    no_discount = {"eligible": False, "tier": None, "discount_pct": 0}
+    if not account_email:
+        return no_discount
+    sub = get_contractor_subscription(account_email)
+    if not sub or not sub.get("active"):
+        return no_discount
+    tier = sub.get("tier")
+    pct = TIER_DISCOUNT_PCT.get(tier, 0)
+    if pct <= 0:
+        return no_discount
+    return {"eligible": True, "tier": tier, "discount_pct": pct}
+
+
+TIER_DISCOUNT_PCT = {
+    "starter": 10,
+    "growth": 15,
+    "arb_consultant": 15,
+    "commercial_forestry": 20,
+    "treekey_elite": 25,
+}
+
+
 def _extract_outcodes(address: str) -> list:
     """Sep 5 2026: pulled out of notifications.dispatch_lead_alerts' inline
     regex so the free-signup lead-matching code below can find a lead's
@@ -3044,6 +3330,138 @@ def classify_leads_by_radius(pool_addresses: list, target_lat: Optional[float], 
         # both buckets, same treatment as a lead whose outcode can't be
         # resolved at all.
     return {"in_radius": in_radius, "nearby": nearby}
+
+
+def estimate_area_monthly_capacity(outcode: str, radius_miles: float, lookback_days: int = 45, conn=None) -> dict:
+    """Sep 12 2026, Nick's ask ("give me a system that's logically sound"):
+    register_or_update_subscription had zero check on whether an area could
+    actually support another subscription -- the same 15-mile circle could
+    be sold to unlimited Starter/Growth/Elite subscribers with nothing
+    warning anyone. This estimates how many real leads an area has actually
+    produced recently, reusing classify_leads_by_radius's own proven
+    haversine matching against a historical pool (ANY lead status, not just
+    'new') instead of the live unclaimed-only pool it normally gets.
+
+    lookback_days defaults to 45 -- comfortably inside the 56-day window
+    cleanup_stale_leads uses before deleting anything, and that cleanup
+    only ever deletes leads that stayed 'new'/unclaimed the whole time (see
+    STALE_LEAD_SQL_WHERE) -- a claimed/dispatched lead is never deleted, so
+    this window doesn't undercount real historical demand.
+
+    Returns {"monthly_estimate": float|None, "sample_days": int} --
+    monthly_estimate is None only when the outcode itself can't be
+    geocoded at all (unknown area, not "zero demand" -- those are
+    different things and the caller needs to tell them apart)."""
+    if not outcode:
+        return {"monthly_estimate": None, "sample_days": lookback_days}
+    area = get_outcode_area_label(outcode.strip().upper())
+    target_lat, target_lng = area.get("lat"), area.get("lon")
+    if target_lat is None or target_lng is None:
+        return {"monthly_estimate": None, "sample_days": lookback_days}
+
+    prefix_m = re.match(r'^([A-Z]{1,2})', outcode.strip().upper())
+    prefix = prefix_m.group(1) if prefix_m else outcode.strip().upper()[:1]
+
+    owns_conn = conn is None
+    try:
+        if owns_conn:
+            conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT address FROM leads
+                WHERE address ~* %s
+                  AND COALESCE(discovered_at, registered_date) >= NOW() - (%s * INTERVAL '1 day')
+            """, (rf"\y{prefix}[0-9]", lookback_days))
+            pool_addresses = cur.fetchall()
+        finally:
+            cur.close()
+        result = classify_leads_by_radius(pool_addresses, target_lat, target_lng, radius_miles, conn=conn)
+        monthly_estimate = round(result["in_radius"] / lookback_days * 30, 1)
+        return {"monthly_estimate": monthly_estimate, "sample_days": lookback_days}
+    except Exception as e:
+        logger.error(f"[Capacity] Historical volume estimate error for {outcode}: {e}")
+        return {"monthly_estimate": None, "sample_days": lookback_days}
+    finally:
+        if owns_conn:
+            conn.close()
+
+
+def get_committed_quota_for_outcode(outcode: str, conn=None) -> int:
+    """Sum of monthly_quota across all ACTIVE subscribers centered on this
+    exact outcode. Sep 12 2026: a deliberate, simple approximation --
+    matches subscribers by exact center_outcode rather than a full
+    geometric radius-overlap calculation (a subscriber based one outcode
+    over with a big radius could also be competing for the same leads, but
+    isn't counted here). Good enough to catch the actual oversell risk this
+    exists for -- multiple subscriptions stacked on the exact same postcode
+    district -- without the complexity of pairwise-overlap math."""
+    if not SURL or not outcode:
+        return 0
+    owns_conn = conn is None
+    try:
+        if owns_conn:
+            conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT COALESCE(SUM(monthly_quota), 0) FROM contractor_subscriptions
+                WHERE active = TRUE AND center_outcode = %s
+            """, (outcode.strip().upper(),))
+            return cur.fetchone()[0]
+        finally:
+            cur.close()
+    except Exception as e:
+        logger.error(f"[Capacity] Committed quota lookup error for {outcode}: {e}")
+        return 0
+    finally:
+        if owns_conn:
+            conn.close()
+
+
+def get_area_capacity_status(outcode: str, radius_miles: float, additional_quota: int = 0, conn=None) -> dict:
+    """Sep 12 2026, Nick's ask: the single entry point checkout (and the
+    homepage radar) call to answer "can this area actually support another
+    subscription at this quota". Combines estimate_area_monthly_capacity
+    (real recent demand) with get_committed_quota_for_outcode (what's
+    already promised to existing active subscribers) plus the quota this
+    specific new signup would add.
+
+    status is one of:
+      "open"    -- plenty of headroom (committed+new < 70% of the real
+                   monthly estimate)
+      "limited" -- getting tight (70-100%)
+      "full"    -- already at or past what the area realistically
+                   produces. Checkout blocks new SUBSCRIPTIONS at this
+                   status -- the Marketplace (pay-per-lead) is unaffected,
+                   since it only ever shows genuinely unclaimed leads and
+                   can't be oversold by this at all.
+      "unknown" -- outcode couldn't be geocoded; caller should treat this
+                   like "open", not block on missing data.
+
+    Deliberate choice: zero historical leads AND zero existing subscribers
+    reads as "open", not "full" -- refusing to ever let anyone be the
+    first subscriber in a genuinely new/sparse area would be overly
+    restrictive on real, if modest, demand. Zero historical leads WITH an
+    existing subscriber already holding quota there reads as "full" --
+    there's demonstrably nothing left to promise a second one."""
+    if not outcode:
+        return {"status": "unknown", "monthly_estimate": None, "committed_quota": 0, "projected_quota": additional_quota}
+
+    cap = estimate_area_monthly_capacity(outcode, radius_miles, conn=conn)
+    committed = get_committed_quota_for_outcode(outcode, conn=conn)
+    projected = committed + additional_quota
+    estimate = cap["monthly_estimate"]
+
+    if estimate is None:
+        status = "unknown"
+    elif estimate <= 0:
+        status = "open" if committed == 0 else "full"
+    else:
+        ratio = projected / estimate
+        status = "open" if ratio < 0.7 else ("limited" if ratio < 1.0 else "full")
+
+    return {"status": status, "monthly_estimate": estimate, "committed_quota": committed, "projected_quota": projected}
 
 
 def _size_mix_select(pool: list, limit: int) -> list:
@@ -5046,9 +5464,47 @@ def _is_agent_already_handling_the_job(lead: dict) -> bool:
     return lead.get("agent_is_tree_surgeon") is not False
 
 
+# Sep 15 2026, Phase 3 (replacing free lead dispatch with purchase alerts,
+# Nick's spec): active subscribers get an early-access email the moment a
+# matching lead is found (see notifications.dispatch_lead_alerts), but the
+# lead itself is NOT given away free -- it's still a real purchase, same
+# reservation/exclusivity machinery as any other sale. This window is what
+# actually makes that "early access" real rather than just a phrase: a lead
+# this fresh is hidden from the PUBLIC marketplace (non-subscribers) for
+# this many minutes after discovery, so subscribers who were alerted have a
+# genuine head start before the general public can also buy it. One flat
+# window for every tier, deliberately -- Nick's own closing note on the
+# spec: "the same early-access window for all subscribers... easier to
+# explain and enforce than an elaborate queue based on tier and seniority."
+EARLY_ACCESS_WINDOW_MINUTES = 60
+
+
+def _within_early_access_window(discovered_at) -> bool:
+    """True if discovered_at is younger than EARLY_ACCESS_WINDOW_MINUTES.
+    Same tolerant parsing as calculate_lead_freshness's own clock_start
+    handling (a psycopg2 timestamp column can come back as a real
+    datetime, a plain string, or occasionally None for very old rows)."""
+    import datetime
+    if not discovered_at:
+        return False
+    now = datetime.datetime.now(datetime.timezone.utc)
+    try:
+        if isinstance(discovered_at, str):
+            dt = datetime.datetime.fromisoformat(discovered_at.replace("Z", "+00:00"))
+        else:
+            dt = discovered_at
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        age_minutes = (now - dt).total_seconds() / 60.0
+        return age_minutes < EARLY_ACCESS_WINDOW_MINUTES
+    except Exception:
+        return False
+
+
 def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 40, filter_category: str = None,
                                           target_lat: float = None, target_lng: float = None,
-                                          radius_miles: float = None, max_fresh_lookups: int = 20) -> list:
+                                          radius_miles: float = None, max_fresh_lookups: int = 20,
+                                          subscriber_early_access: bool = True) -> list:
     """
     Returns unallocated leads enriched with their dynamic statutory freshness calculation.
     Supports filtering by tier ('council', 'domestic', 'flash_hot', 'active', 'clearance', 'granted'),
@@ -5057,6 +5513,14 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
     a real "enter your postcode and a distance" search; target_lat/target_lng/radius_miles come
     from resolve_location() on the customer's typed postcode/outcode).
     Enforces strict separation so council planning notices and private domestic leads are never conflated.
+
+    subscriber_early_access (Sep 15 2026, Phase 3): pass True (default,
+    unchanged behaviour) when the viewer is a verified active subscriber or
+    this call isn't customer-facing at all -- every matching lead shows.
+    Pass False for an anonymous or non-subscribing marketplace visitor and
+    any lead discovered within EARLY_ACCESS_WINDOW_MINUTES is held back
+    from the result, exactly mirroring what the early-access alert email
+    already promised subscribers.
     """
     if not SURL:
         return []
@@ -5351,6 +5815,8 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 if radius_miles is not None and target_lat is not None and target_lng is not None:
                     if idx not in _dist_by_lead or _dist_by_lead[idx] > radius_miles:
                         continue
+                if not subscriber_early_access and _within_early_access_window(l.get("discovered_at")):
+                    continue
                 enriched.append(l)
 
                 # Aug 31 2026: this used to break out of the loop as soon as
@@ -5660,7 +6126,20 @@ def get_contractor_dashboard_data(email: str) -> dict:
                 "stripe_sub_id": sub_row[7] if sub_row else None
             }
 
-            # 2. Fetch dispatched leads
+            # 2. Fetch this contractor's leads: both historical free-dispatch
+            # rows from before the Sep 15 2026 Phase 3 change (lead_dispatches
+            # -- kept so nothing already on a contractor's dashboard vanishes)
+            # and every lead they've actually PAID for since, whether that
+            # purchase came from an early-access alert email or the
+            # Marketplace directly -- both go through the same reservation/
+            # checkout flow now, so the `payments` audit-trail row (Sep 15
+            # 2026 reservation spec) is the real source of truth for "did
+            # this contractor receive this lead" going forward. Without this
+            # second half, a subscriber's dashboard would show zero new
+            # leads forever post-Phase-3, since nothing writes to
+            # lead_dispatches anymore -- a real functional gap, not just
+            # stale copy, since dispatch_lead_alerts no longer gives leads
+            # away for free to populate that table.
             cur.execute("""
                 SELECT l.id, l.reference, l.address, l.summary, l.council_source, l.lead_score, l.lead_price,
                        d.dispatched_at, d.dispatch_type, l.applicant_name, l.agent_name, l.agent_company, l.has_agent,
@@ -5668,9 +6147,19 @@ def get_contractor_dashboard_data(email: str) -> dict:
                 FROM lead_dispatches d
                 JOIN leads l ON l.id = d.lead_id
                 WHERE d.contractor_email = %s
-                ORDER BY d.dispatched_at DESC
+
+                UNION ALL
+
+                SELECT l.id, l.reference, l.address, l.summary, l.council_source, l.lead_score, l.lead_price,
+                       p.updated_at AS dispatched_at, 'purchased' AS dispatch_type, l.applicant_name, l.agent_name,
+                       l.agent_company, l.has_agent, l.registered_date
+                FROM payments p
+                JOIN leads l ON l.id::text = p.lead_id
+                WHERE p.account_email = %s AND p.lead_id IS NOT NULL AND p.status = 'paid'
+
+                ORDER BY dispatched_at DESC
                 LIMIT 30;
-            """, (email.strip().lower(),))
+            """, (email.strip().lower(), email.strip().lower()))
             leads_rows = cur.fetchall()
             cols = ["id", "ref", "addr", "summary", "council", "score", "price", "dispatched_at", "dispatch_type",
                      "applicant_name", "agent_name", "agent_company", "has_agent", "registered_date"]
