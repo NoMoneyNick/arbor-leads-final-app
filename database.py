@@ -266,14 +266,14 @@ def init_db():
                 UNIQUE (api_name, period_month)
             );
 
-            # Sep 12 2026: the territory_claims table (whole-district lock
-            # feature) was deleted per Nick's explicit call -- it's part of
-            # the old system we are deleting, and claim_territory_atomically
-            # was never even called anywhere in the live codebase, so nothing
-            # was ever really locked in production. Deliberately NOT running
-            # a live DROP TABLE against the production database here: an
-            # unused leftover table costs nothing, but a destructive
-            # migration carries risk for zero benefit.
+            -- Sep 12 2026: the territory_claims table (whole-district lock
+            -- feature) was deleted per Nick's explicit call -- it's part of
+            -- the old system we are deleting, and claim_territory_atomically
+            -- was never even called anywhere in the live codebase, so nothing
+            -- was ever really locked in production. Deliberately NOT running
+            -- a live DROP TABLE against the production database here: an
+            -- unused leftover table costs nothing, but a destructive
+            -- migration carries risk for zero benefit.
 
             CREATE TABLE IF NOT EXISTS contractor_suggestions (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

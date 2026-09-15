@@ -1,0 +1,89 @@
+TREEKEY COLD EMAIL SEQUENCE - CURRENT APPROVED VERSION
+(assembled from COLD_EMAIL_SEQUENCE.md: the "Approved sequence" + all live-test corrections applied. This is a reconstruction for your review - the source doc never printed all corrections combined into one clean copy, so read it through once before it goes live.)
+
+PERSONALISATION TOKENS USED:
+{{director_name}} - contact's name (falls back if missing, see Email 1 fallback below)
+{{company_name}} - their business name
+{{city}} - town/city
+{{area}} - postcode district / area name (e.g. "Reigate and Banstead") - NOT the street address. The original street-level token was dropped after a live send leaked a full address.
+{{recent_tpo_work}} - the application's work summary (e.g. "T1 Oak - Crown reduction by 3m")
+{{recent_tpo_council}} - the council name (e.g. "Leeds")
+{{recent_tpo_ref}} - the planning reference number (e.g. "26/04913/TR")
+
+Unsubscribe link on every email: https://treekey.uk/unsubscribe?token=... (real, working route)
+
+==============================================================
+EMAIL 1 - DAY 0
+==============================================================
+
+Subject: {{area}}, {{city}} - filed this week, unclaimed
+
+{{director_name}},
+
+Found a live tree job near {{area}} that nobody's claimed yet.
+
+{{recent_tpo_council}} logged {{recent_tpo_work}} this week (ref {{recent_tpo_ref}}). No tree surgeon's listed as agent yet.
+
+It's a live, unclaimed job on the council's register - we've already pulled it, verified it and set it aside for you, so you're not the one trawling every council portal yourself. Nobody's contacted the homeowner yet. It's yours, free, no card: [link]. There's a printable letter on the site too, so you can be at the door before anyone else knows the job exists.
+
+I run TreeKey. We watch every UK council register daily and sell each lead once, then it's gone from the platform for good.
+
+More in a few days if useful. No obligation.
+
+Nick, TreeKey (treekey.uk)
+
+Unsubscribe: [link]
+
+--------------------------------
+FALLBACK - if director name is missing:
+Replace "{{director_name}}," with "Found this for {{company_name}},"
+Everything else stays the same.
+--------------------------------
+
+==============================================================
+EMAIL 2 - DAY 3
+==============================================================
+
+Subject: the {{area}} lead, still yours
+
+{{director_name}},
+
+Checking in on the {{area}} lead. That wasn't a one-off - TreeKey finds jobs like it daily across every UK council register, and we don't send them to a list of firms. Each lead's bought once, then it's off the platform for good.
+
+No phone number on these - councils don't publish them - so each lead comes with a printable letter and a Street View brief instead.
+
+Stump Pro is £29/mo (3 leads), Climber £49/mo (5 leads, most popular), Commercial & Forestry £139/mo (12 leads). Or grab single leads from £19, no subscription.
+
+https://treekey.uk/pricing
+
+Nick, TreeKey
+
+Unsubscribe: [link]
+
+==============================================================
+EMAIL 3 - DAY 7
+==============================================================
+
+Subject: closing this out, no more chasing
+
+{{director_name}},
+
+Most follow-ups keep selling. This one's to stop.
+
+The {{area}} lead from earlier is still yours either way, free, no card. If a plan's not right for {{company_name}} yet, single leads run £19 to £49 with no subscription.
+
+Quick one before I go: worth a single lead, yes or no? Either answer's fine, and I won't chase this again.
+
+https://treekey.uk/pricing
+
+Nick, TreeKey
+
+Unsubscribe: [link]
+
+==============================================================
+BANNED PHRASES (do not reintroduce - each of these slipped back in at least once during drafting)
+==============================================================
+- "racing against N other firms" / any invented competitor count
+- "called the homeowner" / "calls first" (leads have no phone number - use "contacted")
+- "free for anyone to look up" / "public register, free to check" framing (invites DIY instead of buying)
+- the raw {{recent_tpo_street}} token in a live send (leaked full addresses - use {{area}} instead)
