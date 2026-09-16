@@ -732,14 +732,28 @@ def _nav_auth_block_html(request: Optional[Request]) -> str:
     rather than cramming in a 4th "My Leads" link too -- both /account and
     /dashboard link onward to /my-leads, so it's always one click away
     without widening the nav further on small screens (this row has no
-    flex-wrap, so mobile width is the real constraint here)."""
+    flex-wrap, so mobile width is the real constraint here).
+
+    IMPORTANT (Sep 16 2026): static/tailwind.css is a manually pre-built,
+    purged file (built once via tailwindcss.exe and committed -- it is NOT
+    rebuilt on deploy, confirmed by reading deploy.bat/UPDATE_WEBSITE.bat,
+    which only run `git add/commit/pull/push`). It only contains the exact
+    class names that existed somewhere in the source THE LAST TIME someone
+    ran that build. Any brand-new class/breakpoint combo (even a
+    perfectly valid Tailwind one) silently renders as nothing -- no error,
+    just missing styling -- until the CSS is rebuilt. `sm:inline` was
+    tried here first and confirmed NOT in the compiled file (only
+    `sm:inline-block` is) even though it's a completely standard utility.
+    Stick to classes already proven elsewhere in this file, or inline
+    styles, for anything new -- do not assume a class exists just because
+    it looks standard."""
     auth = _nav_auth_state(request)
     if auth:
         return f"""
                     <a href="/account" class="hover:brightness-125 transition-all text-emerald-300 font-bold text-xs sm:text-sm">
                         My Account
                     </a>
-                    <a href="{auth['dashboard_url']}" class="hover:brightness-125 transition-all text-slate-300 font-bold text-xs sm:text-sm hidden sm:inline">
+                    <a href="{auth['dashboard_url']}" class="hover:brightness-125 transition-all text-slate-300 font-bold text-xs" style="display:inline;">
                         Dashboard
                     </a>
                     <a href="/logout" class="text-slate-400 hover:text-white transition-colors text-xs font-mono uppercase">Log Out</a>"""
@@ -6624,6 +6638,16 @@ def logout():
 
 @app.get("/my-leads", response_class=HTMLResponse)
 def my_leads_view(request: Request):
+    """Sep 16 2026: deliberately built with INLINE styles, not Tailwind
+    utility classes, for everything below the shared nav/footer. Reason
+    (see the long note on _nav_auth_block_html above): static/tailwind.css
+    is a manually pre-built, purged file that is NOT rebuilt on deploy --
+    any brand-new class combo this page introduced would silently render
+    unstyled. Confirmed by grepping the compiled CSS: ~13 of the classes
+    first drafted for this page (bg-slate-700, border-l-2, px-1.5,
+    sm:grid-cols-3, hover:border-sky-500, etc.) were NOT actually present.
+    Inline styles sidestep that entirely and match the same pattern
+    /dashboard and /settings already use successfully in production."""
     session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
     if not session_email:
         return RedirectResponse(url="/login", status_code=303)
@@ -6645,39 +6669,39 @@ def my_leads_view(request: Request):
             summary = l.get("summary", "") or ""
             dispatched_at = str(l.get("dispatched_at", "") or "")[:16]
             filed_date = notifications._format_filed_date(l.get("registered_date"))
-            filed_line = f"<br><span class='text-slate-400 text-xs'>Filed: {filed_date}</span>" if filed_date else ""
+            filed_line = f"<br><span style='color:#94a3b8; font-size:11px;'>Filed: {filed_date}</span>" if filed_date else ""
             applicant_name = l.get("applicant_name")
-            applicant_line = f"<br><span class='text-slate-400 text-xs'>Applicant: {html.escape(applicant_name)}</span>" if applicant_name else ""
+            applicant_line = f"<br><span style='color:#94a3b8; font-size:11px;'>Applicant: {html.escape(applicant_name)}</span>" if applicant_name else ""
             has_agent = l.get("has_agent")
             if has_agent is True:
-                agent_badge = "<span class='text-[10px] bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded font-bold'>AGENT ON RECORD</span>"
+                agent_badge = "<span style='font-size:10px; background:rgba(217,119,6,0.15); color:#fbbf24; padding:2px 6px; border-radius:4px; font-weight:bold;'>AGENT ON RECORD</span>"
             elif has_agent is False:
-                agent_badge = "<span class='text-[10px] bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 rounded font-bold'>NO AGENT LISTED</span>"
+                agent_badge = "<span style='font-size:10px; background:rgba(16,185,129,0.12); color:#34d399; padding:2px 6px; border-radius:4px; font-weight:bold;'>NO AGENT LISTED</span>"
             else:
-                agent_badge = "<span class='text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded'>AGENT STATUS UNCONFIRMED</span>"
+                agent_badge = "<span style='font-size:10px; background:#1e293b; color:#94a3b8; padding:2px 6px; border-radius:4px;'>AGENT STATUS UNCONFIRMED</span>"
             gmap_url = f"/street-view/{urllib.parse.quote(ref)}"
             trimmed_summary = html.escape(summary[:220]) + ("..." if len(summary) > 220 else "")
             lead_cards += f"""
-            <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 mb-3">
-                <div class="flex justify-between items-start flex-wrap gap-2">
+            <div style="background:#0f172a; border:1px solid #1e293b; border-radius:10px; padding:18px; margin-bottom:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
                     <div>
-                        <span class="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-bold">REF: {html.escape(ref)}</span>
+                        <span style="font-size:10px; background:#1e293b; color:#94a3b8; padding:2px 6px; border-radius:4px; font-weight:bold;">REF: {html.escape(ref)}</span>
                         {agent_badge}
-                        <h4 class="text-slate-100 text-[15px] font-bold mt-1 mb-0.5">{html.escape(addr)}</h4>
-                        <span class="text-slate-400 text-xs">Received: {dispatched_at}</span>{filed_line}{applicant_line}
+                        <h4 style="color:#f1f5f9; font-size:15px; font-weight:bold; margin:4px 0 2px 0;">{html.escape(addr)}</h4>
+                        <span style="color:#94a3b8; font-size:12px;">Received: {dispatched_at}</span>{filed_line}{applicant_line}
                     </div>
-                    <div class="flex gap-1.5 flex-wrap">
-                        <a href="/generate-letter/{urllib.parse.quote(ref)}" target="_blank" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg no-underline">Letter</a>
-                        <a href="/generate-street-flyer/{urllib.parse.quote(ref)}" target="_blank" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg no-underline">Street Flyer</a>
-                        <a href="{gmap_url}" target="_blank" class="bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg no-underline">Street View</a>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                        <a href="/generate-letter/{urllib.parse.quote(ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Letter</a>
+                        <a href="/generate-street-flyer/{urllib.parse.quote(ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street Flyer</a>
+                        <a href="{gmap_url}" target="_blank" style="background:#334155; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street View</a>
                     </div>
                 </div>
-                <div class="bg-slate-950 border-l-2 border-emerald-600 px-3 py-2 mt-3 text-slate-300 text-xs">
+                <div style="background:#020617; border-left:3px solid #059669; padding:8px 12px; margin-top:10px; font-size:12px; color:#cbd5e1;">
                     <b>Specification:</b> {trimmed_summary}
                 </div>
             </div>"""
         if not lead_cards:
-            lead_cards = "<div class='text-center py-10 bg-slate-900/60 rounded-xl border border-slate-800'><p class='text-slate-400 m-0'>No leads purchased yet. <a href=\"/marketplace\" class=\"text-emerald-400 font-bold\">Browse the Marketplace</a> to unlock one.</p></div>"
+            lead_cards = "<div style='text-align:center; padding:32px; background:#0f172a; border-radius:10px; border:1px solid #1e293b;'><p style='color:#94a3b8; margin:0;'>No leads purchased yet. <a href=\"/marketplace\" style=\"color:#34d399; font-weight:bold;\">Browse the Marketplace</a> to unlock one.</p></div>"
     else:
         limbo = database.get_limbo_account(session_email)
         free_ref = limbo.get("free_lead_ref") if limbo else None
@@ -6686,21 +6710,21 @@ def my_leads_view(request: Request):
             if lead:
                 total = 1
                 filed_date = notifications._format_filed_date(lead.get("registered_date"))
-                filed_row = f"<p class='text-xs text-slate-400 mt-2 mb-0'>Filed: {filed_date}</p>" if filed_date else ""
+                filed_row = f"<p style='font-size:12px; color:#94a3b8; margin:8px 0 0 0;'>Filed: {filed_date}</p>" if filed_date else ""
                 lead_cards = f"""
-                <div class="bg-slate-900/60 border-l-4 border-emerald-500 rounded-xl p-5">
-                    <p class="text-sm m-0 mb-2"><span class="text-slate-400 font-bold">Reference:</span> <span class="text-slate-100">{html.escape(lead.get('reference', 'N/A'))}</span></p>
-                    <p class="text-sm m-0 mb-2"><span class="text-slate-400 font-bold">Address:</span> <span class="text-slate-100">{html.escape(lead.get('address', 'N/A'))}</span></p>
-                    <p class="text-sm m-0"><span class="text-slate-400 font-bold">Description:</span><br><span class="text-slate-300 text-[13px]">{html.escape(lead.get('summary', 'No summary available.'))}</span></p>
+                <div style="background:#0f172a; border-left:4px solid #10b981; border-radius:10px; padding:18px;">
+                    <p style="font-size:14px; margin:0 0 8px 0;"><span style="color:#94a3b8; font-weight:bold;">Reference:</span> <span style="color:#f1f5f9;">{html.escape(lead.get('reference', 'N/A'))}</span></p>
+                    <p style="font-size:14px; margin:0 0 8px 0;"><span style="color:#94a3b8; font-weight:bold;">Address:</span> <span style="color:#f1f5f9;">{html.escape(lead.get('address', 'N/A'))}</span></p>
+                    <p style="font-size:14px; margin:0;"><span style="color:#94a3b8; font-weight:bold;">Description:</span><br><span style="color:#cbd5e1; font-size:13px;">{html.escape(lead.get('summary', 'No summary available.'))}</span></p>
                     {filed_row}
                 </div>"""
         if not lead_cards:
-            lead_cards = "<div class='text-center py-10 bg-slate-900/60 rounded-xl border border-slate-800'><p class='text-slate-400 m-0'>No leads on your account yet. Free-tier accounts get one lead automatically, or <a href=\"/marketplace\" class=\"text-emerald-400 font-bold\">browse the Marketplace</a> to buy one outright.</p></div>"
+            lead_cards = "<div style='text-align:center; padding:32px; background:#0f172a; border-radius:10px; border:1px solid #1e293b;'><p style='color:#94a3b8; margin:0;'>No leads on your account yet. Free-tier accounts get one lead automatically, or <a href=\"/marketplace\" style=\"color:#34d399; font-weight:bold;\">browse the Marketplace</a> to buy one outright.</p></div>"
 
     upsell = "" if is_paid else """
-        <div class="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-5 mb-6">
-            <p class="text-sm text-emerald-200 m-0 mb-3">Free-tier accounts get one lead. Subscribe for a steady stream of exclusive leads in your area, delivered the moment they're filed.</p>
-            <a href="/pricing" class="inline-block bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg no-underline font-bold text-sm">See Subscription Plans →</a>
+        <div style="background:rgba(6,78,59,0.3); border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:20px; margin-bottom:24px;">
+            <p style="font-size:14px; color:#a7f3d0; margin:0 0 12px 0;">Free-tier accounts get one lead. Subscribe for a steady stream of exclusive leads in your area, delivered the moment they're filed.</p>
+            <a href="/pricing" style="display:inline-block; background:#059669; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">See Subscription Plans →</a>
         </div>"""
 
     return HTMLResponse(f"""
@@ -6711,20 +6735,23 @@ def my_leads_view(request: Request):
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>My Leads | TreeKey</title>
         <link rel="icon" href="/static/icon-192.png">
-        <link href="/static/tailwind.css" rel="stylesheet">
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:0; line-height:1.5; }}
+            .container {{ max-width: 760px; margin: auto; padding: 32px 16px; }}
+        </style>
     </head>
-    <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
+    <body>
     {_shared_nav_html(request)}
-    <div class="max-w-3xl mx-auto px-4 py-8 sm:py-12">
-        <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
-            <h2 class="text-white text-2xl font-extrabold m-0">My Leads</h2>
-            <span class="text-slate-400 text-sm">{total} total</span>
+    <div class="container">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:4px;">
+            <h2 style="color:white; font-size:24px; font-weight:800; margin:0;">My Leads</h2>
+            <span style="color:#94a3b8; font-size:14px;">{total} total</span>
         </div>
-        <p class="text-slate-400 text-sm mb-6">Every lead below is exclusively yours.</p>
+        <p style="color:#94a3b8; font-size:14px; margin-bottom:22px;">Every lead below is exclusively yours.</p>
         {upsell}
         {lead_cards}
-        <div class="text-center mt-8">
-            <a href="/account" class="text-slate-400 hover:text-white no-underline text-sm">← Back to My Account</a>
+        <div style="text-align:center; margin-top:32px;">
+            <a href="/account" style="color:#94a3b8; text-decoration:none; font-size:13px;">← Back to My Account</a>
         </div>
     </div>
     {_shared_footer_html()}
@@ -6735,6 +6762,10 @@ def my_leads_view(request: Request):
 
 @app.get("/account", response_class=HTMLResponse)
 def my_account_view(request: Request):
+    """Sep 16 2026: same inline-styles-only approach as my_leads_view above
+    -- see that function's docstring for why (static/tailwind.css is a
+    pre-built file, not rebuilt on deploy, so new utility-class combos
+    silently fail to render)."""
     session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
     if not session_email:
         return RedirectResponse(url="/login", status_code=303)
@@ -6756,7 +6787,7 @@ def my_account_view(request: Request):
         member_since = str(active_sub["subscribed_at"])[:10]
     elif limbo and limbo.get("signed_up_at"):
         member_since = str(limbo["signed_up_at"])[:10]
-    member_since_line = f"<p class='text-xs text-slate-500 m-0 mt-1'>Member since {member_since}</p>" if member_since else ""
+    member_since_line = f"<p style='font-size:11px; color:#64748b; margin:4px 0 0 0;'>Member since {member_since}</p>" if member_since else ""
 
     if is_paid:
         tier_name = (active_sub.get("tier") or "Free / Pay-As-You-Go").replace("_", " ").title()
@@ -6764,16 +6795,16 @@ def my_account_view(request: Request):
         delivered = active_sub.get("delivered") or 0
         outcode = active_sub.get("outcode", "GB")
         radius = active_sub.get("radius", 15)
-        status_badge = "<span class='bg-emerald-500/15 text-emerald-400 text-xs font-bold px-2.5 py-1 rounded-full'>ACTIVE PARTNER</span>"
-        quota_line = f"<p class='text-sm text-slate-300 m-0 mb-1'>Monthly allocation: <b>{delivered} / {quota}</b> leads used this month</p>"
-        coverage_line = f"<p class='text-sm text-slate-300 m-0'>Coverage: <b>{html.escape(str(outcode))}</b> — {radius}-mile radius</p>"
-        manage_block = '<a href="/pricing" class="inline-block bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg no-underline font-bold text-sm mt-3">Change Plan →</a>'
+        status_badge = "<span style='background:rgba(16,185,129,0.12); color:#34d399; font-size:11px; font-weight:bold; padding:4px 10px; border-radius:12px;'>ACTIVE PARTNER</span>"
+        quota_line = f"<p style='font-size:14px; color:#cbd5e1; margin:0 0 4px 0;'>Monthly allocation: <b>{delivered} / {quota}</b> leads used this month</p>"
+        coverage_line = f"<p style='font-size:14px; color:#cbd5e1; margin:0;'>Coverage: <b>{html.escape(str(outcode))}</b> — {radius}-mile radius</p>"
+        manage_block = '<a href="/pricing" style="display:inline-block; background:#1e293b; color:#e2e8f0; padding:8px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; margin-top:10px;">Change Plan →</a>'
     else:
         tier_name = "Free Tier"
-        status_badge = "<span class='bg-slate-700 text-slate-300 text-xs font-bold px-2.5 py-1 rounded-full'>FREE TIER</span>"
-        quota_line = "<p class='text-sm text-slate-300 m-0 mb-1'>One free lead per account, plus occasional early-access alerts by email.</p>"
+        status_badge = "<span style='background:#1e293b; color:#94a3b8; font-size:11px; font-weight:bold; padding:4px 10px; border-radius:12px;'>FREE TIER</span>"
+        quota_line = "<p style='font-size:14px; color:#cbd5e1; margin:0 0 4px 0;'>One free lead per account, plus occasional early-access alerts by email.</p>"
         coverage_line = ""
-        manage_block = '<a href="/pricing" class="inline-block bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg no-underline font-bold text-sm mt-3">Upgrade to a Subscription →</a>'
+        manage_block = '<a href="/pricing" style="display:inline-block; background:#059669; color:white; padding:8px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; margin-top:10px;">Upgrade to a Subscription →</a>'
 
     pref = settings.get("notification_preference", "email")
     pref_label = {"email": "Email", "whatsapp": "WhatsApp", "both": "Email + WhatsApp"}.get(pref, "Email")
@@ -6783,18 +6814,18 @@ def my_account_view(request: Request):
         date = str(h.get("created_at") or "")[:10]
         amount = f"£{(h.get('amount_pence') or 0) / 100:.2f}"
         status_raw = (h.get("status") or "pending").lower()
-        status_color = {"paid": "text-emerald-400", "refunded": "text-amber-400", "pending": "text-slate-400"}.get(status_raw, "text-slate-400")
+        status_color = {"paid": "#34d399", "refunded": "#fbbf24", "pending": "#94a3b8"}.get(status_raw, "#94a3b8")
         desc_raw = str(h.get("lead_address") or (h.get("plan") or "Subscription").replace("_", " ").title())
         desc = html.escape(desc_raw[:60]) + ("..." if len(desc_raw) > 60 else "")
         history_rows += f"""
-        <tr class="border-b border-slate-800">
-            <td class="py-2.5 pr-3 text-slate-400 text-xs whitespace-nowrap">{date}</td>
-            <td class="py-2.5 pr-3 text-slate-200 text-xs">{desc}</td>
-            <td class="py-2.5 pr-3 text-slate-200 text-xs font-mono whitespace-nowrap">{amount}</td>
-            <td class="py-2.5 {status_color} text-xs font-bold">{status_raw.title()}</td>
+        <tr style="border-bottom:1px solid #1e293b;">
+            <td style="padding:10px 12px 10px 0; color:#94a3b8; font-size:12px; white-space:nowrap;">{date}</td>
+            <td style="padding:10px 12px 10px 0; color:#e2e8f0; font-size:12px;">{desc}</td>
+            <td style="padding:10px 12px 10px 0; color:#e2e8f0; font-size:12px; font-family:monospace; white-space:nowrap;">{amount}</td>
+            <td style="padding:10px 0; color:{status_color}; font-size:12px; font-weight:bold;">{status_raw.title()}</td>
         </tr>"""
     if not history_rows:
-        history_rows = '<tr><td colspan="4" class="py-6 text-center text-slate-500 text-sm">No billing history yet.</td></tr>'
+        history_rows = '<tr><td colspan="4" style="padding:24px 0; text-align:center; color:#64748b; font-size:14px;">No billing history yet.</td></tr>'
 
     return HTMLResponse(f"""
     <!DOCTYPE html>
@@ -6804,46 +6835,51 @@ def my_account_view(request: Request):
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>My Account | TreeKey</title>
         <link rel="icon" href="/static/icon-192.png">
-        <link href="/static/tailwind.css" rel="stylesheet">
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:0; line-height:1.5; }}
+            .container {{ max-width: 760px; margin: auto; padding: 32px 16px; }}
+            .card {{ background:#0f172a; border:1px solid #1e293b; border-radius:10px; padding:20px; margin-bottom:16px; }}
+            .card-label {{ font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; font-weight:bold; margin-bottom:8px; }}
+            .quick-grid {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-top:24px; }}
+            .quick-card {{ display:block; background:#1e293b80; border:1px solid #334155; border-radius:10px; padding:14px; text-decoration:none; }}
+            .quick-card:hover {{ border-color:#34d399; }}
+        </style>
     </head>
-    <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
+    <body>
     {_shared_nav_html(request)}
-    <div class="max-w-3xl mx-auto px-4 py-8 sm:py-12">
-        <h2 class="text-white text-2xl font-extrabold mb-6">My Account</h2>
+    <div class="container">
+        <h2 style="color:white; font-size:24px; font-weight:800; margin:0 0 22px 0;">My Account</h2>
 
-        <!-- Profile -->
-        <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 mb-4">
-            <div class="flex justify-between items-start flex-wrap gap-2">
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
                 <div>
-                    <div class="text-[11px] uppercase tracking-wider text-slate-500 font-bold mb-1">Profile</div>
-                    <h3 class="text-white text-lg font-bold m-0">{html.escape(display_name)}</h3>
-                    <p class="text-slate-400 text-sm m-0 mt-0.5">{html.escape(session_email)}</p>
+                    <div class="card-label">Profile</div>
+                    <h3 style="color:white; font-size:18px; font-weight:bold; margin:0;">{html.escape(display_name)}</h3>
+                    <p style="color:#94a3b8; font-size:13px; margin:2px 0 0 0;">{html.escape(session_email)}</p>
                     {member_since_line}
                 </div>
                 {status_badge}
             </div>
         </div>
 
-        <!-- Subscription & Billing -->
-        <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 mb-4">
-            <div class="text-[11px] uppercase tracking-wider text-slate-500 font-bold mb-2">Subscription</div>
-            <p class="text-sm text-slate-300 m-0 mb-1">Plan: <b class="text-white">{html.escape(tier_name)}</b></p>
+        <div class="card">
+            <div class="card-label">Subscription</div>
+            <p style="font-size:14px; color:#cbd5e1; margin:0 0 4px 0;">Plan: <b style="color:white;">{html.escape(tier_name)}</b></p>
             {quota_line}
             {coverage_line}
             {manage_block}
         </div>
 
-        <!-- Billing History -->
-        <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 mb-4">
-            <div class="text-[11px] uppercase tracking-wider text-slate-500 font-bold mb-2">Billing History</div>
+        <div class="card">
+            <div class="card-label">Billing History</div>
             <div style="overflow-x:auto;">
-                <table class="w-full text-left" style="border-collapse:collapse;">
+                <table style="width:100%; text-align:left; border-collapse:collapse;">
                     <thead>
-                        <tr class="border-b border-slate-700">
-                            <th class="py-2 pr-3 text-slate-500 text-[11px] uppercase font-bold">Date</th>
-                            <th class="py-2 pr-3 text-slate-500 text-[11px] uppercase font-bold">Item</th>
-                            <th class="py-2 pr-3 text-slate-500 text-[11px] uppercase font-bold">Amount</th>
-                            <th class="py-2 text-slate-500 text-[11px] uppercase font-bold">Status</th>
+                        <tr style="border-bottom:1px solid #334155;">
+                            <th style="padding:0 12px 8px 0; color:#64748b; font-size:11px; text-transform:uppercase; font-weight:bold;">Date</th>
+                            <th style="padding:0 12px 8px 0; color:#64748b; font-size:11px; text-transform:uppercase; font-weight:bold;">Item</th>
+                            <th style="padding:0 12px 8px 0; color:#64748b; font-size:11px; text-transform:uppercase; font-weight:bold;">Amount</th>
+                            <th style="padding:0 0 8px 0; color:#64748b; font-size:11px; text-transform:uppercase; font-weight:bold;">Status</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -6853,33 +6889,30 @@ def my_account_view(request: Request):
             </div>
         </div>
 
-        <!-- Notification Preferences -->
-        <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 mb-4">
-            <div class="text-[11px] uppercase tracking-wider text-slate-500 font-bold mb-2">Notification Preferences</div>
-            <p class="text-sm text-slate-300 m-0 mb-2">Currently: <b class="text-white">{pref_label}</b></p>
-            <a href="/settings" class="inline-block bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg no-underline font-bold text-sm">Change Notification Settings →</a>
+        <div class="card">
+            <div class="card-label">Notification Preferences</div>
+            <p style="font-size:14px; color:#cbd5e1; margin:0 0 10px 0;">Currently: <b style="color:white;">{pref_label}</b></p>
+            <a href="/settings" style="display:inline-block; background:#1e293b; color:#e2e8f0; padding:8px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">Change Notification Settings →</a>
         </div>
 
-        <!-- Login & Security -->
-        <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 mb-4">
-            <div class="text-[11px] uppercase tracking-wider text-slate-500 font-bold mb-2">Login &amp; Security</div>
-            <p class="text-sm text-slate-300 m-0 mb-2">Login method: <b class="text-white">Passwordless</b> — a one-time code or link is emailed to <span class="text-slate-100">{html.escape(session_email)}</span> each time you log in. There's no password to remember or reset.</p>
-            <a href="/logout" class="inline-block bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg no-underline font-bold text-sm">Log Out</a>
+        <div class="card">
+            <div class="card-label">Login &amp; Security</div>
+            <p style="font-size:14px; color:#cbd5e1; margin:0 0 10px 0;">Login method: <b style="color:white;">Passwordless</b> — a one-time code or link is emailed to <span style="color:#f1f5f9;">{html.escape(session_email)}</span> each time you log in. There's no password to remember or reset.</p>
+            <a href="/logout" style="display:inline-block; background:#1e293b; color:#e2e8f0; padding:8px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">Log Out</a>
         </div>
 
-        <!-- Quick Links -->
-        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-6">
-            <a href="/my-leads" class="block bg-slate-800/50 border border-slate-700 hover:border-emerald-500 rounded-xl p-4 no-underline transition-colors">
-                <div class="text-white font-bold text-sm mb-1">My Leads</div>
-                <div class="text-slate-400 text-xs">View everything you've received</div>
+        <div class="quick-grid">
+            <a href="/my-leads" class="quick-card">
+                <div style="color:white; font-weight:bold; font-size:14px; margin-bottom:2px;">My Leads</div>
+                <div style="color:#94a3b8; font-size:12px;">View everything you've received</div>
             </a>
-            <a href="{'/dashboard' if is_paid else '/free-dashboard'}" class="block bg-slate-800/50 border border-slate-700 hover:border-emerald-500 rounded-xl p-4 no-underline transition-colors">
-                <div class="text-white font-bold text-sm mb-1">Dashboard</div>
-                <div class="text-slate-400 text-xs">Your command center</div>
+            <a href="{'/dashboard' if is_paid else '/free-dashboard'}" class="quick-card">
+                <div style="color:white; font-weight:bold; font-size:14px; margin-bottom:2px;">Dashboard</div>
+                <div style="color:#94a3b8; font-size:12px;">Your command center</div>
             </a>
-            <a href="/marketplace" class="block bg-slate-800/50 border border-slate-700 hover:border-sky-500 rounded-xl p-4 no-underline transition-colors">
-                <div class="text-white font-bold text-sm mb-1">Marketplace</div>
-                <div class="text-slate-400 text-xs">Buy leads outright</div>
+            <a href="/marketplace" class="quick-card">
+                <div style="color:white; font-weight:bold; font-size:14px; margin-bottom:2px;">Marketplace</div>
+                <div style="color:#94a3b8; font-size:12px;">Buy leads outright</div>
             </a>
         </div>
     </div>
