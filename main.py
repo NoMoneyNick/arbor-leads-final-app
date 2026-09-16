@@ -87,6 +87,63 @@ async def _redirect_old_domain(request: Request, call_next):
     return await call_next(request)
 
 
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
+}
+
+@app.middleware("http")
+async def _security_headers_and_canonical(request: Request, call_next):
+    """Sep 16 2026 site audit ("anything we're missing"): found two real
+    gaps common to every production site. (1) Zero security headers were
+    ever sent -- no clickjacking protection (X-Frame-Options), no MIME-
+    sniffing protection (X-Content-Type-Options), no Referrer-Policy, no
+    HSTS -- despite this app handling real Stripe payments and login
+    sessions. (2) No <link rel="canonical"> anywhere, which matters here
+    specifically because the site has many near-duplicate city-hub pages
+    (a real duplicate-content risk for Google), plus the recent
+    treekey.uk/.co.uk domain migration.
+
+    Both are added here, once, instead of edited into every template
+    (~10 separate <head> blocks) -- keeps this correct automatically as
+    pages are added, and can't be forgotten on a new page like a
+    per-template tag could be. Canonical is injected by swapping
+    "</head>" in the rendered HTML for the tag + "</head>" -- only for a
+    real 200 text/html response, so JSON/XML/binary/redirect/error
+    responses are left completely untouched. Uses the path only (no
+    query string) and always points at the new domain, since the old one
+    now 301s here anyway (see _redirect_old_domain above)."""
+    response = await call_next(request)
+    content_type = response.headers.get("content-type", "")
+    if response.status_code == 200 and "text/html" in content_type:
+        body = b"".join([chunk async for chunk in response.body_iterator])
+        try:
+            text = body.decode("utf-8")
+            if "</head>" in text:
+                canonical_url = f"https://{_NEW_DOMAIN}{request.url.path}"
+                text = text.replace(
+                    "</head>",
+                    f'<link rel="canonical" href="{canonical_url}">\n</head>',
+                    1,
+                )
+                body = text.encode("utf-8")
+        except UnicodeDecodeError:
+            pass
+        headers = dict(response.headers)
+        headers.pop("content-length", None)
+        response = Response(
+            content=body,
+            status_code=response.status_code,
+            headers=headers,
+            media_type=response.media_type,
+        )
+    for _hk, _hv in _SECURITY_HEADERS.items():
+        response.headers[_hk] = _hv
+    return response
+
+
 T_SEC      = os.getenv("TRIGGER_SECRET", "").strip()
 basic_auth = HTTPBasic()
 
@@ -975,6 +1032,51 @@ async def _branded_404_handler(request: Request, exc: _StarletteHTTPException):
         </html>
         """, status_code=404)
     return await _default_http_exception_handler(request, exc)
+
+
+@app.exception_handler(Exception)
+async def _branded_500_handler(request: Request, exc: Exception):
+    """Sep 16 2026 site audit: there was no catch-all handler for an
+    unexpected crash (a bug, a DB hiccup, anything not already wrapped in
+    its own try/except) -- it fell through to Starlette's bare default,
+    either a raw Python traceback or an empty "Internal Server Error",
+    no nav, no way back into the site, no record beyond the raw server
+    log. This logs the real exception first (so it's still fully
+    diagnosable from Render's logs, nothing is hidden) then shows a
+    branded page instead. Scoped outside /api/ + /admin, same reasoning
+    as the 404 handler -- those may have callers expecting a plain error
+    body (a fetch() call, a script), so they re-raise and keep the
+    previous (unbranded) behaviour untouched."""
+    logger.error(f"[Unhandled Exception] {request.method} {request.url.path}: {exc}", exc_info=True)
+    if request.url.path.startswith(("/api/", "/admin")):
+        raise exc
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Something Went Wrong | TreeKey</title>
+        <link rel="icon" href="/static/icon-192.png">
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:0; }}
+        </style>
+    </head>
+    <body>
+    {_shared_nav_html(request)}
+    <div style="max-width:600px; margin:auto; padding:80px 16px; text-align:center;">
+        <div style="font-size:64px; font-weight:800; color:#1e293b; line-height:1;">500</div>
+        <h1 style="color:white; font-size:22px; margin:16px 0 8px 0;">Something went wrong on our end</h1>
+        <p style="color:#94a3b8; font-size:14px; margin:0 0 28px 0;">This has been logged and we'll look into it. Try again in a moment, or head back to a working page.</p>
+        <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+            <a href="/" style="background:#059669; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">Home</a>
+            <a href="/marketplace" style="background:#1e293b; color:#e2e8f0; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">Marketplace</a>
+        </div>
+    </div>
+    {_shared_footer_html()}
+    </body>
+    </html>
+    """, status_code=500)
 
 
 @app.get("/", response_class=HTMLResponse)
