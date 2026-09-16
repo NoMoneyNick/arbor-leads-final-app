@@ -52,6 +52,41 @@ async def _no_cache_dynamic_pages(request: Request, call_next):
     return response
 
 
+_OLD_DOMAIN_HOSTS = {"treekey.uk", "www.treekey.uk"}
+_NEW_DOMAIN = "treekey.co.uk"
+
+@app.middleware("http")
+async def _redirect_old_domain(request: Request, call_next):
+    """Sep 16 2026, Nick's report + confirmed by checking treekey.uk
+    directly: the site migrated from treekey.uk to treekey.co.uk, but
+    treekey.uk was never actually set up to REDIRECT to the new domain --
+    it was just still pointed at this same app, silently serving the
+    identical live site under the old domain with no redirect at all.
+    This is exactly why Google Search Console's "Change of Address" tool
+    failed its "301-redirect from homepage" validation (screenshot: red X
+    on that check, green check on "Verification for both sites") -- there
+    was genuinely nothing to detect. It also means Google, and anyone with
+    an old treekey.uk link/bookmark, has been indexing/serving two
+    identical copies of the entire site on two different domains, which
+    is its own separate SEO problem (duplicate content) beyond just this
+    one validation check.
+
+    Registered as a SECOND @app.middleware("http") (Starlette executes the
+    LAST-decorated http middleware FIRST on the way in), so this runs
+    before _no_cache_dynamic_pages and before any route, and short-
+    circuits with a redirect immediately -- no wasted DB/route work for a
+    domain we don't want served directly.
+
+    301 (permanent) is deliberate: this is a real domain migration, and a
+    301 is what tells Google (and browsers) to transfer old domain's SEO
+    signals to the new one, which is the entire point of fixing this."""
+    host = (request.headers.get("host") or "").split(":")[0].strip().lower()
+    if host in _OLD_DOMAIN_HOSTS:
+        new_url = request.url.replace(scheme="https", netloc=_NEW_DOMAIN)
+        return RedirectResponse(url=str(new_url), status_code=301)
+    return await call_next(request)
+
+
 T_SEC      = os.getenv("TRIGGER_SECRET", "").strip()
 basic_auth = HTTPBasic()
 
@@ -775,9 +810,33 @@ def _shared_nav_html(request: Optional[Request] = None) -> str:
     Sep 10 2026: now takes the request so it can show real login state (see
     _nav_auth_state) -- every caller should pass its own `request` object;
     a caller with no session context (or one that genuinely can't be
-    logged in) can omit it and gets the logged-out button as before."""
+    logged in) can omit it and gets the logged-out button as before.
+
+    Sep 16 2026, Nick's ask ("make the site fuller, more inline with other
+    websites, anything we're missing"): the desktop nav links (RADAR /
+    MARKETPLACE / STORM RADAR / PACKAGES / FAQ) were `hidden lg:flex` --
+    on any screen under ~1024px wide (i.e. every phone) they simply
+    weren't there, and the footer doesn't carry Marketplace or Pricing
+    either, so a mobile visitor had no way at all to reach two of the
+    site's most important pages except by knowing the URL. Added a
+    hamburger button + slide-down panel with the same links, mobile-only.
+
+    Built with a self-contained <style>/<script> block using our own
+    `tk-` prefixed classes and inline styles, NOT new Tailwind utility
+    classes -- see my_leads_view's docstring (Sep 16 2026) for why:
+    static/tailwind.css is a manually pre-built file, not rebuilt on
+    deploy, so a brand-new class/breakpoint combo silently renders as
+    nothing. This nav renders on every page, so it's the last place to
+    gamble on an unverified class existing."""
     auth_block = _nav_auth_block_html(request)
     return f"""
+    <style>
+        .tk-mnav-toggle {{ display: none; background: none; border: none; color: #a7f3d0; cursor: pointer; padding: 6px; }}
+        .tk-mnav-panel {{ display: none; }}
+        @media (max-width: 1023px) {{
+            .tk-mnav-toggle {{ display: inline-flex; align-items: center; }}
+        }}
+    </style>
     <nav class="sticky top-0 z-50 bg-slate-950/95 backdrop-blur-md border-b border-emerald-950 shadow-2xl">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center h-20">
@@ -801,6 +860,18 @@ def _shared_nav_html(request: Optional[Request] = None) -> str:
                         <a href="/faq" class="hover:brightness-125 transition-all text-violet-400 font-bold">FAQ</a>
                     </div>
                     {auth_block}
+                    <button type="button" class="tk-mnav-toggle" aria-label="Menu" onclick="var p=document.getElementById('tk-mnav-panel'); p.style.display = (p.style.display==='block') ? 'none' : 'block';">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    </button>
+                </div>
+            </div>
+            <div id="tk-mnav-panel" class="tk-mnav-panel" style="border-top:1px solid #052e1f; padding:14px 0;">
+                <div style="display:flex; flex-direction:column; gap:14px; font-family:monospace; font-size:14px; font-weight:bold;">
+                    <a href="/#radar" style="color:#34d399; text-decoration:none;">RADAR</a>
+                    <a href="/marketplace" style="color:#38bdf8; text-decoration:none;">MARKETPLACE</a>
+                    <a href="/storm-radar" style="color:#fbbf24; text-decoration:none;">STORM RADAR</a>
+                    <a href="/pricing" style="color:#fb7185; text-decoration:none;">PACKAGES</a>
+                    <a href="/faq" style="color:#a78bfa; text-decoration:none;">FAQ</a>
                 </div>
             </div>
         </div>
@@ -845,6 +916,8 @@ def _shared_footer_html() -> str:
                      confirming with Nick whether that should also change to
                      contact@treekey.uk or genuinely routes differently. -->
                 <a href="mailto:contact@treekey.uk" class="text-slate-400 hover:text-white transition-colors">Help</a>
+                <a href="/marketplace" class="text-slate-400 hover:text-white transition-colors">Marketplace</a>
+                <a href="/pricing" class="text-slate-400 hover:text-white transition-colors">Packages</a>
                 <a href="/faq" class="text-slate-400 hover:text-white transition-colors">FAQ</a>
                 <a href="/suggestions" class="text-slate-400 hover:text-white transition-colors">Suggestions</a>
                 <a href="/privacy-policy" class="text-slate-400 hover:text-white transition-colors">Privacy</a>
@@ -854,6 +927,54 @@ def _shared_footer_html() -> str:
         </div>
     </footer>
     """
+
+
+from starlette.exceptions import HTTPException as _StarletteHTTPException
+from fastapi.exception_handlers import http_exception_handler as _default_http_exception_handler
+
+@app.exception_handler(_StarletteHTTPException)
+async def _branded_404_handler(request: Request, exc: _StarletteHTTPException):
+    """Sep 16 2026, Nick's ask ("make the site fuller... anything we're
+    missing"): there was no custom 404 page at all -- an unmatched route
+    (or an explicit HTTPException(404) raised elsewhere, e.g. an unknown
+    lead reference) fell through to FastAPI's bare default, a plain
+    {"detail": "Not Found"} JSON body with no styling, no nav, no way
+    back into the site. Every "normal" site has a branded 404. Scoped to
+    only the 404 case and only outside /api/ + /admin (those may have
+    callers expecting a plain JSON error body, e.g. a fetch() call or a
+    script) -- everything else still goes through FastAPI's own default
+    handler unchanged, so no existing error behavior anywhere else
+    changes."""
+    if exc.status_code == 404 and not request.url.path.startswith(("/api/", "/admin")):
+        return HTMLResponse(f"""
+        <!DOCTYPE html>
+        <html lang="en-GB">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Page Not Found | TreeKey</title>
+            <link rel="icon" href="/static/icon-192.png">
+            <style>
+                body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:0; }}
+            </style>
+        </head>
+        <body>
+        {_shared_nav_html(request)}
+        <div style="max-width:600px; margin:auto; padding:80px 16px; text-align:center;">
+            <div style="font-size:64px; font-weight:800; color:#1e293b; line-height:1;">404</div>
+            <h1 style="color:white; font-size:22px; margin:16px 0 8px 0;">That page doesn't exist</h1>
+            <p style="color:#94a3b8; font-size:14px; margin:0 0 28px 0;">The link might be old, or the page may have moved. Here are some good places to go instead:</p>
+            <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+                <a href="/" style="background:#059669; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">Home</a>
+                <a href="/marketplace" style="background:#1e293b; color:#e2e8f0; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">Marketplace</a>
+                <a href="/faq" style="background:#1e293b; color:#e2e8f0; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">FAQ</a>
+            </div>
+        </div>
+        {_shared_footer_html()}
+        </body>
+        </html>
+        """, status_code=404)
+    return await _default_http_exception_handler(request, exc)
 
 
 @app.get("/", response_class=HTMLResponse)
