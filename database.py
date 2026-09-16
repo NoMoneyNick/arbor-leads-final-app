@@ -3158,6 +3158,39 @@ def get_outcode_area_label(outcode: str) -> dict:
     return {"district": district, "is_london": is_london, "label": _label(district, is_london), "lat": lat, "lon": lon}
 
 
+def _bulk_get_outcode_area_labels(outcodes: list, max_workers: int = 8) -> dict:
+    """Sep 16 2026, Nick's report: "marketplace has serious lag when
+    loading after a search or reloading." Root cause traced to
+    get_marketplace_leads_with_freshness below, which could call the live
+    postcodes.io lookup (get_outcode_area_label -- up to a 3s timeout each)
+    SEQUENTIALLY, once per outcode not already cached, up to 60 times on a
+    real postcode+radius search (see _area_lookup_cap/_coord_lookup_cap) --
+    worst case around three minutes of pure blocking wait on a single page
+    load, on a brand-new/cold cache. Each call is fully independent (its
+    own DB read/write, its own HTTP request, no shared state or ordering
+    requirement), so this fans them out over a small thread pool instead
+    of one at a time -- worst case drops to roughly (batch_size /
+    max_workers) * 3s. Bounded (not unbounded) deliberately, so this stays
+    a reasonable citizen of both postcodes.io's free tier and the DB
+    connection pool rather than firing 60 simultaneous connections. Returns
+    {outcode: get_outcode_area_label(outcode)} for every outcode passed in
+    -- same return shape per-outcode as calling the single function in a
+    loop, just concurrently."""
+    results = {}
+    if not outcodes:
+        return results
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_oc = {executor.submit(get_outcode_area_label, oc): oc for oc in outcodes}
+        for future in concurrent.futures.as_completed(future_to_oc):
+            oc = future_to_oc[future]
+            try:
+                results[oc] = future.result()
+            except Exception as e:
+                logger.debug(f"[Area Label] bulk lookup failed for {oc}: {e}")
+    return results
+
+
 def _extract_full_postcodes(address: str) -> list:
     """Sep 10 2026: same regex as _extract_outcodes above, but keeps the
     incode too (e.g. "TN16 1JB" not just "TN16") -- for callers that need
@@ -5800,10 +5833,13 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 # much bigger candidate pool during a real search means many
                 # more distinct outcodes can genuinely need a fresh lookup,
                 # not just the same ~20 that a 150-lead pool ever produced.
+                # Sep 16 2026: these used to run one at a time (see
+                # _bulk_get_outcode_area_labels's docstring for the real
+                # lag this caused) -- fanned out over a small thread pool now.
                 _area_lookup_cap = 60 if _is_search else 30
                 _missing = [oc for oc in _distinct_outcodes if oc not in _area_by_outcode]
-                for oc in _missing[:_area_lookup_cap]:
-                    _area_by_outcode[oc] = get_outcode_area_label(oc)["label"]
+                for oc, _area in _bulk_get_outcode_area_labels(_missing[:_area_lookup_cap]).items():
+                    _area_by_outcode[oc] = _area["label"]
 
             for l, oc in zip(raw_leads, _outcodes_by_lead):
                 if oc:
@@ -5845,10 +5881,12 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 except Exception as e:
                     logger.debug(f"[Marketplace] batch coord-cache read failed: {e}")
 
+                # Sep 16 2026: same lag fix as the area-label loop above --
+                # fanned out over a small thread pool instead of one at a
+                # time (see _bulk_get_outcode_area_labels's docstring).
                 _coord_lookup_cap = max(max_fresh_lookups, 60) if _is_search else max_fresh_lookups
                 _missing_coords = [oc for oc in _distinct_outcodes if oc not in _coords_by_outcode]
-                for oc in _missing_coords[:_coord_lookup_cap]:
-                    area = get_outcode_area_label(oc)  # also writes through to outcode_area_cache
+                for oc, area in _bulk_get_outcode_area_labels(_missing_coords[:_coord_lookup_cap]).items():
                     if area.get("lat") is not None and area.get("lon") is not None:
                         _coords_by_outcode[oc] = (area["lat"], area["lon"])
 

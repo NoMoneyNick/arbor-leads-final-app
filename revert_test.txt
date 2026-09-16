@@ -1,0 +1,2 @@
+2026-09-16T21:41:23Z
+TreeKey revert-test file -- if this still says the time above after a minute, sync is truly off.

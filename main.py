@@ -986,6 +986,43 @@ def _shared_footer_html() -> str:
     """
 
 
+def _branded_message_page(request: Request, heading: str, message: str,
+                           cta_text: str = "Browse the Marketplace", cta_href: str = "/marketplace",
+                           status_code: int = 200) -> HTMLResponse:
+    """Sep 16 2026, Nick's report: "This lead is no longer available" and
+    "Payment System Unavailable" were both plain unstyled white pages --
+    no nav, no dark theme, nothing tying them back to the site -- right at
+    the exact moment (mid-checkout, or a lead that turned out unavailable)
+    a visitor most needs to trust they're still on TreeKey and not looking
+    at a broken site. One shared helper for every one-off "here's what
+    happened, here's where to go next" page, styled the same as the 404/500
+    handlers, so this can never drift into a plain unstyled page again
+    just because it was written inline at a random call site."""
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{heading} | TreeKey</title>
+        <link rel="icon" href="/static/icon-192.png">
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:0; }}
+        </style>
+    </head>
+    <body>
+    {_shared_nav_html(request)}
+    <div style="max-width:560px; margin:auto; padding:80px 16px; text-align:center;">
+        <h1 style="color:white; font-size:24px; margin:0 0 12px 0;">{heading}</h1>
+        <p style="color:#94a3b8; font-size:14px; line-height:1.6; margin:0 0 28px 0;">{message}</p>
+        <a href="{cta_href}" style="background:#059669; color:white; padding:10px 22px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">{cta_text}</a>
+    </div>
+    {_shared_footer_html()}
+    </body>
+    </html>
+    """, status_code=status_code)
+
+
 from starlette.exceptions import HTTPException as _StarletteHTTPException
 from fastapi.exception_handlers import http_exception_handler as _default_http_exception_handler
 
@@ -1202,18 +1239,22 @@ def public_homepage(request: Request):
     <meta name="description" content="TreeKey intercepts live UK council and National Park planning applications for tree surgery work. Get exclusive leads delivered to tree surgeons before competitors know they exist.">
     <meta property="og:title" content="TreeKey | UK Tree Surgery Planning Intelligence">
     <meta property="og:description" content="Exclusive tree surgery leads from live UK planning applications. Council and National Park TPO notices, S211 felling approvals, and domestic homeowner jobs — delivered first.">
-    <meta property="og:url" content="https://treekey.uk">
+    <meta property="og:url" content="https://treekey.co.uk">
     <meta property="og:type" content="website">
     <!-- Sep 8 2026, Nick's ask: there was no og:image at all, so Google/
          social link previews fell back to whatever icon happened to be
          set -- the old "K"/leaf mark. Added a proper share image built
          from the site's own current nav-bar branding (the diamond icon +
-         TREEKEY wordmark), and swapped the site icon files to match. -->
-    <meta property="og:image" content="https://treekey.uk/static/images/og-image.png">
+         TREEKEY wordmark), and swapped the site icon files to match.
+         Sep 16 2026: updated all four of these from treekey.uk to
+         treekey.co.uk -- treekey.uk is now cold-email-only (see the
+         domain migration notes), so social previews/share cards were
+         still pointing at the wrong domain. -->
+    <meta property="og:image" content="https://treekey.co.uk/static/images/og-image.png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:image" content="https://treekey.uk/static/images/og-image.png">
+    <meta name="twitter:image" content="https://treekey.co.uk/static/images/og-image.png">
     <link rel="manifest" href="/static/manifest.json">
     <meta name="theme-color" content="#020617">
     <link rel="icon" href="/static/icon-192.png">
@@ -3337,7 +3378,7 @@ def checkout(plan_key: str, request: Request):
 
     plan = payments.PLANS.get(plan_key)
     if not plan:
-        return HTMLResponse("<h3>Invalid plan.</h3>", status_code=404)
+        return _branded_message_page(request, "Invalid Plan", "That package doesn't exist or may have been renamed.", cta_text="View Packages", cta_href="/pricing", status_code=404)
 
     # Single lead purchase — go straight to Stripe (no area needed)
     if lead_id or plan.get("mode") == "payment":
@@ -3361,23 +3402,31 @@ def checkout(plan_key: str, request: Request):
             # that case rather than the generic "Payment System
             # Unavailable" message, which stays for actual Stripe/DB
             # failures on subscription checkout.
+            #
+            # Sep 16 2026, Nick's report: this fired on leads that were
+            # freshly listed and genuinely still for sale -- root cause is
+            # that /checkout/{plan_key} is a GET route, and hitting it
+            # reserves the lead as a SIDE EFFECT of a plain page load, not
+            # only a real purchase attempt. A GET request with side
+            # effects like this can be triggered by things that were never
+            # a real buyer: email link-scanners/"Safe Links" previews,
+            # browser link-prefetching, a crawler, or simply double-
+            # clicking the Unlock button -- any of those silently reserves
+            # (and, until the release_expired_reservations() fix above,
+            # permanently locks) real inventory. Flagged to Nick as the
+            # likely root cause; converting the actual reservation to a
+            # POST-only action is the real fix and needs his sign-off
+            # since it touches the live checkout flow.
             if lead_id:
-                return HTMLResponse(
-                    "<html><body style='font-family:sans-serif; text-align:center; padding:60px;'>"
-                    "<h1>This lead is no longer available</h1>"
-                    "<p>Someone else has already unlocked it, or is completing checkout right now. "
-                    "New leads are added continuously.</p>"
-                    "<a href='/marketplace'>Browse the Marketplace</a>"
-                    "</body></html>",
+                return _branded_message_page(
+                    request, "This Lead Is No Longer Available",
+                    "Someone else has already unlocked it, or is completing checkout right now. New leads are added continuously.",
                     status_code=409
                 )
-            return HTMLResponse(
-                "<html><body style='font-family:sans-serif; text-align:center; padding:60px;'>"
-                "<h1>Payment System Unavailable</h1>"
-                "<p>Please contact support at contact@treekey.uk.</p>"
-                "<a href='/pricing'>Return to Pricing</a>"
-                "</body></html>",
-                status_code=503
+            return _branded_message_page(
+                request, "Payment System Unavailable",
+                "Please contact support at contact@treekey.uk.",
+                cta_text="Return to Pricing", cta_href="/pricing", status_code=503
             )
         return RedirectResponse(url=url)
 
@@ -3490,12 +3539,12 @@ def checkout(plan_key: str, request: Request):
 
 
 @app.post("/checkout/{plan_key}")
-async def checkout_post(plan_key: str, outcode: str = Form(...), radius: int = Form(15), job_size: str = Form("all"),
+async def checkout_post(plan_key: str, request: Request, outcode: str = Form(...), radius: int = Form(15), job_size: str = Form("all"),
                          agree_terms: Optional[str] = Form(None)):
     """Handles the area form submission, then redirects to Stripe with outcode in metadata."""
     plan = payments.PLANS.get(plan_key)
     if not plan:
-        return HTMLResponse("<h3>Invalid plan.</h3>", status_code=404)
+        return _branded_message_page(request, "Invalid Plan", "That package doesn't exist or may have been renamed.", cta_text="View Packages", cta_href="/pricing", status_code=404)
 
     # Sep 11 2026, Nick's ask: server-side enforcement of the terms
     # checkbox -- the form's `required` attribute alone is a client-side
@@ -3567,13 +3616,10 @@ async def checkout_post(plan_key: str, outcode: str = Form(...), radius: int = F
     url = payments.create_checkout_session(plan_key, clean_outcode, radius=radius,
                                             full_postcode=full_postcode, job_size=job_size)
     if not url:
-        return HTMLResponse(
-            "<html><body style='font-family:sans-serif; text-align:center; padding:60px;'>"
-            "<h1>Payment System Unavailable</h1>"
-            "<p>Please contact support at contact@treekey.uk.</p>"
-            "<a href='/pricing'>Return to Pricing</a>"
-            "</body></html>",
-            status_code=503
+        return _branded_message_page(
+            request, "Payment System Unavailable",
+            "Please contact support at contact@treekey.uk.",
+            cta_text="Return to Pricing", cta_href="/pricing", status_code=503
         )
     return RedirectResponse(url=url, status_code=303)
 
@@ -4874,6 +4920,21 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
     homepage radar's own endpoint) and a job-category button grid, both on
     top of the existing tier tabs rather than replacing them.
     """
+    # Sep 16 2026, Nick's report: leads he'd clicked "Unlock" on before (or
+    # that a bot/link-scanner/email-preview hit -- see the docstring on the
+    # checkout route below) sat permanently stuck as status='reserved' and
+    # vanished from the marketplace for good, even long after
+    # RESERVATION_RELEASE_MINUTES had passed -- database.
+    # release_expired_reservations() already existed to sweep these back to
+    # 'new', but nothing in the codebase ever actually called it, so it was
+    # dead code and every abandoned/interrupted checkout permanently burned
+    # real inventory. Calling it here, on every marketplace load, is the
+    # same "opportunistic sweep on a normal page load" pattern already used
+    # elsewhere (e.g. reset_monthly_quotas_if_needed) -- cheap (one indexed
+    # UPDATE, usually touching zero rows) and means a stuck lead can't stay
+    # invisible for longer than one marketplace pageview after it expires.
+    database.release_expired_reservations()
+
     # Sep 15 2026, Nick's exclusive-purchase reservation spec: an
     # already-logged-in subscriber sees their real member price on the
     # card itself (never just at Stripe checkout) -- computed the same
@@ -5104,6 +5165,23 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
         if l.get("is_urgent"):
             urgent_badge = "<span style='font-size:11px; background:rgba(239,68,68,0.15); color:#fca5a5; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;'>Urgent</span>"
 
+        # Sep 16 2026, Nick's ask ("are we not giving an indication to the
+        # size of the job on the market?"): the job-size classification
+        # (small/medium/large, scanners.score_lead) was already selected by
+        # this query (l["score"]) and already drives the £25/£50/£75-style
+        # value tiering elsewhere, but was never actually shown on the card
+        # itself -- a buyer had no way to gauge job scale before paying.
+        _SIZE_BADGE = {
+            "large":  ("Large Job", "rgba(239,68,68,0.15)", "#fca5a5"),
+            "medium": ("Medium Job", "rgba(245,158,11,0.15)", "#fcd34d"),
+            "small":  ("Small Job", "rgba(148,163,184,0.12)", "#cbd5e1"),
+        }
+        _size_key = (l.get("score") or "").strip().lower()
+        size_badge = ""
+        if _size_key in _SIZE_BADGE:
+            _size_text, _size_bg, _size_fg = _SIZE_BADGE[_size_key]
+            size_badge = f"<span style='font-size:11px; background:{_size_bg}; color:{_size_fg}; font-weight:bold; padding:3px 8px; border-radius:12px; margin-left:6px;'>{_size_text}</span>"
+
         # Sep 9 2026, Nick's ask: "marketplace actual lead adverts need
         # complete overhaul in design to fit our new design scheme" -- the
         # earlier pass this session only recoloured the existing light-theme
@@ -5129,6 +5207,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
                         <span style="font-size:11px; background:{badge_bg}; color:{badge_color}; font-weight:bold; padding:4px 10px; border-radius:12px; text-transform:uppercase;">{badge_text}</span>
                         <span style="font-size:11px; background:rgba(148,163,184,0.1); color:#cbd5e1; padding:3px 8px; border-radius:12px;">LPA: {council}</span>
                         {urgent_badge}
+                        {size_badge}
                         {agent_badge}
                     </div>
                     <h3 class="mt-3 mb-1 text-lg sm:text-xl text-white font-bold flex items-center gap-2">
@@ -5146,7 +5225,19 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
                 <div class="sm:w-[210px] shrink-0 bg-slate-900/60 border border-emerald-900/50 rounded-xl p-4 flex sm:flex-col items-center sm:items-stretch justify-between sm:justify-start gap-3 text-center">
                     <div>
                         {price_block_html}
-                        <div class="text-[11px] text-slate-400">{days_left}</div>
+                        <!-- Sep 16 2026, Nick's ask: "the leads need to state
+                        the days until determination with more urgency its
+                        fairly hidden" -- this was a plain small grey line of
+                        text, easy to miss next to the big price. Promoted to
+                        a coloured pill using the same badge_color the
+                        freshness tier badge above already uses (red for
+                        Flash Hot, amber for Prime Window, etc.), so the
+                        colour itself now signals urgency at a glance, not
+                        just the number. -->
+                        <div style="display:inline-flex; align-items:center; gap:5px; background:{badge_color}1a; color:{badge_color}; font-weight:800; font-size:12px; padding:5px 11px; border-radius:8px; margin-top:8px;">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+                            {days_left}
+                        </div>
                     </div>
                     <a href="/checkout/{plan_key}?lead_id={lid}" class="bg-brand-green hover:bg-emerald-500 text-white px-5 py-3 rounded-lg no-underline font-bold text-[13px] transition-all duration-300 shadow-[0_0_20px_rgba(5,150,105,0.3)] hover:shadow-[0_0_30px_rgba(5,150,105,0.5)] inline-flex items-center justify-center gap-1.5 text-center">
                         Unlock Address &amp; Contacts →

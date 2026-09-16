@@ -640,7 +640,7 @@ def send_cold_email_1(email: str, lead_data: dict, code: str, director_name: str
                 <td style="width:30px; vertical-align:middle;"><img src="{logo_url}" width="24" height="24" alt="TreeKey" style="display:block; border-radius:5px;"></td>
                 <td style="vertical-align:middle; padding-left:8px; font-size:14px; color:#374151;">
                     Nick — TreeKey<br>
-                    <a href="https://treekey.uk" style="color:#9ca3af; font-size:12px;">treekey.uk</a>
+                    <a href="https://treekey.co.uk" style="color:#9ca3af; font-size:12px;">treekey.co.uk</a>
                 </td>
             </tr>
         </table>
@@ -766,7 +766,7 @@ def send_free_lead_code_email(email: str, lead_data: dict, code: str, expires_ho
         <p style="font-size: 12px; color: #94a3b8; margin: 0;">
             This code is valid for {expires_label}. If it isn't used in time, the job is released and you can request another one near you from the same page.
         </p>
-        <p style="font-size:11px; color:#cbd5e1; margin-top:24px;">TreeKey — Vector Data Labs · treekey.uk</p>
+        <p style="font-size:11px; color:#cbd5e1; margin-top:24px;">TreeKey — Vector Data Labs · treekey.co.uk</p>
         {unsub_html}
     </div>
     """
@@ -796,7 +796,7 @@ def send_teaser_lead_email(email: str, lead_data: dict, unsubscribe_url: str = "
         </div>
         <p style="font-size: 13px; color: #64748b;">
             Subscribe to unlock the exact address and get jobs like this the moment they're filed, not after we've teased it to you:
-            <a href="https://treekey.uk/pricing" style="color:#059669; font-weight:bold;">See plans →</a>
+            <a href="https://treekey.co.uk/pricing" style="color:#059669; font-weight:bold;">See plans →</a>
         </p>
         {unsub_html}
     </div>

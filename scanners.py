@@ -2970,9 +2970,14 @@ def scan_city_planning_api(city_name: str) -> int:
                             # Sep 2 2026, Tier 4: only queue with a real, stable
                             # reference -- see the GLA loop's identical comment for why.
                             if real_ref:
+                                # Sep 16 2026 fix (see the _insert_lead call
+                                # below for the full explanation): `town`,
+                                # not `city_name` -- a multi-town region must
+                                # not have every one of its towns' queued
+                                # items attributed to the region as a whole.
                                 _queue_for_manual_review(
                                     real_ref, item.get("address") or f"{city_name} / {town}",
-                                    summary, city_name, app_type=item.get("app_type"),
+                                    summary, town, app_type=item.get("app_type"),
                                 )
                             continue
                         ref  = real_ref or f"PLANIT-{town}-{int(time.time())}"
@@ -3087,8 +3092,36 @@ def scan_city_planning_api(city_name: str) -> int:
                                 else:
                                     confirm_stats["inconclusive"] += 1
 
+                        # Sep 16 2026 real bug found + fixed (found while
+                        # investigating 10 councils showing zero leads for
+                        # 3-4 days in the daily warning digest, unprompted --
+                        # not something Nick reported): this PlanIt loop
+                        # queries per-TOWN (real authority name, e.g.
+                        # "Brent", "Maidstone", "Norwich"), but was labelling
+                        # every lead it inserts with `city_name` -- the whole
+                        # REGION it belongs to (e.g. "London", "South East",
+                        # "East of England"), not the specific town PlanIt
+                        # actually returned it for. For any region covering
+                        # more than one town (every region except the
+                        # single-town ones like "Birmingham"/"Bristol"/
+                        # "Sheffield", where city_name==town anyway so this
+                        # never showed up), every PlanIt lead from every town
+                        # in that region was silently pooling under the
+                        # region's name instead of its own. That's exactly
+                        # why get_lead_source_health_report's silent-failure
+                        # check started flagging Brent/Croydon/Maidstone/
+                        # Norwich (etc.) as having gone to zero -- they
+                        # weren't actually broken, their leads were just all
+                        # being counted against "London"/"South East"/"East
+                        # of England" instead. Fixed: `town`, the real
+                        # authority PlanIt returned this specific record
+                        # for, not the broader region -- matches how the
+                        # paid ukplanningapi.co.uk loop above already labels
+                        # (source = the actual queried unit, not a container
+                        # grouping), and how every registered mesh/Idox
+                        # council already behaves.
                         lead = _insert_lead(
-                            cur, ref, addr, summary, city_name,
+                            cur, ref, addr, summary, town,
                             applicant_name=applicant_name,
                             agent_name=agent_name,
                             agent_company=agent_company,
