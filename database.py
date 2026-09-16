@@ -2818,6 +2818,83 @@ def confirm_reserved_lead_sale(lead_id: str, checkout_session_id: str, buyer_ema
         return None
 
 
+def get_already_sold_lead_if_matching_session(lead_id: str, checkout_session_id: str) -> Optional[dict]:
+    """Sep 16 2026, production incident fix: confirm_reserved_lead_sale's
+    UPDATE only ever matches a lead still in status='reserved' -- once a
+    lead has been successfully claimed, a SECOND delivery of the exact same
+    Stripe event (a manual Resend, or Stripe's own automatic retry) finds
+    nothing to update and returns None, which payments.py's webhook used to
+    treat as "the reservation was genuinely lost" and auto-refund the
+    customer. That's exactly what happened live: the first delivery
+    correctly sold the lead but then crashed on the confirmation email
+    (unrelated bug, now fixed) before the event was marked fulfilled, so
+    the retry looked identical to a real lost reservation and refunded an
+    already-completed sale.
+
+    This is the fix: confirm_reserved_lead_sale's UPDATE deliberately never
+    clears reserved_session_id when it flips status to 'claimed' (see that
+    function), so it's still sitting on the row afterwards -- this function
+    checks for exactly that signature (status='claimed' AND
+    reserved_session_id matches THIS checkout session) and, if found,
+    returns the same field shape confirm_reserved_lead_sale does, so the
+    caller can safely re-send the confirmation email without touching
+    payment/refund state at all. Returns None for every other case
+    (genuinely never reserved by this session, claimed by a DIFFERENT
+    session -- the real "stolen reservation" case -- or lead not found),
+    so those keep going through the existing refund safety net unchanged."""
+    if not SURL or not lead_id or not checkout_session_id:
+        return None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT id, reference, address, summary, council_source, lead_score, lead_price,
+                       applicant_name, agent_name, agent_company, has_agent, registered_date
+                FROM leads
+                WHERE (id::text = %s OR reference = %s) AND status = 'claimed' AND reserved_session_id = %s;
+            """, (lead_id, lead_id, checkout_session_id))
+            row = cur.fetchone()
+            if row:
+                return {
+                    "id": row[0], "reference": row[1], "address": row[2], "summary": row[3],
+                    "council_source": row[4], "lead_score": row[5], "lead_price": row[6],
+                    "applicant_name": row[7], "agent_name": row[8], "agent_company": row[9],
+                    "has_agent": row[10], "registered_date": row[11],
+                }
+            return None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Reservation] Error checking already-sold state for lead {lead_id} / session {checkout_session_id}: {e}")
+        return None
+
+
+def get_order_status(checkout_session_id: str) -> Optional[str]:
+    """Reads back the `status` column record_order/update_order_fulfillment
+    write to, for the audit-trail `payments` row matching this checkout
+    session -- e.g. so a caller can tell whether a reservation-lost refund
+    was already issued for this exact order before taking any further
+    action on it. Returns None if there's no matching row (order recording
+    itself failed, or this predates record_order existing)."""
+    if not SURL or not checkout_session_id:
+        return None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT status FROM payments WHERE stripe_session_id = %s;", (checkout_session_id,))
+            row = cur.fetchone()
+            return row[0] if row else None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Order] Error reading order status for session {checkout_session_id}: {e}")
+        return None
+
+
 def record_order(checkout_session_id: str, account_email: str, amount_pence: int, lead_id: str = None, plan: str = None, status: str = "pending") -> bool:
     """The audit record Nick's spec asks for: 'a record linking the buyer,
     lead, checkout, payment, price and fulfilment outcome.' Written at

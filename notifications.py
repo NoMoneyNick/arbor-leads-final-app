@@ -249,12 +249,56 @@ def _free_tools_and_subscribe_html(reference: str) -> str:
 
 
 def send_purchased_lead_email(customer_email: str, lead_data: dict):
-    """Emails the completely unlocked lead details to the buyer after a successful Stripe payment."""
+    """Emails the completely unlocked lead details to the buyer after a successful Stripe payment.
+
+    Sep 16 2026, production incident fix: this whole function used to build
+    its HTML with NO surrounding try/except (only the final requests.post()
+    call was guarded). A real customer paid £19, the lead was correctly
+    burned from inventory, and THIS function then raised an unhandled
+    AttributeError (lead_data['lead_score'] was NULL in the DB for that
+    lead -- `.get('lead_score', 'Medium')` only applies the 'Medium'
+    default when the KEY is missing, not when the value is None, so
+    `.title()` was called on None) -- with nothing catching it, the
+    exception propagated all the way up through payments.handle_stripe_
+    webhook to the FastAPI route, which had no try/except either, so
+    Stripe received a bare HTTP 500. Worse: because this crash happened
+    BEFORE payments.py marked the event fulfilled, Stripe's automatic
+    retry then hit a lead that was already correctly sold (status
+    'claimed', no longer 'reserved') and the webhook's own safety logic
+    misread that as "the reservation was lost" and tried to auto-refund a
+    legitimately completed sale. See payments.py's Sep 16 2026 comment for
+    the matching fix on that side (fulfillment is now marked BEFORE this
+    email is attempted, and this call is wrapped so it can never again
+    take the whole webhook down). Every field read below now defends
+    against a NULL DB value the same way the rest of this codebase already
+    does for lead_score (`X or "small"` -- see database.py), and the
+    entire function body is wrapped so a future, still-unforeseen bug here
+    can only ever cost this one email, never the purchase itself.
+    """
     if not RESEND_API_KEY:
         logging.warning("[Email] RESEND_API_KEY not set — cannot send purchased lead.")
         return
-        
-    subject = f"Unlocked Lead: {lead_data.get('council_source', 'Local')} Tree Surgery"
+
+    try:
+        _send_purchased_lead_email_inner(customer_email, lead_data)
+    except Exception as e:
+        logging.error(f"[Email] Unexpected error building/sending purchased lead email to {customer_email}: {e}", exc_info=True)
+        try:
+            send_system_incident_alert(
+                category="REVENUE & BILLING",
+                title="Purchased-lead email failed to send (customer already charged)",
+                description=f"send_purchased_lead_email raised an unexpected error for {customer_email}: {e}",
+                impact="Customer paid and their lead was correctly recorded as sold, but they may not have received the confirmation email with the lead details.",
+                action_required="Check the lead/order in the DB and manually resend the details to the customer if needed.",
+                severity="WARNING",
+                throttle_hours=1.0
+            )
+        except Exception:
+            pass
+
+
+def _send_purchased_lead_email_inner(customer_email: str, lead_data: dict):
+    subject = f"Unlocked Lead: {lead_data.get('council_source') or 'Local'} Tree Surgery"
 
     # Aug 30 2026: applicant_name/agent_name/agent_company/has_agent are now
     # captured by the scraper (see mesh_scrapers.py) and returned by
@@ -294,20 +338,20 @@ def send_purchased_lead_email(customer_email: str, lead_data: dict):
         <p style="color: #374151;">Thank you for your purchase. Here are the details for the lead you just secured. This lead has been permanently removed from the marketplace.</p>
 
         <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
-            <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {lead_data.get('reference', 'N/A')}</p>
-            <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {lead_data.get('address', 'N/A')}</p>
-            <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source', 'N/A')}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {lead_data.get('reference') or 'N/A'}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {lead_data.get('address') or 'N/A'}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source') or 'N/A'}</p>
             {filed_row}
-            <p style="margin: 0 0 10px 0;"><strong>Estimated Value Grade:</strong> {lead_data.get('lead_score', 'Medium').title()}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Estimated Value Grade:</strong> {(lead_data.get('lead_score') or 'Medium').title()}</p>
             {applicant_row}
             <p style="margin: 0;"><strong>Description / Summary:</strong><br/>
-               <span style="color: #475569; font-size: 14px;">{lead_data.get('summary', 'No summary available.')}</span>
+               <span style="color: #475569; font-size: 14px;">{lead_data.get('summary') or 'No summary available.'}</span>
             </p>
             {agent_row}
         </div>
 
         <p style="font-size: 13px; color: #64748b;">
-            {_street_view_link_html(lead_data.get('address', ''))}
+            {_street_view_link_html(lead_data.get('address') or '')}
         </p>
         <p style="font-size: 12px; color: #94a3b8;">
             Note: UK councils do not publish a homeowner's phone number or email address on planning applications. This lead includes everything that is legally published: the address, the applicant name (when the council records it), and the application details above.
@@ -315,7 +359,7 @@ def send_purchased_lead_email(customer_email: str, lead_data: dict):
         <p style="font-size: 11px; color: #94a3b8; margin-top: 14px; padding-top: 10px; border-top: 1px solid #f1f5f9;">
             {_NOT_WHAT_YOU_EXPECTED_HTML}
         </p>
-        {_free_tools_and_subscribe_html(lead_data.get('reference', ''))}
+        {_free_tools_and_subscribe_html(lead_data.get('reference') or '')}
     </div>
     """
 
@@ -361,8 +405,27 @@ def send_free_lead_granted_email(customer_email: str, lead_data: dict, unsubscri
     the subject/intro wording differs (no "purchase" framing for something
     that cost no money). Routed through send_transactional_email (real
     List-Unsubscribe headers) rather than send_purchased_lead_email's older
-    direct Resend call, matching this session's other email fixes."""
-    subject = f"Your free lead is confirmed — {lead_data.get('council_source', 'Local')} tree job unlocked"
+    direct Resend call, matching this session's other email fixes.
+
+    Sep 16 2026: wrapped the whole body in try/except (mirroring the fix on
+    send_purchased_lead_email above, prompted by that function crashing the
+    Stripe webhook in production when a lead's lead_score was NULL -- see
+    its Sep 16 2026 comment). This is the free-lead-redemption equivalent,
+    called from a normal page request rather than a webhook, but the same
+    class of bug here would 500 that request and leave the customer's
+    dashboard redemption looking broken even though the lead was actually
+    already theirs. Returns False on any failure instead of raising,
+    exactly like the existing RESEND_API_KEY-missing/send_transactional_
+    email failure paths already handled."""
+    try:
+        return _send_free_lead_granted_email_inner(customer_email, lead_data, unsubscribe_url)
+    except Exception as e:
+        logging.error(f"[Email] Unexpected error building/sending free-lead email to {customer_email}: {e}", exc_info=True)
+        return False
+
+
+def _send_free_lead_granted_email_inner(customer_email: str, lead_data: dict, unsubscribe_url: str = "") -> bool:
+    subject = f"Your free lead is confirmed — {lead_data.get('council_source') or 'Local'} tree job unlocked"
 
     applicant_name = lead_data.get("applicant_name")
     agent_name = lead_data.get("agent_name")
@@ -400,20 +463,20 @@ def send_free_lead_granted_email(customer_email: str, lead_data: dict, unsubscri
         <p style="color: #374151;">This job is genuinely yours now — nobody else can claim it. Here are the full details.</p>
 
         <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
-            <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {lead_data.get('reference', 'N/A')}</p>
-            <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {lead_data.get('address', 'N/A')}</p>
-            <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source', 'N/A')}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {lead_data.get('reference') or 'N/A'}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {lead_data.get('address') or 'N/A'}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source') or 'N/A'}</p>
             {filed_row}
-            <p style="margin: 0 0 10px 0;"><strong>Estimated Value Grade:</strong> {lead_data.get('lead_score', 'Medium').title()}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Estimated Value Grade:</strong> {(lead_data.get('lead_score') or 'Medium').title()}</p>
             {applicant_row}
             <p style="margin: 0;"><strong>Description / Summary:</strong><br/>
-               <span style="color: #475569; font-size: 14px;">{lead_data.get('summary', 'No summary available.')}</span>
+               <span style="color: #475569; font-size: 14px;">{lead_data.get('summary') or 'No summary available.'}</span>
             </p>
             {agent_row}
         </div>
 
         <p style="font-size: 13px; color: #64748b;">
-            {_street_view_link_html(lead_data.get('address', ''))}
+            {_street_view_link_html(lead_data.get('address') or '')}
         </p>
         <p style="font-size: 12px; color: #94a3b8;">
             Note: UK councils do not publish a homeowner's phone number or email address on planning applications. This lead includes everything that is legally published: the address, the applicant name (when the council records it), and the application details above.
@@ -421,7 +484,7 @@ def send_free_lead_granted_email(customer_email: str, lead_data: dict, unsubscri
         <p style="font-size: 11px; color: #94a3b8; margin-top: 14px; padding-top: 10px; border-top: 1px solid #f1f5f9;">
             {_NOT_WHAT_YOU_EXPECTED_HTML}
         </p>
-        {_free_tools_and_subscribe_html(lead_data.get('reference', ''))}
+        {_free_tools_and_subscribe_html(lead_data.get('reference') or '')}
         {unsub_html}
     </div>
     """

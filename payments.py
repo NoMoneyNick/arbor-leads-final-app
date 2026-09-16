@@ -569,6 +569,36 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
                 notifications.send_purchased_lead_email(customer_email, lead_data)
             elif is_retry:
                 logger.info(f"[Stripe] Duplicate webhook delivery for already-processed lead {lead_id} ({mask(customer_email)}) — ignoring retry.")
+            elif database.get_already_sold_lead_if_matching_session(lead_id, reservation_token):
+                # Sep 16 2026, production incident fix: confirm_reserved_lead_sale
+                # only matches a lead still in status='reserved' -- once THIS
+                # exact reservation already sold it (an earlier delivery of
+                # this same event), a second delivery (manual Resend, or
+                # Stripe's own retry) finds nothing to confirm and used to
+                # fall straight into the "reservation lost" branch below,
+                # which auto-refunded an already-completed sale. Live
+                # incident: the very first delivery correctly sold the lead
+                # but then crashed on the confirmation email (unrelated bug,
+                # fixed separately) before the event was marked fulfilled, so
+                # the retry looked identical to a genuinely lost reservation.
+                # This check catches exactly that case (same reservation,
+                # lead already 'claimed') and re-sends the confirmation
+                # instead of refunding -- see database.
+                # get_already_sold_lead_if_matching_session's own docstring.
+                already_sold = database.get_already_sold_lead_if_matching_session(lead_id, reservation_token)
+                order_status = database.get_order_status(reservation_token)
+                if order_status == "refunded":
+                    # A refund already went out for this exact order (most
+                    # likely from before this fix existed) -- don't silently
+                    # re-mark it paid or re-send the lead as if nothing
+                    # happened. Whether to still honour the lead for free
+                    # after a refund is Nick's call, not an automatic one.
+                    logger.warning(f"[Stripe] Lead {lead_id} already sold+claimed via this reservation, but the order shows REFUNDED -- not auto-recovering, needs manual review ({mask(customer_email)}).")
+                else:
+                    logger.info(f"[Stripe] Duplicate delivery for already-sold lead {lead_id} ({mask(customer_email)}) — re-sending confirmation email, no refund.")
+                    database.update_order_fulfillment(reservation_token, "paid", "fulfilled")
+                    notifications.send_purchased_lead_email(customer_email, already_sold)
+                _mark_stripe_event_fulfilled(event_id)
             else:
                 # Payment succeeded but this session's reservation is gone --
                 # expired past RESERVATION_RELEASE_MINUTES before payment
