@@ -2895,6 +2895,41 @@ def get_order_status(checkout_session_id: str) -> Optional[str]:
         return None
 
 
+def get_payment_history_for_contractor(email: str, limit: int = 25) -> list:
+    """Sep 16 2026, Nick's ask ("fuller My Account page"): billing/order
+    history is standard on any normal account page and we already write a
+    full audit row per checkout via record_order/update_order_fulfillment --
+    this just reads that back for one contractor, newest first, with the
+    lead's reference/address attached (via a LEFT JOIN, not INNER, so a row
+    whose lead_id doesn't resolve -- e.g. a subscription-plan charge that
+    was never tied to one specific lead -- still shows up rather than
+    silently vanishing from someone's own billing history)."""
+    if not SURL or not email:
+        return []
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT p.stripe_session_id, p.plan, p.amount_pence, p.status, p.fulfillment_outcome,
+                       p.created_at, p.updated_at, l.reference, l.address
+                FROM payments p
+                LEFT JOIN leads l ON l.id::text = p.lead_id
+                WHERE p.account_email = %s
+                ORDER BY p.created_at DESC
+                LIMIT %s;
+            """, (email.strip().lower(), limit))
+            cols = ["session_id", "plan", "amount_pence", "status", "fulfillment_outcome",
+                    "created_at", "updated_at", "lead_reference", "lead_address"]
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Billing History] Error fetching payment history for {email}: {e}")
+        return []
+
+
 def record_order(checkout_session_id: str, account_email: str, amount_pence: int, lead_id: str = None, plan: str = None, status: str = "pending") -> bool:
     """The audit record Nick's spec asks for: 'a record linking the buyer,
     lead, checkout, payment, price and fulfilment outcome.' Written at
@@ -4935,7 +4970,14 @@ def get_active_subscribers_by_seniority(outcode: str = None) -> list:
 
 
 def get_contractor_subscription(email: str) -> dict:
-    """Returns the contractor subscription record for this email, or empty dict. Used for login validation."""
+    """Returns the contractor subscription record for this email, or empty dict. Used for login validation.
+
+    Sep 16 2026, Nick's ask ("fuller My Account page"): added subscribed_at,
+    stripe_subscription_id and customer_name/phone to the SELECT + returned
+    dict so the new /account page can show "member since" and billing
+    identifiers without a second query. Purely additive -- every existing
+    caller only ever reads specific keys via .get(...), never unpacks this
+    dict positionally or iterates its keys, so adding new keys is safe."""
     if not SURL or not email:
         return {}
     try:
@@ -4943,12 +4985,14 @@ def get_contractor_subscription(email: str) -> dict:
         cur = conn.cursor()
         try:
             cur.execute("""
-                SELECT id, tier, center_outcode, radius_miles, active, monthly_quota, delivered_this_month
+                SELECT id, tier, center_outcode, radius_miles, active, monthly_quota, delivered_this_month,
+                       subscribed_at, stripe_subscription_id, customer_name, phone
                 FROM contractor_subscriptions WHERE customer_email = %s
             """, (email.strip().lower(),))
             row = cur.fetchone()
             if row:
-                cols = ["id", "tier", "outcode", "radius", "active", "quota", "delivered"]
+                cols = ["id", "tier", "outcode", "radius", "active", "quota", "delivered",
+                        "subscribed_at", "stripe_sub_id", "customer_name", "phone"]
                 return dict(zip(cols, row))
             return {}
         finally:

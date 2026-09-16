@@ -722,12 +722,25 @@ def _nav_auth_state(request: Optional[Request]) -> Optional[dict]:
 def _nav_auth_block_html(request: Optional[Request]) -> str:
     """The bit of the nav that swaps between "Sign Up / Log In" and a
     logged-in state -- pulled out so both _shared_nav_html and the
-    homepage's own nav render it identically."""
+    homepage's own nav render it identically.
+
+    Sep 16 2026, Nick's ask ("fuller my account... My Account in the top
+    nav"): previously the only logged-in nav element was one link ("{name}
+    — Dashboard") plus Log Out, with no reachable "account" concept at all
+    -- normal login/purchase sites always put an account link top-right.
+    Split into three compact links (My Account / Dashboard / Log Out)
+    rather than cramming in a 4th "My Leads" link too -- both /account and
+    /dashboard link onward to /my-leads, so it's always one click away
+    without widening the nav further on small screens (this row has no
+    flex-wrap, so mobile width is the real constraint here)."""
     auth = _nav_auth_state(request)
     if auth:
         return f"""
-                    <a href="{auth['dashboard_url']}" class="hover:brightness-125 transition-all text-emerald-300 font-bold text-xs sm:text-sm">
-                        {html.escape(auth['display_name'])} — Dashboard &#10132;
+                    <a href="/account" class="hover:brightness-125 transition-all text-emerald-300 font-bold text-xs sm:text-sm">
+                        My Account
+                    </a>
+                    <a href="{auth['dashboard_url']}" class="hover:brightness-125 transition-all text-slate-300 font-bold text-xs sm:text-sm hidden sm:inline">
+                        Dashboard
                     </a>
                     <a href="/logout" class="text-slate-400 hover:text-white transition-colors text-xs font-mono uppercase">Log Out</a>"""
     return """
@@ -6506,6 +6519,8 @@ def contractor_dashboard(request: Request):
                 <div style="text-align:right;">
                     {active_badge}
                     <div style="margin-top:8px;">
+                        <a href="/my-leads" style="color:#a7f3d0; font-size:12px; text-decoration:none; margin-right:12px;">My Leads</a>
+                        <a href="/account" style="color:#a7f3d0; font-size:12px; text-decoration:none; margin-right:12px;">My Account</a>
                         <a href="/settings" style="color:#a7f3d0; font-size:12px; text-decoration:none; margin-right:12px;">Settings </a>
                         <a href="/logout" style="color:#a7f3d0; font-size:12px; text-decoration:none;">Log Out ➔</a>
                     </div>
@@ -6587,6 +6602,291 @@ def logout():
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie("treekey_contractor_session", httponly=True, secure=True, samesite="lax")
     return response
+
+
+# ── My Account / My Leads (Sep 16 2026, Nick's ask) ─────────────────────────
+#
+# Two new, purely additive routes. Deliberately built as NEW pages rather
+# than rewrites of the existing /dashboard and /free-dashboard routes:
+# those two are the actual revenue-critical pages a contractor lands on
+# after paying, and this session has already proven (see payments.py /
+# database.py incident notes, same date) that edits to this codebase can
+# silently revert on Nick's machine if another editor has the project open
+# -- so the lowest-risk way to ship "My Leads" + "a fuller My Account" is
+# to add self-contained routes that reuse the existing data-access
+# functions (get_contractor_subscription, get_limbo_account,
+# get_contractor_dashboard_data, get_lead_by_reference,
+# get_payment_history_for_contractor) rather than touching the working
+# dashboard code paths themselves. Both follow the shared dark-theme /
+# _shared_nav_html / _shared_footer_html convention every other
+# non-legacy page already uses, per Nick's "more inline with other
+# websites" ask.
+
+@app.get("/my-leads", response_class=HTMLResponse)
+def my_leads_view(request: Request):
+    session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not session_email:
+        return RedirectResponse(url="/login", status_code=303)
+
+    active_sub = database.get_contractor_subscription(session_email)
+    is_paid = bool(active_sub and active_sub.get("active"))
+
+    lead_cards = ""
+    total = 0
+    import notifications
+
+    if is_paid:
+        data = database.get_contractor_dashboard_data(session_email)
+        leads = data["dispatched_leads"]
+        total = len(leads)
+        for l in leads:
+            ref = l.get("ref", "") or ""
+            addr = l.get("addr", "") or ""
+            summary = l.get("summary", "") or ""
+            dispatched_at = str(l.get("dispatched_at", "") or "")[:16]
+            filed_date = notifications._format_filed_date(l.get("registered_date"))
+            filed_line = f"<br><span class='text-slate-400 text-xs'>Filed: {filed_date}</span>" if filed_date else ""
+            applicant_name = l.get("applicant_name")
+            applicant_line = f"<br><span class='text-slate-400 text-xs'>Applicant: {html.escape(applicant_name)}</span>" if applicant_name else ""
+            has_agent = l.get("has_agent")
+            if has_agent is True:
+                agent_badge = "<span class='text-[10px] bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded font-bold'>AGENT ON RECORD</span>"
+            elif has_agent is False:
+                agent_badge = "<span class='text-[10px] bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 rounded font-bold'>NO AGENT LISTED</span>"
+            else:
+                agent_badge = "<span class='text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded'>AGENT STATUS UNCONFIRMED</span>"
+            gmap_url = f"/street-view/{urllib.parse.quote(ref)}"
+            trimmed_summary = html.escape(summary[:220]) + ("..." if len(summary) > 220 else "")
+            lead_cards += f"""
+            <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 mb-3">
+                <div class="flex justify-between items-start flex-wrap gap-2">
+                    <div>
+                        <span class="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-bold">REF: {html.escape(ref)}</span>
+                        {agent_badge}
+                        <h4 class="text-slate-100 text-[15px] font-bold mt-1 mb-0.5">{html.escape(addr)}</h4>
+                        <span class="text-slate-400 text-xs">Received: {dispatched_at}</span>{filed_line}{applicant_line}
+                    </div>
+                    <div class="flex gap-1.5 flex-wrap">
+                        <a href="/generate-letter/{urllib.parse.quote(ref)}" target="_blank" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg no-underline">Letter</a>
+                        <a href="/generate-street-flyer/{urllib.parse.quote(ref)}" target="_blank" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg no-underline">Street Flyer</a>
+                        <a href="{gmap_url}" target="_blank" class="bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg no-underline">Street View</a>
+                    </div>
+                </div>
+                <div class="bg-slate-950 border-l-2 border-emerald-600 px-3 py-2 mt-3 text-slate-300 text-xs">
+                    <b>Specification:</b> {trimmed_summary}
+                </div>
+            </div>"""
+        if not lead_cards:
+            lead_cards = "<div class='text-center py-10 bg-slate-900/60 rounded-xl border border-slate-800'><p class='text-slate-400 m-0'>No leads purchased yet. <a href=\"/marketplace\" class=\"text-emerald-400 font-bold\">Browse the Marketplace</a> to unlock one.</p></div>"
+    else:
+        limbo = database.get_limbo_account(session_email)
+        free_ref = limbo.get("free_lead_ref") if limbo else None
+        if free_ref:
+            lead = database.get_lead_by_reference(free_ref)
+            if lead:
+                total = 1
+                filed_date = notifications._format_filed_date(lead.get("registered_date"))
+                filed_row = f"<p class='text-xs text-slate-400 mt-2 mb-0'>Filed: {filed_date}</p>" if filed_date else ""
+                lead_cards = f"""
+                <div class="bg-slate-900/60 border-l-4 border-emerald-500 rounded-xl p-5">
+                    <p class="text-sm m-0 mb-2"><span class="text-slate-400 font-bold">Reference:</span> <span class="text-slate-100">{html.escape(lead.get('reference', 'N/A'))}</span></p>
+                    <p class="text-sm m-0 mb-2"><span class="text-slate-400 font-bold">Address:</span> <span class="text-slate-100">{html.escape(lead.get('address', 'N/A'))}</span></p>
+                    <p class="text-sm m-0"><span class="text-slate-400 font-bold">Description:</span><br><span class="text-slate-300 text-[13px]">{html.escape(lead.get('summary', 'No summary available.'))}</span></p>
+                    {filed_row}
+                </div>"""
+        if not lead_cards:
+            lead_cards = "<div class='text-center py-10 bg-slate-900/60 rounded-xl border border-slate-800'><p class='text-slate-400 m-0'>No leads on your account yet. Free-tier accounts get one lead automatically, or <a href=\"/marketplace\" class=\"text-emerald-400 font-bold\">browse the Marketplace</a> to buy one outright.</p></div>"
+
+    upsell = "" if is_paid else """
+        <div class="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-5 mb-6">
+            <p class="text-sm text-emerald-200 m-0 mb-3">Free-tier accounts get one lead. Subscribe for a steady stream of exclusive leads in your area, delivered the moment they're filed.</p>
+            <a href="/pricing" class="inline-block bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg no-underline font-bold text-sm">See Subscription Plans →</a>
+        </div>"""
+
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>My Leads | TreeKey</title>
+        <link rel="icon" href="/static/icon-192.png">
+        <link href="/static/tailwind.css" rel="stylesheet">
+    </head>
+    <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
+    {_shared_nav_html(request)}
+    <div class="max-w-3xl mx-auto px-4 py-8 sm:py-12">
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
+            <h2 class="text-white text-2xl font-extrabold m-0">My Leads</h2>
+            <span class="text-slate-400 text-sm">{total} total</span>
+        </div>
+        <p class="text-slate-400 text-sm mb-6">Every lead below is exclusively yours.</p>
+        {upsell}
+        {lead_cards}
+        <div class="text-center mt-8">
+            <a href="/account" class="text-slate-400 hover:text-white no-underline text-sm">← Back to My Account</a>
+        </div>
+    </div>
+    {_shared_footer_html()}
+    </body>
+    </html>
+    """)
+
+
+@app.get("/account", response_class=HTMLResponse)
+def my_account_view(request: Request):
+    session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not session_email:
+        return RedirectResponse(url="/login", status_code=303)
+
+    active_sub = database.get_contractor_subscription(session_email)
+    is_paid = bool(active_sub and active_sub.get("active"))
+    limbo = database.get_limbo_account(session_email) if not is_paid else None
+    settings = database.get_contractor_settings(session_email)
+    history = database.get_payment_history_for_contractor(session_email, limit=15)
+
+    display_name = (session_email.split("@")[0] or session_email).replace(".", " ").replace("_", " ").replace("+", " ").strip().title() or session_email
+    if is_paid and active_sub.get("customer_name"):
+        display_name = active_sub["customer_name"]
+    elif limbo and limbo.get("customer_name"):
+        display_name = limbo["customer_name"]
+
+    member_since = None
+    if is_paid and active_sub.get("subscribed_at"):
+        member_since = str(active_sub["subscribed_at"])[:10]
+    elif limbo and limbo.get("signed_up_at"):
+        member_since = str(limbo["signed_up_at"])[:10]
+    member_since_line = f"<p class='text-xs text-slate-500 m-0 mt-1'>Member since {member_since}</p>" if member_since else ""
+
+    if is_paid:
+        tier_name = (active_sub.get("tier") or "Free / Pay-As-You-Go").replace("_", " ").title()
+        quota = active_sub.get("quota") or 0
+        delivered = active_sub.get("delivered") or 0
+        outcode = active_sub.get("outcode", "GB")
+        radius = active_sub.get("radius", 15)
+        status_badge = "<span class='bg-emerald-500/15 text-emerald-400 text-xs font-bold px-2.5 py-1 rounded-full'>ACTIVE PARTNER</span>"
+        quota_line = f"<p class='text-sm text-slate-300 m-0 mb-1'>Monthly allocation: <b>{delivered} / {quota}</b> leads used this month</p>"
+        coverage_line = f"<p class='text-sm text-slate-300 m-0'>Coverage: <b>{html.escape(str(outcode))}</b> — {radius}-mile radius</p>"
+        manage_block = '<a href="/pricing" class="inline-block bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg no-underline font-bold text-sm mt-3">Change Plan →</a>'
+    else:
+        tier_name = "Free Tier"
+        status_badge = "<span class='bg-slate-700 text-slate-300 text-xs font-bold px-2.5 py-1 rounded-full'>FREE TIER</span>"
+        quota_line = "<p class='text-sm text-slate-300 m-0 mb-1'>One free lead per account, plus occasional early-access alerts by email.</p>"
+        coverage_line = ""
+        manage_block = '<a href="/pricing" class="inline-block bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg no-underline font-bold text-sm mt-3">Upgrade to a Subscription →</a>'
+
+    pref = settings.get("notification_preference", "email")
+    pref_label = {"email": "Email", "whatsapp": "WhatsApp", "both": "Email + WhatsApp"}.get(pref, "Email")
+
+    history_rows = ""
+    for h in history:
+        date = str(h.get("created_at") or "")[:10]
+        amount = f"£{(h.get('amount_pence') or 0) / 100:.2f}"
+        status_raw = (h.get("status") or "pending").lower()
+        status_color = {"paid": "text-emerald-400", "refunded": "text-amber-400", "pending": "text-slate-400"}.get(status_raw, "text-slate-400")
+        desc_raw = str(h.get("lead_address") or (h.get("plan") or "Subscription").replace("_", " ").title())
+        desc = html.escape(desc_raw[:60]) + ("..." if len(desc_raw) > 60 else "")
+        history_rows += f"""
+        <tr class="border-b border-slate-800">
+            <td class="py-2.5 pr-3 text-slate-400 text-xs whitespace-nowrap">{date}</td>
+            <td class="py-2.5 pr-3 text-slate-200 text-xs">{desc}</td>
+            <td class="py-2.5 pr-3 text-slate-200 text-xs font-mono whitespace-nowrap">{amount}</td>
+            <td class="py-2.5 {status_color} text-xs font-bold">{status_raw.title()}</td>
+        </tr>"""
+    if not history_rows:
+        history_rows = '<tr><td colspan="4" class="py-6 text-center text-slate-500 text-sm">No billing history yet.</td></tr>'
+
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>My Account | TreeKey</title>
+        <link rel="icon" href="/static/icon-192.png">
+        <link href="/static/tailwind.css" rel="stylesheet">
+    </head>
+    <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
+    {_shared_nav_html(request)}
+    <div class="max-w-3xl mx-auto px-4 py-8 sm:py-12">
+        <h2 class="text-white text-2xl font-extrabold mb-6">My Account</h2>
+
+        <!-- Profile -->
+        <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 mb-4">
+            <div class="flex justify-between items-start flex-wrap gap-2">
+                <div>
+                    <div class="text-[11px] uppercase tracking-wider text-slate-500 font-bold mb-1">Profile</div>
+                    <h3 class="text-white text-lg font-bold m-0">{html.escape(display_name)}</h3>
+                    <p class="text-slate-400 text-sm m-0 mt-0.5">{html.escape(session_email)}</p>
+                    {member_since_line}
+                </div>
+                {status_badge}
+            </div>
+        </div>
+
+        <!-- Subscription & Billing -->
+        <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 mb-4">
+            <div class="text-[11px] uppercase tracking-wider text-slate-500 font-bold mb-2">Subscription</div>
+            <p class="text-sm text-slate-300 m-0 mb-1">Plan: <b class="text-white">{html.escape(tier_name)}</b></p>
+            {quota_line}
+            {coverage_line}
+            {manage_block}
+        </div>
+
+        <!-- Billing History -->
+        <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 mb-4">
+            <div class="text-[11px] uppercase tracking-wider text-slate-500 font-bold mb-2">Billing History</div>
+            <div style="overflow-x:auto;">
+                <table class="w-full text-left" style="border-collapse:collapse;">
+                    <thead>
+                        <tr class="border-b border-slate-700">
+                            <th class="py-2 pr-3 text-slate-500 text-[11px] uppercase font-bold">Date</th>
+                            <th class="py-2 pr-3 text-slate-500 text-[11px] uppercase font-bold">Item</th>
+                            <th class="py-2 pr-3 text-slate-500 text-[11px] uppercase font-bold">Amount</th>
+                            <th class="py-2 text-slate-500 text-[11px] uppercase font-bold">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {history_rows}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Notification Preferences -->
+        <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 mb-4">
+            <div class="text-[11px] uppercase tracking-wider text-slate-500 font-bold mb-2">Notification Preferences</div>
+            <p class="text-sm text-slate-300 m-0 mb-2">Currently: <b class="text-white">{pref_label}</b></p>
+            <a href="/settings" class="inline-block bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg no-underline font-bold text-sm">Change Notification Settings →</a>
+        </div>
+
+        <!-- Login & Security -->
+        <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 mb-4">
+            <div class="text-[11px] uppercase tracking-wider text-slate-500 font-bold mb-2">Login &amp; Security</div>
+            <p class="text-sm text-slate-300 m-0 mb-2">Login method: <b class="text-white">Passwordless</b> — a one-time code or link is emailed to <span class="text-slate-100">{html.escape(session_email)}</span> each time you log in. There's no password to remember or reset.</p>
+            <a href="/logout" class="inline-block bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg no-underline font-bold text-sm">Log Out</a>
+        </div>
+
+        <!-- Quick Links -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-6">
+            <a href="/my-leads" class="block bg-slate-800/50 border border-slate-700 hover:border-emerald-500 rounded-xl p-4 no-underline transition-colors">
+                <div class="text-white font-bold text-sm mb-1">My Leads</div>
+                <div class="text-slate-400 text-xs">View everything you've received</div>
+            </a>
+            <a href="{'/dashboard' if is_paid else '/free-dashboard'}" class="block bg-slate-800/50 border border-slate-700 hover:border-emerald-500 rounded-xl p-4 no-underline transition-colors">
+                <div class="text-white font-bold text-sm mb-1">Dashboard</div>
+                <div class="text-slate-400 text-xs">Your command center</div>
+            </a>
+            <a href="/marketplace" class="block bg-slate-800/50 border border-slate-700 hover:border-sky-500 rounded-xl p-4 no-underline transition-colors">
+                <div class="text-white font-bold text-sm mb-1">Marketplace</div>
+                <div class="text-slate-400 text-xs">Buy leads outright</div>
+            </a>
+        </div>
+    </div>
+    {_shared_footer_html()}
+    </body>
+    </html>
+    """)
 
 
 
