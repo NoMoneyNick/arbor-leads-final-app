@@ -5012,6 +5012,19 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
             _member_fee = max(1, round(unlock_fee * (100 - _viewer_discount["discount_pct"]) / 100))
             price_block_html = f"""<div class="text-lg text-slate-500 line-through leading-none">£{unlock_fee}</div><div class="text-2xl sm:text-3xl font-extrabold text-emerald-400">£{_member_fee}<span class="text-[11px] font-bold text-emerald-400 align-top ml-1">MEMBER</span></div>"""
             member_link_html = ""
+        elif _viewer_email:
+            # Sep 16 2026, Nick's report: a logged-in visitor with no
+            # discount-eligible subscription was shown the exact same
+            # "Already a member? Sign in for your discount" link as a
+            # completely anonymous visitor -- wrong and misleading, since
+            # they're already signed in (signing in again changes
+            # nothing; the real unlock is subscribing). Split the copy on
+            # _viewer_email (are they logged in at all) rather than only
+            # on _viewer_discount (are they a discount-eligible
+            # subscriber) so a logged-in non-subscriber gets an accurate
+            # "subscribe" prompt instead of a "sign in" one.
+            price_block_html = f"""<div class="text-2xl sm:text-3xl font-extrabold text-emerald-400">£{unlock_fee}</div>"""
+            member_link_html = f"""<a href="/pricing" class="text-[11px] text-slate-400 hover:text-emerald-400 underline">Subscribe for member pricing</a>"""
         else:
             price_block_html = f"""<div class="text-2xl sm:text-3xl font-extrabold text-emerald-400">£{unlock_fee}</div>"""
             member_link_html = f"""<a href="/login?next={urllib.parse.quote(f'/checkout/{plan_key}?lead_id={lid}')}" class="text-[11px] text-slate-400 hover:text-emerald-400 underline">Already a member? Sign in for your discount</a>"""
