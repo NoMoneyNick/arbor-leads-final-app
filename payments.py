@@ -577,14 +577,14 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
                 # Stripe's own retry) finds nothing to confirm and used to
                 # fall straight into the "reservation lost" branch below,
                 # which auto-refunded an already-completed sale. Live
-                # incident: the very first delivery correctly sold the lead
-                # but then crashed on the confirmation email (unrelated bug,
-                # fixed separately) before the event was marked fulfilled, so
-                # the retry looked identical to a genuinely lost reservation.
-                # This check catches exactly that case (same reservation,
-                # lead already 'claimed') and re-sends the confirmation
-                # instead of refunding -- see database.
-                # get_already_sold_lead_if_matching_session's own docstring.
+                # incident: the first delivery correctly sold the lead but
+                # crashed on the confirmation email (bug above, fixed) before
+                # the event was marked fulfilled, so the retry looked
+                # identical to a genuinely lost reservation. This check
+                # catches exactly that case (same reservation, lead already
+                # 'claimed') and re-sends the confirmation instead of
+                # refunding -- see database.get_already_sold_lead_if_
+                # matching_session's own docstring.
                 already_sold = database.get_already_sold_lead_if_matching_session(lead_id, reservation_token)
                 order_status = database.get_order_status(reservation_token)
                 if order_status == "refunded":
