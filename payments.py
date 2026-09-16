@@ -547,9 +547,26 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
             lead_data = database.confirm_reserved_lead_sale(lead_id, reservation_token, customer_email)
             if lead_data:
                 logger.info(f"[Stripe] Lead {lead_id} sold to {mask(customer_email)} (reservation {reservation_token[:8]}...)")
-                notifications.send_purchased_lead_email(customer_email, lead_data)
+                # Sep 16 2026, production incident fix: this used to send the
+                # email FIRST, then mark the order/event fulfilled. A real
+                # customer's payment succeeded, the lead was correctly burned
+                # right above, but send_purchased_lead_email then raised an
+                # unhandled exception (see notifications.py's matching Sep 16
+                # comment) -- with fulfillment never marked, the 500 caused
+                # Stripe to retry this exact webhook, and on retry
+                # confirm_reserved_lead_sale correctly found nothing to
+                # confirm (the lead was already 'claimed', not 'reserved'
+                # anymore) and fell into the "reservation lost" branch below,
+                # which AUTO-REFUNDED a payment for a lead the customer had
+                # already legitimately received. The database write that
+                # actually matters -- marking this sale settled -- now
+                # happens immediately, before the (best-effort, now
+                # self-contained/non-raising) email send, so a future email
+                # failure of any kind can never again be mistaken for a lost
+                # reservation or trigger a wrongful refund.
                 database.update_order_fulfillment(reservation_token, "paid", "fulfilled")
                 _mark_stripe_event_fulfilled(event_id)
+                notifications.send_purchased_lead_email(customer_email, lead_data)
             elif is_retry:
                 logger.info(f"[Stripe] Duplicate webhook delivery for already-processed lead {lead_id} ({mask(customer_email)}) — ignoring retry.")
             else:
