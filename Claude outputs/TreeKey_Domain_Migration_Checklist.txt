@@ -1,0 +1,111 @@
+TREEKEY .UK -> .CO.UK MIGRATION CHECKLIST
+(what "move the real business to treekey.co.uk, keep treekey.uk for cold email only" actually touches)
+
+Checked directly against your live code today (15 Sep) so this isn't guesswork -- good news first: most of the website already reads its domain from ONE setting (PUBLIC_APP_URL on Render), not hardcoded everywhere. That's the easy part. Email addresses are the part that's hardcoded and needs real editing.
+
+==============================================================
+1. BUY + DNS (Cloudflare)
+==============================================================
+[ ] Register treekey.co.uk (Cloudflare Registrar, or wherever)
+[ ] Add it as a zone in Cloudflare, same as treekey.uk
+[ ] Point it at Render (same as treekey.uk's current DNS records -- copy the A/CNAME setup)
+[ ] Set up SPF, DKIM, DMARC records fresh on treekey.co.uk for whichever service sends its mail (see section 4)
+[ ] Leave treekey.uk's DNS alone for now except section 6 (it's about to become the cold-email-only domain)
+
+==============================================================
+2. HOSTING (Render)
+==============================================================
+[ ] Add treekey.co.uk as a custom domain on the Render service (Render issues its own SSL cert automatically)
+[ ] Change the PUBLIC_APP_URL environment variable on Render from https://treekey.uk to https://treekey.co.uk
+      -- this one setting drives: sitemap.xml, robots.txt, magic-login links, unsubscribe links,
+      checkout success/cancel URLs, and most email CTA links. Confirmed today it's centralized, not
+      scattered -- changing this one variable does most of the work.
+[ ] Set up the 301 redirect: treekey.uk -> treekey.co.uk for any URL someone still has bookmarked
+      (do this only for the OLD website pages -- don't redirect treekey.uk's future cold-email
+      links, there won't be any website there to redirect from)
+
+==============================================================
+3. CODE -- hardcoded bits PUBLIC_APP_URL does NOT cover
+==============================================================
+Two hardcoded fallback URLs (only used if the env var is ever blank, low risk but worth fixing):
+[ ] main.py, line ~7922 and ~7930 -- "https://treekey.uk" hardcoded as the fallback default
+
+Hardcoded EMAIL ADDRESSES -- these do NOT follow PUBLIC_APP_URL, they're typed directly and need
+actual code changes to become @treekey.co.uk. Say the word and I'll make these edits when you're
+ready -- flagging now so nothing gets missed, not changing anything yet:
+[ ] main.py -- contact@treekey.uk appears ~13 times (footer, FAQ, ToS/Privacy page, contact page)
+[ ] main.py -- nick@treekey.uk appears 3 times
+[ ] notifications.py -- leads@treekey.uk appears 5 times (this is the actual "From:" address on
+      purchase confirmations, free-lead emails, and system alerts -- the important one)
+[ ] notifications.py -- contact@treekey.uk appears 2 times
+[ ] database.py -- contact@treekey.uk appears once
+[ ] net_utils.py -- contact@treekey.uk appears once
+
+==============================================================
+4. EMAIL SENDING INFRASTRUCTURE
+==============================================================
+[ ] Resend (transactional email -- purchase confirmations, login links, free-lead emails):
+      verify treekey.co.uk as a new sending domain on resend.com/domains, add the SPF/DKIM records
+      it gives you to Cloudflare. Transactional mail doesn't need a warmup period the way bulk
+      cold-email does, but it DOES need domain verification before Resend will send from it at all.
+[ ] Google Workspace: decide if you want new mailboxes on treekey.co.uk (e.g. nick@treekey.co.uk)
+      for real business use, or keep using Resend for everything transactional and only use
+      Workspace for your own personal use of the address
+[ ] Once treekey.co.uk is verified and live, switch notifications.py's "from" addresses over
+      (this is the same edit as section 3's leads@ line)
+[ ] Leave nick@treekey.uk / nickms@treekey.uk (the Instantly warmup mailboxes) exactly where they
+      are -- they're the whole point of keeping treekey.uk as the cold-send domain
+
+==============================================================
+5. PAYMENTS (Stripe)
+==============================================================
+[ ] Stripe checkout success/cancel URLs -- already driven by PUBLIC_APP_URL, no separate edit needed
+[ ] Stripe webhook endpoint -- this points at your Render service URL, not treekey.uk directly,
+      so should be unaffected, but worth a quick check in the Stripe dashboard after cutover
+[ ] Stripe's own business profile / branding (the domain shown on the actual checkout page and
+      receipts) -- update this in the Stripe dashboard to treekey.co.uk
+
+==============================================================
+6. DELIVERABILITY ON THE NOW-DEDICATED COLD DOMAIN (treekey.uk)
+==============================================================
+[ ] Fix DMARC on treekey.uk (p=none -> enforcing) -- already on the to-do list, now more important
+      since this domain's only job becomes cold outreach
+[ ] Once the real business fully moves off treekey.uk, double check nothing on the live site still
+      points back to it by mistake (old cached links, leftover hardcoded references)
+
+==============================================================
+7. SEARCH / SEO
+==============================================================
+[ ] Google Search Console: add treekey.co.uk as a new property, verify it, submit the sitemap
+[ ] Google Search Console: use the "Change of Address" tool on the treekey.uk property pointing to
+      treekey.co.uk (tells Google this is a deliberate move, protects what little SEO exists so far)
+[ ] Google Postmaster Tools: this is separate from Search Console -- you'll eventually want
+      treekey.co.uk verified here too if it starts sending meaningful transactional volume, but
+      it's not urgent for transactional-only mail
+
+==============================================================
+8. LEGAL / BUSINESS DOCUMENTS
+==============================================================
+[ ] terms_and_conditions_draft.md -- references treekey.uk, needs updating before this becomes the
+      live ToS on the new domain
+[ ] privacy_policy_draft.md -- same
+[ ] ICO registration -- registers the organisation, not the domain name, so this does NOT need
+      changing. Worth a quick look at the register entry to see if it lists a website, but not urgent.
+
+==============================================================
+9. PHYSICAL / EXTERNAL THINGS EASY TO FORGET
+==============================================================
+[ ] Any printed QR codes (you have a QR code generator in the project) -- check what URL they
+      actually encode and reprint/reissue anything already handed out or planned for print
+[ ] Any business listings, social media bios, Google Business Profile, directory listings --
+      anywhere treekey.uk is typed out somewhere I can't see in code
+
+==============================================================
+10. TEST BEFORE YOU CALL IT DONE
+==============================================================
+[ ] Load treekey.co.uk, confirm the whole site works, SSL is valid, no mixed-content warnings
+[ ] Sign up for a free account end to end, confirm the code email arrives from the new domain
+[ ] Do one real small purchase, confirm the Stripe receipt + purchase-confirmation email both
+      show treekey.co.uk / the new email address correctly
+[ ] Log in via magic link, confirm it lands on treekey.co.uk not treekey.uk
+[ ] Confirm treekey.uk still resolves and still sends cold email fine, with nothing else running on it

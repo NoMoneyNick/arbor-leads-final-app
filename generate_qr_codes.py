@@ -8,7 +8,13 @@ marketing material (a business card run, a trade-show stand, a future
 letter campaign -- see MARKETING_OUTREACH_IDEAS.md).
 
 Each QR code encodes:
-    https://treekey.uk/partner-offer?src=<campaign-code>
+    https://treekey.co.uk/partner-offer?src=<campaign-code>
+
+Sep 16 2026: updated from treekey.uk to treekey.co.uk to match the domain
+migration -- treekey.uk now redirects to treekey.co.uk anyway (so any
+already-printed code using the old URL still works), but any NEWLY
+generated code should point straight at the real domain, not through an
+extra redirect hop.
 
 Scanning it lands the person on the /partner-offer landing page (main.py),
 and the `src` code is recorded against every interest-capture form
@@ -41,7 +47,7 @@ except ImportError:
     print("  pip install reportlab pillow --break-system-packages")
     sys.exit(1)
 
-BASE_URL = "https://treekey.uk/partner-offer"
+BASE_URL = "https://treekey.co.uk/partner-offer"
 OUTPUT_DIR = "qr_codes_output"
 
 # Default campaign codes -- edit/extend freely, or pass custom codes as

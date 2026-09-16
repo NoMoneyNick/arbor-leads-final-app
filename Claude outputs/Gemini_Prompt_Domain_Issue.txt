@@ -1,0 +1,31 @@
+I just bought a brand new domain (treekey.co.uk) through Cloudflare Registrar today.
+I'm trying to add it to my EXISTING Google Workspace account (my primary domain there
+is treekey.uk) as a "User alias domain" so I can send/receive email at
+nick@treekey.co.uk and contact@treekey.co.uk using my existing mailbox.
+
+When I go to Admin console > Account > Domains > Manage domains > Add a domain, enter
+treekey.co.uk, select "User alias domain," and click "Add domain and start
+verification," I get this error:
+
+"This domain name has already been used as an alias or domain."
+
+I checked my own Workspace account's domain list and treekey.co.uk is NOT listed there
+-- only my existing treekey.uk (primary), plus the standard auto-generated
+treekey.uk.guest.google and treekey.uk.test-google-a.com entries. So it's not already
+in MY account.
+
+I registered this domain brand new today, but it's possible a previous owner had it
+registered to a different Google Workspace account before I bought it, and Google may
+still have some old ownership/verification record tied to it from them.
+
+Please give me:
+1. The exact current steps to resolve this (Google's own support pages describe this
+   generally as needing a "domain ownership verification" process with Google
+   Workspace support, but I need the actual current form/URL and what proof of
+   ownership they require -- e.g. a DNS TXT record, WHOIS info, registrar receipt).
+2. Roughly how long this process usually takes.
+3. Whether there's any faster workaround (e.g. verifying via Search Console first,
+   or a different domain-add path) rather than waiting on a support ticket.
+
+I have full DNS control of the domain via Cloudflare and can add any TXT/verification
+record needed.

@@ -1,0 +1,183 @@
+TREEKEY.CO.UK MIGRATION - FULL STEP BY STEP
+(you've bought the domain - this is everything from here to "the business is live on
+treekey.co.uk and treekey.uk is a clean cold-email-only domain," in the order to do it)
+
+Read this once end to end before starting - the order matters. Doing things out of
+order (e.g. flipping the live website over before Resend/DNS are ready) is what causes
+a few hours of broken emails or a dead site. Each phase says who does it: things marked
+(YOU) happen in a dashboard I can't click into myself; things marked (ME) are code
+edits I'll make in your files once you say go.
+
+==============================================================
+PHASE 1 - GET THE NEW DOMAIN ONTO CLOUDFLARE (YOU)
+==============================================================
+Why first: everything else (hosting, email, SSL) needs the domain's DNS to actually
+be manageable before you can configure any of it.
+
+1. In the Cloudflare dashboard, go to your account and add treekey.co.uk as a new site
+   (Websites / Add a site). If you bought it through Cloudflare Registrar it may
+   already be sitting in your account - check the Domain Registration page first.
+2. If it's not already using Cloudflare's nameservers, Cloudflare will show you two
+   nameserver addresses to set at the registrar. If you bought it through Cloudflare
+   itself, this step is done automatically.
+3. Wait for the zone to go "Active" in Cloudflare (usually fast, can take a few hours
+   for a domain bought elsewhere).
+
+Don't touch treekey.uk's DNS in this phase - leave it exactly as it is.
+
+==============================================================
+PHASE 2 - HOSTING: POINT RENDER AT THE NEW DOMAIN (YOU, then ME)
+==============================================================
+Why now: you want the new domain fully working and verified BEFORE you flip the
+"official" site over to it, so there's no dead-site gap.
+
+1. (YOU) In the Render dashboard, open your web service -> Settings -> Custom Domains
+   -> Add Custom Domain -> enter treekey.co.uk (and www.treekey.co.uk if you want the
+   www version to work too).
+2. (YOU) Render will show you the exact DNS record(s) to add (usually a CNAME, or an
+   A record for the root domain). Add those in Cloudflare's DNS tab for treekey.co.uk.
+   One gotcha from Render's own docs: remove any AAAA records on the domain while
+   you're doing this, they can conflict with verification.
+3. (YOU) Back in Render, click Verify. Once it succeeds, Render automatically issues
+   an SSL certificate for the domain (via Let's Encrypt) - no separate step needed.
+   Can take a few minutes for DNS to propagate; if Verify fails immediately, wait 10
+   minutes and try again before assuming something's wrong.
+4. (YOU) Load https://treekey.co.uk directly in a browser once it's issued - you
+   should see the exact same TreeKey site as treekey.uk (same app, just a second
+   domain pointing at it). This is expected and fine, it's not "live" as the official
+   domain until the next step.
+5. STOP HERE and don't do step 5 until Resend (Phase 3) is fully verified, or every
+   email the site sends will start failing.
+5. (YOU) Once Phase 3 is done: change the PUBLIC_APP_URL environment variable on
+   Render from https://treekey.uk to https://treekey.co.uk, and redeploy. This one
+   setting is what actually makes treekey.co.uk "the real site" - it drives the
+   sitemap, robots.txt, every login/checkout/unsubscribe link, and most of the email
+   content.
+
+==============================================================
+PHASE 3 - EMAIL SENDING: VERIFY THE NEW DOMAIN ON RESEND (YOU)
+==============================================================
+Why before Phase 2 step 5: the moment PUBLIC_APP_URL points at the new domain, the
+app will try to send real customer emails "from" it - so the domain needs to be
+verified and ready first, or those emails will fail outright (HTTP 403 from Resend).
+
+1. In the Resend dashboard, go to Domains -> Add Domain.
+2. Resend's own recommendation is to use a subdomain for sending (e.g.
+   notifications.treekey.co.uk or mail.treekey.co.uk) rather than the bare root
+   domain - it's considered better deliverability practice and keeps sending
+   infrastructure separate from the website itself. Worth doing this time even
+   though treekey.uk currently sends from the bare domain.
+3. Pick the region closest to your recipients (UK-based, so pick accordingly).
+4. Resend will show you a Records tab with the exact DNS entries to add (TXT records
+   for SPF/DKIM, possibly an MX record). Copy every one of these into Cloudflare's
+   DNS tab for treekey.co.uk exactly as shown - don't paraphrase them.
+5. Wait for verification - Resend says it's often within 15 minutes, but DNS can take
+   up to 72 hours worst case. Don't move to Phase 2 step 5 until this shows Verified.
+6. Once verified, add a DMARC record too (Resend prompts for this after verification).
+   Worth getting this right from day one on the new domain rather than leaving it at
+   p=none the way treekey.uk currently is.
+
+==============================================================
+PHASE 4 - CODE CHANGES (ME - say go when you're ready)
+==============================================================
+Once Phase 3's domain is verified, tell me and I'll make these edits in one pass,
+test them, and sync back to your OneDrive the same way I always do:
+
+1. Update every hardcoded "from" address in notifications.py (leads@treekey.uk ->
+   leads@[your new sending subdomain], 5 places) - this is the one that actually
+   matters, it's what customers see as the sender.
+2. Update the hardcoded contact@/nick@treekey.uk addresses across main.py,
+   database.py, net_utils.py (footer, FAQ, contact page, ToS/Privacy page - roughly
+   20 occurrences) to the new domain.
+3. Fix the two hardcoded "https://treekey.uk" fallback defaults in main.py (only
+   used if PUBLIC_APP_URL is ever blank, but should match anyway).
+4. Full regression test pass before syncing, same as every fix this session.
+
+I won't touch treekey.uk's DNS, Instantly, or the warmup mailboxes in this pass -
+those stay exactly as they are.
+
+==============================================================
+PHASE 5 - STRIPE (YOU)
+==============================================================
+Checkout success/cancel URLs already follow PUBLIC_APP_URL automatically, no code
+change needed there. Two things only you can do in the Stripe dashboard:
+
+1. Settings -> Business details / Public details - update the business website URL
+   shown to customers to treekey.co.uk.
+2. Quick sanity check on your webhook endpoint (Developers -> Webhooks) - it should
+   already point at your Render service's own URL, not treekey.uk directly, so this
+   is just a confirm-nothing-broke check, not an expected change.
+
+==============================================================
+PHASE 6 - TEST BEFORE CALLING IT LIVE (YOU, I can help verify)
+==============================================================
+Do these against treekey.co.uk after Phase 2 step 5 and Phase 4 are both done:
+
+1. Load the homepage, click through a few pages, confirm SSL padlock is valid, no
+   mixed-content warnings.
+2. Sign up for a free account with a real test email - confirm the code email
+   arrives FROM the new address, not leads@treekey.uk.
+3. Redeem the code, confirm the "lead granted" follow-up email also comes from the
+   new address.
+4. Do one real small single-lead purchase - confirm the Stripe receipt and the
+   purchase-confirmation email both show the new domain/address correctly.
+5. Log out, log back in via magic link - confirm the link lands on treekey.co.uk.
+6. Check the footer/FAQ/contact page in a browser - confirm no stray treekey.uk
+   email addresses slipped through.
+
+If anything's wrong here, tell me and I'll dig into the actual cause rather than us
+guessing - same as always.
+
+==============================================================
+PHASE 7 - LOCK DOWN treekey.uk AS THE COLD-EMAIL-ONLY DOMAIN (YOU)
+==============================================================
+1. Fix DMARC on treekey.uk itself (p=none -> enforcing) - already flagged, now more
+   important since this domain's only job from here is cold outreach.
+2. Leave nick@treekey.uk / nickms@treekey.uk (the Instantly warmup mailboxes)
+   completely alone - don't touch their settings, they keep doing exactly what
+   they're doing now.
+3. If you go ahead with the private staging/admin site idea we discussed on
+   treekey.uk: make sure it doesn't trigger real emails from @treekey.uk addresses
+   when you're testing on it (either stub the email sending in that environment, or
+   point its email config at the new domain instead) - this is the one way that
+   setup could undo the isolation you're building here.
+
+==============================================================
+PHASE 8 - SEO / SEARCH ENGINES (YOU)
+==============================================================
+1. Google Search Console: add treekey.co.uk as a new property, verify it (same TXT
+   record method you just used for Postmaster Tools), submit the sitemap
+   (treekey.co.uk/sitemap.xml - already dynamic, no code change needed).
+2. On the treekey.uk property in Search Console, use the "Change of Address" tool
+   pointing at treekey.co.uk - this tells Google it's a deliberate move rather than
+   the old site just vanishing.
+3. Once Phase 2 step 5 is live, treekey.uk's 301 redirect (set up back in Phase 2 if
+   you want one) should already be sending any old visitors/bookmarks on to
+   treekey.co.uk automatically.
+
+==============================================================
+PHASE 9 - LEGAL DOCUMENTS (ME, once you confirm wording)
+==============================================================
+terms_and_conditions_draft.md and privacy_policy_draft.md both reference treekey.uk -
+these need the domain and contact-email references updated before they become the
+live ToS/Privacy Policy on the new domain. I can do this as a straight find-and-
+replace once Phase 4's addresses are settled - just confirm you want this done at the
+same time.
+
+==============================================================
+PHASE 10 - PHYSICAL / EXTERNAL THINGS (YOU)
+==============================================================
+1. Check what URL your QR code generator actually encodes - reprint/reissue anything
+   already handed out or planned for print.
+2. Any business listings, social media bios, Google Business Profile, directories -
+   anywhere treekey.uk is written out somewhere I have no visibility into.
+
+==============================================================
+FINAL SIGN-OFF
+==============================================================
+You're fully migrated once: treekey.co.uk is the live PUBLIC_APP_URL, all emails send
+and receive correctly from the new addresses, Stripe/Search Console/legal docs all
+reference the new domain, and treekey.uk has nothing running on it except the
+Instantly warmup mailboxes (plus, optionally, your private staging site if you keep
+that email-isolated). At that point treekey.uk is a clean, dedicated cold-email
+domain and you're clear to start ramping real send volume on it.

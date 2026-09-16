@@ -7919,7 +7919,7 @@ def local_seo_intake_page(location_slug: str):
 @app.get("/robots.txt")
 def robots_txt():
     """Serves robots.txt pointing crawlers to the sitemap."""
-    base = os.getenv("PUBLIC_APP_URL", "https://treekey.uk").rstrip("/")
+    base = os.getenv("PUBLIC_APP_URL", "https://treekey.co.uk").rstrip("/")
     content = f"User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\nSitemap: {base}/sitemap.xml\n"
     return Response(content=content, media_type="text/plain")
 
@@ -7927,7 +7927,7 @@ def robots_txt():
 @app.get("/sitemap.xml")
 def sitemap_xml():
     """Generates dynamic XML sitemap for Google Search Console indexing all UK city hubs."""
-    base = os.getenv("PUBLIC_APP_URL", "https://treekey.uk").rstrip("/")
+    base = os.getenv("PUBLIC_APP_URL", "https://treekey.co.uk").rstrip("/")
     urls = [
         f"{base}/",
         f"{base}/marketplace",

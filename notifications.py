@@ -89,7 +89,7 @@ def send_resend_email(subject: str, html_body: str) -> bool:
                 "Content-Type": "application/json"
             },
             json={
-                "from": "TreeKey Intelligence <leads@treekey.uk>",
+                "from": "TreeKey Intelligence <leads@mail.treekey.co.uk>",
                 "to": [TEST_EMAIL],
                 "subject": subject,
                 "html": html_body
@@ -113,7 +113,7 @@ def send_resend_email(subject: str, html_body: str) -> bool:
 
 
 def send_transactional_email(to_email: str, subject: str, html_body: str,
-                              from_label: str = "TreeKey Support <leads@treekey.uk>",
+                              from_label: str = "TreeKey Support <leads@mail.treekey.co.uk>",
                               headers: Optional[Dict[str, str]] = None) -> bool:
     """Sep 5 2026 CRITICAL FIX: send_resend_email() above always sends to the
     fixed internal TEST_EMAIL address -- correct for the admin/incident
@@ -327,7 +327,7 @@ def send_purchased_lead_email(customer_email: str, lead_data: dict):
                 "Content-Type": "application/json"
             },
             json={
-                "from": "TreeKey Support <leads@treekey.uk>",
+                "from": "TreeKey Support <leads@mail.treekey.co.uk>",
                 "to": [customer_email],
                 "subject": subject,
                 "html": html
@@ -585,7 +585,7 @@ def send_cold_email_1(email: str, lead_data: dict, code: str, director_name: str
     </div>
     """
     return send_transactional_email(to_email=email, subject=subject, html_body=html,
-                                     from_label="Nick from TreeKey <leads@treekey.uk>",
+                                     from_label="Nick from TreeKey <leads@mail.treekey.co.uk>",
                                      headers=_list_unsubscribe_headers(unsubscribe_url))
 
 
@@ -1016,7 +1016,7 @@ def dispatch_lead_alerts(city: str, leads: list):
                     "https://api.resend.com/emails",
                     headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
                     json={
-                        "from": "TreeKey Intelligence <leads@treekey.uk>",
+                        "from": "TreeKey Intelligence <leads@mail.treekey.co.uk>",
                         "to": [email],
                         "subject": f"{len(routed_leads)} New Leads Available in Your Area — Early Access",
                         "html": body
