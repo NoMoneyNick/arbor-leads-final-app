@@ -1,14 +1,12 @@
-# Tree Key — Terms and Conditions (Draft for Solicitor Review)
+# Tree Key — Terms and Conditions
 
-*Not legal advice. This is a first full draft, written to match how the product actually works, for a solicitor to review, correct, and formally issue before publishing on treekey.uk. Bracketed items marked [TODO] need a decision or a fact from you before this can be finalized.*
-
-**Fill in before publishing:** "Tree Key" is currently operated by you as a sole trader (not yet incorporated), so clause 1.1 below needs your full legal name and a registered/trading address inserted — e.g. "**[Your Full Legal Name]**, trading as Tree Key, of **[address]**". If you incorporate as a limited company later, swap this for the company's registered name and number — which entity is contracting with customers is a material legal fact, not a formatting detail.
+*Not legal advice. Nick has confirmed a solicitor review isn't affordable pre-revenue, so Claude maintains this document to the best of its ability going forward rather than leaving it stale until one is affordable — this is the same text published live at treekey.co.uk/terms-of-service (main.py), kept here as a plain-text mirror for easier review/editing outside the site. When updating either copy, update both, or note here that they've diverged. A solicitor review remains the right long-term step once revenue allows it, and either of you should flag anything that looks legally off in the meantime.*
 
 ---
 
 ## 1. Introduction and Acceptance
 
-1.1 These Terms and Conditions ("Terms") govern access to and use of the Tree Key website (treekey.uk) and the lead-generation service provided through it (the "Service"), operated by **[TODO: legal entity/trading name and registered address]** ("Tree Key", "we", "us", "our").
+1.1 These Terms and Conditions ("Terms") govern access to and use of the Tree Key website (treekey.co.uk) and the lead-generation service provided through it (the "Service"), operated by Vector Data Labs, trading as Tree Key ("we", "us", "our").
 
 1.2 By creating an account, purchasing a subscription, or otherwise using the Service, you ("you", "the Customer", "the User") agree to be bound by these Terms. If you do not agree, do not use the Service.
 

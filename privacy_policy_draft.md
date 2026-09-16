@@ -1,16 +1,12 @@
-# Tree Key — Privacy Policy (Draft for Solicitor Review)
+# Tree Key — Privacy Policy
 
-*Not legal advice. Written to replace the current live `/privacy-policy` page, which is materially thin for what this business actually does with personal data. [TODO] items need a decision or fact from you before publishing.*
-
-**Read this first:** the current live policy says "We do not sell your personal data to third parties." Given the business model is selling access to Leads containing personal data sourced from public records, that sentence is a real liability as written and should not stay live in its current form regardless of when this fuller rewrite is ready — flag it to your solicitor as urgent on its own.
+*Not legal advice. This draft has been superseded — the "we do not sell your data" liability this file originally flagged has already been fixed live (see the live `/privacy-policy` page, main.py). Nick has confirmed a solicitor review isn't affordable pre-revenue, so Claude maintains this document to the best of its ability going forward rather than leaving it stale until one is affordable; the live page is the current source of truth, this file is kept as a plain-text mirror for easier review/editing outside the site. When updating either copy, update both, or note here that they've diverged. A solicitor review remains the right long-term step once revenue allows it.*
 
 ---
 
 ## 1. Who We Are
 
-Tree Key ("we", "us", "our") operates the website treekey.uk and the lead-generation service described in our Terms and Conditions. For data protection purposes, Tree Key is the data controller for the personal data described below.
-
-**Fill in before publishing:** insert your full legal name and address here — "**[Your Full Legal Name]**, trading as Tree Key, of **[address]**" — same fill-in as the Terms document; a data controller must be identifiable, not just a trading name.
+Tree Key ("we", "us", "our") operates the website treekey.co.uk and the lead-generation service described in our Terms and Conditions. Tree Key is a trading name of Vector Data Labs, which is the data controller for the personal data described below.
 
 Contact for privacy matters: **contact@treekey.uk**
 
