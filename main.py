@@ -294,6 +294,32 @@ UK_CITY_COORDS = {
     "CARLISLE": (54.8925, -2.9329, "Cumberland Council", "CA1")
 }
 
+def _to_uk_display_time(dt: Optional[datetime.datetime]) -> Optional[datetime.datetime]:
+    """17 Sep 2026, Nick flagged a displayed lead time being an hour off
+    from his actual British time ('your scan says 11:40, it's 12:40 here').
+    Cause: `discovered_at` is a Postgres TIMESTAMPTZ, which psycopg2 hands
+    back as a real UTC-aware datetime -- every place that then called
+    .strftime() directly on it was printing raw UTC, not British time. That
+    was invisible for most of the year under GMT (UTC+0, same clock), but
+    wrong by exactly one hour for anyone reading the site during British
+    Summer Time (UTC+1, in effect late March-late October) -- which is
+    right now. Same zoneinfo("Europe/London") conversion already used for
+    the homepage's live 'as of' clock (see that comment above) applied
+    here too, as one shared helper so every display site converts the same
+    way instead of each one reimplementing it slightly differently.
+    Handles a naive datetime (assumed already UTC, matching how this
+    codebase always writes timestamps) as well as tz-aware ones."""
+    if not dt:
+        return dt
+    try:
+        from zoneinfo import ZoneInfo
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt.astimezone(ZoneInfo("Europe/London"))
+    except Exception:
+        return dt
+
+
 _IP_RATE_LIMITS = {}
 def _check_rate_limit(ip: str):
     import time
@@ -629,8 +655,8 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
                 "area_label": l["area_label"],
                 "summary": (l["summary"] or "")[:120],
                 "size": l["lead_score"],
-                "time": l["discovered_at"].strftime("%H:%M") if l["discovered_at"] else "--:--",
-                "date": l["discovered_at"].strftime("%d %b") if l["discovered_at"] else "",
+                "time": _to_uk_display_time(l["discovered_at"]).strftime("%H:%M") if l["discovered_at"] else "--:--",
+                "date": _to_uk_display_time(l["discovered_at"]).strftime("%d %b") if l["discovered_at"] else "",
             })
     if "Unregistered" in district:
         selected_leads = 0
@@ -1231,8 +1257,8 @@ def public_homepage(request: Request):
     # job description in its place so job type is actually visible.
     ticker_rows = "".join([
         f"""<div class='hidden sm:grid grid-cols-[56px_48px_84px_1fr_80px_28px] gap-3 items-center px-4 py-2.5 border-b border-emerald-900/40 text-xs font-mono'>
-            <span class='text-emerald-700'>{(l['discovered_at'].strftime('%d %b') if l['discovered_at'] else '--')}</span>
-            <span class='text-emerald-600'>{(l['discovered_at'].strftime('%H:%M') if l['discovered_at'] else '--:--')}</span>
+            <span class='text-emerald-700'>{(_to_uk_display_time(l['discovered_at']).strftime('%d %b') if l['discovered_at'] else '--')}</span>
+            <span class='text-emerald-600'>{(_to_uk_display_time(l['discovered_at']).strftime('%H:%M') if l['discovered_at'] else '--:--')}</span>
             <span class='text-emerald-600 truncate'>{(database.classify_job_category(l['summary'])['label'])[:12]}</span>
             <span class='text-slate-300 truncate'>{l['area_label']}</span>
             <span class='text-right'>
@@ -1242,7 +1268,7 @@ def public_homepage(request: Request):
         </div>
         <div class='sm:hidden px-4 py-2.5 border-b border-emerald-900/40 text-xs font-mono'>
             <div class='flex items-center justify-between gap-2 mb-1'>
-                <span class='text-emerald-500'>{(l['discovered_at'].strftime('%d %b') if l['discovered_at'] else '--')} &middot; {(l['discovered_at'].strftime('%H:%M') if l['discovered_at'] else '--:--')}</span>
+                <span class='text-emerald-500'>{(_to_uk_display_time(l['discovered_at']).strftime('%d %b') if l['discovered_at'] else '--')} &middot; {(_to_uk_display_time(l['discovered_at']).strftime('%H:%M') if l['discovered_at'] else '--:--')}</span>
                 <span class='flex items-center gap-2 shrink-0'>
                     <span class='text-amber-400 font-bold text-[10px] uppercase tracking-wide'>{l['lead_score']} job</span>
                     <span class='tk-live-dot' title='Live'></span>
@@ -5145,7 +5171,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
             else:
                 dt = raw_discovered_at
             if dt:
-                listed_date = dt.strftime("%d %b %Y, %H:%M")
+                listed_date = _to_uk_display_time(dt).strftime("%d %b %Y, %H:%M")
         except Exception:
             pass
 
@@ -9613,6 +9639,47 @@ def partner_email_backfill_status(secret: Optional[str] = Query(None)):
     }
 
 
+@app.get("/admin/sample-unscraped-partner-sites")
+def sample_unscraped_partner_sites(secret: Optional[str] = Query(None), limit: int = Query(15)):
+    """17 Sep 2026, Nick's ask ("is this really as good as it will get") --
+    real diagnosis instead of more guessing. The backfill's "unchanged" rate
+    is high even after several real scraper improvements (Cloudflare-email
+    decoding, GDPR privacy/terms fallback pages, wider TLD support, a
+    realistic browser header set); before writing another scraper fix
+    blind, this returns real sample website URLs from the exact rows still
+    landing in "unchanged" so they can actually be fetched and looked at --
+    the honest next question is whether the majority of these are (a) sites
+    that genuinely publish no contact info anywhere, (b) JavaScript-
+    rendered single-page apps whose real content never appears in the raw
+    HTML a plain HTTP fetch sees (a fundamentally different problem no
+    regex/header tweak can solve -- would need a headless-browser fetch
+    instead), or (c) dead/parked/broken domains. Read-only, same auth as
+    every other /admin/ route."""
+    verify_cron_secret(secret)
+    limit = max(1, min(limit, 50))
+    if not database.SURL:
+        return {"error": "no database configured"}
+    try:
+        conn = database.get_db_conn(); cur = conn.cursor()
+        cur.execute("""
+            SELECT company_name, website, enriched_at
+            FROM potential_partners
+            WHERE email IS NULL AND website IS NOT NULL AND website <> 'None Listed'
+            ORDER BY enriched_at DESC NULLS LAST
+            LIMIT %s;
+        """, (limit,))
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+    except Exception as e:
+        logger.error(f"[SampleUnscrapedSites] DB error: {e}")
+        return {"error": str(e)}
+    return {
+        "count": len(rows),
+        "sites": [{"company_name": r[0], "website": r[1], "last_enrichment_attempt": str(r[2]) if r[2] else None} for r in rows],
+        "note": "These are real partners the backfill already tried and couldn't find an email for. Fetch a few of these URLs directly to see what the scraper is actually up against.",
+    }
+
+
 @app.get("/reset-pipeline-lock")
 def reset_pipeline_lock(secret: Optional[str] = Query(None)):
     """Sep 1 2026: manual escape hatch for a stuck lock, so restarting a
@@ -10281,6 +10348,7 @@ def export_directors(user: str = Depends(verify_dashboard_auth)):
             <h2>&#128101; Verified Tree Surgery Contacts ({len(rows)} companies)</h2>
             <div>
                 <a href="/export-directors.csv" style="background:#1b5e20; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold;">&#128190; Download CSV</a>
+                &nbsp;|&nbsp; <a href="/export-mail-list.csv" style="background:#92400e; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold;">&#128231; Sole-Trader Mail List</a>
                 &nbsp;|&nbsp; <a href="/"> Dashboard</a>
             </div>
         </div>
@@ -10364,6 +10432,92 @@ def export_directors_csv(request: Request, secret: Optional[str] = Query(None)):
         content=output.getvalue(),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=tree_surgeons_outreach.csv"}
+    )
+
+
+@app.get("/export-mail-list.csv")
+def export_mail_list_csv(request: Request, secret: Optional[str] = Query(None)):
+    """17 Sep 2026, Nick's ask ("is there anywhere I can find their
+    addresses or a machine I can build to scrape their addresses"): PECR
+    treats a sole trader as an "individual subscriber" (same email-consent
+    bar as a private person), unlike a Ltd company (corporate-subscriber
+    exemption) -- so the existing cold-email pipeline can legally never
+    reach this segment, however good the scraper gets. Postal marketing is
+    entirely outside PECR's scope (confirmed against ICO's own guidance),
+    and this project already has exactly the data a mail campaign needs:
+    `potential_partners.address` has been populated by the Google Places
+    enrichment pass for every partner discovered (Ltd or not) since that
+    pipeline was built, it just had no export surfacing it anywhere --
+    export_directors_csv above deliberately serves a different purpose
+    (a clickable outreach sheet for staff) and was never extended with
+    address, since nothing needed it until now.
+
+    company_number IS NULL is the exact, already-existing signal for "not
+    Ltd" -- it's only ever set when a Companies House match was found, so
+    a NULL there means no such match exists, i.e. genuinely unregistered
+    or a sole trader/partnership operating under a trading name. That's
+    precisely PECR's own "individual subscriber" boundary, not a proxy for
+    it. Ltd partners are deliberately excluded here -- they're already
+    legally cold-emailable, so they don't need a postal channel, and
+    keeping them out avoids duplicate contact across two channels.
+    Same auth pattern as export-directors.csv (dashboard Basic Auth or
+    ?secret=)."""
+    authorized = False
+    if secret:
+        try:
+            verify_cron_secret(secret)
+            authorized = True
+        except Exception:
+            pass
+
+    if not authorized:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Basic "):
+            import base64
+            try:
+                decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+                u, p = decoded.split(":", 1)
+                DASH_USER = os.getenv("DASHBOARD_USER", "admin").strip()
+                DASH_PASS = os.getenv("DASHBOARD_PASS", "").strip()
+                if DASH_PASS and secrets.compare_digest(u.encode(), DASH_USER.encode()) and secrets.compare_digest(p.encode(), DASH_PASS.encode()):
+                    authorized = True
+            except Exception:
+                pass
+
+    if not authorized:
+        raise HTTPException(status_code=401, detail="Unauthorized.",
+                            headers={"WWW-Authenticate": "Basic"})
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Company Name", "Director/Contact Name", "Address",
+        "Phone Number", "City"
+    ])
+
+    try:
+        conn = database.get_db_conn(); cur = conn.cursor()
+        cur.execute("""
+            SELECT company_name, md_name, address, phone_number,
+                   COALESCE(NULLIF(target_city, 'None'), 'UK') as city
+            FROM potential_partners
+            WHERE company_number IS NULL
+              AND address IS NOT NULL AND address <> ''
+              AND address <> 'None Listed'
+            ORDER BY target_city, company_name
+        """)
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        for r in rows:
+            writer.writerow([r[0], r[1] or "", r[2], r[3] or "", r[4]])
+    except Exception as e:
+        logger.error(f"[EXPORT MAIL LIST CSV] DB error: {e}")
+
+    output.seek(0)
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=tree_surgeons_mail_list.csv"}
     )
 # --- LEGAL PAGES ---
 @app.get("/privacy-policy", response_class=HTMLResponse)
