@@ -378,15 +378,24 @@ def scrape_contact_info_from_website(website_url: str):
         except Exception:
             pass
 
-        # 2. Check /contact sub-page (3s timeout) if either is still missing
+        # 2. Check common contact sub-pages (3s timeout each) if either is
+        # still missing, stopping as soon as both are found. 17 Sep 2026,
+        # Nick's ask ("any way we haven't tried to get more emails"): this
+        # used to only ever guess "/contact" -- a lot of small trade sites
+        # use "/contact-us", "/about", "/about-us", or "/get-in-touch"
+        # instead, and those were never checked at all. Order is roughly
+        # most-to-least common for small UK trade sites.
         if not (email and phone):
             base_url = website_url.rstrip("/")
-            try:
-                sub_res = net_utils.smart_get(base_url + "/contact", headers=headers, timeout=3.0)
-                if sub_res.status_code == 200:
-                    _scan_page(sub_res.text)
-            except Exception:
-                pass
+            for path in ("/contact", "/contact-us", "/about", "/about-us", "/get-in-touch"):
+                if email and phone:
+                    break
+                try:
+                    sub_res = net_utils.smart_get(base_url + path, headers=headers, timeout=3.0)
+                    if sub_res.status_code == 200:
+                        _scan_page(sub_res.text)
+                except Exception:
+                    pass
 
     except Exception as e:
         logger.debug(f"[Contact Scraper] Could not scrape {website_url}: {e}")
