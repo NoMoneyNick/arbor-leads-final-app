@@ -25,8 +25,8 @@ SCORE_LABEL = {"small": "Small — £19", "medium": "Medium — £29", "large": 
 _NOT_WHAT_YOU_EXPECTED_HTML = (
     '<b>Not what you were expecting?</b> Every lead is filtered to confirm '
     "it's genuine tree work before it reaches you, so this is rare — but if "
-    'this one isn\'t, screenshot it and email <a href="mailto:contact@treekey.uk" '
-    'style="color:#059669;">contact@treekey.uk</a> and we\'ll issue a correct '
+    'this one isn\'t, screenshot it and email <a href="mailto:contact@treekey.co.uk" '
+    'style="color:#059669;">contact@treekey.co.uk</a> and we\'ll issue a correct '
     'lead or a refund.'
 )
 

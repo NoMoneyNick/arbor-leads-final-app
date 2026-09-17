@@ -150,7 +150,7 @@ def _request(method: str, url: str, session=None, max_retries: int = 2, backoff_
     has_session_ua = bool(session is not None and session.headers.get("User-Agent"))
     if not has_explicit_ua and not has_session_ua:
         caller_headers = dict(caller_headers or {})
-        caller_headers["User-Agent"] = "TreeKeyBot/1.0 (+https://treekey.uk; contact@treekey.uk)"
+        caller_headers["User-Agent"] = "TreeKeyBot/1.0 (+https://treekey.co.uk; contact@treekey.co.uk)"
     if caller_headers is not None:
         kwargs["headers"] = caller_headers
 
