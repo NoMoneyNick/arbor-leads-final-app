@@ -2521,7 +2521,7 @@ def _time_ago(iso_str: Optional[str]) -> str:
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
     verify_admin_or_secret(request, secret)
-    stats = {"p": 0, "l": 0, "l_council": 0, "l_domestic": 0, "enriched": 0, "partners": [], "leads": []}
+    stats = {"p": 0, "l": 0, "l_council": 0, "l_domestic": 0, "enriched": 0, "with_email": 0, "partners": [], "leads": []}
 
     try:
         conn = database.get_db_conn(); cur = conn.cursor()
@@ -2537,6 +2537,13 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
         stats["l_council"] = stats["l"] - stats["l_domestic"]
         cur.execute("SELECT count(*) FROM potential_partners WHERE phone_number IS NOT NULL OR email IS NOT NULL")
         stats["enriched"] = cur.fetchone()[0]
+        # 17 Sep 2026, Nick's ask: "phone is effectively useless at this
+        # point" -- the "enriched" figure above counts phone-OR-email, which
+        # overstates how many partners are actually reachable by email (the
+        # channel that matters for cold outreach). This is the real,
+        # email-specific count.
+        cur.execute("SELECT count(*) FROM potential_partners WHERE email IS NOT NULL")
+        stats["with_email"] = cur.fetchone()[0]
         cur.execute("""SELECT company_name, md_name, target_city, google_rating, phone_number, email
                        FROM potential_partners ORDER BY created_at DESC LIMIT 6""")
         stats["partners"] = cur.fetchall()
@@ -2665,6 +2672,7 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
         </div>"""
 
     pct = int((stats['enriched'] / stats['p'] * 100)) if stats['p'] else 0
+    pct_email = int((stats['with_email'] / stats['p'] * 100)) if stats['p'] else 0
     partner_dead = (partner_tag_stats.get("categories", {}).get("contact", {}) or {}).get("contact:dead", 0)
     lead_unclassified_region = (lead_tag_stats.get("categories", {}).get("region", {}) or {}).get("region:unclassified", 0)
 
@@ -2683,7 +2691,8 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
         <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:20px;">
             <span style="background:#0f172a; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Total Leads: <b>{stats['l']}</b> ({stats['l_council']} council / {stats['l_domestic']} domestic)</span>
             <span style="background:#047857; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Total Partners: <b>{stats['p']}</b></span>
-            <span style="background:#059669; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Partners w/ Contacts: <b>{stats['enriched']} ({pct}%)</b></span>
+            <span style="background:#059669; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Partners w/ Email: <b>{stats['with_email']} ({pct_email}%)</b></span>
+            <span style="background:#64748b; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Partners w/ Phone or Email: <b>{stats['enriched']} ({pct}%)</b></span>
             <span style="background:{'#dc2626' if partner_dead else '#64748b'}; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Dead Partners (no phone/email): <b>{partner_dead}</b></span>
             <span style="background:{'#dc2626' if lead_unclassified_region else '#64748b'}; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Leads w/ Unclassified Region: <b>{lead_unclassified_region}</b></span>
         </div>
