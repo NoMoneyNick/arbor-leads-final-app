@@ -9680,6 +9680,71 @@ def sample_unscraped_partner_sites(secret: Optional[str] = Query(None), limit: i
     }
 
 
+@app.get("/admin/reset-spam-matched-partner-websites")
+def reset_spam_matched_partner_websites(secret: Optional[str] = Query(None), dry_run: bool = Query(False)):
+    """17 Sep 2026: direct follow-up to today's SPAM_WEBSITE_DOMAINS
+    expansion in research.py -- that fix (Companies House lookup pages,
+    Google short-links, directory/aggregator sites, and outright
+    wrong-business matches were being accepted as a partner's real website)
+    only protects FUTURE website discovery. enrich_existing_partners() only
+    ever looks at rows where enriched_at IS NULL, so every partner already
+    stuck with one of these wrong websites is already enriched_at-stamped
+    and would be silently skipped forever, not just today -- permanently.
+    This finds every potential_partners row whose stored website matches one
+    of the (now-expanded) spam domains and resets website, email,
+    phone_number AND enriched_at back to NULL, so the next
+    enrich_existing_partners() pass re-discovers all three from scratch.
+    email/phone_number are reset too, not just website -- they were
+    typically scraped from that same wrong page in the same enrichment
+    pass (see the Google Places rejection logic a few hundred lines into
+    research.py: website/phone/email are discarded together, never just
+    the website field, because a wrong listing means all three are
+    suspect), so leaving them would keep a correct-looking but wrong
+    contact on the record. dry_run=true returns the match count and a
+    sample without writing anything -- use it first to sanity-check the
+    scope before actually resetting ~thousands of rows."""
+    verify_cron_secret(secret)
+    if not database.SURL:
+        return {"error": "no database configured"}
+    try:
+        conn = database.get_db_conn(); cur = conn.cursor()
+        like_clauses = []
+        params = []
+        for domain in research.SPAM_WEBSITE_DOMAINS:
+            like_clauses.append("LOWER(website) LIKE %s")
+            params.append(f"%{domain.lower()}%")
+        where_sql = "website IS NOT NULL AND website <> 'None Listed' AND (" + " OR ".join(like_clauses) + ")"
+
+        cur.execute(f"SELECT id, company_name, website FROM potential_partners WHERE {where_sql}", tuple(params))
+        matched = cur.fetchall()
+
+        if dry_run:
+            cur.close(); conn.close()
+            return {
+                "status": "dry_run",
+                "matched_count": len(matched),
+                "sample": [{"id": r[0], "company_name": r[1], "website": r[2]} for r in matched[:20]],
+                "note": "Nothing was changed. Re-run without dry_run=true to actually reset these rows.",
+            }
+
+        if matched:
+            cur.execute(f"""
+                UPDATE potential_partners
+                SET website = NULL, email = NULL, phone_number = NULL, enriched_at = NULL
+                WHERE {where_sql}
+            """, tuple(params))
+            conn.commit()
+        cur.close(); conn.close()
+    except Exception as e:
+        logger.error(f"[ResetSpamMatchedPartners] DB error: {e}")
+        return {"error": str(e)}
+    return {
+        "status": "reset",
+        "reset_count": len(matched),
+        "note": "These rows now have website=NULL, so /admin/run-partner-email-backfill-now will skip them (it only ever looks at rows that already have a website -- see database.backfill_partner_emails). Two-step next-run: (1) hit /trigger-enrich-all to re-run Google Places discovery and give them a real website again (now filtered by the expanded SPAM_WEBSITE_DOMAINS list, so it won't pick the same wrong site twice) -- this also runs in the background and can take a while for a few thousand rows; (2) once that's finished, hit /admin/run-partner-email-backfill-now as usual to fill in email from the new, correct website.",
+    }
+
+
 @app.get("/reset-pipeline-lock")
 def reset_pipeline_lock(secret: Optional[str] = Query(None)):
     """Sep 1 2026: manual escape hatch for a stuck lock, so restarting a
