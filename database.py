@@ -1378,6 +1378,116 @@ def backfill_lead_size_and_price(batch_size: int = 1000) -> dict:
             "note": "re-run if updated+unchanged == batch_size -- there may be more rows past this cursor."}
 
 
+def backfill_partner_emails(batch_size: int = 200, max_workers: int = 12) -> dict:
+    """17 Sep 2026, Nick's explicit instruction ("exhaust every free avenue,
+    then build the backfill"): re-runs research.scrape_contact_info_from_website
+    against every existing partner that has a website on file but no email
+    yet, so today's two scraper fixes (reading emails out of JSON-LD
+    structured data instead of discarding it, and following a site's own
+    real Contact/About link instead of only guessing at "/contact") get
+    applied retroactively to the ~2000 partners already sitting in the
+    table, not just to newly-discovered ones going forward.
+
+    Naturally self-limiting, unlike backfill_lead_size_and_price: every
+    lead row already has a score/price so that backfill needs a persisted
+    id-cursor to know what it hasn't swept yet, but a partner that gets an
+    email here simply stops matching `email IS NULL` and won't be selected
+    again -- no cursor needed. Calling this repeatedly (or wiring it into
+    the autonomous daily cycle, matching the size/price backfill's own
+    pattern) is a true no-op once every partner-with-a-website has been
+    tried at least once under the current scraper logic.
+
+    Partners with NO website on file are deliberately excluded from the
+    WHERE clause -- research.scrape_contact_info_from_website(None) always
+    returns (None, None) immediately, so re-trying them here would just
+    burn HTTP round-trips for a guaranteed miss. Those partners genuinely
+    need either a website-discovery pass (Google Places, already run once
+    at partner-creation time and gated by its own monthly paid-call cap)
+    or a different data source entirely (e.g. a paid email-finder API) --
+    outside what this function does.
+
+    Runs the actual HTTP scraping concurrently (ThreadPoolExecutor,
+    matching the 12-worker pattern already used elsewhere in this
+    codebase's enrichment pass) since each site fetch is a slow, blocking
+    network call with no relationship to the others; writes results back
+    to the DB afterward over a single connection, not one connection per
+    worker thread."""
+    if not SURL:
+        return {"error": "no database configured"}
+    updated_email = 0
+    updated_phone_only = 0
+    unchanged = 0
+    errors = 0
+    try:
+        import research as _research  # only imported when there's actually work to do
+        from concurrent.futures import ThreadPoolExecutor
+
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT id, website FROM potential_partners
+                WHERE email IS NULL AND website IS NOT NULL AND website <> 'None Listed'
+                ORDER BY created_at DESC LIMIT %s;
+            """, (batch_size,))
+            rows = cur.fetchall()
+        finally:
+            cur.close()
+            conn.close()
+
+        if not rows:
+            return {"updated_email": 0, "updated_phone_only": 0, "unchanged": 0, "errors": 0,
+                    "batch_size": batch_size,
+                    "note": "no partners with a website but no email left to try -- fully caught up."}
+
+        def _try_one(row):
+            partner_id, website = row
+            try:
+                email, phone = _research.scrape_contact_info_from_website(website)
+                return (partner_id, email, phone, None)
+            except Exception as e:
+                return (partner_id, None, None, str(e))
+
+        results = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for result in executor.map(_try_one, rows):
+                results.append(result)
+
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            for partner_id, email, phone, err in results:
+                if err:
+                    errors += 1
+                    logger.warning(f"[PartnerEmailBackfill] error on partner {partner_id}: {err}")
+                    continue
+                if email:
+                    cur.execute(
+                        "UPDATE potential_partners SET email = %s, phone_number = COALESCE(phone_number, %s) WHERE id = %s;",
+                        (email, phone, partner_id)
+                    )
+                    updated_email += 1
+                elif phone:
+                    cur.execute(
+                        "UPDATE potential_partners SET phone_number = COALESCE(phone_number, %s) WHERE id = %s;",
+                        (phone, partner_id)
+                    )
+                    updated_phone_only += 1
+                else:
+                    unchanged += 1
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[PartnerEmailBackfill] error: {e}")
+        return {"error": str(e), "updated_email": updated_email,
+                "updated_phone_only": updated_phone_only, "unchanged": unchanged, "errors": errors}
+    return {"updated_email": updated_email, "updated_phone_only": updated_phone_only,
+            "unchanged": unchanged, "errors": errors, "batch_size": batch_size,
+            "note": "re-run if this batch was full (updated_email+updated_phone_only+unchanged+errors == batch_size) -- there may be more partners left to try."}
+
+
 def resync_all_lead_tags(commit_every: int = 500) -> dict:
     """Sep 2 2026: same 'recompute every row, not just untagged ones'
     pattern as resync_all_partner_tags -- added for the agent_type/

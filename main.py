@@ -9167,6 +9167,24 @@ def run_full_autonomous_cycle():
     except Exception as e:
         logger.error(f"[AUTO] enrich_existing_partners error: {e}")
 
+    # 17 Sep 2026, Nick's ask ("more emails for the companies we have"):
+    # enrich_existing_partners above only ever looks at partners still
+    # marked enriched_at IS NULL (never tried at all) -- once a partner has
+    # been through that once, even a full miss, it's never revisited. This
+    # separately re-tries every partner that has a website but still no
+    # email, under whatever the CURRENT scraper logic can find (today: the
+    # JSON-LD + real-contact-link fixes) -- naturally self-limiting, see
+    # database.backfill_partner_emails's own docstring.
+    try:
+        for _ in range(20):
+            result = database.backfill_partner_emails(batch_size=200)
+            done = (result.get("updated_email", 0) + result.get("updated_phone_only", 0)
+                    + result.get("unchanged", 0) + result.get("errors", 0))
+            if done < 200:
+                break
+    except Exception as e:
+        logger.error(f"[AUTO] backfill_partner_emails error: {e}")
+
     _check_for_silent_source_failures()
 
     # Sep 8 2026, Nick's ask: replaces what used to be a dozen+ separate
@@ -9475,6 +9493,50 @@ def run_size_price_backfill_now(secret: Optional[str] = Query(None)):
         "status": "complete" if (last_result and last_result.get("updated", 0) + last_result.get("unchanged", 0) < 1000) else "stopped_at_20_batches -- run again to continue",
         "totals": totals,
         "cursor_id": last_result.get("cursor_id") if last_result else None,
+    }
+
+
+@app.get("/admin/run-partner-email-backfill-now")
+def run_partner_email_backfill_now(secret: Optional[str] = Query(None)):
+    """17 Sep 2026, Nick's ask ("we need more emails for the companies we
+    have"): runs database.backfill_partner_emails() directly, synchronously,
+    so it returns real numbers in seconds/minutes rather than waiting for
+    the next autonomous cycle. Same shape as run_size_price_backfill_now
+    above. Smaller batch_size (50, not 1000/200) than that one deliberately
+    -- each partner here costs several live HTTP fetches (homepage + real
+    contact-page link + guessed-path fallbacks), not a pure local
+    recompute, so a large batch risks running long enough to hit a
+    platform request timeout. Loops up to 20 batches (1000 partners) per
+    call; re-call if it reports more may be left."""
+    verify_cron_secret(secret)
+    totals = {"updated_email": 0, "updated_phone_only": 0, "unchanged": 0, "errors": 0, "batches_run": 0}
+    last_result = None
+    for _ in range(20):
+        result = database.backfill_partner_emails(batch_size=50)
+        last_result = result
+        if result.get("error"):
+            return {
+                "status": "error",
+                "error": result["error"],
+                "totals": totals,
+                "note": "stopped after this batch failed -- nothing past this point was processed.",
+            }
+        totals["updated_email"] += result.get("updated_email", 0)
+        totals["updated_phone_only"] += result.get("updated_phone_only", 0)
+        totals["unchanged"] += result.get("unchanged", 0)
+        totals["errors"] += result.get("errors", 0)
+        totals["batches_run"] += 1
+        done = result.get("updated_email", 0) + result.get("updated_phone_only", 0) + result.get("unchanged", 0) + result.get("errors", 0)
+        if done < 50:
+            break
+    fully_caught_up = last_result is not None and (
+        last_result.get("updated_email", 0) + last_result.get("updated_phone_only", 0)
+        + last_result.get("unchanged", 0) + last_result.get("errors", 0) < 50
+    )
+    return {
+        "status": "complete" if fully_caught_up else "stopped_at_20_batches -- run again to continue",
+        "totals": totals,
+        "note": "updated_email = partners that got a real email this pass. updated_phone_only = no email found but a phone was, so that got filled in instead. unchanged = website checked, genuinely nothing found (site has no published contact info anywhere the scraper looks).",
     }
 
 

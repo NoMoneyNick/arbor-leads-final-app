@@ -278,9 +278,20 @@ def _extract_emails_from_html(html_text: str) -> list[str]:
     if not html_text:
         return []
         
-    # Strip script, style, and svg blocks to eliminate JavaScript/npm package version tags (@1.0, @11.7, etc.)
+    # 17 Sep 2026, Nick's ask ("exhaust every free avenue for more emails"):
+    # this used to strip out EVERY <script> block wholesale, including
+    # <script type="application/ld+json"> ones -- but that's exactly where
+    # a lot of small-business site builders (Wix, Squarespace, WordPress
+    # w/ Yoast/Rank Math SEO plugins) auto-embed a genuine business email
+    # as schema.org LocalBusiness/Organization structured data, even when
+    # nothing is visible as plain text anywhere on the rendered page. Pull
+    # JSON-LD blocks out FIRST and keep their contents, then strip every
+    # other script/style/svg/noscript/iframe block as before (still needed
+    # to avoid matching JS/npm package version tags like foo@1.2.3).
+    jsonld_blocks = re.findall(r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+                                html_text, flags=re.DOTALL | re.IGNORECASE)
     sanitized = re.sub(r'<(script|style|svg|noscript|iframe)[^>]*>.*?</\1>', '', html_text, flags=re.DOTALL | re.IGNORECASE)
-    decoded = html.unescape(sanitized)
+    decoded = html.unescape(sanitized + "\n" + "\n".join(jsonld_blocks))
     
     # 1. Mailto links
     mailto_matches = re.findall(r'mailto:([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', decoded, re.IGNORECASE)
@@ -371,31 +382,67 @@ def scrape_contact_info_from_website(website_url: str):
                     phone = _is_valid_uk_phone(phone_match.group(1))
 
         # 1. Fetch Homepage (4s timeout)
+        homepage_html = ""
         try:
             res = net_utils.smart_get(website_url, headers=headers, timeout=4.0)
             if res.status_code == 200:
-                _scan_page(res.text)
+                homepage_html = res.text
+                _scan_page(homepage_html)
         except Exception:
             pass
 
-        # 2. Check common contact sub-pages (3s timeout each) if either is
-        # still missing, stopping as soon as both are found. 17 Sep 2026,
-        # Nick's ask ("any way we haven't tried to get more emails"): this
-        # used to only ever guess "/contact" -- a lot of small trade sites
-        # use "/contact-us", "/about", "/about-us", or "/get-in-touch"
-        # instead, and those were never checked at all. Order is roughly
-        # most-to-least common for small UK trade sites.
         if not (email and phone):
             base_url = website_url.rstrip("/")
-            for path in ("/contact", "/contact-us", "/about", "/about-us", "/get-in-touch"):
-                if email and phone:
-                    break
-                try:
-                    sub_res = net_utils.smart_get(base_url + path, headers=headers, timeout=3.0)
-                    if sub_res.status_code == 200:
-                        _scan_page(sub_res.text)
-                except Exception:
-                    pass
+            tried_paths = set()
+
+            # 2. Follow the site's OWN real "Contact"/"About"/"Get in touch"
+            # nav link, if the homepage has one, before guessing at URLs.
+            # 17 Sep 2026, Nick's ask ("any way we haven't tried to get more
+            # emails, exhaust every free avenue"): guessed paths (below)
+            # miss any site using a non-standard URL (e.g. "/get-in-touch-
+            # with-us", "/enquiries", a numbered CMS slug); the real link is
+            # already sitting right there in the page's own nav/footer HTML,
+            # so extract and follow it directly instead of only guessing.
+            if homepage_html:
+                for href, link_text in re.findall(
+                        r'<a\b[^>]*href=["\']([^"\'#][^"\']*)["\'][^>]*>(.*?)</a>',
+                        homepage_html, flags=re.IGNORECASE | re.DOTALL):
+                    combined = f"{href} {re.sub('<[^>]+>', '', link_text)}".lower()
+                    if not any(kw in combined for kw in ("contact", "about", "get in touch", "get-in-touch", "enquir")):
+                        continue
+                    real_url = urllib.parse.urljoin(base_url + "/", href)
+                    if not real_url.startswith(("http://", "https://")) or urllib.parse.urlparse(real_url).netloc != urllib.parse.urlparse(base_url).netloc:
+                        continue  # skip mailto:, tel:, and off-site links (social media etc.)
+                    if real_url in tried_paths or len(tried_paths) >= 3:
+                        continue
+                    tried_paths.add(real_url)
+                    try:
+                        sub_res = net_utils.smart_get(real_url, headers=headers, timeout=3.0)
+                        if sub_res.status_code == 200:
+                            _scan_page(sub_res.text)
+                    except Exception:
+                        pass
+                    if email and phone:
+                        break
+
+            # 3. Fall back to guessing common contact sub-pages (3s timeout
+            # each) for anything still missing -- covers sites whose nav
+            # link text/href didn't match the keywords above (icon-only nav,
+            # JS-rendered menus, etc). Order is roughly most-to-least common
+            # for small UK trade sites.
+            if not (email and phone):
+                for path in ("/contact", "/contact-us", "/about", "/about-us", "/get-in-touch"):
+                    if email and phone:
+                        break
+                    guess_url = base_url + path
+                    if guess_url in tried_paths:
+                        continue
+                    try:
+                        sub_res = net_utils.smart_get(guess_url, headers=headers, timeout=3.0)
+                        if sub_res.status_code == 200:
+                            _scan_page(sub_res.text)
+                    except Exception:
+                        pass
 
     except Exception as e:
         logger.debug(f"[Contact Scraper] Could not scrape {website_url}: {e}")
