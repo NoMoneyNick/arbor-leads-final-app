@@ -637,7 +637,30 @@ SPAM_WEBSITE_DOMAINS = [
     "facebook.com", "yell.com", "checkatrade.com", "trustatrader.com",
     "linkedin.com", "instagram.com", "cylex-uk.co.uk", "freeindex.co.uk",
     "thomsonlocal.com", "192.com", "thephonebook.bt.com", "webador.com",
-    "mysite.com", "wix.com", "squarespace.com", "wordpress.com"
+    "mysite.com", "wix.com", "squarespace.com", "wordpress.com",
+    # 17 Sep 2026, added from real evidence (Nick's "is this as good as it
+    # gets" question -- sampled 15 real partners still stuck in the
+    # backfill's "unchanged" bucket and fetched them directly): a
+    # meaningful share of these were never actually the business's own
+    # site at all, they're third-party company-lookup/directory pages that
+    # rank well for a "<company name>" search and get accepted as if they
+    # were the real website -- no email will EVER be found on any of
+    # these, for ANY company, because they're not business homepages.
+    # These entries block the whole category, not just the specific URLs
+    # seen in this one sample.
+    "companiesintheuk.co.uk", ".gov.uk",  # .gov.uk covers Companies House's
+    # own find-and-update.company-information.service.gov.uk filing pages
+    # and any other .gov.uk subdomain -- no real business's own site is
+    # ever a government domain, so this is a safe blanket match.
+    "//g.co/", "//goo.gl/",  # Google Search/Maps short-links (e.g.
+    # g.co/kgs/... seen live) -- "//" prefix deliberately avoids a
+    # substring false-positive against real domains that happen to end
+    # "...g.co.uk" (e.g. "kingtreesurgery.co.uk" legitimately contains the
+    # substring "g.co").
+    "endole.co.uk", "companycheck.co.uk", "opencorporates.com", "duedil.com",
+    "bizdb.co.uk", "hotfrog.co.uk", "businessmagnet.co.uk", "scoot.co.uk",
+    "misterwhat.co.uk", "bark.com", "mybuilder.com", "ratedpeople.com",
+    "threebestrated.co.uk", "trustpilot.com", "yelp.co.uk", "yelp.com",
 ]
 
 
