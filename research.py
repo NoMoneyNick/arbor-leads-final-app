@@ -8,6 +8,7 @@ import re
 import html
 import random
 import urllib.parse
+from difflib import SequenceMatcher
 from concurrent.futures import ThreadPoolExecutor
 import database
 from typing import Optional, List, Dict, Tuple, Set, Any
@@ -312,6 +313,121 @@ def _normalize_obfuscated_domain(raw: str) -> str:
     obfuscated-pattern match below for why this needs to handle more than
     one separator per domain (multi-part UK TLDs like co.uk/org.uk)."""
     return re.sub(r'\s*(?:\[dot\]|\(dot\)|\s+dot\s+|\.)\s*', '.', raw, flags=re.IGNORECASE).strip(".")
+
+
+_JS_SHELL_PHRASES = (
+    "you need to enable javascript",
+    "please enable javascript",
+    "javascript is required to",
+    "requires javascript",
+    "enable javascript to run this app",
+    "javascript to view this",
+)
+
+
+def _looks_like_js_only_shell(html_text: str) -> bool:
+    """17 Sep 2026, built to answer Nick's "how many emails are we actually
+    missing to JS-only sites?" question with a real number instead of a
+    guess (confirmed live: atoztreeservice.bestmate.us/book is a booking
+    SPA whose raw HTML is just a React/Vue mount point and a "you need to
+    enable JavaScript" message -- a plain HTTP scraper can never see
+    anything on a page like that, no header/parsing tweak fixes it, it
+    needs an actual headless-browser fetch). Two signals, either one is
+    enough: (1) one of the standard framework/bundler "enable JavaScript"
+    fallback messages appears in the raw HTML (these are boilerplate,
+    near-zero false-positive rate), or (2) after stripping every
+    script/style/noscript/svg tag and all remaining HTML tags, what's left
+    as genuine visible text is suspiciously short (under 250 chars) -- a
+    real small-business homepage almost always has more body copy than
+    that; an empty SPA shell has almost none. Deliberately a heuristic for
+    a ROUGH estimate (see estimate_js_only_sites), not a certainty per
+    site."""
+    if not html_text:
+        return False
+    lower = html_text.lower()
+    if any(phrase in lower for phrase in _JS_SHELL_PHRASES):
+        return True
+    stripped = re.sub(r'<(script|style|noscript|svg)[^>]*>.*?</\1>', ' ', html_text, flags=re.DOTALL | re.IGNORECASE)
+    stripped = re.sub(r'<[^>]+>', ' ', stripped)
+    visible_text = re.sub(r'\s+', ' ', html.unescape(stripped)).strip()
+    return len(visible_text) < 250
+
+
+def estimate_js_only_sites(sample_size: int = 150) -> dict:
+    """Fetches a RANDOM sample of partners with a website but no email
+    (the exact pool the email backfill draws from) and checks how many of
+    their sites are JavaScript-only shells a plain HTTP scraper can never
+    read (see _looks_like_js_only_shell). Random rather than the backfill's
+    id-cursor order specifically to be representative of the whole pool,
+    not just whatever the cursor has reached so far. Concurrent fetches
+    (ThreadPoolExecutor, same pattern as backfill_partner_emails) since
+    this is pure network-bound I/O; a single connection would take
+    sample_size x (fetch latency) sequentially otherwise. Extrapolates the
+    sample rate across the full candidate pool for a rough headline
+    number -- explicitly a sample-based ESTIMATE, not an exhaustive count,
+    and said so in the returned note so it's never mistaken for one."""
+    if not database.SURL:
+        return {"error": "no database configured"}
+    try:
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, company_name, website FROM potential_partners
+            WHERE email IS NULL AND website IS NOT NULL AND website <> 'None Listed'
+            ORDER BY RANDOM() LIMIT %s;
+        """, (sample_size,))
+        rows = cur.fetchall()
+        cur.execute("""
+            SELECT count(*) FROM potential_partners
+            WHERE email IS NULL AND website IS NOT NULL AND website <> 'None Listed';
+        """)
+        candidate_pool_size = cur.fetchone()[0]
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"[JSOnlySiteEstimate] DB error: {e}")
+        return {"error": str(e)}
+
+    if not rows:
+        return {"sampled": 0, "likely_js_only_in_sample": 0,
+                "note": "no candidates left to sample -- nothing with a website but no email right now."}
+
+    def _check(row):
+        pid, name, website = row
+        try:
+            res = net_utils.smart_get(website, timeout=8, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "text/html,application/xhtml+xml",
+                "Accept-Language": "en-GB,en;q=0.9",
+            })
+            if res.status_code != 200:
+                return (pid, name, website, None)  # inconclusive, not counted either way
+            return (pid, name, website, _looks_like_js_only_shell(res.text))
+        except Exception:
+            return (pid, name, website, None)
+
+    results = []
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        for r in executor.map(_check, rows):
+            results.append(r)
+
+    js_only = [r for r in results if r[3] is True]
+    inconclusive = [r for r in results if r[3] is None]
+    checked = len(results) - len(inconclusive)
+    pct_of_checked = (len(js_only) / checked * 100) if checked else 0.0
+    estimated_across_pool = int(round(candidate_pool_size * (len(js_only) / checked))) if checked else 0
+
+    return {
+        "sampled": len(rows),
+        "successfully_checked": checked,
+        "inconclusive_fetch_errors": len(inconclusive),
+        "likely_js_only_in_sample": len(js_only),
+        "pct_of_checked_sites": round(pct_of_checked, 1),
+        "candidate_pool_size": candidate_pool_size,
+        "estimated_js_only_across_pool": estimated_across_pool,
+        "examples": [{"company_name": r[1], "website": r[2]} for r in js_only[:10]],
+        "note": "This is a random-sample ESTIMATE, not an exhaustive count -- re-run for a tighter number. candidate_pool_size is everyone with a website but no email right now (what the backfill is working through); estimated_js_only_across_pool applies the sample's hit rate to that whole pool."
+    }
 
 
 def _extract_emails_from_html(html_text: str) -> list[str]:
@@ -664,6 +780,77 @@ SPAM_WEBSITE_DOMAINS = [
 ]
 
 
+# 17 Sep 2026, a SECOND wrong-match bug found alongside SPAM_WEBSITE_DOMAINS
+# (Nick's "is this really as good as it will get?" follow-up, after live-
+# checking a fresh sample): SPAM_WEBSITE_DOMAINS only catches known
+# directory/aggregator DOMAINS. It can't catch Google Text Search returning
+# a real, honest, perfectly legitimate small business -- just the WRONG
+# one. Confirmed live: firstchoicetreesurgeons.co.uk is a real Brighton
+# tree surgeon's own site, correctly built, with a real published email --
+# and it was attached to TWO completely different partners in the database
+# ("Friendly Tree Services" and "Safe Tree Limited"), neither of which is
+# First Choice. Google's fuzzy text search occasionally prefers a
+# well-ranked nearby competitor over returning nothing. A domain blacklist
+# can never cover this -- every legitimate business's own domain would
+# eventually need to be on it. The real fix is checking whether the name
+# Google actually matched us to bears any resemblance to the company we
+# searched for.
+_COMPANY_NAME_GENERIC_WORDS = {
+    "tree", "trees", "surgery", "surgeon", "surgeons", "care", "services",
+    "service", "ltd", "limited", "arboricultural", "arboriculture",
+    "arborist", "arborists", "forestry", "woodland", "management",
+    "company", "uk", "the", "and", "landscaping", "landscape", "gardening",
+    "garden", "gardens", "co", "group", "of", "grounds", "maintenance",
+}
+
+
+def _distinctive_name_tokens(name: str) -> Set[str]:
+    """Strips the generic trade vocabulary shared by almost every tree
+    surgery business name (see _COMPANY_NAME_GENERIC_WORDS above) so what's
+    left is the part that actually distinguishes one company from another
+    -- comparing raw words would make "SAFE TREE LIMITED" and "FIRST CHOICE
+    TREE SURGEONS" look related just because they both contain "tree"."""
+    words = re.findall(r"[a-z]+", (name or "").lower())
+    return {w for w in words if w not in _COMPANY_NAME_GENERIC_WORDS and len(w) > 2}
+
+
+def _is_plausible_name_match(company_name: str, returned_name: str) -> bool:
+    """True if `returned_name` (what Google Places actually matched us to)
+    is plausibly the same business as `company_name` (what we searched
+    for). Deliberately lenient on purpose: a false REJECTION here throws
+    away a website/phone/email that may well have been correct, while a
+    false ACCEPTANCE writes a wrong contact into the database as if
+    verified -- the second is the worse failure mode (see
+    SPAM_WEBSITE_DOMAINS's own comment on this exact tradeoff), so this
+    only blocks confident mismatches. If `returned_name` is missing
+    entirely (API didn't return one, or an older code path that predates
+    this check), returns True -- can't reject on absent evidence."""
+    if not returned_name or not company_name:
+        return True
+    a = _distinctive_name_tokens(company_name)
+    b = _distinctive_name_tokens(returned_name)
+    if a and b:
+        if a & b:
+            return True
+        # Both names have a distinctive part but share no exact token --
+        # compare THOSE distinctive parts only (not the raw full names,
+        # which was tried first and rejected: shared generic words like
+        # "tree"/"ltd"/"limited" inflate a raw string-similarity ratio
+        # enough that a real live mismatch, e.g. "safe tree limited" vs
+        # "first choice tree surgeons ltd", still scored 0.47 on the full
+        # strings -- comparing "safe" against "first choice" scores 0.25,
+        # correctly rejecting it, while a genuine near-match like
+        # "mcdonald" vs "mcdonalds" still scores 0.94).
+        ratio = SequenceMatcher(None, " ".join(sorted(a)), " ".join(sorted(b))).ratio()
+        return ratio >= 0.6
+    # one or both names are ALL generic words (e.g. "Tree Care Company (SW)
+    # Limited") -- distinctive-token comparison can't say anything here,
+    # fall back to comparing the full normalized names, with a stricter
+    # bar since this string still carries the generic-word inflation risk.
+    ratio = SequenceMatcher(None, (company_name or "").lower().strip(), (returned_name or "").lower().strip()).ratio()
+    return ratio >= 0.7
+
+
 def get_google_places_info(company_name: str, city_or_addr: str = ""):
     """
     Sep 2 2026: restored to the REAL Places API (New) when GOOGLE_MAPS_KEY
@@ -824,7 +1011,7 @@ def _get_google_places_info_via_api(company_name: str, city_or_addr: str = ""):
         headers = {
             "Content-Type": "application/json",
             "X-Goog-Api-Key": GOOGLE_MAPS_KEY,
-            "X-Goog-FieldMask": "places.nationalPhoneNumber,places.websiteUri,places.rating",
+            "X-Goog-FieldMask": "places.nationalPhoneNumber,places.websiteUri,places.rating,places.displayName",
         }
         body = {"textQuery": query, "pageSize": 1}
         res = net_utils.smart_post(url, json=body, headers=headers, timeout=10)
@@ -862,6 +1049,20 @@ def _get_google_places_info_via_api(company_name: str, city_or_addr: str = ""):
         website = place.get("websiteUri")
         raw_phone = place.get("nationalPhoneNumber")
         phone = _is_valid_uk_phone(raw_phone) if raw_phone else None
+        returned_name = ((place.get("displayName") or {}).get("text") or "").strip()
+        # 17 Sep 2026: reject a confident wrong-business match (see
+        # _is_plausible_name_match's docstring -- e.g. Google matched
+        # "SAFE TREE LIMITED" to the real, honest, unrelated
+        # firstchoicetreesurgeons.co.uk). Same treatment as the
+        # SPAM_WEBSITE_DOMAINS rejection just below: discard the whole
+        # result rather than write a wrong phone/email/website in as if
+        # verified.
+        if returned_name and not _is_plausible_name_match(company_name, returned_name):
+            logger.warning(
+                f"[Google Places] Rejected a name mismatch for '{company_name}': "
+                f"Google matched us to '{returned_name}' ({website}) -- treating as no confident match."
+            )
+            return None, None, None
         # Sep 2 2026: confirmed live the same night this API switch shipped
         # -- Google's Text Search occasionally returns a completely
         # unrelated business (several different UK tree surgery companies

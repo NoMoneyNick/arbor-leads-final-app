@@ -207,6 +207,20 @@ _partner_email_backfill_state = {
     "error": None,
 }
 
+# 17 Sep 2026: background-thread state for /admin/scan-js-only-sites-now,
+# same pattern as _PARTNER_EMAIL_BACKFILL_LOCK above -- a live site-by-site
+# HTTP scan of a couple hundred partners takes long enough to hit the same
+# "browser just spins" problem the backfill endpoint had, so this is
+# async-from-the-start rather than repeating that mistake.
+_JS_SITE_SCAN_LOCK = threading.Lock()
+_js_site_scan_state = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "result": None,
+    "error": None,
+}
+
 optional_auth = HTTPBasic(auto_error=False)
 
 
@@ -9639,6 +9653,50 @@ def partner_email_backfill_status(secret: Optional[str] = Query(None)):
     }
 
 
+@app.get("/admin/test-email-scrape")
+def test_email_scrape(secret: Optional[str] = Query(None), url: str = Query(...)):
+    """17 Sep 2026, built so Nick can confirm the Cloudflare-email-decoder
+    (and every other extraction path) is actually firing on a real page,
+    instead of just trusting it worked. Fetches exactly one URL live (same
+    net_utils.smart_get every other scraper uses) and reports, in one
+    response: whether a Cloudflare data-cfemail attribute was found in the
+    raw HTML at all, what it decoded to if so, and the full list of emails
+    research._extract_emails_from_html() would extract from this page
+    (mailto/raw-text/obfuscated/Cloudflare, all sources, deduped) -- the
+    exact same function the real backfill uses, so this is a true test of
+    the live code path, not a simplified re-implementation that could drift
+    out of sync with it. Read-only, makes no database changes. Example:
+    /admin/test-email-scrape?secret=...&url=https://example.co.uk"""
+    verify_cron_secret(secret)
+    try:
+        res = research.net_utils.smart_get(url, timeout=10, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-GB,en;q=0.9",
+        })
+    except Exception as e:
+        return {"error": f"fetch failed: {e}", "url": url}
+
+    if res.status_code != 200:
+        return {"error": f"non-200 status: {res.status_code}", "url": url, "body_preview": res.text[:300]}
+
+    cf_matches = re.findall(r'data-cfemail=["\']([a-fA-F0-9]+)["\']', res.text)
+    cf_decoded = [research._decode_cf_email(m) for m in cf_matches]
+    found_emails = research._extract_emails_from_html(res.text)
+
+    return {
+        "url": url,
+        "status_code": res.status_code,
+        "page_size_bytes": len(res.text),
+        "cloudflare_obfuscation_found": len(cf_matches) > 0,
+        "cloudflare_raw_hex_matches": cf_matches,
+        "cloudflare_decoded_emails": [e for e in cf_decoded if e],
+        "cloudflare_decode_failed_count": sum(1 for e in cf_decoded if not e),
+        "all_emails_extracted": found_emails,
+        "note": "If cloudflare_obfuscation_found is true but cloudflare_decoded_emails is empty, the decoder is failing on this specific page's encoding -- worth flagging. If all_emails_extracted is empty and cloudflare_obfuscation_found is also false, this page genuinely has no findable email by any method the scraper knows."
+    }
+
+
 @app.get("/admin/sample-unscraped-partner-sites")
 def sample_unscraped_partner_sites(secret: Optional[str] = Query(None), limit: int = Query(15)):
     """17 Sep 2026, Nick's ask ("is this really as good as it will get") --
@@ -9819,6 +9877,66 @@ def reset_partner_email_backfill_cursor(secret: Optional[str] = Query(None)):
         "old_cursor_id": old_cursor,
         "new_cursor_id": "00000000-0000-0000-0000-000000000000",
         "note": "every partner with a website but no email will be re-checked from the start on the next /admin/run-partner-email-backfill-now run."
+    }
+
+
+@app.get("/admin/scan-js-only-sites-now")
+def scan_js_only_sites_now(secret: Optional[str] = Query(None), sample_size: int = Query(150)):
+    """17 Sep 2026, Nick's ask: "give me a rough number of how many
+    emails we're missing to JS-only sites." Kicks off
+    research.estimate_js_only_sites() on a background thread -- a live
+    fetch of ~150 real sites takes a couple of minutes, same "don't block
+    the request and make the browser spin" reasoning as
+    run_partner_email_backfill_now. Poll /admin/js-only-sites-status for
+    the result. sample_size is capped at 400 to keep one run reasonably
+    fast; re-run for a fresh/larger sample any time."""
+    verify_cron_secret(secret)
+    sample_size = max(10, min(sample_size, 400))
+    if not _JS_SITE_SCAN_LOCK.acquire(blocking=False):
+        return {
+            "status": "already_running",
+            "started_at": _js_site_scan_state.get("started_at"),
+            "message": "A JS-only-site scan is already in progress. Poll /admin/js-only-sites-status instead of re-triggering.",
+        }
+    _js_site_scan_state["running"] = True
+    _js_site_scan_state["started_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+    _js_site_scan_state["finished_at"] = None
+    _js_site_scan_state["result"] = None
+    _js_site_scan_state["error"] = None
+
+    def _run_scan():
+        try:
+            result = research.estimate_js_only_sites(sample_size=sample_size)
+            if result.get("error"):
+                _js_site_scan_state["error"] = result["error"]
+            else:
+                _js_site_scan_state["result"] = result
+        except Exception as e:
+            logger.error(f"[JSOnlySiteScan] Unhandled error in background thread: {e}")
+            _js_site_scan_state["error"] = str(e)
+        finally:
+            _js_site_scan_state["running"] = False
+            _js_site_scan_state["finished_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+            _JS_SITE_SCAN_LOCK.release()
+
+    threading.Thread(target=_run_scan, daemon=True).start()
+    return {
+        "status": "started",
+        "sample_size": sample_size,
+        "started_at": _js_site_scan_state["started_at"],
+        "note": "Running in the background -- poll /admin/js-only-sites-status for the result, usually ready within a couple of minutes.",
+    }
+
+
+@app.get("/admin/js-only-sites-status")
+def js_only_sites_status(secret: Optional[str] = Query(None)):
+    verify_cron_secret(secret)
+    return {
+        "running": _js_site_scan_state["running"],
+        "started_at": _js_site_scan_state.get("started_at"),
+        "finished_at": _js_site_scan_state.get("finished_at"),
+        "result": _js_site_scan_state.get("result"),
+        "error": _js_site_scan_state.get("error"),
     }
 
 
