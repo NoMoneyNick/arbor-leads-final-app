@@ -9795,6 +9795,33 @@ def reset_size_price_backfill_cursor(secret: Optional[str] = Query(None)):
     }
 
 
+@app.get("/admin/reset-partner-email-backfill-cursor")
+def reset_partner_email_backfill_cursor(secret: Optional[str] = Query(None)):
+    """17 Sep 2026: companion reset endpoint for the cursor bug fix in
+    database.backfill_partner_emails() (see that function's docstring for
+    the full story -- it used to re-scrape the exact same ~50 partners on
+    every single call forever, because nothing removed a "tried, no email
+    found" partner from the WHERE email IS NULL candidate pool). The fix
+    is a forward-only id cursor, same tradeoff as
+    reset_size_price_backfill_cursor above: once the cursor moves past a
+    partner, it stays skipped even if a future scraper improvement would
+    now find their email. Hit this manually right after any future change
+    to research.scrape_contact_info_from_website's logic (new obfuscation
+    pattern, new fallback path, etc.), or after a website-discovery pass
+    (e.g. /trigger-enrich-all) gives a batch of partners a website for the
+    first time and you want them tried immediately rather than waiting for
+    the cursor to naturally reach their random UUID position."""
+    verify_cron_secret(secret)
+    old_cursor = database.get_system_state("partner_email_backfill_cursor_id")
+    database.set_system_state("partner_email_backfill_cursor_id", "00000000-0000-0000-0000-000000000000")
+    return {
+        "status": "reset",
+        "old_cursor_id": old_cursor,
+        "new_cursor_id": "00000000-0000-0000-0000-000000000000",
+        "note": "every partner with a website but no email will be re-checked from the start on the next /admin/run-partner-email-backfill-now run."
+    }
+
+
 @app.get("/test-mesh-council/{city_slug}")
 def test_mesh_council(city_slug: str, secret: Optional[str] = Query(None)):
     """Sep 1 2026: the real fix for the 2-hour test loop -- testing a mesh

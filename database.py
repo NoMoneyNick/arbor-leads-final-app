@@ -1411,7 +1411,32 @@ def backfill_partner_emails(batch_size: int = 200, max_workers: int = 12) -> dic
     codebase's enrichment pass) since each site fetch is a slow, blocking
     network call with no relationship to the others; writes results back
     to the DB afterward over a single connection, not one connection per
-    worker thread."""
+    worker thread.
+
+    17 Sep 2026 BUG FOUND AND FIXED (Nick: "is this really as good as it
+    will get?"): the WHERE clause used to be just `email IS NULL AND
+    website IS NOT NULL`, ordered by created_at DESC, LIMIT batch_size,
+    no cursor. A partner that gets checked and genuinely has no findable
+    email ("unchanged") or only a phone ("updated_phone_only") STILL
+    matches `email IS NULL` next time, so it never leaves the candidate
+    pool -- the query always returns the same top-N rows by created_at
+    DESC. Every re-trigger (and every batch after the first inside one
+    run's 20-batch loop) was silently re-scraping the exact same handful
+    of partners forever: confirmed live, two runs 23 minutes apart both
+    showed identical "0 email, 7 phone_only, 43 unchanged, 1 batch"
+    totals, only possible if it's the same 50 rows both times. The real
+    backlog (168+ partners never even attempted) was never being reached.
+    Fixed with a persisted forward-only id cursor (system_state key
+    'partner_email_backfill_cursor_id'), same pattern as
+    size_price_backfill_cursor_id: potential_partners.id is a random UUID
+    (gen_random_uuid()), so `id > cursor ORDER BY id ASC` gives a stable
+    total order that advances past a row the moment it's been tried once,
+    regardless of outcome, so failures/phone-only partners get skipped
+    forward for good instead of retried forever. Same tradeoff as the
+    size/price cursor: a scraper improvement makes already-passed rows
+    worth re-checking, so reset the cursor (see
+    /admin/reset-partner-email-backfill-cursor) after any future change
+    to scrape_contact_info_from_website's logic."""
     if not SURL:
         return {"error": "no database configured"}
     updated_email = 0
@@ -1422,14 +1447,17 @@ def backfill_partner_emails(batch_size: int = 200, max_workers: int = 12) -> dic
         import research as _research  # only imported when there's actually work to do
         from concurrent.futures import ThreadPoolExecutor
 
+        cursor_id = get_system_state("partner_email_backfill_cursor_id") or "00000000-0000-0000-0000-000000000000"
+
         conn = get_db_conn()
         cur = conn.cursor()
         try:
             cur.execute("""
                 SELECT id, website FROM potential_partners
                 WHERE email IS NULL AND website IS NOT NULL AND website <> 'None Listed'
-                ORDER BY created_at DESC LIMIT %s;
-            """, (batch_size,))
+                  AND id > %s
+                ORDER BY id ASC LIMIT %s;
+            """, (cursor_id, batch_size))
             rows = cur.fetchall()
         finally:
             cur.close()
@@ -1438,7 +1466,8 @@ def backfill_partner_emails(batch_size: int = 200, max_workers: int = 12) -> dic
         if not rows:
             return {"updated_email": 0, "updated_phone_only": 0, "unchanged": 0, "errors": 0,
                     "batch_size": batch_size,
-                    "note": "no partners with a website but no email left to try -- fully caught up."}
+                    "cursor_exhausted": True,
+                    "note": "no partners with a website but no email left to try past the cursor -- fully caught up. If this comes back right after a fresh website-discovery pass (e.g. /trigger-enrich-all), hit /admin/reset-partner-email-backfill-cursor once."}
 
         def _try_one(row):
             partner_id, website = row
@@ -1479,12 +1508,21 @@ def backfill_partner_emails(batch_size: int = 200, max_workers: int = 12) -> dic
         finally:
             cur.close()
             conn.close()
+
+        # Advance the cursor past every id in this batch, regardless of
+        # outcome -- this is the fix: a row that comes back unchanged or
+        # phone_only must still leave the candidate pool, or it gets
+        # re-selected by every future call forever (see the BUG FOUND AND
+        # FIXED note above this function).
+        max_id_in_batch = max(row[0] for row in rows)
+        set_system_state("partner_email_backfill_cursor_id", str(max_id_in_batch))
     except Exception as e:
         logger.error(f"[PartnerEmailBackfill] error: {e}")
         return {"error": str(e), "updated_email": updated_email,
                 "updated_phone_only": updated_phone_only, "unchanged": unchanged, "errors": errors}
     return {"updated_email": updated_email, "updated_phone_only": updated_phone_only,
             "unchanged": unchanged, "errors": errors, "batch_size": batch_size,
+            "cursor_id": str(max_id_in_batch),
             "note": "re-run if this batch was full (updated_email+updated_phone_only+unchanged+errors == batch_size) -- there may be more partners left to try."}
 
 
