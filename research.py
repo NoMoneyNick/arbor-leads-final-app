@@ -273,11 +273,52 @@ def _is_valid_uk_phone(phone_str: Optional[str]) -> Optional[str]:
     return None
 
 
+def _decode_cf_email(encoded_hex: str) -> Optional[str]:
+    """17 Sep 2026: decodes Cloudflare's 'Email Address Obfuscation'
+    encoding. That feature is auto-enabled for any site proxied through
+    Cloudflare -- which covers a large share of small UK trade/business
+    sites on cheap hosting, WordPress, Wix, etc. -- and it replaces every
+    real mailto:/plain-text email in the HTML with a
+    `<a class="__cf_email__" data-cfemail="HEXBLOB">[email&#160;protected]</a>`
+    snippet, decoded back to the real address client-side by a tiny inline
+    script. A scraper reading raw HTML text never sees the underlying
+    address at all -- added while investigating why the partner-email
+    backfill was landing updated_email:0 across dozens of partners whose
+    own sites clearly WERE reachable (their phone number was still being
+    found on the same page fetch, just not the email). The encoding itself
+    is simple and undocumented-but-stable XOR-with-first-byte-as-key,
+    reverse-engineered from Cloudflare's own public rocket-loader JS."""
+    try:
+        data = bytes.fromhex(encoded_hex)
+        if len(data) < 2:
+            return None
+        key = data[0]
+        decoded = bytes(b ^ key for b in data[1:]).decode("utf-8")
+        # 17 Sep 2026, refinement pass: a malformed/truncated hex blob can
+        # still decode to valid UTF-8 garbage (wrong key byte, partial
+        # attribute value cut off by an upstream regex quirk) -- don't hand
+        # that back as if it were a real address. Cheap sanity check here
+        # rather than trusting every caller downstream to re-validate.
+        if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', decoded):
+            return None
+        return decoded
+    except Exception:
+        return None
+
+
+def _normalize_obfuscated_domain(raw: str) -> str:
+    """Collapses '[dot]'/'(dot)'/' dot ' separators (and stray whitespace
+    around literal dots) into plain '.' -- see _extract_emails_from_html's
+    obfuscated-pattern match below for why this needs to handle more than
+    one separator per domain (multi-part UK TLDs like co.uk/org.uk)."""
+    return re.sub(r'\s*(?:\[dot\]|\(dot\)|\s+dot\s+|\.)\s*', '.', raw, flags=re.IGNORECASE).strip(".")
+
+
 def _extract_emails_from_html(html_text: str) -> list[str]:
     """Helper to extract clean, valid email addresses from raw HTML text."""
     if not html_text:
         return []
-        
+
     # 17 Sep 2026, Nick's ask ("exhaust every free avenue for more emails"):
     # this used to strip out EVERY <script> block wholesale, including
     # <script type="application/ld+json"> ones -- but that's exactly where
@@ -290,27 +331,81 @@ def _extract_emails_from_html(html_text: str) -> list[str]:
     # to avoid matching JS/npm package version tags like foo@1.2.3).
     jsonld_blocks = re.findall(r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
                                 html_text, flags=re.DOTALL | re.IGNORECASE)
+    # 17 Sep 2026: pull Cloudflare's data-cfemail attribute out BEFORE the
+    # script/style strip below -- it lives on a plain <a>/<span> tag, not
+    # inside <script>, so stripping wouldn't remove it anyway, but decode it
+    # here into a real address up front so it flows through the same
+    # matching/filtering pipeline as every other email source.
+    cf_hex_blobs = re.findall(r'data-cfemail=["\']([0-9a-fA-F]+)["\']', html_text, flags=re.IGNORECASE)
+    cf_emails = [e for e in (_decode_cf_email(h) for h in cf_hex_blobs) if e]
     sanitized = re.sub(r'<(script|style|svg|noscript|iframe)[^>]*>.*?</\1>', '', html_text, flags=re.DOTALL | re.IGNORECASE)
     decoded = html.unescape(sanitized + "\n" + "\n".join(jsonld_blocks))
-    
-    # 1. Mailto links
-    mailto_matches = re.findall(r'mailto:([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', decoded, re.IGNORECASE)
-    # 2. General regex patterns with valid letter-based TLD requirement (2-6 chars)
-    raw_matches = re.findall(r'\b[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,6}(?:\.[a-zA-Z]{2,4})?\b', decoded, re.IGNORECASE)
-    # 3. Obfuscated [at] or (at) patterns
-    obfuscated = re.findall(r'([a-zA-Z0-9_.+-]+)\s*(?:\[at\]|\(at\)|\s+at\s+)\s*([a-zA-Z0-9-]+\.[a-zA-Z]{2,6})', decoded, re.IGNORECASE)
-    obf_emails = [f"{user}@{dom}" for user, dom in obfuscated]
 
-    all_emails = mailto_matches + raw_matches + obf_emails
+    # 1. Mailto links -- kept first in the combined list below because an
+    # explicit mailto: is the strongest possible signal of intent (someone
+    # deliberately made this address clickable), so it should win any tie
+    # against an address merely found sitting in body text elsewhere.
+    mailto_matches = re.findall(r'mailto:([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', decoded, re.IGNORECASE)
+    # 2. General regex patterns. 17 Sep 2026, refinement pass: TLD length
+    # cap widened from {2,6} to {2,24} -- {2,6} silently misses every
+    # trade-relevant new-style gTLD longer than 6 characters (.plumbing,
+    # .contractors, .construction, .builders are all real, purchasable
+    # TLDs a UK trade business could genuinely use), rejecting a real,
+    # well-formed address purely on TLD length. Widening costs nothing --
+    # the length/shape/domain checks below still catch actual garbage.
+    raw_matches = re.findall(r'\b[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,24}(?:\.[a-zA-Z]{2,10})?\b', decoded, re.IGNORECASE)
+    # 3. Obfuscated "name [at] domain" patterns, where the domain itself may
+    # ALSO obfuscate its dots (e.g. "info [at] mytreecare [dot] co [dot]
+    # uk") -- 17 Sep 2026: widened from only matching a domain with a
+    # literal "." already present, since a site obfuscating the "@" but
+    # leaving a plain "." was already being caught by pattern 2 above; this
+    # pattern's whole purpose is the sites obfuscating BOTH separators,
+    # which the old version silently missed entirely for multi-part TLDs.
+    obfuscated = re.findall(
+        r'([a-zA-Z0-9_.+-]+)\s*(?:\[at\]|\(at\)|\s+at\s+)\s*'
+        r'([a-zA-Z0-9-]+(?:\s*(?:\[dot\]|\(dot\)|\s+dot\s+|\.)\s*[a-zA-Z0-9-]+)+)',
+        decoded, re.IGNORECASE)
+    obf_emails = [f"{user}@{_normalize_obfuscated_domain(dom)}" for user, dom in obfuscated]
+
+    # Order matters: earlier sources win ties (see dedup below). mailto is
+    # the most deliberate signal, then plain visible text, then the two
+    # reconstructed/decoded sources -- both technically correct once
+    # rebuilt, but more prone to an edge-case mangling a plain-text match
+    # wouldn't have, so they're trusted last among equals.
+    all_emails = mailto_matches + raw_matches + obf_emails + cf_emails
     excluded_domains = [
-        "sentry.io", "wixpress.com", "example.com", "example.org", "domain.com", 
-        "schema.org", "w3.org", "googleapis.com", "cloudflare.com", "wordpress.org", 
-        "godaddy.com", "webador.com", "mysite.com", "gmail.com.au"
+        "sentry.io", "sentry-cdn.com", "wixpress.com", "example.com", "example.org", "domain.com",
+        "schema.org", "w3.org", "googleapis.com", "gstatic.com", "google-analytics.com",
+        "googletagmanager.com", "cloudflare.com", "cloudflareinsights.com", "wordpress.org",
+        "godaddy.com", "webador.com", "mysite.com", "gmail.com.au", "sentry.wixpress.com",
+        # 17 Sep 2026, refinement pass: added after widening the fallback
+        # crawl to privacy/terms pages (a deliberate change to catch more
+        # GDPR-mandated contact emails) -- that same change also surfaces a
+        # lot of NOISE those pages commonly carry that isn't the business's
+        # own address: third-party privacy-policy generator boilerplate
+        # (iubenda/Termly/GetTerms/etc leave their own support address in
+        # the generated text), cookie-consent vendors, and the regulator's
+        # own address quoted in "how to complain" boilerplate.
+        "iubenda.com", "termly.io", "getterms.io", "privacypolicies.com",
+        "freeprivacypolicy.com", "websitepolicies.com", "termsfeed.com",
+        "cookiebot.com", "onetrust.com", "cookieyes.com", "ico.org.uk",
+        "gdpr.eu", "europa.eu",
     ]
-    excluded_exts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".js", ".css", ".ico", ".woff", ".woff2", ".au", ".nz", ".us", ".ca"]
+    excluded_exts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".js", ".css", ".ico",
+                      ".woff", ".woff2", ".pdf", ".avif", ".au", ".nz", ".us", ".ca"]
     placeholder_users = ["yourname", "user", "username", "email", "example", "info.example", "admin@mysite"]
+    # 17 Sep 2026: addresses that are real but useless as an outreach
+    # target -- cold-emailing these either bounces, hits an automated
+    # system nobody reads, or is a courtesy/legal mailbox rather than a
+    # real point of contact. Excluding them means the backfill correctly
+    # falls through to phone-only rather than recording a "success" that
+    # can never actually be replied to.
+    unusable_local_parts = ["noreply", "no-reply", "donotreply", "do-not-reply",
+                             "mailer-daemon", "postmaster", "unsubscribe", "abuse",
+                             "webmaster", "dpo", "data-protection"]
 
     valid_emails = []
+    seen = set()
     for email in all_emails:
         clean = email.strip().lower().rstrip(".")
         # Block version-tag style matches from JS (e.g. package@1.2.3)
@@ -321,10 +416,19 @@ def _extract_emails_from_html(html_text: str) -> list[str]:
         if any(d in clean for d in excluded_domains):
             continue
         user_part = clean.split("@")[0]
-        if user_part in placeholder_users:
+        if user_part in placeholder_users or user_part in unusable_local_parts:
             continue
         if len(clean) < 7 or "@" not in clean:
             continue
+        # 17 Sep 2026, refinement pass: dedup while preserving source-
+        # priority order (mailto/raw/obfuscated/cf, in that order per the
+        # comment above) -- with 4 extraction sources now feeding the same
+        # list, the same real address was routinely appearing 2-3 times,
+        # which cost nothing correctness-wise (caller just takes [0]) but
+        # made this function's actual output harder to reason about/debug.
+        if clean in seen:
+            continue
+        seen.add(clean)
         valid_emails.append(clean)
     return valid_emails
 
@@ -366,8 +470,20 @@ def scrape_contact_info_from_website(website_url: str):
         if not website_url.startswith("http"):
             website_url = "https://" + website_url.lstrip("/")
 
+        # 17 Sep 2026, refinement pass: was sending User-Agent alone, no
+        # other header a real browser always sends (Accept, Accept-
+        # Language, Accept-Encoding). A bare UA with nothing else is itself
+        # a basic bot-detection signal -- some WAFs/Cloudflare configs will
+        # serve a JS challenge page (still HTTP 200, so this code wouldn't
+        # even notice anything was wrong) to a request that "looks like"
+        # Chrome by UA string alone but is missing everything else Chrome
+        # always sends. This doesn't get past a real CAPTCHA/JS challenge
+        # (nothing here executes JS) -- it just avoids tripping the
+        # cheapest tier of bot-blocking unnecessarily.
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-GB,en;q=0.9",
         }
 
         def _scan_page(html_text):
@@ -403,35 +519,81 @@ def scrape_contact_info_from_website(website_url: str):
             # with-us", "/enquiries", a numbered CMS slug); the real link is
             # already sitting right there in the page's own nav/footer HTML,
             # so extract and follow it directly instead of only guessing.
+            #
+            # 17 Sep 2026, second pass (0 emails found across the first
+            # batches of a real production run, phones still being found
+            # fine -- see _decode_cf_email's docstring for the other half of
+            # this investigation): added "privacy"/"terms"/"legal" to the
+            # keyword list. Reasoning: a LOT of small trade sites route
+            # "get in touch" only through a contact FORM with no address in
+            # the page at all -- but UK GDPR legally requires a data-
+            # controller contact somewhere, and in practice that's almost
+            # always a real, checkable email address sitting in the Privacy
+            # Policy/Terms page footer link, even on sites that hide it
+            # everywhere else.
+            #
+            # 17 Sep 2026, refinement pass: split into two explicit passes
+            # instead of one combined keyword match. A single pass just
+            # followed links in whatever order they happened to appear in
+            # the page's raw HTML -- on a site whose footer lists "Privacy
+            # Policy" before "Contact Us" (common; footers are usually
+            # legal-links-first, nav-links-second in source order even
+            # though nav renders above), that meant privacy/terms pages
+            # could get visited FIRST, using up slots in the 5-link cap and
+            # then _scan_page's "if not email" short-circuit means an email
+            # found there (more likely to be a policy-generator/DPO address
+            # -- see excluded_domains above) would incorrectly win over a
+            # real one sitting on the not-yet-visited Contact page. Contact/
+            # about links are strictly more likely to carry the actual
+            # business's own outreach-appropriate address, so they're
+            # always tried first now; privacy/terms is the fallback tier.
             if homepage_html:
-                for href, link_text in re.findall(
-                        r'<a\b[^>]*href=["\']([^"\'#][^"\']*)["\'][^>]*>(.*?)</a>',
-                        homepage_html, flags=re.IGNORECASE | re.DOTALL):
-                    combined = f"{href} {re.sub('<[^>]+>', '', link_text)}".lower()
-                    if not any(kw in combined for kw in ("contact", "about", "get in touch", "get-in-touch", "enquir")):
-                        continue
-                    real_url = urllib.parse.urljoin(base_url + "/", href)
-                    if not real_url.startswith(("http://", "https://")) or urllib.parse.urlparse(real_url).netloc != urllib.parse.urlparse(base_url).netloc:
-                        continue  # skip mailto:, tel:, and off-site links (social media etc.)
-                    if real_url in tried_paths or len(tried_paths) >= 3:
-                        continue
-                    tried_paths.add(real_url)
-                    try:
-                        sub_res = net_utils.smart_get(real_url, headers=headers, timeout=3.0)
-                        if sub_res.status_code == 200:
-                            _scan_page(sub_res.text)
-                    except Exception:
-                        pass
-                    if email and phone:
-                        break
+                nav_links = re.findall(
+                    r'<a\b[^>]*href=["\']([^"\'#][^"\']*)["\'][^>]*>(.*?)</a>',
+                    homepage_html, flags=re.IGNORECASE | re.DOTALL)
+
+                def _follow_matching_links(keywords, max_links):
+                    for href, link_text in nav_links:
+                        if email and phone:
+                            return
+                        combined = f"{href} {re.sub('<[^>]+>', '', link_text)}".lower()
+                        if not any(kw in combined for kw in keywords):
+                            continue
+                        real_url = urllib.parse.urljoin(base_url + "/", href)
+                        if not real_url.startswith(("http://", "https://")) or urllib.parse.urlparse(real_url).netloc != urllib.parse.urlparse(base_url).netloc:
+                            continue  # skip mailto:, tel:, and off-site links (social media etc.)
+                        if real_url in tried_paths or len(tried_paths) >= max_links:
+                            continue
+                        tried_paths.add(real_url)
+                        try:
+                            sub_res = net_utils.smart_get(real_url, headers=headers, timeout=3.0)
+                            if sub_res.status_code == 200:
+                                _scan_page(sub_res.text)
+                        except Exception:
+                            pass
+
+                # Pass 1: contact/about-style links (up to 3) -- the pages
+                # most likely to carry the real business address.
+                _follow_matching_links(
+                    ("contact", "about", "get in touch", "get-in-touch", "enquir"), 3)
+                # Pass 2: privacy/terms/legal (up to 2 more, 5 total) -- only
+                # a fallback tier, tried after contact/about have had their
+                # shot.
+                if not (email and phone):
+                    _follow_matching_links(("privacy", "terms", "legal", "gdpr"), 5)
 
             # 3. Fall back to guessing common contact sub-pages (3s timeout
             # each) for anything still missing -- covers sites whose nav
             # link text/href didn't match the keywords above (icon-only nav,
             # JS-rendered menus, etc). Order is roughly most-to-least common
-            # for small UK trade sites.
+            # for small UK trade sites. 17 Sep 2026: added the
+            # privacy/terms guesses for the same GDPR-contact reason as
+            # above -- these are worth trying even with no matching nav
+            # link, since they're near-universal footer boilerplate paths.
             if not (email and phone):
-                for path in ("/contact", "/contact-us", "/about", "/about-us", "/get-in-touch"):
+                for path in ("/contact", "/contact-us", "/contact-us.html", "/about", "/about-us",
+                             "/get-in-touch", "/enquiries", "/privacy-policy", "/privacy", "/terms",
+                             "/terms-and-conditions", "/terms-conditions"):
                     if email and phone:
                         break
                     guess_url = base_url + path
