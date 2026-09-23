@@ -902,6 +902,16 @@ def dispatch_lead_alerts(city: str, leads: list):
     customer_discount = {}    # {email: discount dict} — Sep 15 2026, so the alert can show their real member price
 
     for lead in leads:
+        # Sep 17 2026, critical bug found from Nick's live report: this
+        # loop never checked `vertical` before matching a freshly-scanned
+        # lead to subscribers, so an HMO/care-home application (a real,
+        # separate business line since the Sep 2 multi-vertical build)
+        # could trigger an early-access alert email to a tree-surgeon
+        # subscriber. This function's whole design (redacted area-only
+        # info, tree-surgeon subscriber matching) is tree-specific, so
+        # skip anything not tagged tree rather than alerting on it.
+        if lead.get("vertical", "tree") != "tree":
+            continue
         addr = lead.get("addr", "").upper()
         lead_id = lead.get("id") or lead.get("ref") or lead.get("reference")
         lead_size = lead.get("lead_score") or "small"

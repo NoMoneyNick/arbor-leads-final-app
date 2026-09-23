@@ -1312,7 +1312,22 @@ def _insert_lead(cur, reference: str, address: str, summary: str, source: str,
     # in code: it is not possible for an HMO row to ever end up with a name
     # in it, regardless of what any scan function's PlanIt/paid-API/mesh
     # extraction logic happens to pull out of the source record.
-    if not VERTICALS.get(vertical, {}).get("capture_identity", True):
+    #
+    # Sep 2026 compliance-audit fix: the fallback default used to be True
+    # (permissive) for any vertical string NOT explicitly listed in
+    # VERTICALS -- which is exactly what `vertical=None` resolves to when
+    # _resolve_vertical finds neither a tree nor an hmo keyword match (a
+    # care-home/HMO application that misses HMO_GOLD, or anything else
+    # non-tree that still ends up inserted). That meant every "not
+    # confidently classified" application defaulted to capturing full
+    # applicant/agent identity -- the opposite of the safe-by-default
+    # posture this block's own comment claims. Default flipped to False:
+    # identity is now captured ONLY for a vertical explicitly configured
+    # capture_identity=True (currently just "tree"). An unrecognised or
+    # None vertical is now GDPR-safe by default, same structural guarantee
+    # HMO already had, instead of silently inheriting the permissive
+    # fallback meant only for pre-existing tree call sites.
+    if not VERTICALS.get(vertical, {}).get("capture_identity", False):
         applicant_name = None
         agent_name = None
         agent_company = None

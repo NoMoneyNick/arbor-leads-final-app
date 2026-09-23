@@ -1021,7 +1021,7 @@ def _shared_footer_html() -> str:
                 <p class="text-slate-400 mt-4 mb-1 flex items-center justify-center md:justify-start gap-2">
                     Proudly engineered in the United Kingdom &#127468;&#127463;
                 </p>
-                <p class="text-slate-600">Contact: nick@treekey.uk</p>
+                <p class="text-slate-600">Contact: nick@treekey.co.uk</p>
             </div>
             <div class="flex gap-6 text-xs font-mono uppercase tracking-wider flex-wrap justify-center md:justify-end shrink-0 pt-2">
                 <!-- Sep 9 2026, Nick's ask: "we need a way for people to
@@ -1030,13 +1030,13 @@ def _shared_footer_html() -> str:
                      site, different screens)" -- FAQ and Suggestions already
                      existed as real pages but weren't linked from the
                      footer, so most pages never surfaced them. Help is a
-                     direct mailto to the same contact@treekey.uk address
+                     direct mailto to the same contact@treekey.co.uk address
                      already used everywhere else on the site (ToS, Privacy,
                      FAQ) -- this footer previously showed a different
-                     address in plain text below ("nick@treekey.uk"); worth
+                     address in plain text below ("nick@treekey.co.uk"); worth
                      confirming with Nick whether that should also change to
-                     contact@treekey.uk or genuinely routes differently. -->
-                <a href="mailto:contact@treekey.uk" class="text-slate-400 hover:text-white transition-colors">Help</a>
+                     contact@treekey.co.uk or genuinely routes differently. -->
+                <a href="mailto:contact@treekey.co.uk" class="text-slate-400 hover:text-white transition-colors">Help</a>
                 <a href="/marketplace" class="text-slate-400 hover:text-white transition-colors">Marketplace</a>
                 <a href="/pricing" class="text-slate-400 hover:text-white transition-colors">Packages</a>
                 <a href="/faq" class="text-slate-400 hover:text-white transition-colors">FAQ</a>
@@ -1293,6 +1293,64 @@ def public_homepage(request: Request):
         </div>"""
         for l in stats["diverse_leads"]
     ]) or "<div class='px-4 py-8 text-center text-slate-500 font-mono text-xs'>Intercepting live planning data...</div>"
+
+    # Sep 17 2026: this homepage pricing grid was still hardcoded to the OLD,
+    # retired plan names (Sole Trader £49 / Commercial Pro £149 / Regional
+    # Elite £299) -- Nick caught this live on the real site. payments.PLANS
+    # itself confirms these three were retired weeks ago and replaced by
+    # Starter/Growth/Consultant/Commercial & Forestry/Elite; the /pricing
+    # page already reads payments.PLANS directly so it never went stale,
+    # but this homepage teaser was a separate static block nobody wired up
+    # when the tiers changed. Also silently carried an untrue claim
+    # ("Dedicated Account Manager" on Regional Elite) that had already been
+    # stripped from the real plan copy elsewhere -- this was the one place
+    # it survived. Rebuilt to read from payments.PLANS the same way /pricing
+    # does, so it can't drift out of sync again. Shows 3 representative
+    # tiers (entry/mid/top); full 5-tier + pay-per-lead breakdown is still
+    # one click away via the existing "see the full range of packages"
+    # link just below this grid. Bullet copy trimmed to only claims already
+    # verified true elsewhere on this site (exclusivity, early-access
+    # alerts) rather than carrying over old unverified per-tier specifics
+    # like "Instant SMS/Phone Notifications" or exact radius mileage.
+    _homepage_tier_keys = ["starter", "commercial_forestry", "treekey_elite"]
+    _homepage_tier_cards = ""
+    for _tier_key in _homepage_tier_keys:
+        _tier = payments.PLANS[_tier_key]
+        _is_hero = (_tier["badge"] == "Most Popular")
+        _card_style = (
+            "bg-gradient-to-b from-[#064e3b] to-[#022c22] border-2 border-emerald-500 rounded-2xl p-8 relative transform md:-translate-y-4 shadow-[0_0_40px_rgba(16,185,129,0.15)]"
+            if _is_hero else
+            "bg-[#0f172a] border border-slate-800 rounded-2xl p-8 relative hover:border-slate-600 transition-colors"
+        )
+        _ribbon = (
+            f'<div class="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2">'
+            f'<span class="bg-emerald-500 text-white text-xs font-bold uppercase tracking-widest py-1 px-3 rounded-full">{_tier["badge"]}</span></div>'
+        ) if _is_hero else ""
+        _price_gbp = _tier["amount"] / 100
+        _btn_classes = (
+            "bg-emerald-500 hover:bg-emerald-400 text-white font-extrabold py-5 shadow-[0_4px_14px_0_rgba(16,185,129,0.39)] uppercase tracking-widest"
+            if _is_hero else
+            "border border-slate-700 hover:border-slate-500 text-white font-bold py-4 uppercase tracking-wider"
+        )
+        _btn_label = "Secure Priority Access" if _is_hero else "See This Tier"
+        _homepage_tier_cards += f"""
+                <div class="{_card_style}">
+                    {_ribbon}
+                    <h3 class="text-2xl font-bold text-white mb-2">{_tier['name']}</h3>
+                    <p class="text-slate-400 mb-6 text-sm">{_tier['description']}</p>
+                    <div class="flex items-baseline gap-2 mb-6">
+                        <div class="text-4xl font-extrabold text-white">&pound;{_price_gbp:.0f}</div>
+                        <div class="text-lg text-slate-500 font-normal">/month</div>
+                    </div>
+                    <div class="bg-emerald-500/10 border-l-2 border-emerald-500 rounded p-3 mb-6 text-xs text-emerald-200">{_tier.get('real_world_roi', '')}</div>
+                    <ul class="mb-8 space-y-3 text-slate-300 text-sm font-medium">
+                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 100% Exclusive &mdash; every lead sold once, never resold</li>
+                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Early-access alert the moment a matching lead is filed</li>
+                    </ul>
+                    <a href="#map" class="block w-full text-center {_btn_classes} rounded-lg transition-all duration-300 text-sm">
+                        {_btn_label}
+                    </a>
+                </div>"""
 
     return f"""<!DOCTYPE html>
 <html lang="en-GB" class="scroll-smooth">
@@ -1792,66 +1850,7 @@ def public_homepage(request: Request):
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
-                
-                <!-- Tier 1: Sole Trader -->
-                <div class="bg-[#0f172a] border border-slate-800 rounded-2xl p-8 relative hover:border-slate-600 transition-colors">
-                    <h3 class="text-2xl font-bold text-white mb-2">Sole Trader</h3>
-                    <p class="text-slate-400 mb-6 text-sm">Perfect for one-man bands and local startups aiming to grow steadily.</p>
-                    <div class="flex items-baseline gap-2 mb-8">
-                        <div class="text-4xl font-extrabold text-white">&pound;49</div>
-                        <div class="text-lg text-slate-500 font-normal">/month</div>
-                    </div>
-                    <ul class="mb-8 space-y-4 text-slate-300 text-sm font-medium">
-                        <li class="flex items-start gap-3"><svg width="20" class="text-slate-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 10-Mile Radial Boundary</li>
-                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 100% Exclusive Lead Routing</li>
-                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Daily Email Notifications</li>
-                    </ul>
-                    <a id="btn-checkout-sole" href="#map" class="block w-full text-center border border-slate-700 hover:border-slate-500 text-white font-bold py-4 rounded-lg transition-all duration-300 uppercase tracking-wider text-sm">
-                        Start Local
-                    </a>
-                </div>
-
-                <!-- Tier 2: Commercial Pro (Hero) -->
-                <div class="bg-gradient-to-b from-[#064e3b] to-[#022c22] border-2 border-emerald-500 rounded-2xl p-8 relative transform md:-translate-y-4 shadow-[0_0_40px_rgba(16,185,129,0.15)]">
-                    <div class="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-                        <span class="bg-emerald-500 text-white text-xs font-bold uppercase tracking-widest py-1 px-3 rounded-full">Most Popular</span>
-                    </div>
-                    <h3 class="text-3xl font-bold text-white mb-2">Commercial Pro</h3>
-                    <p class="text-emerald-100/70 mb-6 text-sm h-10">The sweet spot for established 3-man crews hunting lucrative clearances.</p>
-                    <div class="flex items-baseline gap-2 mb-8">
-                        <div class="text-5xl font-extrabold text-white">&pound;149</div>
-                        <div class="text-lg text-emerald-500 font-normal">/month</div>
-                    </div>
-                    <ul class="mb-8 space-y-4 text-slate-100 text-sm font-medium">
-                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 25-Mile Radial Boundary</li>
-                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 100% Exclusive Lead Routing</li>
-                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Instant SMS/Phone Notifications</li>
-                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Connected-Authority Job Access</li>
-                    </ul>
-                    <a id="btn-checkout-pro" href="#map" class="block w-full text-center bg-emerald-500 hover:bg-emerald-400 text-white font-extrabold py-5 rounded-lg transition-all duration-300 uppercase tracking-widest text-sm shadow-[0_4px_14px_0_rgba(16,185,129,0.39)]">
-                        Secure Priority Access
-                    </a>
-                </div>
-
-                <!-- Tier 3: Regional Dominator -->
-                <div class="bg-[#0f172a] border border-slate-800 rounded-2xl p-8 relative hover:border-slate-600 transition-colors">
-                    <h3 class="text-2xl font-bold text-white mb-2">Regional Elite</h3>
-                    <p class="text-slate-400 mb-6 text-sm">For massive operations running multiple crews across a wide geographic spread.</p>
-                    <div class="flex items-baseline gap-2 mb-8">
-                        <div class="text-4xl font-extrabold text-white">&pound;299</div>
-                        <div class="text-lg text-slate-500 font-normal">/month</div>
-                    </div>
-                    <ul class="mb-8 space-y-4 text-slate-300 text-sm font-medium">
-                        <li class="flex items-start gap-3"><svg width="20" class="text-amber-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 50-Mile Radial Boundary</li>
-                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 100% Exclusive Lead Routing</li>
-                        <li class="flex items-start gap-3"><svg width="20" class="text-amber-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> First-Priority API Routing</li>
-                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Dedicated Account Manager</li>
-                    </ul>
-                    <a id="btn-checkout-elite" href="#map" class="block w-full text-center border border-slate-700 hover:border-slate-500 text-white font-bold py-4 rounded-lg transition-all duration-300 uppercase tracking-wider text-sm">
-                        Dominate Region
-                    </a>
-                </div>
-
+                {_homepage_tier_cards}
             </div>
 
             <!-- Sep 9 2026, Nick's ask: "under the 3 price groups I want a
@@ -2062,7 +2061,7 @@ def public_homepage(request: Request):
                 <p class="text-slate-400 mt-4 mb-1 flex items-center justify-center md:justify-start gap-2">
                     Proudly engineered in the United Kingdom 
                 </p>
-                <p class="text-slate-600">Contact: nick@treekey.uk</p>
+                <p class="text-slate-600">Contact: nick@treekey.co.uk</p>
             </div>
             <div class="flex gap-6 text-xs font-mono uppercase tracking-wider flex-wrap justify-center md:justify-end shrink-0 pt-2">
                 <!-- Sep 9 2026, Nick's ask: "we need a way for people to
@@ -2071,13 +2070,13 @@ def public_homepage(request: Request):
                      site, different screens)" -- FAQ and Suggestions already
                      existed as real pages but weren't linked from the
                      footer, so most pages never surfaced them. Help is a
-                     direct mailto to the same contact@treekey.uk address
+                     direct mailto to the same contact@treekey.co.uk address
                      already used everywhere else on the site (ToS, Privacy,
                      FAQ) -- this footer previously showed a different
-                     address in plain text below ("nick@treekey.uk"); worth
+                     address in plain text below ("nick@treekey.co.uk"); worth
                      confirming with Nick whether that should also change to
-                     contact@treekey.uk or genuinely routes differently. -->
-                <a href="mailto:contact@treekey.uk" class="text-slate-400 hover:text-white transition-colors">Help</a>
+                     contact@treekey.co.uk or genuinely routes differently. -->
+                <a href="mailto:contact@treekey.co.uk" class="text-slate-400 hover:text-white transition-colors">Help</a>
                 <a href="/faq" class="text-slate-400 hover:text-white transition-colors">FAQ</a>
                 <a href="/suggestions" class="text-slate-400 hover:text-white transition-colors">Suggestions</a>
                 <a href="/privacy-policy" class="text-slate-400 hover:text-white transition-colors">Privacy</a>
@@ -3007,7 +3006,7 @@ def pricing(request: Request):
              marketplace page, so it's visible wherever a customer is deciding
              to pay, not just at the point of picking an individual lead. -->
         <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-emerald-200">
-            <b>Lead-Quality Promise:</b> Every lead is filtered to confirm it's genuine tree work before it's dispatched. On the rare chance a non-tree lead slips through, screenshot it and email <a href="mailto:contact@treekey.uk" class="underline hover:text-emerald-100">contact@treekey.uk</a> &mdash; we'll swap it for a correct lead or refund it.
+            <b>Lead-Quality Promise:</b> Every lead is filtered to confirm it's genuine tree work before it's dispatched. On the rare chance a non-tree lead slips through, screenshot it and email <a href="mailto:contact@treekey.co.uk" class="underline hover:text-emerald-100">contact@treekey.co.uk</a> &mdash; we'll swap it for a correct lead or refund it.
         </div>
 
         <h2 class="text-[22px] mt-10 mb-4 text-white font-bold">Why TreeKey is the Opposite of Directories</h2>
@@ -3322,6 +3321,20 @@ def generate_homeowner_letter(request: Request, lead_id: str, company: str = "Yo
             <b>{company}</b><br>
             Direct Line: <b>{phone}</b>
         </div>
+
+        <!-- Sep 2026, Nick's business-model pivot: every unlocked lead now
+             gets a letter, no exceptions (see database._queue_letter_dispatch)
+             -- and this section is why: it's the UK GDPR Article 14 notice,
+             now delivered on paper to the actual person it's about, not just
+             sitting on a privacy-policy page nobody has a reason to visit
+             (see TreeKey_Solicitor_Evidence_Pack.md's finding that a website
+             link alone doesn't satisfy Article 14). Kept visually distinct
+             from the sales copy above -- smaller, greyed, its own divider --
+             same convention as the small-print/compliance footer any real
+             trade letter already carries, not hidden, not styled to be missed. -->
+        <div style="margin-top:28px; padding-top:14px; border-top:1px solid #cbd5e1; font-family:sans-serif; font-size:10.5px; line-height:1.5; color:#64748b;">
+            <b>How we found your details.</b> This letter was prepared using information from your planning application <b>{ref}</b>, a public record held by {council}. The application (your name and property address, and the proposed works described above) was identified by TreeKey (operated by Vector Data Labs), a service that matches public planning records with UK tree-care and arboricultural contractors. Vector Data Labs processed this information on the basis of its legitimate interest in connecting relevant local contractors with published planning notices. Vector Data Labs does not hold a phone number or email address for you. You have the right to object to this processing, to ask what information is held about you, or to request its removal from future matching &mdash; contact <b>contact@treekey.co.uk</b>, or see the full privacy notice at <b>treekey.co.uk/privacy-policy</b>. Objecting will not affect this contractor's ability to assist with your project if you choose to get in touch with them directly.
+        </div>
     </body>
     </html>
     """
@@ -3498,7 +3511,7 @@ def checkout(plan_key: str, request: Request):
                 )
             return _branded_message_page(
                 request, "Payment System Unavailable",
-                "Please contact support at contact@treekey.uk.",
+                "Please contact support at contact@treekey.co.uk.",
                 cta_text="Return to Pricing", cta_href="/pricing", status_code=503
             )
         return RedirectResponse(url=url)
@@ -3678,7 +3691,7 @@ async def checkout_post(plan_key: str, request: Request, outcode: str = Form(...
             <p style="color:#94a3b8; max-width:480px; margin:16px auto;">
                 You can still buy individual leads as they appear via the
                 <a href="/marketplace" style="color:#34d399;">Marketplace</a>, or
-                <a href="mailto:contact@treekey.uk?subject=Waitlist:%20{urllib.parse.quote(clean_outcode)}" style="color:#34d399;">email us to be notified</a>
+                <a href="mailto:contact@treekey.co.uk?subject=Waitlist:%20{urllib.parse.quote(clean_outcode)}" style="color:#34d399;">email us to be notified</a>
                 if a slot opens up here.
             </p>
             <a href="/pricing" style="color:#34d399;">← Back to pricing</a>
@@ -3691,7 +3704,7 @@ async def checkout_post(plan_key: str, request: Request, outcode: str = Form(...
     if not url:
         return _branded_message_page(
             request, "Payment System Unavailable",
-            "Please contact support at contact@treekey.uk.",
+            "Please contact support at contact@treekey.co.uk.",
             cta_text="Return to Pricing", cta_href="/pricing", status_code=503
         )
     return RedirectResponse(url=url, status_code=303)
@@ -4905,6 +4918,136 @@ def admin_restore_non_tree_leaks(request: Request, secret: Optional[str] = Query
     """)
 
 
+@app.get("/admin/delete-non-tree-personal-data", response_class=HTMLResponse)
+def admin_delete_non_tree_personal_data(request: Request, secret: Optional[str] = Query(None), confirm: str = Query("no")):
+    """Sep 2026, compliance-audit follow-up: /admin/remove-non-tree-leaks
+    (above) only ever soft-flags a confirmed non-tree lead (status set to
+    'non_tree_removed') -- it deliberately never deletes, because that tool
+    doubles as the source list for /admin/restore-non-tree-leaks whenever a
+    removal turns out to be wrong. This route is the next, separate step:
+    once a lead has sat at 'non_tree_removed' with no restore, its
+    applicant/agent personal data (name, address) has no remaining
+    commercial purpose and shouldn't be retained indefinitely just because
+    nothing ever deleted it -- this is the real, irreversible DELETE for
+    that population, same two-step confirm pattern as
+    /admin/cleanup-stale-leads.
+
+    Excludes _SUSPECT_DISCHARGE_REFS_SEP11 defensively -- those are the
+    same 7 refs /admin/restore-non-tree-leaks defaults to, still flagged as
+    possibly wrongly excluded and not yet confirmed resolved one way or the
+    other. Deleting ahead of that review could permanently destroy a
+    genuine tree lead; excluding them here costs nothing and closes that
+    race. Re-run this after that review is settled to pick them up too."""
+    verify_admin_or_secret(request, secret)
+
+    exclude_refs = _SUSPECT_DISCHARGE_REFS_SEP11
+    preview_count = database.count_non_tree_personal_data(exclude_refs=exclude_refs)
+    deleted_count = None
+    if confirm == "yes" and preview_count > 0:
+        deleted_count = database.delete_non_tree_personal_data(exclude_refs=exclude_refs)["deleted"]
+
+    if deleted_count is not None:
+        body = f"""
+        <h2 style="color:#044332;">Cleanup Complete</h2>
+        <p style="color:#065f46; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:14px;">
+            Permanently deleted <b>{deleted_count}</b> confirmed non-tree lead{'s' if deleted_count != 1 else ''} — personal data (applicant/agent name, address) removed, no commercial purpose remaining.
+        </p>
+        """
+    else:
+        body = f"""
+        <h2 style="color:#044332;">Delete Non-Tree Personal Data</h2>
+        <p style="color:#64748b; font-size:13px;">This PERMANENTLY DELETES leads at status='non_tree_removed' (confirmed non-tree, already pulled from marketplace/dispatch via /admin/remove-non-tree-leaks) — their applicant/agent name and address serve no remaining purpose. The {len(exclude_refs)} refs still under manual re-review (see /admin/restore-non-tree-leaks) are excluded from this run.</p>
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin:16px 0;">
+            <div style="font-size:12px; color:#64748b;">Leads that would be permanently deleted right now</div>
+            <div style="font-size:28px; font-weight:800; color:{'#dc2626' if preview_count else '#059669'};">{preview_count}</div>
+        </div>
+        {"<a href='/admin/delete-non-tree-personal-data?secret=" + (secret or '') + "&confirm=yes' style='background:#dc2626; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block;'>Confirm — permanently delete these " + str(preview_count) + " leads</a>" if preview_count else "<p style='color:#059669;'>Nothing to clean up.</p>"}
+        """
+
+    return HTMLResponse(f"""
+    <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:1000px; margin:auto;">
+        {body}
+        <p style="margin-top:24px;"><a href="/admin/remove-non-tree-leaks?secret={secret or ''}" style="color:#044332;">← Back to Remove Non-Tree Leaks</a></p>
+    </body></html>
+    """)
+
+
+@app.get("/admin/letter-dispatches", response_class=HTMLResponse)
+def admin_letter_dispatches(request: Request, secret: Optional[str] = Query(None)):
+    """Sep 2026: status page for the mandatory-letter pivot -- shows the
+    queue depth and the current LETTER_PROVIDER, and (Nick's explicit
+    rule) makes it visible at a glance whether any lead has EVER been
+    claimed without a corresponding letter_dispatches row, which should be
+    structurally impossible now but is cheap to keep verifying rather than
+    just assuming the code is right forever."""
+    verify_admin_or_secret(request, secret)
+    import letter_provider
+
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT status, count(*) FROM letter_dispatches GROUP BY status;")
+        status_counts = dict(cur.fetchall())
+        cur.execute("""
+            SELECT count(*) FROM leads l
+            WHERE l.status = 'claimed'
+              AND NOT EXISTS (SELECT 1 FROM letter_dispatches ld WHERE ld.lead_reference = l.reference);
+        """)
+        claimed_without_letter = cur.fetchone()[0]
+        cur.execute("""
+            SELECT lead_reference, address, sale_context, status, attempts, last_error, created_at
+            FROM letter_dispatches ORDER BY created_at DESC LIMIT 25;
+        """)
+        recent = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+
+    provider_name = os.getenv("LETTER_PROVIDER", "console").strip().lower() or "console"
+    rows_html = "".join([
+        f"""<tr>
+            <td style="padding:6px; border-bottom:1px solid #e2e8f0; font-family:monospace; font-size:11px;">{ref}</td>
+            <td style="padding:6px; border-bottom:1px solid #e2e8f0; font-size:11px;">{(addr or '')[:60]}</td>
+            <td style="padding:6px; border-bottom:1px solid #e2e8f0; font-size:11px;">{ctx}</td>
+            <td style="padding:6px; border-bottom:1px solid #e2e8f0; font-size:11px;">{status}</td>
+            <td style="padding:6px; border-bottom:1px solid #e2e8f0; font-size:11px;">{attempts}</td>
+            <td style="padding:6px; border-bottom:1px solid #e2e8f0; font-size:11px; color:#dc2626;">{(err or '')[:80]}</td>
+        </tr>"""
+        for ref, addr, ctx, status, attempts, err, _ in recent
+    ])
+
+    return HTMLResponse(f"""
+    <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:1100px; margin:auto;">
+        <h2 style="color:#044332;">Letter Dispatches</h2>
+        <p style="color:#64748b; font-size:13px;">Active provider: <b>{provider_name}</b>{' (dry-run, sends nothing)' if provider_name == 'console' else ''}. Set the LETTER_PROVIDER env var to switch once a vendor is chosen and funded.</p>
+        <div style="display:flex; gap:12px; margin:16px 0; flex-wrap:wrap;">
+            {"".join(f'<div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px;"><div style="font-size:11px; color:#64748b;">{s}</div><div style="font-size:22px; font-weight:800;">{c}</div></div>' for s, c in status_counts.items()) or '<p>No letter dispatches yet.</p>'}
+            <div style="background:{'#fef2f2' if claimed_without_letter else 'white'}; border:1px solid {'#fecaca' if claimed_without_letter else '#e2e8f0'}; border-radius:8px; padding:12px 16px;">
+                <div style="font-size:11px; color:#64748b;">Claimed leads with NO letter row (should be 0)</div>
+                <div style="font-size:22px; font-weight:800; color:{'#dc2626' if claimed_without_letter else '#059669'};">{claimed_without_letter}</div>
+            </div>
+        </div>
+        <p><a href="/admin/process-letter-dispatches?secret={secret or ''}" style="background:#044332; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block;">Process queue now (one batch of 20)</a></p>
+        <h3 style="color:#044332; margin-top:24px;">Most recent 25</h3>
+        <table style="width:100%; border-collapse:collapse; font-size:13px; background:white; border:1px solid #e2e8f0;">
+            <tr style="background:#f1f5f9;"><th style="padding:6px; text-align:left;">Ref</th><th style="padding:6px; text-align:left;">Address</th><th style="padding:6px; text-align:left;">Context</th><th style="padding:6px; text-align:left;">Status</th><th style="padding:6px; text-align:left;">Attempts</th><th style="padding:6px; text-align:left;">Last error</th></tr>
+            {rows_html or '<tr><td colspan="6" style="padding:8px;">None yet.</td></tr>'}
+        </table>
+    </body></html>
+    """)
+
+
+@app.get("/admin/process-letter-dispatches")
+def admin_process_letter_dispatches(request: Request, secret: Optional[str] = Query(None)):
+    """Manual trigger for database.process_pending_letter_dispatches, for
+    whenever Nick wants to run it himself rather than wait for the next
+    autonomous cycle -- same relationship as /admin/cleanup-stale-leads has
+    to the automatic version."""
+    verify_admin_or_secret(request, secret)
+    result = database.process_pending_letter_dispatches(batch_size=20)
+    return RedirectResponse(f"/admin/letter-dispatches?secret={secret or ''}", status_code=302)
+
+
 @app.get("/admin/clear-lead-flag")
 def admin_clear_lead_flag(request: Request, secret: Optional[str] = Query(None), email: str = Query(...)):
     """Admin/debug-only, Sep 10 2026 (Nick's ask: "it's our system, can't we
@@ -5293,6 +5436,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
                         <span class="text-emerald-400 font-mono text-[10px] uppercase tracking-widest block mb-1">Job Specification</span>
                         {summary[:220]}...
                     </div>
+                    <a href="/marketplace/lead/{ref}" class="inline-block mt-2 text-emerald-400 hover:text-emerald-300 text-[12px] font-bold no-underline">View Full Job Details →</a>
                 </div>
 
                 <div class="sm:w-[210px] shrink-0 bg-slate-900/60 border border-emerald-900/50 rounded-xl p-4 flex sm:flex-col items-center sm:items-stretch justify-between sm:justify-start gap-3 text-center">
@@ -5375,7 +5519,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
              case a non-tree lead slips past our filters, so it's clear this
              gets made right rather than customers having to guess/argue. -->
         <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-emerald-200">
-            <b>Lead-Quality Promise:</b> Every lead is filtered to confirm it's genuine tree work before it's listed. On the rare chance a non-tree lead slips through, screenshot it and email <a href="mailto:contact@treekey.uk" class="underline hover:text-emerald-100">contact@treekey.uk</a> &mdash; we'll swap it for a correct lead or refund it.
+            <b>Lead-Quality Promise:</b> Every lead is filtered to confirm it's genuine tree work before it's listed. On the rare chance a non-tree lead slips through, screenshot it and email <a href="mailto:contact@treekey.co.uk" class="underline hover:text-emerald-100">contact@treekey.co.uk</a> &mdash; we'll swap it for a correct lead or refund it.
         </div>
 
         {search_html}
@@ -5396,6 +5540,182 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
     """
 
 
+@app.get("/marketplace/lead/{reference}", response_class=HTMLResponse)
+def lead_detail_view(reference: str, request: Request):
+    """Sep 17 2026, Nick's ask: marketplace cards only ever showed a
+    220-character truncated snippet of the job description with nothing to
+    click through to -- "give every lead something worth clicking on...
+    take you to a prepurchase page that gives the full job description, as
+    much info as we can show without giving away the address." Reuses
+    get_marketplace_leads_with_freshness's new only_reference param instead
+    of recomputing price/freshness/badges separately, so this page can
+    never show a different price or status than the marketplace card for
+    the same lead. Shows the FULL redacted description (never truncated),
+    plus every other pre-purchase signal already proven safe to show on the
+    card (category, size, urgency, agent status, listed/registered dates,
+    freshness tier) -- still nothing that identifies the address or the
+    exact applicant/agent, which is what unlocking pays for."""
+    _viewer_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    _viewer_discount = database.get_subscriber_discount(_viewer_email) if _viewer_email else {"eligible": False, "discount_pct": 0}
+    _viewer_sub = database.get_contractor_subscription(_viewer_email) if _viewer_email else None
+    _viewer_is_subscriber = bool(_viewer_sub and _viewer_sub.get("active"))
+
+    leads = database.get_marketplace_leads_with_freshness(
+        only_reference=reference, limit=1,
+        subscriber_early_access=_viewer_is_subscriber,
+    )
+
+    if not leads:
+        return HTMLResponse(f"""
+        <!DOCTYPE html>
+        <html lang="en-GB">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Lead No Longer Available | TreeKey</title>
+            <link rel="icon" href="/static/icon-192.png">
+            <link href="/static/tailwind.css" rel="stylesheet">
+        </head>
+        <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
+        {_shared_nav_html(request)}
+        <div class="max-w-2xl mx-auto px-4 py-20 text-center">
+            <h1 class="text-2xl font-bold text-white mb-3">This lead is no longer available</h1>
+            <p class="text-slate-400 mb-6">It's already been unlocked by another contractor, or the reference doesn't match a current listing.</p>
+            <a href="/marketplace" class="inline-block bg-brand-green hover:bg-emerald-500 text-white px-6 py-3 rounded-lg no-underline font-bold">Browse the Marketplace →</a>
+        </div>
+        {_shared_footer_html()}
+        </body>
+        </html>
+        """, status_code=404)
+
+    l = leads[0]
+    lid = l["id"]
+    plan_key = l["plan_key"]
+    unlock_fee = l["price"]
+
+    if _viewer_discount.get("eligible") and unlock_fee:
+        _member_fee = max(1, round(unlock_fee * (100 - _viewer_discount["discount_pct"]) / 100))
+        price_block_html = f"""<div class="text-lg text-slate-500 line-through leading-none">£{unlock_fee}</div><div class="text-4xl font-extrabold text-emerald-400">£{_member_fee}<span class="text-[12px] font-bold text-emerald-400 align-top ml-1">MEMBER</span></div>"""
+        member_link_html = ""
+    elif _viewer_email:
+        price_block_html = f"""<div class="text-4xl font-extrabold text-emerald-400">£{unlock_fee}</div>"""
+        member_link_html = f"""<a href="/pricing" class="text-[12px] text-slate-400 hover:text-emerald-400 underline">Subscribe for member pricing</a>"""
+    else:
+        price_block_html = f"""<div class="text-4xl font-extrabold text-emerald-400">£{unlock_fee}</div>"""
+        member_link_html = f"""<a href="/login?next={urllib.parse.quote(f'/checkout/{plan_key}?lead_id={lid}')}" class="text-[12px] text-slate-400 hover:text-emerald-400 underline">Already a member? Sign in for your discount</a>"""
+
+    job_cat = l.get("job_category") or database._GENERAL_CATEGORY
+    cat_color = job_cat["color"]
+    cat_label = job_cat["label"]
+    cat_icon = _CAT_ICONS.get(job_cat["icon"], _CAT_ICONS["general"])
+
+    listed_date = "Date unavailable"
+    raw_discovered_at = l.get("discovered_at")
+    try:
+        dt = datetime.datetime.fromisoformat(raw_discovered_at.replace("Z", "+00:00")) if isinstance(raw_discovered_at, str) else raw_discovered_at
+        if dt:
+            listed_date = _to_uk_display_time(dt).strftime("%d %b %Y, %H:%M")
+    except Exception:
+        pass
+
+    registered_date_html = ""
+    raw_reg_date = l.get("reg_date")
+    if raw_reg_date:
+        try:
+            reg_dt = datetime.datetime.fromisoformat(raw_reg_date.replace("Z", "+00:00")) if isinstance(raw_reg_date, str) else raw_reg_date
+            if reg_dt:
+                registered_date_html = f"""<div class="text-[12px] text-slate-500 font-mono mt-1">Council application filed {_to_uk_display_time(reg_dt).strftime('%d %b %Y')}</div>"""
+        except Exception:
+            pass
+
+    if l.get("has_agent") is True:
+        agent_badge = "<span style='font-size:12px; background:rgba(148,163,184,0.15); color:#cbd5e1; font-weight:bold; padding:4px 10px; border-radius:12px;' title=\"An agent handled the paperwork but doesn't look like a tree company -- the tree work itself may still be open.\">Non-tree agent on record</span>"
+    elif l.get("has_agent") is False:
+        agent_badge = "<span style='font-size:12px; background:rgba(16,185,129,0.15); color:#6ee7b7; font-weight:bold; padding:4px 10px; border-radius:12px;'>No agent listed</span>"
+    else:
+        agent_badge = "<span style='font-size:12px; background:rgba(148,163,184,0.1); color:#94a3b8; padding:4px 10px; border-radius:12px;'>Agent status: unconfirmed</span>"
+
+    urgent_badge = "<span style='font-size:12px; background:rgba(239,68,68,0.15); color:#fca5a5; font-weight:bold; padding:4px 10px; border-radius:12px;'>Urgent</span>" if l.get("is_urgent") else ""
+
+    _SIZE_BADGE = {
+        "large":  ("Large Job", "rgba(239,68,68,0.15)", "#fca5a5"),
+        "medium": ("Medium Job", "rgba(245,158,11,0.15)", "#fcd34d"),
+        "small":  ("Small Job", "rgba(148,163,184,0.12)", "#cbd5e1"),
+    }
+    _size_key = (l.get("score") or "").strip().lower()
+    size_badge = ""
+    if _size_key in _SIZE_BADGE:
+        _size_text, _size_bg, _size_fg = _SIZE_BADGE[_size_key]
+        size_badge = f"<span style='font-size:12px; background:{_size_bg}; color:{_size_fg}; font-weight:bold; padding:4px 10px; border-radius:12px;'>{_size_text}</span>"
+
+    masked_area = l.get("area_label") or "Area unavailable"
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{masked_area} — {cat_label} | TreeKey</title>
+        <link rel="icon" href="/static/icon-192.png">
+        <link href="/static/tailwind.css" rel="stylesheet">
+    </head>
+    <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
+    {_shared_nav_html(request)}
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 py-10">
+        <a href="/marketplace" class="text-slate-400 hover:text-white no-underline text-[13px] transition-colors">← Back to Marketplace</a>
+
+        <div class="mt-5 bg-slate-800/50 rounded-2xl p-6 sm:p-8 shadow-lg" style="border: 2px solid {cat_color};">
+            <div class="flex flex-wrap items-center gap-2 mb-4">
+                <span style="font-size:12px; background:{cat_color}26; color:{cat_color}; font-weight:bold; padding:5px 12px; border-radius:12px; display:inline-flex; align-items:center; gap:5px;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="{cat_color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">{cat_icon}</svg>
+                    {cat_label}
+                </span>
+                <span style="font-size:12px; background:{l['badge_bg']}; color:{l['badge_color']}; font-weight:bold; padding:5px 12px; border-radius:12px; text-transform:uppercase;">{l['badge_text']}</span>
+                <span style="font-size:12px; background:rgba(148,163,184,0.1); color:#cbd5e1; padding:4px 10px; border-radius:12px;">LPA: {l['council']}</span>
+                {urgent_badge}
+                {size_badge}
+                {agent_badge}
+            </div>
+
+            <h1 class="text-2xl sm:text-3xl text-white font-bold flex items-center gap-2 mb-1">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="text-emerald-400 shrink-0"><path d="M12 21s-7-6.5-7-11a7 7 0 1 1 14 0c0 4.5-7 11-7 11z"></path><circle cx="12" cy="10" r="2.5"></circle></svg>
+                {masked_area}
+            </h1>
+            <div class="text-[12px] text-slate-500 font-mono">Listed {listed_date}</div>
+            {registered_date_html}
+
+            <div class="bg-slate-900/60 border-l-[3px] border-emerald-600 px-5 py-4 mt-5 text-[15px] text-slate-200 leading-relaxed rounded-r-lg">
+                <span class="text-emerald-400 font-mono text-[11px] uppercase tracking-widest block mb-2">Full Job Specification</span>
+                {l['summary']}
+            </div>
+
+            <p class="text-[12px] text-slate-500 mt-4">
+                The exact address and applicant/agent identity are redacted above -- that's what unlocking this lead pays for. Everything else the council's own public record states about the job is shown in full.
+            </p>
+
+            <div class="mt-7 bg-slate-900/60 border border-emerald-900/50 rounded-xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div>
+                    {price_block_html}
+                    <div style="display:inline-flex; align-items:center; gap:5px; background:{l['badge_color']}1a; color:{l['badge_color']}; font-weight:800; font-size:12px; padding:5px 11px; border-radius:8px; margin-top:8px;">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+                        {l['days_left']}
+                    </div>
+                    <div class="mt-1">{member_link_html}</div>
+                </div>
+                <a href="/checkout/{plan_key}?lead_id={lid}" class="shrink-0 bg-brand-green hover:bg-emerald-500 text-white px-7 py-4 rounded-lg no-underline font-bold text-sm transition-all duration-300 shadow-[0_0_20px_rgba(5,150,105,0.3)] hover:shadow-[0_0_30px_rgba(5,150,105,0.5)] inline-flex items-center justify-center gap-1.5 text-center">
+                    Unlock Address &amp; Contacts →
+                </a>
+            </div>
+            <div class="text-[11px] text-slate-500 mt-3 text-center sm:text-left">
+                Single-Sale Asset — burned permanently upon unlock, never resold.
+            </div>
+        </div>
+    </div>
+    {_shared_footer_html()}
+    </body>
+    </html>
+    """
 
 
 @app.get("/payment/success", response_class=HTMLResponse)
@@ -6420,7 +6740,7 @@ async def free_signup(request: Request):
             logger.error(f"[Free Signup] Code redeemed for {email} but record_free_lead_grant found no "
                          f"limbo_accounts row -- lead {result['lead']['reference']} is claimed but ungranted.")
             return RedirectResponse(
-                url="/free-account?error=Your+code+worked+and+the+job+is+now+yours%2C+but+we+couldn%27t+load+your+account+to+show+it.+Please+contact+contact%40treekey.uk+with+your+email+so+we+can+fix+this+manually.",
+                url="/free-account?error=Your+code+worked+and+the+job+is+now+yours%2C+but+we+couldn%27t+load+your+account+to+show+it.+Please+contact+contact%40treekey.co.uk+with+your+email+so+we+can+fix+this+manually.",
                 status_code=303)
 
         # Sep 10 2026, Nick's ask ("once they own a lead we give them
@@ -6537,7 +6857,7 @@ async def resend_webhook(request: Request):
     INERT until two manual steps happen on Nick's side, neither of which
     this code can do for him: (1) set RESEND_WEBHOOK_SECRET in Render's
     environment variables to the signing secret Resend shows when you
-    register the endpoint, (2) add https://treekey.uk/webhooks/resend as an
+    register the endpoint, (2) add https://treekey.co.uk/webhooks/resend as an
     endpoint in the Resend dashboard's Webhooks section, subscribed to at
     least email.bounced and email.complained."""
     webhook_secret = os.getenv("RESEND_WEBHOOK_SECRET", "").strip()
@@ -9282,6 +9602,23 @@ def run_full_autonomous_cycle():
     except Exception as e:
         logger.error(f"[AUTO] Stale-lead cleanup error: {e}")
 
+    # Sep 2026, business-model pivot: every sale queues a letter_dispatches
+    # row (see database._queue_letter_dispatch) -- this is the step that
+    # actually works through that queue, same loop-until-drained pattern as
+    # every backfill above. Safe to run with no vendor chosen yet: defaults
+    # to letter_provider.ConsoleLetterProvider (dry-run, logs only), so
+    # this can go live today without risking a real send/charge before
+    # LETTER_PROVIDER is deliberately set.
+    try:
+        for _ in range(20):
+            result = database.process_pending_letter_dispatches(batch_size=20)
+            if result.get("failed"):
+                logger.warning(f"[AUTO] {result['failed']} letter dispatch(es) failed this batch -- check letter_dispatches.last_error.")
+            if result.get("batch_size", 0) < 20:
+                break
+    except Exception as e:
+        logger.error(f"[AUTO] Letter dispatch processing error: {e}")
+
     # Non-tree-leak scan is automatic for DETECTION, deliberately NOT for
     # removal. Unlike the stale-lead check above, this is a keyword
     # heuristic that -- proven live on Sep 11's 83-row review -- can flag a
@@ -9544,7 +9881,7 @@ def run_size_price_backfill_now(secret: Optional[str] = Query(None)):
                 "status": "error",
                 "error": result["error"],
                 "totals": totals,
-                "note": "stopped after this batch failed -- nothing past this point was processed. If a full autonomous cycle is running at the same time, that's the most likely cause (DB connection contention) -- wait for it to finish (check https://treekey.uk/pipeline-status?secret=... ) and try again.",
+                "note": "stopped after this batch failed -- nothing past this point was processed. If a full autonomous cycle is running at the same time, that's the most likely cause (DB connection contention) -- wait for it to finish (check https://treekey.co.uk/pipeline-status?secret=... ) and try again.",
             }
         totals["updated"] += result.get("updated", 0)
         totals["unchanged"] += result.get("unchanged", 0)
@@ -10764,7 +11101,7 @@ async def privacy_policy():
         <p class="mb-6 text-sm text-slate-500">Last updated: September 2026 &middot; Tree Key is a trading name of Vector Data Labs</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">1. Who We Are</h2>
-        <p class="mb-4">Tree Key ("we", "us", "our") operates the website treekey.co.uk and the lead-generation service described in our <a href="/terms-of-service" class="text-emerald-400 underline">Terms of Service</a>. Tree Key is a trading name of Vector Data Labs, which is the data controller for the personal data described below. For privacy matters, contact <strong>contact@treekey.uk</strong>.</p>
+        <p class="mb-4">Tree Key ("we", "us", "our") operates the website treekey.co.uk and the lead-generation service described in our <a href="/terms-of-service" class="text-emerald-400 underline">Terms of Service</a>. Tree Key is a trading name of Vector Data Labs, which is the data controller for the personal data described below. For privacy matters, contact <strong>contact@treekey.co.uk</strong>.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">2. The Two Kinds of Personal Data We Handle</h2>
         <p class="mb-2"><strong class="text-white">2.1 Customer data</strong> &mdash; information about you, our paying customer: name, business name, email, phone number, billing details (processed by Stripe), and your usage of the Service.</p>
@@ -10799,7 +11136,7 @@ async def privacy_policy():
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">8. Your Rights</h2>
         <p class="mb-2">Both customers and individuals named in Lead data have the right, under UK GDPR, to: request access to the personal data we hold about them; request correction of inaccurate data; request erasure ("right to be forgotten"), subject to our legal bases for retaining it; object to processing based on legitimate interests (Section 3); request restriction of processing in certain circumstances; and lodge a complaint with the Information Commissioner's Office (ico.org.uk).</p>
-        <p class="mb-4">To exercise any of these rights, contact <strong>contact@treekey.uk</strong>.</p>
+        <p class="mb-4">To exercise any of these rights, contact <strong>contact@treekey.co.uk</strong>.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">9. Data Retention</h2>
         <p class="mb-4">Lead data is retained for 24 months from discovery, after which personal identifiers are anonymized or deleted, though the underlying planning application record may be retained in non-identifying form for business analytics. Customer account data is retained for the life of the account; billing records are kept for 6 years after account closure to meet HMRC record-keeping requirements.</p>
@@ -10817,7 +11154,7 @@ async def privacy_policy():
         <p class="mb-4">We may update this policy from time to time; material changes will be reflected by an updated "last updated" date, and significant changes affecting Lead data subjects' rights will be communicated where practical.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">14. Contact</h2>
-        <p class="mb-6">Questions or requests regarding this policy: <strong>contact@treekey.uk</strong>.</p>
+        <p class="mb-6">Questions or requests regarding this policy: <strong>contact@treekey.co.uk</strong>.</p>
 
         <a href="/" class="text-emerald-500 hover:text-emerald-400 mt-4 inline-block font-bold">&larr; Back to Home</a>
     </div>
@@ -10875,9 +11212,9 @@ async def terms_of_service():
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">4. Subscriptions, Pricing, and Payment</h2>
         <p class="mb-2">Access to Leads is provided on the subscription plans, credit packages, and pricing displayed on the Service at the time of purchase. Prices and plan structures may change; changes will not affect a billing period already paid for.</p>
-        <p class="mb-2">Payments are processed by Stripe. By subscribing, you authorize recurring charges for the plan you select until you cancel. Subscriptions may be cancelled via your account settings, or by emailing contact@treekey.uk, effective at the end of the current billing period.</p>
+        <p class="mb-2">Payments are processed by Stripe. By subscribing, you authorize recurring charges for the plan you select until you cancel. Subscriptions may be cancelled via your account settings, or by emailing contact@treekey.co.uk, effective at the end of the current billing period.</p>
         <p class="mb-4 border-l-4 border-amber-500 pl-4 bg-amber-500/10 py-3 text-slate-200"><strong>Refunds.</strong> Because you are granted immediate access to proprietary Lead data the moment you subscribe or purchase a single lead, all payments &mdash; subscription and one-off purchases alike &mdash; are non-refundable, including for unused portions of a billing cycle, save for the Lead-Quality Promise below. Nothing in this clause affects any statutory right you may have that cannot lawfully be excluded.</p>
-        <p class="mb-4 border-l-4 border-emerald-500 pl-4 bg-emerald-500/10 py-3 text-slate-200"><strong>Lead-Quality Promise.</strong> Every Lead is automatically filtered to confirm it describes genuine tree work before it is listed or dispatched. On the rare occasion a Lead that is not genuine tree work reaches you despite this, notify us at <strong>contact@treekey.uk</strong> with a screenshot of the Lead, and we will, at your choice, issue a replacement Lead of equivalent value or a refund for that Lead.</p>
+        <p class="mb-4 border-l-4 border-emerald-500 pl-4 bg-emerald-500/10 py-3 text-slate-200"><strong>Lead-Quality Promise.</strong> Every Lead is automatically filtered to confirm it describes genuine tree work before it is listed or dispatched. On the rare occasion a Lead that is not genuine tree work reaches you despite this, notify us at <strong>contact@treekey.co.uk</strong> with a screenshot of the Lead, and we will, at your choice, issue a replacement Lead of equivalent value or a refund for that Lead.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">5. Lead Accuracy &mdash; No Warranty</h2>
         <p class="mb-2">Lead information reflects data available to Tree Key at the time of discovery or last check and is not guaranteed to be current, complete, or accurate. In particular, we do not guarantee that: the underlying planning application remains active or undetermined; no contractor has since been engaged by the applicant, whether or not this is reflected in the public record; contact or applicant details are current or correct; or that use of a Lead will result in a successful quote, contract, or completed job.</p>
@@ -10914,7 +11251,7 @@ async def terms_of_service():
         <p class="mb-2"><strong class="text-white">Governing law.</strong> These Terms are governed by the laws of England and Wales, and the courts of England and Wales have exclusive jurisdiction.</p>
         <p class="mb-2"><strong class="text-white">Severability.</strong> If any provision of these Terms is found unenforceable, the remaining provisions continue in full force.</p>
         <p class="mb-2"><strong class="text-white">Entire agreement.</strong> These Terms, together with the <a href="/privacy-policy" class="text-emerald-400 underline">Privacy Policy</a> and any order confirmation, constitute the entire agreement between the parties regarding the Service.</p>
-        <p class="mb-6"><strong class="text-white">Contact.</strong> Questions about these Terms can be sent to <strong>contact@treekey.uk</strong>.</p>
+        <p class="mb-6"><strong class="text-white">Contact.</strong> Questions about these Terms can be sent to <strong>contact@treekey.co.uk</strong>.</p>
 
         <a href="/" class="text-emerald-500 hover:text-emerald-400 mt-4 inline-block font-bold">&larr; Back to Home</a>
     </div>
@@ -10953,7 +11290,7 @@ async def faq_page():
             ("Can I get a refund?",
              "Because you get immediate access to the Lead data itself the moment you subscribe or buy, payments are non-refundable &mdash; the same policy that applies to unused portions of a billing cycle. Full detail is in our <a href=\"/terms-of-service\" class=\"text-emerald-400 underline\">Terms of Service</a>."),
             ("What if a lead turns out not to be tree work at all?",
-             "Every lead is filtered to confirm it's genuine tree work before it's listed or dispatched, so this is rare &mdash; but if one slips through, screenshot it and email <strong>contact@treekey.uk</strong>. We'll issue you a correct replacement lead or a refund for that lead."),
+             "Every lead is filtered to confirm it's genuine tree work before it's listed or dispatched, so this is rare &mdash; but if one slips through, screenshot it and email <strong>contact@treekey.co.uk</strong>. We'll issue you a correct replacement lead or a refund for that lead."),
         ]),
         ("How Matching Works", [
             ("How do you decide which leads I get?",
@@ -10990,7 +11327,7 @@ async def faq_page():
             ("Is my business data sold to anyone?",
              "No. Your own account information (name, email, phone, billing) is never sold to data brokers or advertisers &mdash; it's used only to run your account and the Service. What you're paying for is licensed access to Lead data compiled from public records, which is a different thing entirely. See our <a href=\"/privacy-policy\" class=\"text-emerald-400 underline\">Privacy Policy</a> for the full breakdown."),
             ("I'm named in a Lead and want it removed &mdash; what do I do?",
-             "Email <strong>contact@treekey.uk</strong> and we'll action your request in line with the rights set out in our Privacy Policy."),
+             "Email <strong>contact@treekey.co.uk</strong> and we'll action your request in line with the rights set out in our Privacy Policy."),
         ]),
     ]
 
@@ -11034,7 +11371,7 @@ async def faq_page():
         {groups_html}
 
         <div class="text-center mt-4 pb-8 text-sm text-slate-500">
-            Still have a question? Email <strong class="text-slate-300">contact@treekey.uk</strong> or <a href="/suggestions" class="text-emerald-400 underline">submit a suggestion</a>.
+            Still have a question? Email <strong class="text-slate-300">contact@treekey.co.uk</strong> or <a href="/suggestions" class="text-emerald-400 underline">submit a suggestion</a>.
         </div>
     </div>
 </body>

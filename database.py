@@ -308,6 +308,33 @@ def init_db():
                 dispatched_at TIMESTAMPTZ DEFAULT NOW()
             );
 
+            -- Sep 2026, business-model pivot (Nick's ask, BuildAlert-style):
+            -- every lead sold/unlocked must trigger a real postal letter to
+            -- the applicant, and that letter is now also the vehicle for
+            -- the UK GDPR Article 14 "we collected your data" notice --
+            -- see _queue_letter_dispatch's own comment for why this table
+            -- is written in the SAME transaction as every status='claimed'
+            -- flip, not as a follow-up step. Letter vendor not chosen yet
+            -- (see letter_provider.py) -- this table and the queue exist
+            -- independently of which vendor ends up sending the mail.
+            CREATE TABLE IF NOT EXISTS letter_dispatches (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                lead_reference TEXT NOT NULL,
+                address TEXT NOT NULL,
+                applicant_name TEXT,
+                buyer_email TEXT,
+                sale_context TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                provider TEXT,
+                provider_reference TEXT,
+                attempts INT NOT NULL DEFAULT 0,
+                last_error TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                sent_at TIMESTAMPTZ
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_letter_dispatches_status ON letter_dispatches(status);
+
             CREATE TABLE IF NOT EXISTS contractor_ledger_entries (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 contractor_id UUID REFERENCES contractor_subscriptions(id) ON DELETE CASCADE,
@@ -1633,6 +1660,57 @@ def cleanup_stale_leads() -> dict:
         conn.close()
 
 
+def count_non_tree_personal_data(exclude_refs: Optional[list] = None) -> int:
+    """Preview count for delete_non_tree_personal_data -- see that function.
+    exclude_refs lets the caller keep any refs still under manual review out
+    of both the count and the delete (main.py passes
+    scanners._SUSPECT_DISCHARGE_REFS_SEP11-equivalent list -- see route)."""
+    conn = get_db_conn()
+    cur = conn.cursor()
+    try:
+        if exclude_refs:
+            cur.execute("SELECT count(*) FROM leads WHERE status = 'non_tree_removed' AND reference != ALL(%s);", (exclude_refs,))
+        else:
+            cur.execute("SELECT count(*) FROM leads WHERE status = 'non_tree_removed';")
+        return cur.fetchone()[0]
+    finally:
+        cur.close()
+        conn.close()
+
+
+def delete_non_tree_personal_data(exclude_refs: Optional[list] = None) -> dict:
+    """Permanently DELETEs leads at status='non_tree_removed' -- confirmed
+    non-tree applications already pulled out of active marketplace/dispatch
+    by remove_non_tree_leaks (see that function), carrying applicant/agent
+    personal data (name, address) with no remaining commercial purpose.
+    Added Sep 2026 per the compliance audit finding that this population
+    had no justified reason to be retained once it stops being sellable.
+
+    Safe by the same logic as cleanup_stale_leads: status='non_tree_removed'
+    is only ever reached from 'new'/blank (remove_non_tree_leaks' own scope),
+    and every live customer-facing query already skips that status, so this
+    can never touch a lead that was ever purchased/claimed or is still live.
+
+    exclude_refs: pass refs still under manual re-review (e.g. the
+    discharge-of-conditions batch flagged Sep 11 as possibly wrongly
+    excluded) so a delete can't outrun that review -- see the calling route
+    for the current list. Mirrors count_non_tree_personal_data's scoping so
+    the preview and the delete always agree on what's eligible."""
+    conn = get_db_conn()
+    cur = conn.cursor()
+    try:
+        if exclude_refs:
+            cur.execute("DELETE FROM leads WHERE status = 'non_tree_removed' AND reference != ALL(%s);", (exclude_refs,))
+        else:
+            cur.execute("DELETE FROM leads WHERE status = 'non_tree_removed';")
+        deleted = cur.rowcount
+        conn.commit()
+        return {"deleted": deleted}
+    finally:
+        cur.close()
+        conn.close()
+
+
 def scan_non_tree_leaks(exclude_seen: bool = True) -> list:
     """Scans every tree-vertical lead for scanners.NON_TREE_EXCLUSION_GOLD
     hits -- the same pattern behind PL/26/02939/HB (a chimney/listed-
@@ -2555,7 +2633,7 @@ def find_chip_drop_candidates_via_osm(lat: float, lon: float, radius_miles: floa
             resp = requests.post(
                 endpoint,
                 data={"data": query},
-                headers={"User-Agent": "TreeKey/1.0 (treekey.uk; contact@treekey.uk)"},
+                headers={"User-Agent": "TreeKey/1.0 (treekey.co.uk; contact@treekey.co.uk)"},
                 timeout=25,
             )
             if resp.status_code != 200:
@@ -2770,6 +2848,8 @@ def burn_lead_inventory(lead_id: str, buyer_email: str) -> dict:
                           applicant_name, agent_name, agent_company, has_agent, registered_date;
             """, (lead_id, lead_id))
             row = cur.fetchone()
+            if row:
+                _queue_letter_dispatch(cur, row[1], row[2], row[7], buyer_email, "single_purchase")
             conn.commit()
             if row:
                 logger.info(f"[Inventory Burn] Lead {lead_id} permanently claimed & burned by {buyer_email}.")
@@ -2948,6 +3028,8 @@ def confirm_reserved_lead_sale(lead_id: str, checkout_session_id: str, buyer_ema
                           applicant_name, agent_name, agent_company, has_agent, registered_date;
             """, (lead_id, lead_id, checkout_session_id))
             row = cur.fetchone()
+            if row:
+                _queue_letter_dispatch(cur, row[1], row[2], row[7], buyer_email, "single_purchase")
             conn.commit()
             if row:
                 logger.info(f"[Reservation] Lead {lead_id} sold to {buyer_email} via session {checkout_session_id}.")
@@ -3807,8 +3889,14 @@ def select_diverse_ticker_leads(limit: int = 5, enforce_geo_mix: bool = True,
         try:
             conn = get_db_conn()
             cur = conn.cursor()
+            # Sep 17 2026: same vertical-leak bug as get_marketplace_leads_
+            # with_freshness/find_nearest_unclaimed_lead -- this public
+            # homepage ticker had no vertical filter either, so an HMO/
+            # care-home application could show up as a "live tree work"
+            # example to anonymous visitors. Filtered to tree only.
             cur.execute("""SELECT address, summary, lead_score, lead_price, council_source, reference, discovered_at
                            FROM leads WHERE (status = 'new' OR status IS NULL)
+                                 AND COALESCE(vertical, 'tree') = 'tree'
                            ORDER BY discovered_at DESC LIMIT %s""", (pool_limit,))
             pool_rows = cur.fetchall()
             cur.close()
@@ -4007,12 +4095,26 @@ def find_nearest_unclaimed_lead(lat: float, lon: float, max_miles: Optional[floa
         conn = get_db_conn()
         cur = conn.cursor()
         try:
+            # Sep 17 2026, critical bug found from Nick's live report (HMO/
+            # care-home leads -- "Use Class C4", "Sui Generis", "Change of
+            # use ... to Residential care home (C2)" -- showing up where only
+            # tree work should): this query, like get_marketplace_leads_with_
+            # freshness and select_diverse_ticker_leads, never filtered by
+            # `vertical` even though every lead has been tagged tree/hmo
+            # since the Sep 2 multi-vertical build. A brand-new free-signup
+            # could have their very first, "no strings attached" welcome
+            # lead be a 25-bedroom HMO conversion notice, which is not just
+            # useless to a tree surgeon but actively damages trust in the
+            # product on day one. Filtered to vertical='tree' explicitly
+            # (COALESCE handles any pre-migration row with a NULL vertical,
+            # same convention used everywhere else this column is read).
             if score:
                 cur.execute("""
                     SELECT id, reference, address, summary, council_source, lead_score, lead_price,
                            registered_date, vertical, applicant_name, agent_name, agent_company, has_agent
                     FROM leads
                     WHERE (status = 'new' OR status IS NULL) AND lead_score = %s
+                          AND COALESCE(vertical, 'tree') = 'tree'
                     ORDER BY discovered_at DESC
                     LIMIT 5000;
                 """, (score,))
@@ -4022,6 +4124,7 @@ def find_nearest_unclaimed_lead(lat: float, lon: float, max_miles: Optional[floa
                            registered_date, vertical, applicant_name, agent_name, agent_company, has_agent
                     FROM leads
                     WHERE (status = 'new' OR status IS NULL)
+                          AND COALESCE(vertical, 'tree') = 'tree'
                     ORDER BY discovered_at DESC
                     LIMIT 5000;
                 """)
@@ -4468,6 +4571,7 @@ def redeem_free_lead_code(email: str, code: str) -> dict:
                 conn.commit()
                 return {"ok": False, "reason": "expired", "lead": None}
 
+            _queue_letter_dispatch(cur, lead_row[1], lead_row[2], lead_row[7], email, "free_lead")
             cur.execute("UPDATE free_lead_codes SET redeemed_at = NOW() WHERE code = %s;", (code,))
             conn.commit()
             logger.info(f"[Free Lead Promo] Code {code} redeemed by {email} for lead {lead_reference}.")
@@ -5184,6 +5288,121 @@ def get_contractor_subscription(email: str) -> dict:
         return {}
 
 
+# ── Mandatory letter dispatch (Sep 2026 business-model pivot) ─────────────────
+#
+# Nick's ask, verbatim shape: "if an address is unlocked with a token we
+# will send a letter out no matter what, no address can be sold without a
+# letter." The point of the letter changed too -- it's no longer just a
+# contractor sales aid, it's now the delivery vehicle for the UK GDPR
+# Article 14 notice (see main.py's generate_homeowner_letter for the
+# content itself). That makes this a compliance mechanism, not a nice-to-
+# have feature, so it gets the same treatment capture_identity got: built
+# in at the one place every sale passes through, not trusted to each
+# caller to remember. There are 4 places a lead flips to status='claimed'
+# (burn_lead_inventory, confirm_reserved_lead_sale, redeem_free_lead_code,
+# record_lead_dispatch_and_burn) -- every one of them calls this, on the
+# SAME cursor, before its own conn.commit(), so the letter obligation and
+# the sale either both happen or neither does. No new call site can
+# accidentally skip it without deliberately not calling this function.
+#
+# Deliberately does NOT call the letter vendor here. A live HTTP call to a
+# postal API inside a payment-webhook or redemption transaction is exactly
+# the kind of thing that took the site down for 18 minutes once already
+# (see PROJECT_STATE.md's Sep 1 incident) -- if the vendor is slow or down,
+# a real paying customer's checkout must never fail because of it. This
+# just queues the obligation; process_pending_letter_dispatches (below)
+# actually sends it, out-of-band, with retries.
+def _queue_letter_dispatch(cur, reference: str, address: str, applicant_name: Optional[str],
+                            buyer_email: Optional[str], sale_context: str) -> None:
+    """Insert-only, uses the caller's own cursor/transaction -- never opens
+    its own connection or commits. Must be called before the caller's
+    conn.commit(), after the status='claimed' UPDATE's RETURNING gives it
+    real address/applicant_name values, not before."""
+    if not reference or not address:
+        # Same "if we cannot get the info we need then that lead is dead
+        # to us" standard _insert_lead already applies to address -- but
+        # here it can't return None and cancel the sale (already claimed
+        # by this point), so it logs loudly instead of silently dropping
+        # the obligation.
+        logger.error(f"[Letter Dispatch] Sale for reference={reference!r} has no address to queue a letter for -- "
+                      f"THIS LEAD WAS SOLD WITHOUT A LETTER QUEUED. Needs manual follow-up.")
+        return
+    cur.execute("""
+        INSERT INTO letter_dispatches (lead_reference, address, applicant_name, buyer_email, sale_context)
+        VALUES (%s, %s, %s, %s, %s);
+    """, (reference, address, applicant_name, buyer_email, sale_context))
+
+
+def count_pending_letter_dispatches() -> int:
+    conn = get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT count(*) FROM letter_dispatches WHERE status = 'queued';")
+        return cur.fetchone()[0]
+    finally:
+        cur.close()
+        conn.close()
+
+
+def process_pending_letter_dispatches(batch_size: int = 20) -> dict:
+    """Sends (or, with the default console/dry-run provider, logs) queued
+    letters. Mirrors backfill_partner_emails' batch/retry shape so it slots
+    into the same admin-route + autonomous-cycle pattern the rest of the
+    app already uses. Each dispatch's own attempts/last_error is updated
+    regardless of outcome, so a persistently-failing address is visible on
+    the admin side rather than silently retried forever."""
+    import letter_provider
+    provider = letter_provider.get_letter_provider()
+
+    conn = get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT id, lead_reference, address, applicant_name, sale_context
+            FROM letter_dispatches WHERE status = 'queued'
+            ORDER BY created_at ASC LIMIT %s;
+        """, (batch_size,))
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+
+    sent, failed = 0, 0
+    for dispatch_id, reference, address, applicant_name, sale_context in rows:
+        result = provider.send({
+            "reference": reference,
+            "address": address,
+            "applicant_name": applicant_name,
+            "sale_context": sale_context,
+        })
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            if result.ok:
+                cur.execute("""
+                    UPDATE letter_dispatches
+                    SET status = %s, provider = %s, provider_reference = %s,
+                        attempts = attempts + 1, sent_at = NOW(), last_error = NULL
+                    WHERE id = %s;
+                """, (result.status, result.provider_name, result.provider_reference, dispatch_id))
+                sent += 1
+            else:
+                cur.execute("""
+                    UPDATE letter_dispatches
+                    SET attempts = attempts + 1, last_error = %s
+                    WHERE id = %s;
+                """, (result.error, dispatch_id))
+                failed += 1
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+
+    if failed:
+        logger.warning(f"[Letter Dispatch] Batch complete: {sent} sent, {failed} failed -- check letter_dispatches.last_error.")
+    return {"sent": sent, "failed": failed, "batch_size": len(rows)}
+
+
 def record_lead_dispatch_and_burn(lead_id: str, sub_id: str, contractor_email: str, dispatch_type: str = "standard") -> bool:
     """
     Atomically dispatches a lead to a subscriber, logs the dispatch audit record,
@@ -5200,7 +5419,7 @@ def record_lead_dispatch_and_burn(lead_id: str, sub_id: str, contractor_email: s
                 UPDATE leads
                 SET status = 'claimed'
                 WHERE (id::text = %s OR reference = %s) AND (status = 'new' OR status IS NULL)
-                RETURNING id;
+                RETURNING id, reference, address, applicant_name;
             """, (lead_id, lead_id))
             burned_lead = cur.fetchone()
             if not burned_lead:
@@ -5208,6 +5427,7 @@ def record_lead_dispatch_and_burn(lead_id: str, sub_id: str, contractor_email: s
                 return False  # Already burned or claimed by someone else
 
             real_lead_uuid = burned_lead[0]
+            _queue_letter_dispatch(cur, burned_lead[1], burned_lead[2], burned_lead[3], contractor_email, "subscription_dispatch")
 
             # 2. Record dispatch audit log
             cur.execute("""
@@ -5806,7 +6026,8 @@ def _within_early_access_window(discovered_at) -> bool:
 def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 40, filter_category: str = None,
                                           target_lat: float = None, target_lng: float = None,
                                           radius_miles: float = None, max_fresh_lookups: int = 20,
-                                          subscriber_early_access: bool = True) -> list:
+                                          subscriber_early_access: bool = True,
+                                          only_reference: str = None) -> list:
     """
     Returns unallocated leads enriched with their dynamic statutory freshness calculation.
     Supports filtering by tier ('council', 'domestic', 'flash_hot', 'active', 'clearance', 'granted'),
@@ -5815,6 +6036,15 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
     a real "enter your postcode and a distance" search; target_lat/target_lng/radius_miles come
     from resolve_location() on the customer's typed postcode/outcode).
     Enforces strict separation so council planning notices and private domestic leads are never conflated.
+
+    only_reference (Sep 17 2026, prepurchase detail page): when set, narrows
+    the pool to that one lead's reference before any other processing, so
+    the new /marketplace/lead/{reference} route gets the exact same
+    pricing/freshness/badge/redaction logic every marketplace card already
+    uses, computed for a single lead, instead of duplicating that logic.
+    Still subject to the same status/vertical filtering as the normal
+    listing -- a sold, reserved, or wrong-vertical reference correctly
+    returns [] rather than leaking a lead that shouldn't be shown.
 
     subscriber_early_access (Sep 15 2026, Phase 3): pass True (default,
     unchanged behaviour) when the viewer is a verified active subscriber or
@@ -5872,17 +6102,31 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
             # honest yes/no/unconfirmed signal before checkout -- without
             # revealing WHICH agent/company (that detail stays part of what
             # unlocking pays for).
+            # Sep 17 2026, critical bug found from Nick's live report: this
+            # query selected the `vertical` column but never actually
+            # filtered by it, so HMO/care-home leads (a real, deliberately
+            # separate business line -- see the Sep 2 multi-vertical build)
+            # were showing up right alongside tree work in the TreeKey
+            # marketplace itself. This is the ONLY current caller of this
+            # function (main.py's /marketplace route, tree-surgeon-facing),
+            # so filtering here to tree only is safe -- a future HMO-facing
+            # marketplace would need its own explicit vertical parameter,
+            # not silently share this default.
+            _ref_clause = " AND reference = %s" if only_reference else ""
+            _ref_params = (only_reference,) if only_reference else ()
             try:
-                cur.execute("""
+                cur.execute(f"""
                     SELECT id, reference, address, summary, council_source, lead_score, lead_price,
                            discovered_at, planning_status, registered_date,
                            COALESCE(lead_source_type, 'council_planning') as source_type,
                            has_agent, agent_is_tree_surgeon, COALESCE(vertical, 'tree') as vertical
                     FROM leads
-                    WHERE status = 'new' OR status IS NULL
+                    WHERE (status = 'new' OR status IS NULL)
+                          AND COALESCE(vertical, 'tree') = 'tree'
+                          {_ref_clause}
                     ORDER BY discovered_at DESC
                     LIMIT %s;
-                """, (_pool_limit,))
+                """, _ref_params + (_pool_limit,))
                 cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date", "source_type", "has_agent", "agent_is_tree_surgeon", "vertical"]
             except Exception as e:
                 # Sep 2 2026 (production incident fix): if the `vertical`
@@ -5899,16 +6143,17 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                     raise
                 conn.rollback()
                 logger.warning(f"[Marketplace] 'vertical' column not available yet ({e}) -- falling back to legacy SELECT without it.")
-                cur.execute("""
+                cur.execute(f"""
                     SELECT id, reference, address, summary, council_source, lead_score, lead_price,
                            discovered_at, planning_status, registered_date,
                            COALESCE(lead_source_type, 'council_planning') as source_type,
                            has_agent, agent_is_tree_surgeon
                     FROM leads
-                    WHERE status = 'new' OR status IS NULL
+                    WHERE (status = 'new' OR status IS NULL)
+                          {_ref_clause}
                     ORDER BY discovered_at DESC
                     LIMIT %s;
-                """, (_pool_limit,))
+                """, _ref_params + (_pool_limit,))
                 cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date", "source_type", "has_agent", "agent_is_tree_surgeon"]
             rows = cur.fetchall()
             raw_leads = [dict(zip(cols, r)) for r in rows]
