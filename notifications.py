@@ -398,18 +398,13 @@ def _send_purchased_lead_email_inner(customer_email: str, lead_data: dict):
     filed_date = _format_filed_date(lead_data.get("registered_date"))
     filed_row = f'<p style="margin: 0 0 10px 0;"><strong>Application filed:</strong> {filed_date}</p>' if filed_date else ""
 
-    # 2026-09-24, mailed-introduction wording audit (Nick's ask: "audit and
-    # update buyer-facing product wording to match the mailed-introduction
-    # model"): this closing note used to unconditionally state "This lead
-    # includes ... the address" regardless of whether guarded_addr above
-    # was actually the real address or address_release's redacted
-    # placeholder -- true only for a historical/released lead, false for a
-    # normal new purchase. Reuses _address_release_allowed (already
-    # computed above for the address/Street View gating) rather than a new
-    # check, and reuses fulfilment.letter_sending_live() (the same
-    # executable gate payments.py/main.py already use) so this email can
-    # never promise an operational posted letter that isn't actually live.
-    import fulfilment
+    # 2026-09-24, launch-experience rewrite (Nick's ask: "do not hide the
+    # product explanation just because sending is disabled" -- the posted
+    # introduction is the actual launch product, stated unconditionally in
+    # every customer-facing surface now, this email included). Still reuses
+    # _address_release_allowed (computed above for the address/Street View
+    # gating) so this email never claims to hand over an address it isn't
+    # actually releasing for this lead.
     if _address_release_allowed:
         _disclosure_note = (
             "Note: UK councils do not publish a homeowner's phone number or email address on planning "
@@ -419,7 +414,7 @@ def _send_purchased_lead_email_inner(customer_email: str, lead_data: dict):
     else:
         _letter_note = (
             " TreeKey will print and post an approved introduction letter to the homeowner on your behalf "
-            "-- it's their choice whether to get in touch." if fulfilment.letter_sending_live() else ""
+            "-- it's their choice whether to get in touch, and a reply or job isn't guaranteed."
         )
         _disclosure_note = (
             "Note: TreeKey does not share the homeowner's exact address, phone number or email with you "
@@ -576,10 +571,9 @@ def _send_free_lead_granted_email_inner(customer_email: str, lead_data: dict, un
     filed_date = _format_filed_date(lead_data.get("registered_date"))
     filed_row = f'<p style="margin: 0 0 10px 0;"><strong>Application filed:</strong> {filed_date}</p>' if filed_date else ""
 
-    # 2026-09-24, mailed-introduction wording audit: same fix as
+    # 2026-09-24, launch-experience rewrite: same fix as
     # _send_purchased_lead_email_inner's identical closing note above --
     # see that function's comment for the full reasoning.
-    import fulfilment
     if _address_release_allowed:
         _disclosure_note = (
             "Note: UK councils do not publish a homeowner's phone number or email address on planning "
@@ -589,7 +583,7 @@ def _send_free_lead_granted_email_inner(customer_email: str, lead_data: dict, un
     else:
         _letter_note = (
             " TreeKey will print and post an approved introduction letter to the homeowner on your behalf "
-            "-- it's their choice whether to get in touch." if fulfilment.letter_sending_live() else ""
+            "-- it's their choice whether to get in touch, and a reply or job isn't guaranteed."
         )
         _disclosure_note = (
             "Note: TreeKey does not share the homeowner's exact address, phone number or email with you "

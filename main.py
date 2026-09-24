@@ -1738,16 +1738,43 @@ def public_homepage(request: Request):
                 </div>
 
                 <!-- The Big Claim -->
+                <!-- 2026-09-24, launch-experience rewrite (Nick's ask: replace the
+                     old planning-intelligence hero with a clear explanation of
+                     the postal-introduction service -- the product is "we print
+                     and post your introduction to the homeowner," not raw lead
+                     data access). -->
                 <h1 class="text-4xl md:text-6xl font-extrabold text-white tracking-tight mb-4 sm:mb-6 leading-tight">
-                    Every job, the moment it's filed.<br>
-                    <span class="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-amber-500">Not the moment your rivals hear about it.</span>
+                    Introduce your tree-surgery business<br>
+                    <span class="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-amber-500">to local homeowners planning tree work.</span>
                 </h1>
 
                 <!-- The Pain/Solution Frame -->
                 <p class="mt-4 max-w-2xl mx-auto text-lg text-slate-400 leading-relaxed font-medium">
                     We watch 360+ UK council and National Park planning portals so you don't have to check them between jobs.
-                    <br><strong class="text-slate-200">When a real felling licence or TPO notice lands in your patch, it's yours first — chainsaw still in the van.</strong>
+                    <br><strong class="text-slate-200">Choose a local opportunity. We print and post your personalised introduction. Interested homeowners contact you directly.</strong>
                 </p>
+
+                <!-- 2026-09-24, launch-experience rewrite: the visible three-step
+                     explanation Nick asked for, using the existing dark-card
+                     grid pattern already used elsewhere on this page (no new
+                     layout system). Kept short on purpose -- this is the "how
+                     it works" summary, not a full explainer; the full detail
+                     lives on /pricing and in the letter-settings journey. -->
+                <div class="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl mx-auto text-left">
+                    <div class="bg-[#020617] border border-slate-700 rounded-xl p-4">
+                        <div class="text-emerald-400 font-mono text-xs font-bold uppercase tracking-wide mb-1">1. Choose an opportunity</div>
+                        <div class="text-slate-400 text-sm leading-relaxed">Browse verified local tree-work planning notices and pick the ones worth pursuing.</div>
+                    </div>
+                    <div class="bg-[#020617] border border-slate-700 rounded-xl p-4">
+                        <div class="text-emerald-400 font-mono text-xs font-bold uppercase tracking-wide mb-1">2. Approve your introduction</div>
+                        <div class="text-slate-400 text-sm leading-relaxed">Your saved business details and letter template form the introduction. Standard wording is ready to use, or write your own.</div>
+                    </div>
+                    <div class="bg-[#020617] border border-slate-700 rounded-xl p-4">
+                        <div class="text-emerald-400 font-mono text-xs font-bold uppercase tracking-wide mb-1">3. We print and post it</div>
+                        <div class="text-slate-400 text-sm leading-relaxed">We print and post your approved introduction to the homeowner. It's their choice whether to get in touch.</div>
+                    </div>
+                </div>
+                <p class="mt-4 text-xs text-slate-500 max-w-2xl mx-auto">Business details are saved once and can be changed any time from your account.</p>
 
                 <!-- Cognitive Ease & Action Cues -->
                 <div class="mt-6 sm:mt-10 flex flex-col items-center gap-3 sm:gap-5">
@@ -3652,13 +3679,11 @@ def _letter_settings_form_html(settings: "letter_content.ContractorLetterSetting
         # for their first-ever letter choice. It must say the same thing
         # /letter-onboarding says -- personalising is optional, not a
         # second, unstated requirement -- not just "this is required".
-        # 2026-09-24, mailed-introduction wording audit: only claim the
-        # letter WILL be posted when fulfilment.letter_sending_live() is
-        # actually True (same executable gate payments.py's PLANS dict and
-        # the marketplace/lead-detail pages now use) -- otherwise this is
-        # still just the template setup step, and the letter-posting
-        # sentence is dropped rather than promised.
-        _letter_setup_promise = " -- every lead includes a posted introduction letter" if fulfilment.letter_sending_live() else ""
+        # 2026-09-24, launch-experience rewrite: always states the posted-
+        # introduction explanation now (it's the actual launch product,
+        # not an optional add-on -- see payments.py's PLANS comment for
+        # what still keeps real sending off until Nick authorises launch).
+        _letter_setup_promise = " -- every lead includes a posted introduction letter"
         banner = f'<div style="background:rgba(56,189,248,0.12); border:1px solid #38bdf8; color:#7dd3fc; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:13px;">Add your business details below to continue with your purchase{_letter_setup_promise}. You can personalise its wording now, or leave the optional fields blank to use TreeKey\'s standard letter; either way you can change this later from your account.</div>'
     elif error:
         banner = f'<div style="background:rgba(248,113,113,0.12); border:1px solid #f87171; color:#fca5a5; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:13px;">{html.escape(error)}</div>'
@@ -4633,14 +4658,11 @@ def checkout(plan_key: str, request: Request):
 
     <div class="lock-note">
         Every lead is sent to exactly one contractor and then permanently removed — never shared or resold.
-        We also check your area isn't already fully subscribed before taking payment.{" Each dispatched lead includes one printed &amp; posted introduction letter to the homeowner on your behalf." if fulfilment.letter_sending_live() else ""}
+        Each chosen opportunity includes one printed &amp; posted introduction letter to the homeowner on your behalf. It's their choice whether to get in touch — a reply isn't guaranteed.
     </div>
-    <!-- 2026-09-24, mailed-introduction wording audit: this is the actual
-         payment page, so it's the most important place for the letter
-         promise to be genuinely gated on fulfilment.letter_sending_live()
-         rather than hardcoded -- the comment this replaced claimed that
-         gate already existed here; it didn't (same gap as the marketplace
-         card and lead-detail page, fixed the same way). -->
+    <!-- 2026-09-24, launch-experience rewrite: always states the posted-
+         introduction explanation now, not gated on fulfilment.letter_
+         sending_live() -- see payments.py's PLANS comment. -->
 
     <form method="POST" action="/checkout/{plan_key}">
         <label for="outcode">Your Postcode or Outcode</label>
@@ -6448,16 +6470,14 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
     homepage radar's own endpoint) and a job-category button grid, both on
     top of the existing tier tabs rather than replacing them.
     """
-    # 2026-09-24, mailed-introduction wording audit (Nick's ask): the
-    # "Includes 1 printed & posted intro letter" caption on every card below
-    # used to be hardcoded unconditionally -- shown even though real letter
-    # sending is still dry-run only (no live provider configured; see
-    # fulfilment.letter_sending_live()'s own docstring, and payments.py's
-    # PLANS dict, which already gates the identical sentence on this same
-    # flag). Reusing that existing executable gate here rather than
-    # inventing a second one, so the marketplace card can never promise
-    # operational posting the checkout/pricing copy itself doesn't.
-    _letter_promise_live = fulfilment.letter_sending_live()
+    # 2026-09-24, launch-experience rewrite (Nick's ask: "do not hide the
+    # product explanation just because sending is disabled" -- the posted
+    # introduction is the actual launch product, described as such
+    # everywhere now; see payments.py's PLANS comment for what still keeps
+    # real sending off until Nick authorises launch). Kept as a variable
+    # (always True) rather than removed outright, so this file's per-card
+    # rendering below doesn't need a second, separate edit.
+    _letter_promise_live = True
     # Sep 16 2026, Nick's report: leads he'd clicked "Unlock" on before (or
     # that a bot/link-scanner/email-preview hit -- see the docstring on the
     # checkout route below) sat permanently stuck as status='reserved' and
@@ -6841,8 +6861,13 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
             <a href="/pricing" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg no-underline font-bold text-[13px] transition-colors">View Monthly Subscriptions</a>
         </div>
 
+        <!-- 2026-09-24, launch-experience rewrite (Nick's ask: "make clear
+             that customers are selecting an opportunity for a posted
+             introduction, not purchasing someone's contact details...
+             explain briefly that homeowner responses and jobs are not
+             guaranteed"). -->
         <div class="bg-sky-500/10 border border-sky-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-sky-200">
-            <b>Single-Sale Guarantee:</b> Every lead purchased below is immediately removed from the live marketplace and never resold. You are the only contractor TreeKey will introduce to this homeowner.
+            <b>How this works:</b> Buying a lead below reserves that opportunity for you and sends a printed introduction to the homeowner on your behalf, using your saved business details and letter template -- we do not hand you the homeowner's address or contact details. It's the homeowner's choice whether to get in touch; a reply or job isn't guaranteed. Every lead purchased is immediately removed from the marketplace and never resold -- you are the only contractor TreeKey will introduce to this homeowner.
         </div>
 
         {"" if _viewer_is_subscriber else f'''<div class="bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-amber-200">
@@ -6910,9 +6935,9 @@ def lead_detail_view(lead_id: str, request: Request):
     _viewer_discount = database.get_subscriber_discount(_viewer_email) if _viewer_email else {"eligible": False, "discount_pct": 0}
     _viewer_sub = database.get_contractor_subscription(_viewer_email) if _viewer_email else None
     _viewer_is_subscriber = bool(_viewer_sub and _viewer_sub.get("active"))
-    # 2026-09-24, mailed-introduction wording audit -- same executable gate
-    # as marketplace_view's own _letter_promise_live; see that comment.
-    _letter_promise_live = fulfilment.letter_sending_live()
+    # 2026-09-24, launch-experience rewrite -- same as marketplace_view's
+    # own _letter_promise_live; see that comment.
+    _letter_promise_live = True
 
     leads = database.get_marketplace_leads_with_freshness(
         only_id=lead_id, limit=1,
@@ -7045,16 +7070,15 @@ def lead_detail_view(lead_id: str, request: Request):
             </div>
 
             <p class="text-[12px] text-slate-500 mt-4">
-                The exact address and applicant/agent identity are redacted above -- TreeKey does not hand these to buyers directly. Everything else the council's own public record states about the job is shown in full.
+                The exact address and applicant/agent identity are redacted above -- TreeKey does not hand these to buyers directly. Everything else the council's own public record states about the job is shown in full. Buying this opportunity reserves it for you and sends a printed introduction to the homeowner on your behalf -- it's their choice whether to get in touch, and a reply or job isn't guaranteed.
             </p>
 
-            <!-- 2026-09-24, mailed-introduction wording audit: the
-                 "Includes 1 printed & posted intro letter" line is now
-                 actually gated on fulfilment.letter_sending_live()
-                 (_letter_promise_live, computed above) instead of being
-                 hardcoded regardless of whether real sending is live --
-                 the comment this replaced claimed that gate already
-                 existed here; it didn't. -->
+            <!-- 2026-09-24, launch-experience rewrite: the "Includes 1
+                 printed & posted intro letter" line is always shown now --
+                 it's the actual launch product, not an optional extra.
+                 What still keeps real sending off is the separate,
+                 existing server-side gate (fulfilment.letter_sending_live(),
+                 the deployed Stripe key), not this copy. -->
             <div class="mt-7 bg-slate-900/60 border border-emerald-900/50 rounded-xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div>
                     {price_block_html}
@@ -9245,7 +9269,7 @@ def my_account_view(request: Request):
         if letter_setup_current else
         f"""<div class="card" style="background:rgba(251,191,36,0.08); border-color:#fbbf24;">
             <p style="font-size:14px; color:#fef3c7; margin:0 0 10px 0;">
-                <b>Finish your letter template</b> -- {"every lead you buy includes a posted introduction letter to the homeowner, so this" if fulfilment.letter_sending_live() else "this"} needs to be set up and approved before your next purchase.
+                <b>Finish your letter template</b> -- every lead you buy includes a posted introduction letter to the homeowner, so this needs to be set up and approved before your next purchase.
             </p>
             <a href="/letter-settings" style="display:inline-block; background:#f59e0b; color:#111; padding:8px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">Complete Letter Setup &rarr;</a>
         </div>"""
@@ -13288,9 +13312,9 @@ async def faq_page(request: Request = None):
     faq_groups = [
         ("About Tree Key", [
             ("What is Tree Key?",
-             "Tree Key finds new tree work before your competitors do. We continuously monitor UK local council planning portals, the GLA Planning Datahub, and other statutory public sources for tree-related applications &mdash; TPO (Tree Preservation Order) consents, Section 211 notices, felling and pruning applications &mdash; and turn each one into a Lead you can quote on directly."),
+             "Tree Key finds new tree work before your competitors do, and introduces you to it. We continuously monitor UK local council planning portals, the GLA Planning Datahub, and other statutory public sources for tree-related applications &mdash; TPO (Tree Preservation Order) consents, Section 211 notices, felling and pruning applications &mdash; and turn each one into an opportunity you can choose to pursue. When you choose one, we print and post a personalised introduction to the homeowner on your behalf, using your saved business details and letter template. We don't hand you the homeowner's address or contact details &mdash; it's their choice whether to get in touch, and a reply or job isn't guaranteed."),
             ("How is this different from a directory like Checkatrade or Bark?",
-             "Directories sell the same lead to several competing contractors at once and take a cut of what you earn. Every Lead on Tree Key is single-sale: the moment it's dispatched to a subscriber (or bought from the Marketplace), it's burned from our system and never sold to anyone else. You quote the homeowner directly, under your own brand, with no ongoing commission."),
+             "Directories sell the same lead to several competing contractors at once and take a cut of what you earn. Every opportunity on Tree Key is single-sale: the moment it's dispatched to a subscriber (or bought from the Marketplace), it's removed from our system and never sold to anyone else. Your introduction goes out under your own brand, with no ongoing commission &mdash; and because it's the homeowner who decides whether to make contact, we never promise a guaranteed reply or job."),
             ("Where does the data come from, and is it legal?",
              "Entirely from public statutory sources: council planning registers and Companies House, both publicly accessible under the Open Government Licence. We don't buy data from private brokers or scrape anything that isn't otherwise publicly available. Full detail on how we're allowed to process it is in our <a href=\"/privacy-policy\" class=\"text-emerald-400 underline\">Privacy Policy</a>."),
             ("Is there a mobile app?",
@@ -13300,7 +13324,7 @@ async def faq_page(request: Request = None):
             ("What are my options if I'm not ready to pay?",
              "You can sign up for a free account with no card required and get one real free lead near you to start with, plus occasional teaser emails after that. When you're ready for full coverage, upgrade to a subscription tier from your dashboard at any time."),
             ("What's the difference between a subscription and the Marketplace?",
-             "A subscription gives you priority, ongoing dispatch of every matching Lead in your territory as it's discovered. Any Lead that isn't claimed by a subscriber flows into the single-purchase Marketplace, where anyone can buy it one-off &mdash; useful for topping up, or for trying Tree Key out before subscribing."),
+             "A subscription includes a set number of opportunities each month (6 to 20, depending on tier), matched to your job types and radius and dispatched to you automatically &mdash; each one already includes a printed &amp; posted introduction letter to the homeowner, at no extra charge. Want more than your monthly amount? Buy additional opportunities from the Marketplace any time at a member discount (10&ndash;25% off, depending on tier). Anyone without an active subscription can still buy individual opportunities from the Marketplace at the standard price &mdash; useful for topping up, or for trying Tree Key out before subscribing."),
             ("Am I tied into a long contract?",
              "No. Subscriptions are a rolling monthly agreement &mdash; cancel any time from your account settings with zero penalty and no further charges from the next billing date."),
             ("Can I get a refund?",

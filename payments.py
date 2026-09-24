@@ -70,14 +70,32 @@ def _mark_stripe_event_fulfilled(event_id: str) -> None:
 PLANS = {
     "starter": {
         "name": "TreeKey Starter",
-        "description": "For 1-2 van operators. Domestic and small commercial jobs, every job type, plus 1-tap letter previews and Street View briefs.",
-        # 2026-09-18 review, Section 4: the letter-posting promise is a
-        # SUFFIX, appended by plan_description() only when
-        # fulfilment.letter_sending_live() is True -- see that function
-        # and fulfilment.py's own docstring on LETTER_SENDING_LIVE. Do not
-        # read "description" directly for anything customer-facing;
-        # call plan_description(plan_key) instead.
-        "letter_suffix": " A posted introduction letter comes with every lead.",
+        "description": "For 1-2 van operators. Domestic and small commercial jobs, every job type, plus 1-tap letter previews.",
+        # 2026-09-24, launch-experience rewrite (Nick's ask: "TreeKey is not
+        # launched yet. Build the finished launch experience now... Do not
+        # hide the product explanation just because sending is disabled"):
+        # the letter-posting explanation used to be a SUFFIX that
+        # plan_description() only appended when fulfilment.letter_sending_
+        # live() was True, so the site said nothing at all about the core
+        # product (a printed & posted introduction) while sending was off.
+        # That was correct for the OLD add-on framing (letter-sending as a
+        # bonus feature bolted onto a lead-data product) but is wrong for
+        # THIS model, where the posted introduction IS the product. Do not
+        # read "description" directly for anything customer-facing; call
+        # plan_description(plan_key) instead -- it still reads from here,
+        # just always appends this now (see plan_description()'s own
+        # docstring for what still gates real sending: Stripe's own
+        # test/live key and fulfilment.letter_sending_live(), used
+        # elsewhere to gate the actual dispatch pipeline, not this copy).
+        # 2026-09-24, launch-experience rewrite: the quota (6/month) and
+        # discount (10%) figures below are pulled directly from
+        # database.TIER_QUOTAS["starter"] and TIER_DISCOUNT_PCT["starter"]
+        # -- the actual, enforced entitlement (see database.
+        # dispatch_lead_to_subscriber's own comment: "No Stripe charge
+        # happens at dispatch time -- the subscription was already paid"),
+        # not an invented number. Every tier below states its own real
+        # quota/discount the same way.
+        "letter_suffix": " Includes 6 opportunities a month, each with a printed & posted introduction letter to the homeowner -- already covered by your subscription, no extra charge. Want more? Buy extra opportunities from the Marketplace any time, at a 10% member discount.",
         "amount": 3900,   # £39/month
         "mode": "subscription",
         "badge": "Most Popular",
@@ -86,6 +104,7 @@ PLANS = {
     "growth": {
         "name": "TreeKey Growth",
         "description": "For established 2-3 man crews wanting more volume and a wider net across a bigger area.",
+        "letter_suffix": " Includes 10 opportunities a month, each with a printed & posted introduction letter to the homeowner -- already covered by your subscription, no extra charge. Extra opportunities from the Marketplace are 15% off.",
         "amount": 7900,   # £79/month
         "mode": "subscription",
         "badge": "Growing Crews",
@@ -102,6 +121,7 @@ PLANS = {
         # for enriching a lead's developer applicant). Only the two
         # deliverables the pipeline actually produces are listed.
         "description": "For qualified arborists (TechArb/MICFor). Developer condition 7 discharges and BS5837 impact assessment planning intelligence.",
+        "letter_suffix": " Includes 8 opportunities a month, each with a printed & posted introduction letter to the homeowner -- already covered by your subscription, no extra charge. Extra opportunities from the Marketplace are 15% off.",
         "amount": 9900,   # £99/month (was £89)
         "mode": "subscription",
         "badge": "Planning & Surveyors",
@@ -110,6 +130,7 @@ PLANS = {
     "commercial_forestry": {
         "name": "TreeKey Commercial & Forestry",
         "description": "For heavy machinery operators & commercial outfits. Multi-tree site clearances (3+), Ash Dieback blocks, and B2B institutional tenders.",
+        "letter_suffix": " Includes 14 opportunities a month, each with a printed & posted introduction letter to the homeowner -- already covered by your subscription, no extra charge. Extra opportunities from the Marketplace are 20% off.",
         "amount": 15900,  # £159/month (was £139; also replaces retired commercial_pro)
         "mode": "subscription",
         "badge": "Heavy Commercial",
@@ -134,6 +155,7 @@ PLANS = {
         # the dispatch order). Add real features back to this line only
         # once they're actually built and deployed, never before.
         "description": "100% Unrestricted Access to ALL categories across 45 miles + top-priority lead dispatch and first look at Elite-value leads, ahead of every lower tier.",
+        "letter_suffix": " Includes 20 opportunities a month, each with a printed & posted introduction letter to the homeowner -- already covered by your subscription, no extra charge. Extra opportunities from the Marketplace are 25% off.",
         "amount": 24900,  # £249/month (was £179; also replaces retired regional_elite)
         "mode": "subscription",
         "badge": "VIP All-Access",
@@ -165,44 +187,35 @@ PLANS = {
     # brief: added "includes one printed & posted introduction letter" to
     # each single-lead description/real_world_roi below, and to the
     # marketplace/lead-detail/checkout templates in main.py that reference
-    # these plans. This is a DELIBERATE, EXPLICIT reversal of the Sep 12
-    # 2026 rule immediately above ("remove... letter sending feature off
-    # anything public until its built and deployed... including any
-    # statements that are untrue") -- Nick's own instructions this session
-    # confirm the bundled model ("every purchased lead includes one
-    # personalised introduction letter printed and posted") as the current,
-    # agreed design, not a speculative feature.
+    # these plans. Nick's own instructions this session confirm the bundled
+    # model ("every purchased lead includes one personalised introduction
+    # letter printed and posted") as the current, agreed design.
     #
-    # BUT the underlying caution that Sep 12 rule was protecting against
-    # still applies just as much: as of this session, letter SENDING is
-    # still dry-run only. No postal provider has real credentials
-    # configured (see letter_providers/*_provider.py -- Stannp is
-    # unverified against a live API, Intelliprint/Postworks are unbuilt
-    # stubs), no funding has been confirmed through funding.FundingGate,
-    # and no migration has been run against the production database (see
-    # fulfilment.py). This copy describes the INTENDED, BUILT model, not a
-    # currently-operational one -- it must not be deployed live until
-    # real sending is actually possible end-to-end. See
-    # docs/launch_checklist.md's "copy go-live gate", which exists
-    # specifically to prevent a repeat of the exact problem the Sep 12
-    # rule was written to fix.
-    # 2026-09-18 review, Section 4: see the "starter" plan's comment above --
-    # same rule applies to every plan below. "description" and
-    # "real_world_roi" are base text with no letter-posting claim; the
-    # letter claim lives only in "letter_suffix"/"roi_letter_suffix" and is
-    # appended by plan_description()/plan_roi() when
-    # fulfilment.letter_sending_live() is True. Do not read these dict
-    # entries directly for customer-facing text.
+    # 2026-09-24, launch-experience rewrite: as of this session, letter
+    # SENDING is still dry-run only -- no postal provider has real
+    # credentials configured, no funding has been confirmed, no migration
+    # has run against production (see fulfilment.py). What keeps a real
+    # customer from being charged for a real posted letter that doesn't go
+    # out is NOT this copy any more (Nick's explicit instruction: "do not
+    # hide the product explanation just because sending is disabled" -- the
+    # posted introduction is the actual launch product, described as such
+    # throughout) -- it's the existing, separate server-side controls:
+    # whichever STRIPE_SECRET_KEY is deployed (test vs live) and
+    # fulfilment.letter_sending_live()'s three-way gate (still used
+    # unchanged elsewhere to control the real dispatch pipeline itself, see
+    # worker.py/fulfilment.py). See docs/launch_checklist.md.
+    # "description" and "real_world_roi" are base text; letter_suffix"/
+    # "roi_letter_suffix" is always appended by plan_description()/
+    # plan_roi() now (no longer gated) -- still the ONE place to read
+    # customer-facing plan text from, never these dict entries directly.
     # 2026-09-24, mailed-introduction wording audit (Nick's ask: "audit and
     # update buyer-facing product wording to match the mailed-introduction
     # model"): "name" and "real_world_roi" below used to say "Unlock" and
     # "Instant unlocked property address ... plus a Street View brief" --
     # both wrong under the current model. TreeKey does not hand the buyer
     # the homeowner's exact address; it arranges an approved postal
-    # introduction to the homeowner (see letter_suffix/roi_letter_suffix,
-    # already correctly gated on fulfilment.letter_sending_live() -- left
-    # untouched by this pass). Street View was never something a buyer
-    # could rely on for a new purchase either: main.py's street_view_
+    # introduction to the homeowner. Street View was never something a
+    # buyer could rely on for a new purchase either: main.py's street_view_
     # redirect route 403s and shows the redacted placeholder unless
     # address_release.lead_address_release_allowed() is True for that
     # specific lead, which it is not for a newly-purchased, non-historical
@@ -211,9 +224,19 @@ PLANS = {
     # again" describes TreeKey's own no-resale policy (a lead sold once,
     # never resold to another contractor), not a claim that nobody else in
     # the world is aware of the underlying public planning notice.
+    # single_lead_small's description used to claim "permanently deleted
+    # from all systems" -- inaccurate and now removed: the actual retention
+    # rule (privacy_policy() in main.py) is narrower and more honest --
+    # homeowner name/address/letter content are cleared from the LIVE
+    # application database 72 hours after confirmed dispatch, which does
+    # not and cannot reach routine backups, the mailing provider's own
+    # records, or the physical letter already delivered. This card now
+    # distinguishes "removed from sale" (never resold to another
+    # contractor -- true immediately) from data retention (see the Privacy
+    # Policy) rather than conflating the two under one overclaim.
     "single_lead_small": {
         "name": "Single Lead Purchase (Entry)",
-        "description": "100% Exclusive unshared planning lead. Once purchased, this lead is permanently deleted from all systems and never sold again.",
+        "description": "100% Exclusive planning lead. Once purchased, it's reserved for you and never resold to another contractor.",
         "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 1900,   # £19 one-off -- Standard value, past its freshest window
         "mode": "payment",
@@ -255,40 +278,41 @@ PLANS = {
 
 
 def plan_description(plan_key: str, plan: Optional[dict] = None) -> str:
-    """2026-09-18 review, Section 4: the ONLY place customer-facing plan
-    description text should be read from. Returns the plan's base
-    "description" and, ONLY when fulfilment.letter_sending_live() is True
-    at the moment of the call (read fresh every call -- never cached),
-    appends that plan's "letter_suffix" if it has one. When the flag is
-    False (the default), no plan ever mentions posting a letter, however
-    its dict entry is written -- this is the executable gate the audit
-    asked for, not just checklist/comment wording.
+    """The ONLY place customer-facing plan description text should be read
+    from. Returns the plan's base "description" plus its "letter_suffix"
+    (when it has one), always -- see PLANS' own 2026-09-24 comment for why
+    this is no longer gated on fulfilment.letter_sending_live(): the posted
+    introduction is the actual launch product, not an optional add-on, so
+    the copy describes it unconditionally. What still keeps a real
+    customer from being charged for a real send that won't happen is the
+    separate, existing server-side controls (the deployed Stripe key,
+    letter_sending_live()'s own gate on the real dispatch pipeline) --
+    never this copy.
 
     `plan` lets a caller pass an already-looked-up dict (e.g. the
     synthesized "live" dict from _resolve_live_single_lead_price) instead
     of forcing a second PLANS lookup by plan_key; falls back to
     PLANS.get(plan_key) when omitted."""
-    import fulfilment
     p = plan if plan is not None else PLANS.get(plan_key)
     if not p:
         return ""
     text = p.get("description", "")
     suffix = p.get("letter_suffix", "")
-    if suffix and fulfilment.letter_sending_live():
+    if suffix:
         text = f"{text}{suffix}"
     return text
 
 
 def plan_roi(plan_key: str, plan: Optional[dict] = None) -> str:
-    """Same gate as plan_description(), for the "real_world_roi" /
-    "roi_letter_suffix" pair."""
-    import fulfilment
+    """Same as plan_description(), for the "real_world_roi" /
+    "roi_letter_suffix" pair -- always appended now, see plan_description()'s
+    own docstring for why."""
     p = plan if plan is not None else PLANS.get(plan_key)
     if not p:
         return ""
     text = p.get("real_world_roi", "")
     suffix = p.get("roi_letter_suffix", "")
-    if suffix and fulfilment.letter_sending_live():
+    if suffix:
         text = f"{text}{suffix}"
     return text
 
@@ -374,9 +398,8 @@ def _resolve_live_single_lead_price(lead_id: str) -> Optional[dict]:
             "amount_pence": int(price_pounds) * 100,
             "plan_key": live_plan_key,
             "name": live_plan["name"] if live_plan else "Single Lead Purchase",
-            # 2026-09-18 review, Section 4: gated through plan_description()
-            # so the letter-posting sentence only appears when
-            # fulfilment.letter_sending_live() is True -- never read
+            # Always read through plan_description() -- the one place
+            # customer-facing plan text comes from -- never read
             # live_plan["description"] directly here.
             "description": plan_description(live_plan_key, live_plan) if live_plan else "Exclusive planning lead.",
         }
