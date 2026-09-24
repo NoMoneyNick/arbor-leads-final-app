@@ -18,6 +18,7 @@ import os
 import sys
 import types
 import unittest
+import urllib.parse
 from unittest.mock import MagicMock, patch
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -127,10 +128,24 @@ import main  # noqa: E402
 import fulfilment  # real module, no stubbing needed (stdlib only)
 
 
-def _mock_request(cookie_value=None, auth_header=None):
+class _FakeURL:
+    """2026-09-24 handoff: generate_homeowner_letter/generate_street_flyer
+    now build a `next` redirect target from request.url.path/.query when a
+    real, logged-in contractor has no saved letter settings (see those
+    routes' own comments) -- a bare MagicMock's .url.path/.query are
+    themselves MagicMocks, not strings, which breaks urllib.parse.quote.
+    Same minimal fake already used for this in
+    tests/test_letter_setup_checkout_gate.py's own _mock_request."""
+    def __init__(self, path, query=""):
+        self.path = path
+        self.query = query
+
+
+def _mock_request(cookie_value=None, auth_header=None, path="/generate-letter/PLANIT-REF-001", query=""):
     req = MagicMock()
     req.cookies = {"treekey_contractor_session": cookie_value} if cookie_value else {}
     req.headers = {"authorization": auth_header} if auth_header else {}
+    req.url = _FakeURL(path, query)
     return req
 
 
@@ -264,14 +279,14 @@ class TestGenerateLetterRouteEnforcesOwnership(unittest.TestCase):
 
     @patch("main.fulfilment.get_lead_owner")
     @patch("main.database.get_db_conn")
-    def test_generate_letter_allows_the_real_buyer(self, mock_get_db_conn, mock_get_lead_owner):
+    def test_generate_letter_allows_the_real_buyer_with_saved_settings(self, mock_get_db_conn, mock_get_lead_owner):
         conn = MagicMock()
         cur = MagicMock()
         conn.cursor.return_value = cur
         cur.fetchone.side_effect = [
             None,  # 2026-09-23 Request D, Part 1: resolve_buyer_facing_reference miss (see comment above)
             ("PLANIT-REF-001", "1 Real Street, Leeds", "Fell one oak", "Leeds City Council", "claimed"),
-            None,  # no saved contractor_letter_settings -> fallback path
+            ("real-buyer@example.com", "Real Buyer Tree Care", "07700 900123", "", "", "", 1, True, "fp", "friendly_introduction", "", "", ""),
         ]
         mock_get_db_conn.return_value = conn
         mock_get_lead_owner.return_value = "real-buyer@example.com"
@@ -293,6 +308,39 @@ class TestGenerateLetterRouteEnforcesOwnership(unittest.TestCase):
         # settings row and blow up on row[5..8]).
         self.assertIsInstance(response, str)
         self.assertIn("letter-frame", response)
+        self.assertIn("Real Buyer Tree Care", response)
+
+    @patch("main.fulfilment.get_lead_owner")
+    @patch("main.database.get_db_conn")
+    def test_generate_letter_sends_a_real_buyer_with_no_saved_settings_to_letter_settings(
+            self, mock_get_db_conn, mock_get_lead_owner):
+        """2026-09-24 handoff (Nick's task, item 3: 'never save or print
+        example business names, numbers or fictional credentials'): this
+        used to fall straight through to this route's own placeholder
+        `company`/`phone` query-string defaults ("Your Local Tree
+        Specialists" / "07XXX XXXXXX"), rendered as if they were this
+        real, logged-in contractor's actual business identity -- see
+        generate_homeowner_letter's own comment. It must now redirect them
+        to add their real details first, `next` carrying them straight
+        back to this exact letter."""
+        conn = MagicMock()
+        cur = MagicMock()
+        conn.cursor.return_value = cur
+        cur.fetchone.side_effect = [
+            None,  # resolve_buyer_facing_reference miss
+            ("PLANIT-REF-001", "1 Real Street, Leeds", "Fell one oak", "Leeds City Council", "claimed"),
+            None,  # no saved contractor_letter_settings at all
+        ]
+        mock_get_db_conn.return_value = conn
+        mock_get_lead_owner.return_value = "real-buyer@example.com"
+
+        request = _mock_request(cookie_value=main._sign_session_cookie("real-buyer@example.com"),
+                                 path="/generate-letter/PLANIT-REF-001")
+        response = main.generate_homeowner_letter(request, "PLANIT-REF-001")
+        self.assertEqual(getattr(response, "status_code", None), 303)
+        self.assertIn("/letter-settings", response.url)
+        self.assertIn("next=", response.url)
+        self.assertIn(urllib.parse.quote("/generate-letter/PLANIT-REF-001", safe=""), response.url)
 
     @patch("main.fulfilment.get_lead_owner")
     @patch("main.database.get_db_conn")
@@ -300,11 +348,25 @@ class TestGenerateLetterRouteEnforcesOwnership(unittest.TestCase):
         conn = MagicMock()
         cur = MagicMock()
         conn.cursor.return_value = cur
-        cur.fetchone.return_value = ("PLANIT-REF-001", "1 Real Street, Leeds", "Fell one oak", "claimed")
+        # 2026-09-24 handoff: generate_street_flyer now also loads this
+        # session's own contractor_letter_settings row (if any) while the
+        # connection is open, same as generate_homeowner_letter already
+        # did -- see that route's comment -- so this needs the same THREE-
+        # call fetchone sequence: (0) resolve_buyer_facing_reference miss,
+        # (1) the route's own lead SELECT, (2) the settings lookup (None
+        # here; irrelevant to this test either way, since ownership is
+        # checked and must reject this session before anything from
+        # settings is ever used).
+        cur.fetchone.side_effect = [
+            None,
+            ("PLANIT-REF-001", "1 Real Street, Leeds", "Fell one oak", "claimed"),
+            None,
+        ]
         mock_get_db_conn.return_value = conn
         mock_get_lead_owner.return_value = "real-buyer@example.com"
 
-        request = _mock_request(cookie_value=main._sign_session_cookie("attacker@example.com"))
+        request = _mock_request(cookie_value=main._sign_session_cookie("attacker@example.com"),
+                                 path="/generate-street-flyer/PLANIT-REF-001")
         with self.assertRaises(main.HTTPException) as ctx:
             main.generate_street_flyer(request, "PLANIT-REF-001")
         self.assertEqual(ctx.exception.status_code, 404)

@@ -172,26 +172,52 @@ class TestTemplateSelection(unittest.TestCase):
         # selection would defeat the whole feature.
         self.assertEqual(len(set(rendered.values())), len(rendered))
 
-    def test_locked_footer_text_is_identical_across_every_template(self):
+    def test_locked_reverse_page_is_identical_across_every_template(self):
         """Section: 'Keep TreeKey's privacy, data-source, address-
-        protection and contact-policy sections locked.' Extracts the
-        footer block (from the 'How we found your details' marker onward)
-        and asserts it is byte-for-byte identical no matter which template
-        is selected."""
+        protection and contact-policy sections locked.' 2026-09-24 handoff:
+        this content now lives on its own reverse PAGE (not a footer) --
+        extracts everything from the reverse page's own title marker
+        onward and asserts it is byte-for-byte identical no matter which
+        template is selected, exactly like the old footer check."""
 
-        def _footer(html_out: str) -> str:
-            marker = "How we found your details."
+        def _reverse_page(html_out: str) -> str:
+            marker = "About this letter and your information"
             idx = html_out.index(marker)
             return html_out[idx:]
 
-        footers = set()
+        pages = set()
         for key in letter_content.TEMPLATE_REGISTRY:
             html_out = letter_content.render_letter(
                 _settings(template_key=key), lead_reference="PLANIT-001",
                 address="1 Test St", summary="Fell one oak", council="Leeds",
             )
-            footers.add(_footer(html_out))
-        self.assertEqual(len(footers), 1, "the locked footer must not vary by template")
+            pages.add(_reverse_page(html_out))
+        self.assertEqual(len(pages), 1, "the locked reverse page must not vary by template")
+
+    def test_reverse_page_carries_no_contractor_advertisement(self):
+        """2026-09-24 handoff: 'no reverse-side advertisement.' The reverse
+        page must contain the contractor's phone/contact-panel content
+        nowhere -- that lives on the front page only. The single exception
+        is the 'Who receives it?' data-recipient disclosure, which legitimately
+        names the contractor once as a factual GDPR Art.13(1)(e) recipient
+        statement ('We have not given <business_name> your name or postal
+        address...') -- that is a privacy disclosure, not advertisement, and
+        is asserted separately below rather than excluded."""
+
+        def _reverse_page(html_out: str) -> str:
+            return html_out[html_out.index("About this letter and your information"):]
+
+        html_out = letter_content.render_letter(
+            _settings(business_name="Apex Tree Care", phone="0113 555 0199"),
+            lead_reference="PLANIT-001", address="1 Test St", summary="Fell one oak", council="Leeds",
+        )
+        reverse = _reverse_page(html_out)
+        self.assertNotIn("0113 555 0199", reverse)
+        self.assertNotIn("Speak Directly To Your Tree Surgeon", reverse)
+        # The business name appears exactly once on the reverse page: inside
+        # the factual "Who receives it?" recipient-disclosure sentence.
+        self.assertEqual(reverse.count("Apex Tree Care"), 1)
+        self.assertIn("We have not given Apex Tree Care your name or postal address", reverse)
 
 
 class TestNoAutoAddedClaimWords(unittest.TestCase):
@@ -301,6 +327,11 @@ class TestEscapingDefenseInDepth(unittest.TestCase):
         os.environ[letter_content.PRIVACY_CONTACT_EMAIL_ENV] = "privacy@treekey.co.uk"
 
     def test_lead_sourced_fields_are_escaped_even_though_never_validated(self):
+        """2026-09-24 handoff: render_letter's own markup now legitimately
+        contains '<img' tags (the branding logo/marks) -- a bare
+        assertNotIn("<img", ...) would false-positive on TreeKey's own
+        branding, so this checks for the actual injected payload
+        ('onerror=alert(1)') rather than the tag name alone."""
         html_out = letter_content.render_letter(
             _settings(), lead_reference="PLANIT-001",
             address='1 Test St <script>alert("addr")</script>',
@@ -308,9 +339,14 @@ class TestEscapingDefenseInDepth(unittest.TestCase):
             council='<b>Leeds</b> Council',
         )
         self.assertNotIn("<script>", html_out)
-        self.assertNotIn("<img", html_out)
+        self.assertNotIn("<img src=x", html_out)
         self.assertNotIn("<b>Leeds</b>", html_out)
         self.assertIn("&lt;script&gt;", html_out)
+        # The injected payload's '<'/'>' must be neutralised (escaped), even
+        # though the harmless remaining text ("onerror=alert(1)") -- no
+        # longer inside real tag syntax once escaped -- legitimately still
+        # appears verbatim as inert text.
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;", html_out)
 
     def test_settings_constructed_directly_bypassing_validate_are_still_escaped_at_render(self):
         """A settings object assembled directly in Python (bypassing
@@ -398,6 +434,28 @@ class TestFingerprintCoversNewFields(unittest.TestCase):
             fp_after = letter_content.template_fingerprint(settings)
         finally:
             letter_content.TEMPLATE_REGISTRY["friendly_introduction"] = original
+
+        self.assertNotEqual(fp_before, fp_after)
+
+    def test_editing_the_reverse_page_content_version_changes_the_fingerprint_for_everyone(self):
+        """2026-09-24 handoff: the reverse page (privacy/supporting info) is
+        TreeKey's own locked copy, identical across every contractor and
+        template -- not a contractor-editable field and not part of
+        TEMPLATE_REGISTRY. The same 'any material change to wording ...
+        must invalidate reusable approval' requirement applies to it, via
+        REVERSE_PAGE_CONTENT_VERSION being baked into template_fingerprint's
+        material. Simulated here by monkeypatching that module-level
+        constant, the same way the previous test monkeypatches a
+        TEMPLATE_REGISTRY entry to simulate a future wording swap."""
+        settings = _settings(template_key="friendly_introduction")
+        fp_before = letter_content.template_fingerprint(settings)
+
+        original_version = letter_content.REVERSE_PAGE_CONTENT_VERSION
+        letter_content.REVERSE_PAGE_CONTENT_VERSION = original_version + 1
+        try:
+            fp_after = letter_content.template_fingerprint(settings)
+        finally:
+            letter_content.REVERSE_PAGE_CONTENT_VERSION = original_version
 
         self.assertNotEqual(fp_before, fp_after)
 

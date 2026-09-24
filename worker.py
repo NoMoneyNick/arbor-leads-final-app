@@ -222,11 +222,28 @@ def promote_pending_approvals(cur, batch_limit: int = 100) -> PromotionReport:
             # live at SEND time, which could silently diverge from what was
             # approved if either changed in between (see run_batch's own
             # updated docstring, and tests/test_content_freezing.py).
+            # 2026-09-24 handoff ("My Introductions" account view, "template/
+            # version used" per-introduction field): letter_obligations.
+            # template_version was defined in the schema (fulfilment.py's
+            # init_fulfilment_schema) and accepted as a parameter by
+            # fulfilment.create_allocation_and_obligation, but NO caller
+            # anywhere in the codebase ever actually passed a value for it --
+            # confirmed by grepping every caller of that function. Every
+            # obligation's template_version has therefore always been NULL,
+            # for the whole lifetime of this table. This is the one place a
+            # specific template is actually frozen for a specific obligation
+            # (settings.template_version, read from the SAME `settings` row
+            # whose approved wording is being frozen into approved_content_html
+            # on this exact line) -- so it is the correct, and only correct,
+            # place to stamp it, not obligation-creation time (before
+            # approval is even checked, the eventual template could still
+            # change).
             cur.execute("""
                 UPDATE letter_obligations
-                SET status = 'pending_funding', content_fingerprint = %s, approved_content_html = %s, updated_at = NOW()
+                SET status = 'pending_funding', content_fingerprint = %s, approved_content_html = %s,
+                    template_version = %s, updated_at = NOW()
                 WHERE id = %s AND status = 'pending_approval' RETURNING id;
-            """, (fingerprint, html, obligation_id))
+            """, (fingerprint, html, settings.template_version, obligation_id))
             if cur.fetchone() is not None:
                 report.promoted_to_pending_funding += 1
             else:

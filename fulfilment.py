@@ -738,3 +738,240 @@ def mark_cancelled(cur, obligation_id: str, reason: str) -> bool:
         RETURNING id;
     """, (reason, obligation_id))
     return cur.fetchone() is not None
+
+
+def get_letter_status_label_for_lead_reference(lead_reference: str) -> Optional[str]:
+    """2026-09-24 handoff ("replace misleading old actions with the
+    appropriate template preview or mailing-status action... do not offer
+    address-dependent tools the customer cannot legitimately use"): a
+    short, honest, buyer-facing status for the ONE letter_obligations row
+    belonging to a NEW allocation's lead_reference. A historical claim
+    never has one of these rows at all (retention_dispatch_purge.py's own
+    docstring: "letter_obligations rows are ALWAYS a new allocation") --
+    callers only use this for the population that no longer gets a real
+    Street Flyer link and whose Letter link is now a template preview, not
+    the actual posted letter.
+
+    Self-contained (opens its own connection); fails toward None -- render
+    nothing -- on any DB error or on no obligation row at all (an old lead
+    predating this pipeline, or a genuine lookup miss), same posture as
+    every other standalone wrapper in this codebase: never invent a status
+    that wasn't actually recorded.
+
+    is_dry_run is checked explicitly and overrides `status`: a dry-run/
+    test send (this sandbox's only mode -- see the standing "never enable
+    live sending" instruction) must never be described to a buyer as mail
+    that actually reached a homeowner just because its `status` column
+    happens to read 'dispatched'."""
+    if not lead_reference:
+        return None
+    try:
+        import database
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT status, is_dry_run FROM letter_obligations
+                WHERE lead_reference = %s ORDER BY created_at DESC LIMIT 1;
+            """, (lead_reference,))
+            row = cur.fetchone()
+        finally:
+            cur.close()
+            conn.close()
+        if not row or len(row) < 2:
+            return None
+        status, is_dry_run = row[0], row[1]
+    except Exception as e:
+        logger.error(f"[Fulfilment] Could not look up letter status for {lead_reference!r}: {e}")
+        return None
+
+    if is_dry_run:
+        return "Preparing to post"
+    return {
+        "pending_approval": "Preparing to post",
+        "pending_funding": "Preparing to post",
+        "ready": "Preparing to post",
+        "submitting": "Preparing to post",
+        "blocked_missing_data": "Preparing to post",
+        "dry_run": "Preparing to post",
+        "provider_accepted": "Being printed & posted",
+        "dispatched": "Posted",
+        "failed": "Issue detected -- contact support",
+        "unknown": "Confirming with our mailing provider",
+        "suppressed": "On hold",
+        "cancelled": "Cancelled",
+    }.get(status, "Preparing to post")
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-24 handoff ("My Introductions" account view): a richer, structured
+# per-introduction record for the account view -- deliberately SEPARATE from
+# get_letter_status_label_for_lead_reference above rather than a refactor of
+# it. That function is already correct, already tested, and already wired
+# into three live main.py call sites (dashboard/my-leads/free-dashboard)
+# whose displayed wording ("Being printed & posted", "Posted", ...) is
+# established and must not shift as a side effect of this work -- see the
+# standing "do not undertake unrelated refactoring" instruction. This new
+# function runs its own query (one extra JOIN to lead_allocations for the
+# purchase date/allocation_type, which the label function has no need of)
+# rather than sharing a code path with it.
+#
+# STAGE_MAP gives the 5-ish plain-English stages the account view actually
+# asks for ("awaiting approval; preparing; submitted to postal provider;
+# dispatch confirmed; needs attention") as a (stage_key, stage_label,
+# stage_explanation) tuple per real letter_obligations.status value. This is
+# a DIFFERENT vocabulary from get_letter_status_label_for_lead_reference's
+# existing short labels on purpose -- that function's strings are tuned for
+# a one-line dashboard summary; this one is tuned for a dedicated account
+# view that also shows the underlying explanation. Both read the exact same
+# underlying `status` column -- there is only ever one real state per
+# obligation -- they just describe it differently for different contexts.
+#
+# Critically: "provider_accepted" is never described as dispatch, and
+# "dispatched" is never described as delivery -- there is no 'delivered'
+# outcome anywhere in this codebase (letter_obligations.delivered_at exists
+# as a schema column but is never written by any code path -- confirmed by
+# grepping every writer of this table), so this deliberately never claims
+# delivery to the homeowner.
+STAGE_MAP = {
+    "blocked_missing_data": (
+        "needs_attention", "Needs attention",
+        "We're missing a detail we need before this can be prepared. Contact support and we'll sort it out.",
+    ),
+    "pending_approval": (
+        "awaiting_approval", "Awaiting approval",
+        "Waiting on your intro-letter template being approved before we can prepare this introduction.",
+    ),
+    "pending_funding": (
+        "preparing", "Preparing",
+        "Your letter template is approved -- we're getting this ready to send to our mailing provider.",
+    ),
+    "ready": (
+        "preparing", "Preparing",
+        "Queued and ready to be sent to our mailing provider.",
+    ),
+    "submitting": (
+        "preparing", "Preparing",
+        "Being submitted to our mailing provider right now.",
+    ),
+    "dry_run": (
+        "preparing", "Preparing",
+        "Being prepared in our system.",
+    ),
+    "provider_accepted": (
+        "submitted", "Submitted to postal provider",
+        "Our mailing provider has accepted this for printing and posting. It has not left their system yet, "
+        "so this is acceptance, not dispatch.",
+    ),
+    "dispatched": (
+        "dispatched", "Dispatch confirmed",
+        "Our mailing provider has confirmed this has left their system for posting. We have no way to confirm "
+        "actual delivery to the homeowner -- Royal Mail and other postal networks don't report that back to us.",
+    ),
+    "failed": (
+        "needs_attention", "Needs attention",
+        "Something went wrong sending this. Contact support.",
+    ),
+    "unknown": (
+        "needs_attention", "Needs attention",
+        "Our mailing provider gave us an unclear result for this one -- we're checking it with them directly "
+        "before it's marked either way.",
+    ),
+    "suppressed": (
+        "on_hold", "On hold",
+        "This introduction has been placed on hold (for example, following a homeowner objection or an "
+        "address on our do-not-mail list).",
+    ),
+    "cancelled": (
+        "cancelled", "Cancelled",
+        "This introduction was cancelled and will not be sent.",
+    ),
+}
+_DEFAULT_STAGE = ("preparing", "Preparing", "This introduction is being prepared.")
+
+
+def get_introduction_record_for_lead_reference(lead_reference: str) -> Optional[dict]:
+    """The structured per-introduction record 'My Introductions' needs,
+    for the ONE letter_obligations row belonging to a NEW allocation's
+    lead_reference (see get_letter_status_label_for_lead_reference's own
+    docstring on why a historical claim never has one of these rows).
+
+    Deliberately returns ONLY fields already confirmed safe: no address, no
+    applicant_name, no approved_content_html (the frozen render carries the
+    real address baked into its front page -- see letter_content.py's
+    render_letter -- and is never safe to hand to a buyer directly; the
+    caller must use letter_content.render_preview_letter's fixed sample data
+    instead, e.g. by linking to the existing /letter-settings/preview
+    route). provider_reference is included as-is: confirmed (by inspecting
+    every letter_providers/*.py adapter) to always be a bare opaque ID
+    string with no URL, document or address embedded in it.
+
+    Every field returned here is also confirmed to survive
+    retention_dispatch_purge.py's 72-hour purge unchanged (see that
+    module's own "MINIMAL EVIDENCE PRESERVED" docstring section: status,
+    every timestamp, provider_name, provider_reference, template_version
+    and created_at are explicitly never cleared -- only address/
+    applicant_name/approved_content_html are, and none of those are
+    returned here). So this record stays fully useful after the homeowner's
+    personal data has been purged, without ever having retained a full
+    addressed letter for that purpose.
+
+    Self-contained (opens its own connection); fails toward None on any DB
+    error or no obligation row at all, same posture as every other
+    standalone wrapper in this codebase -- never invent a status that
+    wasn't actually recorded."""
+    if not lead_reference:
+        return None
+    try:
+        import database
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT lo.status, lo.is_dry_run, lo.template_version, lo.provider_name, lo.provider_reference,
+                       lo.provider_accepted_at, lo.dispatched_at, lo.failed_at, lo.suppressed_at,
+                       lo.suppressed_reason, lo.created_at, la.created_at, la.allocation_type
+                FROM letter_obligations lo
+                JOIN lead_allocations la ON la.id = lo.allocation_id
+                WHERE lo.lead_reference = %s
+                ORDER BY lo.created_at DESC LIMIT 1;
+            """, (lead_reference,))
+            row = cur.fetchone()
+        finally:
+            cur.close()
+            conn.close()
+        if not row:
+            return None
+        (status, is_dry_run, template_version, provider_name, provider_reference,
+         provider_accepted_at, dispatched_at, failed_at, suppressed_at,
+         suppressed_reason, obligation_created_at, allocation_created_at, allocation_type) = row
+    except Exception as e:
+        logger.error(f"[Fulfilment] Could not look up introduction record for {lead_reference!r}: {e}")
+        return None
+
+    if is_dry_run:
+        stage_key, stage_label, stage_explanation = "preparing", "Preparing", (
+            "This introduction is being prepared in our test/practice sending mode -- no real letter has been "
+            "posted yet."
+        )
+    else:
+        stage_key, stage_label, stage_explanation = STAGE_MAP.get(status, _DEFAULT_STAGE)
+
+    return {
+        "stage_key": stage_key,
+        "stage_label": stage_label,
+        "stage_explanation": stage_explanation,
+        "raw_status": status,
+        "is_dry_run": bool(is_dry_run),
+        "template_version": template_version,
+        "provider_name": provider_name,
+        "provider_reference": provider_reference,
+        "provider_accepted_at": provider_accepted_at,
+        "dispatched_at": dispatched_at,
+        "failed_at": failed_at,
+        "suppressed_at": suppressed_at,
+        "suppressed_reason": suppressed_reason,
+        "purchase_date": allocation_created_at,
+        "obligation_created_at": obligation_created_at,
+        "allocation_type": allocation_type,
+    }

@@ -1120,3 +1120,809 @@ restructure), new `tests/test_magic_link_credential_exposure.py`,
 extended existing tests), `tests/test_dispatch_purge.py` (2 new tests).
 No change to `_autonomous_scheduler_loop`'s purge cadence, `/privacy-
 policy`'s Section 9 wording, or any database schema.
+
+## 18. The account "Letter" link's unbranded error pages fixed, a fabricated business-identity fallback removed, and one-time letter onboarding added (2026-09-24)
+
+**Superseding note on section 15 above.** Section 15's "Letter Template"
+card status line was `Not started / Saved, not yet approved / Approved &
+in use`; it now also appends `(standard wording)` or `(personalised
+wording)` once approved, based on whether `business_intro` is blank.
+Everything else in section 15 (the checkout gate, its `next`-preservation
+chain, `_letter_setup_complete`) is unchanged by this section.
+
+**What changed.** Nick reported clicking "Letter" from his account gave a
+404 whose own page was itself largely unstyled. The dashboard/my-leads
+"Letter" link itself (`/generate-letter/{buyer_facing_ref}`) was traced
+and empirically verified end-to-end and is not broken for the normal
+case. What was actually broken, and matches the reported symptom far more
+precisely than a literal 404 would: `generate_homeowner_letter` and
+`generate_street_flyer` returned their own hand-rolled, completely bare
+`HTMLResponse` snippets (no nav, no footer) for every one of their own
+internal error cases, instead of the `_branded_message_page` helper
+already used sitewide since 2026-09-16. All 8 such responses (4 per
+route) now use it. See `ERROR_LOG.md`'s 2026-09-24 entry and
+`START_HERE.md` section 1b for the full reasoning and the one caveat
+(a literal 404 status was not reproduced from code, so if this recurs
+post-deploy, the exact failing URL is the one thing needed to go
+further).
+
+**Also fixed, found during the same investigation:** both of those routes
+fell back to hardcoded example business identity (`"Your Local Tree
+Specialists"` / `"07XXX XXXXXX"`) for a real, logged-in contractor with no
+saved `contractor_letter_settings` row, printing it as if it were their
+actual business on a homeowner-facing letter/flyer. Now redirects such a
+contractor to `/letter-settings` first (`next` carrying them back to the
+exact letter/flyer), never fabricates. The admin/no-session preview path
+used by `tests/test_address_release_gate.py` is unchanged.
+
+**Onboarding/personalisation added, reusing the existing setup->preview->
+approve pipeline (section 15) throughout -- no new approval mechanism:**
+- `GET /letter-onboarding`: offered once, via `_login_session_response`,
+  only the first time a contractor has no `contractor_letter_settings` row
+  at all, and only when no `next` (checkout continuation) is already
+  pending -- that case is left entirely to section 15's pre-existing gate.
+  Copy: "Personalise the introduction homeowners will receive from your
+  business. You can change this later in your account." with two choices,
+  both landing on the real `/letter-settings` form (which still requires
+  an explicit Save -> Preview -> Approve; skipping personalisation is
+  never silently treated as approval).
+- `/letter-settings` now prefills business name/phone from
+  `limbo_accounts.company_name`/`.phone` or a subscriber's `.phone` --
+  **never** a subscriber's personal `customer_name` as a business name.
+  Every field now has a real example `placeholder=` attribute (never a
+  submitted value).
+- Section 15's forced-setup banner now reads "Add a personal
+  introduction, or continue with your standard letter" once the essential
+  fields are already saved, and its "Preview" link is relabelled
+  "Continue with your standard letter" in that state -- the existing
+  preview/approve flow already required no extra typing there; this only
+  makes that visible.
+
+**UPDATE 2026-09-24, second pass -- the gap above is now built, per
+Nick's explicit authorisation.** `checkout()` now shows a compact
+"Add a personal introduction, or continue with your standard letter"
+choice the moment a contractor is already fully set up
+(`_letter_setup_complete` true) but still on standard wording
+(`business_intro` blank) -- before any lead reservation or Stripe call.
+It is read-only (never writes to `contractor_letter_settings`), adds no
+duplicate reservation or Stripe session ("Continue" is a link back to the
+same checkout URL plus a `letter_nudge=continue` marker; the nudge itself
+never reserves anything, so the follow-up hit is a single ordinary
+purchase), skips entirely once personalised, and fails open on any
+lookup error. `approve_letter_settings`'s own redirect back to a pending
+checkout `next` now carries that same marker too -- added after actually
+testing the brand-new-customer journey end to end and finding that,
+without it, a buyer who had just chosen standard wording during the
+forced setup detour would see the identical prompt again immediately
+after approving. See `tests/test_letter_onboarding.py::
+TestPurchaseTimePersonalisationNudge` for the full test coverage,
+including that exact end-to-end journey.
+`checkout_post` was not touched -- a contractor only reaches it after
+already passing through the `GET` above.
+
+**Also found, NOT fixed, flagged separately:** `generate_street_flyer`
+renders its own, entirely separate, hardcoded flyer copy for every
+contractor regardless of what they've told TreeKey, including a specific
+`"NPTC Certified - GBP5M Insured"` claim and a `"20% Same-Day Street
+Discount"` offer -- entirely outside `letter_content.py`'s governed
+template system, and the same class of problem as the fake-identity fix
+above (arguably worse: an invented certification/insurance figure and an
+unconfirmed discount, not just a placeholder name). Rewriting this
+route's content model is a materially bigger change than this pass
+attempted.
+
+**Where.** `main.py` (`generate_homeowner_letter`, `generate_street_
+flyer`, `_login_session_response`, new `letter_onboarding`/`_letter_
+onboarding_choice_html`, `letter_settings_form`, `_letter_settings_form_
+html`, `my_account_view`, and -- second pass -- `checkout`/new
+`_letter_purchase_nudge_response`/`approve_letter_settings`),
+`tests/test_letter_onboarding.py` (19 tests total: 13 from the first
+pass, 6 new for the purchase-time nudge), `tests/test_access_control.py`
+(2 tests updated in the first pass -- they previously asserted the
+fake-default fallback as correct, which was itself the bug),
+`tests/test_letter_setup_checkout_gate.py` (2 tests updated in the
+second pass for the new banner copy and the `approve_letter_settings`
+dismiss-marker redirect). Full suite: 515/515 (`python -m unittest
+discover -s tests -v`, run 2026-09-24, both passes). No change to
+retention, provider integration, pricing, or live-sending settings;
+nothing deployed.
+
+## 19. Request D: the "Letter" 404 root-caused (multi-segment reference routing) and fixed; account/dashboard/my-leads links now distinguish historical from new-allocation leads; street-flyer fabricated claims removed; error-page stylesheet gap fixed (2026-09-24, later pass)
+
+**Superseding note on section 18 above.** Section 18 correctly left the
+404 unconfirmed at the code level and flagged the street-flyer claims as
+"NOT fixed." Both are resolved by this section, per Nick's explicit
+instruction not to mark the root cause resolved without a real
+reproduction. Section 18's onboarding/personalisation work is unchanged.
+
+**The routing bug, in full.** `generate_homeowner_letter`,
+`generate_street_flyer`, and `street_view_redirect` all took their lead
+identifier as `@app.get("/.../{param}")` -- Starlette's DEFAULT route
+convertor, which matches exactly one URL path segment and cannot match a
+literal `/`. A historical claim's buyer-facing reference is the real,
+unmodified council planning reference (`address_release.buyer_facing_
+reference`'s own docstring), and genuine UK planning references routinely
+contain `/` (e.g. `"26/P/1118/S73"` -- taken verbatim from this
+codebase's own `_SUSPECT_DISCHARGE_REFS_SEP11` admin constant, not a
+synthetic worst case). Every link this app builds to one of these routes
+goes through `urllib.parse.quote()`, whose default `safe='/'` leaves the
+slash unescaped -- so the actual href rendered for this population was a
+genuine multi-segment path. Pre-encoding it would not have helped either:
+Starlette decodes a percent-encoded `%2F` back to `/` before route
+matching runs, so it 404s against the default convertor identically to a
+literal slash. Net effect: the ROUTER itself returned 404 before any of
+these three handler functions ever ran, for any historical buyer whose
+council reference happened to contain a `/`. This is precisely why
+section 18's fix (which changed what those functions RETURN on their own
+internal error paths) could not have reproduced or fixed this -- the
+router never dispatched to them at all in this case.
+
+**Fix.** All three decorators changed to Starlette's multi-segment `path`
+convertor: `/generate-letter/{lead_id:path}`, `/generate-street-flyer/
+{lead_id:path}`, `/street-view/{reference:path}`.
+
+**Why this was invisible to the existing test suite, and how it was
+verified instead.** Every test in this suite runs `main.py` against a
+hand-rolled `fastapi` stub whose `@app.get(...)` is a pure pass-through
+decorator -- it never parses or compiles a route's path template, so no
+existing test could ever have caught this bug or proven a fix for it
+(see `tests/test_access_control.py`'s own `_FakeFastAPI`). `fastapi`
+itself cannot be installed in this sandbox (no PyPI access), so this was
+verified against the genuinely-installed `starlette` package directly --
+a faithful proxy, since FastAPI's `APIRoute` is an unmodified subclass of
+`starlette.routing.Route` with no independent path-matching logic of its
+own. New `tests/test_slash_reference_routing.py` (10 tests) extracts the
+actual `@app.get(...)` path-template strings straight from `main.py`'s
+own source text via regex (so the test fails the moment a decorator
+drifts, rather than silently testing a stale copy), builds minimal
+single-route Starlette apps from them, and drives a real
+`starlette.testclient.TestClient` against both the old and new route
+shapes -- confirming the real reference 404s under the old `{param}`
+shape and succeeds under the new `{param:path}` shape, that a plain
+reference and an opaque allocation UUID still work (no regression), and
+that a percent-encoded slash still 404s against the default convertor
+(proving pre-encoding alone was never a viable fix). **Stated plainly:**
+this verifies real Starlette routing behaviour, not the actual installed
+FastAPI app end-to-end, which cannot run in this sandbox at all.
+
+**Account/dashboard/my-leads link audit.** `/account` (`my_account_view`)
+was already correct (a separate, accurately-worded "Letter Template"
+card) -- no change. `/dashboard`, `/my-leads`, and `/free-dashboard` each
+offered the same "Letter"/"Street Flyer" button pair regardless of
+whether the lead was historical (real address disclosed, both routes
+genuinely usable) or a new allocation (address redacted --
+`address_release.guarded_address_for_lead_reference` never discloses the
+real address for anything but a historical claim). Fixed per-lead, reusing
+the already-computed `addr` as a free historical-vs-new-allocation signal
+(`addr != address_release.REDACTED_ADDRESS_PLACEHOLDER`) rather than an
+extra DB call: a historical lead is untouched (same "Letter" + "Street
+Flyer", both real); a new-allocation lead now shows "Preview Letter"
+(never "Letter" -- it previews against a redacted address, it is not the
+actual posted letter) and no "Street Flyer" button at all -- that route
+is already gated by `address_release.lead_address_release_allowed(ref)`,
+which is structurally `False` for anything but a historical claim, so
+offering it to a new-allocation buyer was offering a tool guaranteed to
+refuse them every time. In its place, a new honest mailing-status line
+(below), shown only when there is something real to say. `free_dashboard`'s
+single free-lead tool card is unconditionally treated as new-allocation
+(`database.redeem_free_lead_code` always creates one via `fulfilment.
+create_allocation_and_obligation`, never historical by construction) --
+its "Street Flyer" card was removed outright and its letter card
+relabelled "Preview Intro Letter".
+
+**New: `fulfilment.get_letter_status_label_for_lead_reference(lead_
+reference)`.** Looks up the most recent `letter_obligations` row for a
+reference and maps `status`/`is_dry_run` to a short, homeowner-safe
+label: `"Preparing to post"`, `"Being printed & posted"`, `"Posted"`,
+`"Issue detected -- contact support"`, `"On hold"`, etc. `is_dry_run`
+unconditionally overrides any status-based "posted" claim (this
+environment never runs live sending -- a dry-run row must never read as
+delivered). Fails toward `None` (the status line is omitted entirely,
+never fabricated) on an empty reference, no row on record, or any DB
+error -- the same fail-safe posture used throughout this codebase. Note
+for future readers: this function does a LOCAL `import database` inside
+its own body, not a module-level one -- `database.py` itself does
+`import fulfilment` at its own top level, so a top-level `import
+database` here would be a genuine circular import. This is intentional
+and correct for the real app; it just means any test patching
+`database.get_db_conn` via the plain string form needs `create=True` if
+run under the full suite (documented in `tests/test_lead_action_links_
+and_flyer_claims.py` itself).
+
+**Street-flyer fabricated claims -- fixed, per explicit instruction this
+pass (section 18 above left this flagged, not fixed).** The hardcoded
+`"NPTC Certified • £5M Insured"` line and the `"20% Same-Day Street
+Discount"` offer (including the `<title>`'s promise of it) are removed.
+Following the instruction's own "hide or disable ... rather than
+constructing an entirely new flyer product": the discount was removed
+outright, with no replacement, since no underlying real setting exists to
+condition it on and inventing one would be the same class of problem
+being fixed. The credentials line now reuses the exact mechanism
+`letter_content.render_letter` already uses for the homeowner letter --
+the contractor's own real, freely-entered `insurance_note`/
+`qualifications_note` (the schema's own comment: "never invented by
+TreeKey"), shown only when actually saved and non-blank. **Explicitly
+flagged, not fixed:** a different, unrelated route (`boost_review_page`,
+the "Google Review Booster & BS3998 Digital Trust Badge" feature) carries
+a very similar unconditional claim ("Verified Member • £5M Public
+Liability Insured • NPTC Certified Crew"). The instruction named "the
+separate street-flyer route" specifically -- this is a different route,
+so it was deliberately left untouched (avoiding both scope creep and
+silently ignoring it); needs its own explicit go-ahead.
+
+**Error pages' shared styling -- root cause found and fixed, matching the
+instruction's own "merely calling a branding helper is not enough."**
+`_branded_message_page`, `_branded_404_handler`, and `_branded_500_
+handler` all already called the shared nav/footer HTML helpers, but none
+of the three linked `/static/tailwind.css` in their own `<head>` -- so
+every Tailwind utility class those shared helpers emit rendered as bare,
+unstyled markup (confirmed by comparing against real pages like
+`privacy_policy`/`faq_page`, which do include the link). Fixed by adding
+the missing `<link>` to all three.
+
+**Test-infrastructure gaps found and fixed while building this pass's own
+tests (test-only; no production code involved in any of these four):**
+1. The shared stub `HTMLResponse` (`test_main.py`'s `_FakeHTMLResponse.
+   __init__`) discards every constructor argument, including the content
+   itself. Harmless for routes only ever checked via `assert_called_
+   with`, but it meant `my_leads_view`/`free_dashboard` (both `return
+   HTMLResponse(f"""...""")`, unlike `contractor_dashboard`/`generate_
+   homeowner_letter`/`generate_street_flyer`, which return bare
+   f-strings) could never have their rendered HTML actually inspected by
+   any test before now. Fixed test-side only, via a small content-
+   capturing fake patched in for exactly the tests that need it.
+2. `patch("database.get_db_conn", ...)` (string form) broke under the
+   full suite only, for the reason already noted above under the new
+   fulfilment function -- `tests/test_letter_promise_gate.py`
+   unconditionally replaces `sys.modules["database"]` with a bare module
+   at its own collection time, and `unittest discover` finishes importing
+   every test file before running any of them, so that replacement is
+   already in place regardless of file execution order. Fixed with
+   `create=True` on the affected patches.
+3. Two new tests initially tried to simulate `generate_street_flyer`'s
+   anonymous/admin preview path by mocking `fulfilment.get_lead_owner` to
+   return `None` -- wrong, since `require_lead_ownership` 404s on "no
+   session" before `get_lead_owner` is ever reached; the real bypass is
+   `_admin_basic_auth_ok`. Fixed to patch that instead.
+4. `tests/test_slash_reference_routing.py` needs the real, installed
+   `starlette` package, but `tests/test_access_control.py` (collected
+   first, alphabetically) registers a bare fake `starlette` as part of
+   its own fastapi stub. Fixed by dropping any `starlette*` entries from
+   `sys.modules` before importing, forcing a genuine fresh import of the
+   real on-disk package.
+
+**Where.** `main.py` (`generate_homeowner_letter`, `generate_street_
+flyer`, `street_view_redirect` route decorators; `_branded_message_page`,
+`_branded_404_handler`, `_branded_500_handler`; `my_leads_view`,
+`contractor_dashboard`, `free_dashboard`), `fulfilment.py` (new `get_
+letter_status_label_for_lead_reference`), new `tests/test_slash_
+reference_routing.py` (10 tests), new `tests/test_lead_action_links_and_
+flyer_claims.py` (17 tests). Full suite: **542/542** (`python3 -m
+unittest discover -s tests -p "test_*.py"`, run 2026-09-24 -- up from
+515 before this pass). No change to retention, provider integration,
+pricing, or live-sending settings; nothing deployed.
+
+**Decision needed from Nick, not invented:** whether `boost_review_page`'s
+own separate unconditional credentials claim should be fixed the same
+way -- out of scope for this pass since the instruction named only "the
+separate street-flyer route."
+
+## 20. Request E: marketplace privacy review for the mailed-introduction model -- raw council reference removed from public URLs/links, a second independent leak found in subscriber alert emails, free-text redaction extended to reference/TPO patterns (2026-09-24, later pass)
+
+**The ask, in one line.** Nick's own instruction stated the concern
+precisely: "Encoding the raw reference is not sufficient" -- the raw
+council reference is not just a URL-encoding problem, it is itself the
+exact search key someone could paste into the council's own public
+planning portal to locate the original application, address, and
+applicant. Fixing how it was transported (section 19's `{param:path}`
+fix, which only made multi-segment references route correctly) would not
+have addressed this at all -- a well-formed, `path`-routable URL like
+`/marketplace/lead/23/00568/WTCA` still hands out the identifying value
+itself, unauthenticated, to anyone who sees the link.
+
+**Confirmed leak #1 (public, unauthenticated): the marketplace detail
+page and its own card links.** `lead_detail_view` was
+`@app.get("/marketplace/lead/{reference}")`, taking the raw
+`leads.reference` straight from the URL and passing it to
+`database.get_marketplace_leads_with_freshness(only_reference=reference)`.
+`marketplace_view`'s card loop built every link to it the same way:
+`f"/marketplace/lead/{ref}"`. Both were reachable with no login. **Fixed
+by swapping the lookup key entirely, not by encoding the existing one.**
+`leads.id` (`UUID PRIMARY KEY DEFAULT gen_random_uuid()`, confirmed via
+the schema -- genuinely unguessable, and already used safely in checkout
+links elsewhere in this codebase before this pass) is now the only key
+either the route or the card links use. `lead_detail_view` is now
+`@app.get("/marketplace/lead/{lead_id}")`, and
+`get_marketplace_leads_with_freshness`'s matching parameter was renamed
+`only_reference` -> `only_id`, with its `WHERE` clause changed to
+`id::text = %s`. The council reference is still resolved -- internally,
+server-side, only where the app itself needs it (letter generation,
+fulfilment, admin tooling) -- it is simply never again placed in a public
+URL, href, or query string.
+
+**Confirmed leak #2 (authenticated, but customer-facing): the subscriber
+lead-alert email's "Unlock" link -- found while auditing every place a
+lead reference reaches an external output, not mentioned in Nick's own
+"known concerns" list.** `notifications.dispatch_lead_alerts`'s
+`_unlock_button` closure built its checkout link as
+`f"{PUBLIC_APP_URL}/checkout/single_lead_medium?lead_id={urllib.parse.quote(str(ref))}"`,
+where `ref` came from `l.get("ref", l.get("reference", ""))` -- the same
+raw council reference, sent by email (via the direct
+`requests.post(..., "to": [email], ...)` branch of that function -- the
+"Master Digest for Admin" and "Individual emails per lead" branches both
+route through `notifications.send_resend_email`, which only ever sends to
+the fixed internal `TEST_EMAIL` address, so they were correctly ruled out
+as not customer-facing) to every subscribed contractor. **This was also,
+independently, a genuine functional bug, which raises confidence this was
+a real, previously-undetected defect and not a theoretical concern:**
+`payments._resolve_live_single_lead_price(lead_id)` does
+`SELECT ... FROM leads WHERE id = %s` -- a raw reference could never have
+matched that lookup, so the "Unlock" link in every such email was already
+broken for any contractor who clicked it. Fixed the same way as leak #1:
+the closure now uses `l.get("id")`, never a reference.
+
+**Regex free-text redaction extended to reference/TPO patterns --
+closing the gap Nick's own instruction named directly ("Regex redaction
+currently covers only some patterns").** `database.
+_redact_address_from_summary` previously redacted only postcodes and
+house-number/street combinations from free-text lead summaries; it never
+touched a TPO number or council reference appearing inline in descriptive
+text (e.g. "...subject to TPO 45/2019, ref 23/00568/WTCA..."). Two new
+patterns were added: `_TPO_REFERENCE_IN_TEXT_RE` (matches `TPO` followed
+by a number, with or without a separating slash/dash) and
+`_COUNCIL_REFERENCE_IN_TEXT_RE` (matches multi-segment alphanumeric
+reference shapes -- 3 to 5 slash-separated groups, with a lookahead
+requiring at least one letter somewhere in the match, specifically so a
+plain `DD/MM/YYYY` date or a simple fraction is never mistaken for a
+reference and redacted). Both were verified against real reference
+examples already present in this codebase (`"26/P/1118/S73"`,
+`"23/00568/WTCA"`) and against known non-matches (plain dates, fractions)
+via a standalone script before being integrated. **Stated plainly, per
+the instruction's own "If a field cannot be safely produced, omit it
+rather than inventing it or relying on regex as a guarantee":** this
+regex extension reduces the free-text leak surface, it does not
+eliminate it as a guarantee -- an operator-entered summary containing a
+reference in a shape neither pattern anticipates would still pass
+through unredacted. The instruction's own preferred approach -- a
+structured summary from reliably available fields (work category, broad
+area, and other approved non-identifying attributes), omitting a field
+that cannot be safely produced rather than inventing or trusting regex
+alone -- is unchanged by this pass and remains the stronger long-term
+fix; this extension only closes the specific pattern gap that was
+flagged.
+
+**Broad verification sweep -- confirmed already safe, no code change
+needed (checked directly against current source, not assumed from any
+earlier report).** Per the instruction's own list ("Inspect HTML, URLs,
+query strings, data attributes, embedded JSON, API responses, emails,
+PDFs, previews, downloads, maps and search metadata"):
+- Homepage ticker and `/api/check-postcode` -- already use only
+  non-identifying aggregate fields; no reference, address, or applicant
+  name in either response.
+- The Leaflet map -- plots only approximate/broad-area coordinates
+  already gated the same way as the rest of the redaction pipeline; no
+  marker payload carries a raw reference.
+- `sitemap.xml` / `robots.txt` -- list only static route paths, never
+  per-lead URLs.
+- JSON-LD structured data on public pages -- carries only the
+  non-identifying summary fields already covered above, no reference or
+  address.
+- `applicant_name` -- confirmed not exposed on any public or
+  unauthenticated path (existing gating from section 17 unchanged and
+  still in force).
+- `/street-view/` -- already gated by `address_release.
+  lead_address_release_allowed(reference)`, unchanged this pass (section
+  19's `{param:path}` fix already covers its own multi-segment-reference
+  routing separately).
+- PDF generation (`letter_content.render_letter` and related) -- confirmed
+  it only ever receives the resolved real address for a genuinely
+  historical, address-released claim, per the existing address-release
+  gate; unchanged.
+
+**Found and explicitly flagged, not fixed -- out of scope for a
+privacy-specific review.** `/generate-storm-quote/{lead_id}` takes an
+unused `lead_id` parameter (no privacy exposure from it), but its output
+carries the same fabricated-credentials pattern already fixed for the
+street flyer in section 19 and still open for `boost_review_page`
+("BS3998:2010 • NPTC • £5M Insurance") -- this is now a **third**
+occurrence of that specific pattern across the codebase. Named here for
+visibility, not fixed, since it is a fabricated-claims issue, not a
+privacy/identifier issue, and therefore outside this pass's scope.
+
+**Where.** `database.py` (`get_marketplace_leads_with_freshness`'s
+`only_reference` -> `only_id` param/SQL change; new
+`_TPO_REFERENCE_IN_TEXT_RE` / `_COUNCIL_REFERENCE_IN_TEXT_RE`;
+`_redact_address_from_summary` extended to apply both), `main.py`
+(`lead_detail_view` route/signature/lookup; `marketplace_view` card href),
+`notifications.py` (`dispatch_lead_alerts`'s `_unlock_button` closure),
+new `tests/test_marketplace_privacy_review.py` (20 tests: redaction
+regex coverage including real reference/TPO examples and plain-date/
+fraction non-matches, `only_id` SQL-text assertions, opaque-id-only
+marketplace detail route and card link tests, the subscriber-alert
+unlock-link fix). Full suite: **562/562** (`python3 -m unittest discover
+-s tests -p "test_*.py"`, run 2026-09-24 -- up from 542 before this
+pass). No change to retention, provider integration, pricing, or
+live-sending settings; nothing deployed.
+
+**Decisions needed from Nick, not invented:**
+1. Whether the structured-summary-from-approved-fields approach (work
+   category, broad area, other non-identifying attributes; omit rather
+   than invent) should now be built as the primary public-summary
+   mechanism, with regex redaction demoted to a defence-in-depth backstop
+   rather than the main safeguard it still effectively is today.
+2. Whether `/generate-storm-quote/{lead_id}`'s fabricated-credentials
+   text (the third occurrence of the pattern flagged in section 19, still
+   open for `boost_review_page` too) should be fixed the same way as the
+   street flyer, and whether Nick wants all remaining occurrences handled
+   together in one pass rather than piecemeal.
+
+## 21. Bounded retention consistency check across the mailed-introduction model -- every established decision re-verified against current code, two documentation/wording gaps found and fixed, no code behaviour changed (2026-09-24, later pass, Request G)
+
+**Purpose and posture.** This was a verification pass, explicitly scoped
+by its own instruction not to reopen settled decisions or run a
+production purge/change a schedule "simply to resolve stale
+documentation." Every one of the ask's own "established decisions" was
+independently re-checked against the actual current code (not re-cited
+from the Request E/F sections above) before being reported as still
+true.
+
+**1. The 60-day unsold-lead clock -- re-confirmed true, unchanged.**
+`database.UNSOLD_LEAD_DELETION_DAYS = 60`, scoped to `status IN (NULL,
+'new')` only (a purchased/claimed lead is never touched regardless of
+age), keyed off `COALESCE(registered_date, discovered_at)` -- council
+registration, not TreeKey's own collection/discovery time, with
+`discovered_at` only ever a fallback when `registered_date` is missing.
+Confirmed genuinely separate from the 56-day maximum sale-eligibility
+window (the module's own comment states this explicitly; re-run
+`tests/test_lead_retention.py::TestDeletionClockIsSeparateFromSaleEligibility`,
+15/15 passing in that file).
+
+**2. The 72-hour post-dispatch purge cadence -- re-confirmed true,
+unchanged, and still more frequent than the "accepted daily sweep."**
+`retention_dispatch_purge.purge_dispatched_personal_data()` runs on
+`_autonomous_scheduler_loop`'s own ~20-minute tick, independent of the
+~20-hour-gated daily full cycle the 60-day sweep runs on -- re-confirmed
+by reading the loop body directly. Per this ask's own instruction
+("describe actual behaviour accurately without reopening this as a large
+task"), this is reported as-is, not reverted -- same posture section 17
+above already took when an external review asked for the opposite.
+
+**3. Personal-data copy trace -- extended per this ask's own inspection
+list, one real documentation gap found.** Re-confirmed the retained/
+cleared field lists in section 16's own table still match current code
+exactly. Newly checked: no email content or PII is ever written to any
+database table by `notifications.py` (no `INSERT`/`CREATE TABLE`
+anywhere in that file -- the only copies of a sent email are the
+recipient's own inbox and the email provider's own logs, both correctly
+treated as outside TreeKey's control, never claimed as deletable). No
+log statement anywhere in `main.py`/`database.py`/
+`retention_dispatch_purge.py`/`suppression.py` writes a real address,
+applicant name, or summary into the application log. Two admin CSV
+exports exist (`/export-directors.csv`, `/export-mail-list.csv`) --
+confirmed by reading both handlers that they query `potential_partners`
+(TreeKey's own contractor-prospect outreach list) only, never
+`leads`/`letter_obligations`/`letter_dispatches` -- a separate personal-
+data category (prospective business contacts, not homeowners/
+applicants), out of scope for a review of the mailed-introduction model
+specifically, named here for completeness rather than treated as a
+finding. No export of `leads` table data exists anywhere in the
+codebase.
+
+**4. Suppression effectiveness after deletion/re-scraping -- confirmed
+sound by design; one real documentation gap found and fixed.**
+`suppression.py`'s matching is via a keyed digest computed and stored
+independently of the `leads`/`letter_obligations` rows at the moment an
+objection is recorded -- it does not reference or depend on the original
+lead row at all, so purging that row via either retention clock above
+cannot break a match, and a later re-scrape of the same real-world
+address (a new `leads` row, new `id`) is still matched correctly because
+matching is address/name-keyed, not lead-keyed. `is_suppressed()`'s
+wiring immediately before every real send
+(`letter_providers/registry.py::attempt_send`) was re-confirmed by direct
+inspection. **Real gap found and fixed:** `SUPPRESSION_HASH_KEY` -- the
+one secret this whole mechanism depends on, which fails LOUD (blocks
+every send) if unset -- was never actually listed in
+`.env.example.letter-fulfilment`, the file this codebase's own
+conventions treat as the canonical "recognized environment variables"
+reference (confirmed by grep: no mention of it existed). An operator
+following only that file, as `START_HERE.md` section 6 directs, would
+never learn this variable needs setting. Fixed by adding a full entry
+documenting its purpose, that it must be handled like a signing secret
+(restricted to whoever can already read the production database
+directly; never logged or pasted into a ticket/chat), its rotation
+behaviour (requires re-running `backfill_address_suppression_hashes`),
+and its fail-loud default. Documentation-only -- `suppression.py` itself
+was not touched; `tests/test_suppression.py` (13 tests) re-run and
+confirmed passing unchanged.
+
+**5. Historical/indefinitely-retained records -- confirmed unchanged, no
+drift from Request E's marketplace-id change.** Re-verified
+`address_release.is_historical_purchase`/`guarded_address_for_lead` are
+untouched by Request E's lookup-key swap (that change was to the PUBLIC
+marketplace route only, never to disclosure/retention logic). The three
+previously-reported open items (section 16, findings A/B/C) remain open
+and unresolved by this pass, exactly as instructed -- none were given an
+invented retention period here.
+
+**6. Deletion boundary (app DB vs. email/postal-provider/backups) --
+wording gap found and fixed.** `/privacy-policy`'s Data Retention
+paragraph said dispatched personal data is "permanently deleted" with no
+stated scope -- read literally, an absolute claim reaching backups, the
+mailing provider's own delivery records, and the physical letter already
+in the homeowner's hands, none of which TreeKey controls or can reach.
+Verified against actual behaviour: `purge_dispatched_personal_data()`
+only ever executes against this app's own Postgres tables; nothing in
+this codebase touches a database backup, calls the mailing provider's
+API to delete anything, or reaches a letter after it's posted. Fixed by
+scoping the sentence to "our live application database" and adding one
+sentence naming what it does not reach -- without inventing a backup-
+retention figure this codebase has no way to know (Render's own backup
+policy is not verified anywhere in this session). New tests,
+`tests/test_purge_scheduling.py::TestPrivacyPolicyDistinguishesDeletionFromSystemsWeDoNotControl`
+(4 tests), pin the scoped wording against silent regression.
+
+**7. Article 14 -- deliberately not reopened, per the ask's own
+instruction.** Confirmed it remains listed as an unresolved item
+requiring a data-protection adviser in `docs/launch_checklist.md` item 3
+and `docs/handoff.md`, unchanged by this pass. Retention/deletion
+mechanics (this pass's two fixes included) do not constitute or
+substitute for an Article 14 "we collected your data" notice.
+
+**The short consistency table the ask requested:**
+
+| Data | Location | Trigger | Action | Exception | Verification status |
+|---|---|---|---|---|---|
+| Unsold lead (address/applicant name/summary, whole row) | `leads` | 60 days past `COALESCE(registered_date, discovered_at)`, status still `new`/blank | Row DELETEd (`cleanup_stale_leads`, ~daily via the autonomous cycle) | A purchased/claimed lead, at any age; a row with a missing/implausible/contradictory date (quarantined, not deleted) | Implemented and tested locally (15/15, `tests/test_lead_retention.py`) |
+| Dispatched homeowner address/applicant name/frozen letter HTML | `letter_obligations`, `letter_dispatches` | 72 hours past provider-confirmed dispatch, checked ~every 20 min | Fields cleared (`purge_dispatched_personal_data`) | A historical claim's `letter_dispatches` row (no `lead_allocations` row) -- never purged, by design | Implemented and tested locally (23/23, `tests/test_dispatch_purge.py` + `test_purge_scheduling.py`) |
+| `leads.summary` for the same reference, once purged | `leads` | Same 72-hour/20-min trigger as above, non-historical references only | Overwritten with its redacted form, not cleared to blank | Historical claim -- summary left unchanged | Implemented and tested locally (section 17 above) |
+| Raw council `lead_reference` | `leads`, `lead_allocations`, `letter_obligations`, `letter_dispatches` | None | None -- retained indefinitely, both historical and new, purged rows or not | None | Missing / awaiting a business decision (section 16 finding C) |
+| Historical dispatch's address/applicant name | `letter_dispatches` (historical rows only) | None | None -- retained indefinitely, by design ("historical disclosures are not undone") | N/A | Awaiting a business decision if this is ever to change (section 16 finding B) |
+| Payment/allocation evidence record | `payments`, `lead_allocations` | None | None -- retained indefinitely | None | Awaiting a business decision on a retention period |
+| Postal-suppression record (address/name digest) | `postal_suppressions` | Recorded manually by an operator; never expires | Blocks every future send matching the digest, survives the source lead's own deletion/re-scrape by design | None | Mechanism implemented and tested (13/13, `tests/test_suppression.py`); operator UI to actually record one is missing (direct-SQL/console only -- launch_checklist.md item 10, unchanged) |
+| Email/letter content once sent | Recipient's inbox; mailing provider's own systems | N/A | N/A -- outside TreeKey's control | N/A | Correctly not claimed as deletable by TreeKey (verified: `notifications.py` writes no DB copy of sent content) |
+| Database backups | Hosting platform (Render) | N/A | N/A -- outside TreeKey's control | N/A | Correctly not claimed as deletable by TreeKey (wording fixed this pass to state this explicitly) |
+
+**Tests.** New: 4 tests, `tests/test_purge_scheduling.py`. Re-run without
+modification to confirm no drift: `tests/test_lead_retention.py`
+(15/15), `tests/test_dispatch_purge.py` + `tests/test_purge_scheduling.py`
+combined (23/23 before the 4 new), `tests/test_suppression.py` (13/13).
+Full suite: **566/566** (`python3 -m unittest discover -s tests -p
+"test_*.py"`, run 2026-09-24 -- up from 562 before this pass). No
+production purge was run, no schedule was changed, no database migration
+was needed; every mechanism this ask asked to be verified was found
+already correctly implemented -- only two documentation/wording gaps
+needed fixing.
+
+**Where.** `.env.example.letter-fulfilment` (new `SUPPRESSION_HASH_KEY`
+section), `main.py` (`privacy_policy`'s Data Retention paragraph, one
+added sentence), `tests/test_purge_scheduling.py` (new
+`TestPrivacyPolicyDistinguishesDeletionFromSystemsWeDoNotControl`). No
+changes to `database.py`, `retention_dispatch_purge.py`,
+`suppression.py`, `address_release.py`, or any migration.
+
+**Decisions needed from Nick, not invented, consolidated with everything
+still open from earlier passes:**
+1. The eventual retention period, if any, for the minimal financial/
+   evidence record kept indefinitely (`payments`, `lead_allocations`, the
+   retained columns on `letter_obligations`/`letter_dispatches`).
+2. Whether/how to actually enforce a specific billing-record retention
+   period, or a closed-account data policy -- neither exists today.
+3. Whether historical dispatches should ever be purged on some separate,
+   longer schedule.
+4. Whether/how the raw `lead_reference` should ever be scrubbed from
+   storage, and what would replace it for the `NOT EXISTS`/join logic
+   that currently depends on it.
+5. The Article 14 disclosure-timing question itself -- needs an actual
+   data-protection adviser, not code.
+6. Whether `generate_storm_quote`'s and `boost_review_page`'s fabricated-
+   credentials claims (flagged in section 20/19 above) should be fixed.
+7. Whether an operator-facing UI for adding a suppression row is worth
+   building (currently direct-SQL only -- `docs/launch_checklist.md` item
+   10, unchanged by this pass).
+
+## 22. Letter template finalization -- the three templates now use the approved two-page A4 layout, real TreeKey branding, and a genuine reverse-page privacy notice; front-page wording is still Nick's placeholder (2026-09-24, later pass)
+
+**Full narrative, asset-audit findings, launch-blocker/can-wait split and
+the two questions still open for Nick are in `START_HERE.md` section 1f --
+not duplicated here to avoid two copies drifting apart.** Summary for this
+file's own purpose (the render pipeline itself):
+
+`letter_content.render_letter()` (same signature, no caller changes) now
+produces a genuine two-page HTML document -- front page (contractor
+introduction, per-template wording unchanged) and reverse page (privacy/
+supporting information only, no contractor content or advertisement) --
+matching the two-page A4 layout Nick approved in
+`handoff_inspect/TreeKey-branded-letter-draft-v2.pdf` (that PDF's own
+**wording** is watermarked "DESIGN DRAFT -- NOT FOR POSTING" and is not
+used verbatim; the reverse page's actual text is built from facts already
+verified elsewhere in this codebase). Real branding assets are embedded as
+base64 data-URIs (`app/assets/letter_branding/`, resized once offline with
+Pillow -- not a new runtime dependency; `letter_content.py` only uses
+stdlib `base64`). Fixed A4 CSS with `page-break-after: always`; no
+automatic text-shrinking anywhere -- `validate()`'s existing `MAX_*` limits
+are what rejects excessive content, clearly, before rendering.
+
+`template_fingerprint()` was confirmed unaffected (it never calls
+`render_letter()`) except for one real gap this pass closed: the new
+reverse-page copy is TreeKey's own locked content, identical across every
+contractor/template, but wasn't yet part of the fingerprinted material. A
+new `REVERSE_PAGE_CONTENT_VERSION` constant is now included, so a future
+edit to that wording invalidates every contractor's existing approval, the
+same guarantee `template.version` already gave front-page wording changes.
+`worker.py::promote_pending_approvals`'s freeze-once semantics (an
+approved mailing's exact snapshot never re-renders) are unchanged.
+
+A new optional, non-fail-loud `TREEKEY_CORRESPONDENCE_ADDRESS` env var was
+added to `.env.example.letter-fulfilment` -- unlike the two required
+privacy env vars already there, a missing value is omitted from the
+reverse page's wording rather than blocking every render, because the
+underlying business decision (Nick's PO Box) is still unresolved and real
+posting is independently blocked regardless.
+
+**Pagination/overflow was empirically verified, not assumed**: a
+standalone script, `tests/letter_pagination_check/run_pagination_check.py`
+(same convention as `tests/postgres_concurrency/` -- not part of
+`unittest discover`; uses the sandbox's pre-installed headless Chromium via
+Playwright, not a new application dependency), rendered all 3 templates x
+7 edge cases (short/blank-optional/max-length/long-business-name/
+punctuation/realistic-worst-case) to real PDFs and rasterised every page
+for visual inspection. **All 21 renders produced exactly 2 A4 pages**, no
+clipping, no blank pages, no page-scaling. Output is in
+`tests/letter_pagination_check/_out/`.
+
+**Tests**: `tests/test_letter_content.py` 41/41 (2 new, 1 replaced, 1
+narrowed after a false-positive against the new branding `<img>` tags).
+Full suite: **568/568**. No deployment, charge, real letter, or production
+data change.
+
+## 23. First postal provider -- real integration requirements, current config audit, and a verified PC2Paper-vs-Intelliprint comparison (2026-09-24, later pass; no adapter implemented this pass -- awaiting Nick's account-access decision)
+
+**Current configuration, audited directly (no secrets read or exposed):** no `.env` file exists in this working copy; no `STANNP_*`/`INTELLIPRINT_*`/`POSTWORKS_*`/`LETTER_PROVIDER_*` variable is set in this session's environment. `letter_providers/registry.py`'s `_provider_kinds()` recognises exactly `fake_test`, `stannp`, `intelliprint`, `postworks` -- **`pc2paper` is not a recognised kind; no PC2Paper adapter exists anywhere in this codebase.** `stannp_provider.py` has real HTTP call logic but is explicitly flagged (in its own header) as unverified against Stannp's current live docs, with no account/API key -- and Stannp isn't one of the two providers actually under discussion for this business. `intelliprint_provider.py`/`postworks_provider.py` are intentional stubs (`is_configured()` hard-`False`, `send()` raises). **No postal provider is genuinely usable today, for any of the three providers this project has ever named.**
+
+**PC2Paper vs. Intelliprint, verified against each provider's current official documentation this pass (URLs below) -- not recalled from training data, not assumed from either provider's marketing copy:**
+
+| Requirement | PC2Paper | Intelliprint |
+|---|---|---|
+| API & auth | Best-documented interface (a versioned PDF spec, "Letter API Interfaces V3.2") is the **legacy** Form-Post/XML-RPC API: sends the account's **plaintext username+password on every request** (the doc's own warning: never call this from a front-end). Newer SOAP/JSON APIs are recommended for new integrations but their public pages don't disclose an auth method. | REST API, `https://api.intelliprint.net/v1`. `Authorization: Bearer <API key>`, separate test/live keys, rotatable from the dashboard. |
+| Supported formats | PDF, or HTML/plain text letter body. | PDF, Word, RTF, JPG, PNG, or inline HTML/text/template. |
+| Address placement / print constraints | Not documented in any public page found. | Documented precisely: C5/C4 window envelope address zone at **23mm from the left, 43mm from the top**. PDF: 300dpi images, CMYK or RGB, 3mm bleed, safe zone for trimming. |
+| Payment / top-up | Prepaid balance; **minimum top-up £5**; PayPal, major cards, Nochex; some accounts can go into debt (not detailed further). | Pay-per-item; **no minimum order, no monthly fee**; billing/invoicing model itself marked "coming soon" in Intelliprint's own help centre -- not fully public yet. |
+| Submission / status endpoints | `SendLetter` via Form-Post or XML-RPC (legacy); a newer JSON/SOAP API exists but **no status-check endpoint was found documented anywhere** on their site for any of the four API variants. | `POST /prints` (create), `GET /prints`/`GET /prints/{id}` (list/retrieve), `DELETE /prints/{id}` (cancel); JSON or multipart/form-data. |
+| Idempotency / duplicate prevention | Not documented. | Not documented either -- a `reference` field exists but is described only as a "user-friendly identifier," not confirmed to block a duplicate submission. **Real gap on both providers.** |
+| What accepted/printed/dispatched/delivered mean | Not documented -- only submission-time `OK`/`ERx` error codes were found (e.g. `ER5` login failed, `ER6` empty field, `ER11` incompatible postage combination). | Documented lifecycle: `draft` → `waiting_to_print` → `printing` → `enclosing` → `shipping` → `sent`, plus `returned` (undeliverable)/`cancelled`/`invalid_address`. **There is no "delivered" status for standard post** -- Intelliprint's own docs state most postage services aren't tracked once they leave the facility, so delivery is only knowable on a tracked-postage option, never by default. Webhook: `letter.updated`, fired on printed/dispatched/delivered/returned transitions for whichever of those a given letter's service actually supports. |
+| Test / sandbox | An account-level test account exists but must be **requested by email**; letters submitted to it are cleared out daily. | **Self-service**: `testmode=true` on any `/prints` request runs the full pipeline (validation, address verification, pricing, webhook dispatch) with no charge and no real mail sent -- available immediately, no request needed. |
+| Cancellation / failed-job handling | Not documented. | `DELETE /prints/{id}` -- only while `draft` or `waiting_to_print`; blocked once `printing` has started or later. Errors are structured JSON (`message`/`type`/`code`/`param`); no documented safe-retry/idempotency guidance for a timed-out request. |
+| Provider-side document/address retention & deletion | Not documented anywhere found. | Not documented anywhere found either. **Real gap on both** -- would need asking each provider's support directly once an account is live. |
+| Indicative UK letter cost | 1st class: ~£1.77 postage + £0.25 service charge + ~£0.12 paper/envelope (example calculation) ≈ ~£2.14, ex VAT. 2nd class listed but price not surfaced in this research. | 1st class **£1.94** ex VAT; 2nd class **£0.84** ex VAT ("most popular") -- both fully inclusive of printing, enveloping and postage; full colour standard on all documents. |
+| What Nick can actually access today | A real, zero-balance account -- reached PDF upload, no live test letter confirmed sent. | Described as having "unresolved login friction" (`handoff_inspect/CLAUDE-TREEKEY-BUILD-PROMPT.md` line 91) -- current access status unknown to this session. |
+
+**Recommendation, given before writing any adapter code, per the task's own instruction:** on automation fit and cost alone, **Intelliprint** is the stronger candidate against verified current docs -- real bearer-token auth vs. plaintext credentials on every legacy-API request; an instant self-service sandbox vs. an emailed request; a documented status lifecycle vs. none found; no minimum spend vs. a £5 top-up; cheaper 2nd-class pricing. The one factor this session cannot verify is "what we can actually access" -- presented as the comparison above and asked as the one required business-decision question via `AskUserQuestion`. **Nick's answer: "Let me get account access sorted first."** No adapter was implemented this pass, and none was guessed at or built speculatively against either provider while that's still open.
+
+**Sources consulted (fetched and read this pass):**
+- https://www.pc2paper.co.uk/api-and-developers.aspx
+- https://www.pc2paper.co.uk/api-and-developers/api-faqs.aspx
+- https://www.pc2paper.co.uk/api-and-developers/json-letter-api.aspx
+- https://www.pc2paper.co.uk/api-and-developers/soap-letter-api.aspx
+- https://www.pc2paper.co.uk/api-and-developers/api-errormessages.aspx
+- https://www.pc2paper.co.uk/api-and-developers/letter-pricing-api.aspx
+- https://www.pc2paper.co.uk/downloads/pc2paperAPI32.pdf ("Letter API Interfaces V3.2")
+- https://www.pc2paper.co.uk/webapp/HowDoITopUp.asp
+- https://www.pc2paper.co.uk/send-letters/postage-prices.aspx
+- https://www.intelliprint.net/api, /api-docs, /reference, /reference/prints/create
+- https://www.intelliprint.net/docs, /docs/cancelling-print-jobs, /docs/tracking-print-jobs, /docs/submitting-print-jobs, /docs/errors
+- https://www.intelliprint.net/pricing
+- https://www.intelliprint.net/help
+- `handoff_inspect/CLAUDE-TREEKEY-BUILD-PROMPT.md` (Nick's own 2026-09-22 account-status notes)
+- `docs/2026-09-22_handoff_status_report.md` Section 4 (confirms the same gap independently)
+
+**What was NOT done this pass, deliberately:** no adapter code written for either provider (Nick's own choice, above); no `.env.example.letter-fulfilment` entries added yet for either provider's credentials (would be premature before the choice is made -- unlike the Stannp entries already there, which document an adapter that already exists in code); the rendered letter's actual address position was **not** checked against either provider's window-envelope zone (only Intelliprint publishes one to check against); provider-side retention/deletion was not asked of either provider directly (would need a live account first).
+
+**Decisions needed from Nick, not invented:** (1) which account he can actually get working credentials for -- determines which adapter gets built first; (2) once decided, real API credentials supplied through secure local configuration, never in chat; (3) the third, still-unchosen provider slot (unchanged from the original build prompt).
+
+## 24. Purchase-to-posting lifecycle review (provider-independent, fake/test only) -- every verified property already correctly implemented except one: refund-to-cancellation isn't wired to any trigger (2026-09-24, later pass)
+
+**Full narrative and every code reference: `ERROR_LOG.md`'s matching 2026-09-24 entry.** This section is the operator-facing summary.
+
+Nine properties were verified this pass by reading the current code directly (payment-confirmed vs. pending vs. funds-in-bank; funding-gate reservation before any send; duplicate-prevention across repeated clicks/webhooks/workers; approval-snapshot freeze; failed-DB-write recoverability; acceptance-vs-dispatch; no auto-resend on ambiguous outcomes; rejection follows the configured provider-slot order; unavailable funds produce a visible `pending_funding`/`failed` state plus the existing `/admin/live-provider-status` breakdown). **All nine were already correctly implemented** -- mostly from the 2026-09-18 review's Section 6/7 funding-reservation and content-freezing work, and Item 4's payment reconciliation, both re-confirmed here rather than trusted. No code changes were needed for any of them.
+
+**One real gap, not fixed -- a business decision, not a bug to patch silently.** `fulfilment.mark_cancelled()` exists, is safe (structurally cannot cancel an obligation that has already reached a provider), and is unit-tested -- but nothing in this codebase ever calls it. `payments.py` does not handle a Stripe `charge.refunded` event. So a manual refund issued from the Stripe dashboard today does not stop the corresponding letter from being queued and sent. Decision table (also in `ERROR_LOG.md`):
+
+| Question | Option A | Option B | Option C (today) |
+|---|---|---|---|
+| Refund before the letter reaches a provider -- cancel automatically? | Add a `charge.refunded` webhook handler calling the existing `mark_cancelled()` | Admin cancels manually via a new small admin action, same existing `mark_cancelled()` | No link -- refund and cancellation stay two independent manual actions |
+| Refund after `provider_accepted`/`dispatched`? | `mark_cancelled()` already refuses this regardless of which option above is picked -- no decision needed | | |
+
+**Wording previews delivered this pass**: all three templates' current wording, rendered through the real `letter_content.render_preview_letter()` path (fixed fictional sample data), via new `tests/letter_pagination_check/render_wording_previews.py`. Layout remains approved (`TreeKey-branded-letter-draft-v2.pdf`); wording approval is still outstanding and these previews are what that approval decision should be based on -- they are not evidence of postal address-window print compatibility, which stays unverified pending a chosen provider.
+
+**Still blocked on a real provider, unchanged by this pass:** real HTTP behaviour, real timeouts, real status-webhook delivery, and real address-window print accuracy all remain unverifiable from this sandbox until Nick's Intelliprint-access decision (section 23 above) resolves.
+
+## 25. Buyer-facing wording audit (mailed-introduction model) -- ~50 stale "buyer gets the address" instances fixed; one real gate-consistency gap in main.py fixed (2026-09-24, later still pass)
+
+**Full narrative and every code reference: `ERROR_LOG.md`'s matching 2026-09-24 entry.** This section is the operator-facing summary.
+
+Every buyer-facing surface was checked against the actual current model (a
+contractor buys a lead; TreeKey arranges an approved postal introduction;
+the homeowner decides whether to reply; a new purchaser does not receive
+the homeowner's name or address) -- homepage, marketplace cards/details,
+pricing, FAQ, free signup, account pages, checkout, and every transactional
+email. All of the named outdated examples ("Unlock Address & Contacts",
+"0 competitors aware", buyer-receives-the-data claims, "burned permanently"
+paired with an address claim, instant unlocked free-lead promises,
+address-dependent Street View/letter tools offered without checking the
+address is actually released) were confirmed present and fixed. The
+highest-severity new instance found (not on the original list): the FAQ's
+non-refundable-payments justification itself claimed "you get immediate
+access to the Lead data itself" -- the policy is unchanged, only its false
+stated reason was fixed. Also fixed: `payments.py`'s Stripe-facing plan
+names ("...Unlock..." → "...Purchase..."), a marketplace badge claiming
+phone verification that doesn't exist, and the two actual post-purchase
+emails, whose subject/heading/closing-note unconditionally claimed the
+address was included even on leads where the shown value was already
+correctly redacted -- the copy and the data disagreed; now they agree.
+
+**One real gate-consistency gap found and fixed:** the marketplace card,
+lead-detail page, checkout page, and letter-setup banner in `main.py` all
+promised "includes 1 printed & posted intro letter" unconditionally,
+despite code comments claiming they already used the same go-live gate
+`payments.py`'s pricing page correctly uses
+(`fulfilment.letter_sending_live()`). They didn't. All four now call that
+same existing gate, so the checkout page itself can no longer promise an
+operational posted letter while real sending stays dry-run-only. Payment
+can still be taken today regardless (unchanged, not asked to change -- the
+letter-approval step is a separate, intentional requirement before any
+purchase) -- this fix stops the site claiming a guarantee it can't back.
+
+**Nothing invented**: no price, allowance, dispatch time, refund term,
+qualification, or guarantee was added; every fix reused the two gates that
+already existed for exactly this purpose. No unresolved package detail
+needing a decision was found. Full regression suite: 568/568 passing,
+unchanged. Two pre-existing, unrelated test-environment gaps were
+surfaced and confirmed (via this repo's own git baseline) to predate this
+pass -- not fixed, as that would be unrelated-refactoring outside scope;
+see `ERROR_LOG.md`'s entry for detail. Nothing deployed, charged, sent, or
+configured live; live sending remains disabled throughout.
+
+## 26. "My Introductions" account view -- a richer, structured per-introduction record built on the existing fulfilment tables; one genuine pre-existing gap (template_version always NULL) found and fixed (2026-09-24, later still pass)
+
+**Full narrative and every code reference: `ERROR_LOG.md`'s matching 2026-09-24 entry.** This section is the operator-facing summary.
+
+The contractor-facing "My Leads" page (`/my-leads`) now shows a richer
+mailing-status block for any lead whose sale went through the fulfilment
+pipeline (`fulfilment.get_introduction_record_for_lead_reference`): a plain-
+English stage (awaiting approval / preparing / submitted to postal provider
+/ dispatch confirmed / needs attention, mapped from the real
+`letter_obligations.status` enum, never labelling acceptance as dispatch or
+dispatch as delivery -- there is no "delivered" concept anywhere in this
+codebase), a safe work category/area (reused from the marketplace's own
+classifier, nothing new exposed), the letter template version used (or
+"not yet finalised"), the provider's name/reference and accepted/dispatched/
+failed timestamps with an explicit statement that no downloadable proof-of-
+postage document exists, and a link to the contractor's own existing
+address-free letter preview.
+
+**Important operational note, unchanged from every earlier pass:**
+`LETTER_DISPATCH_PIPELINE` still defaults to `"legacy"`. This new view is
+built strictly from the new `lead_allocations`/`letter_obligations` tables,
+so it correctly shows nothing extra for any lead sold under today's default
+config -- it will only start showing real data once the pipeline is
+switched to `"fulfilment"` for new sales. This is not a bug; it's the same
+honest degrade the rest of this codebase already relies on rather than
+fabricating a status for a sale that never wrote to these tables.
+
+**One real, pre-existing gap found and fixed while building this:**
+`letter_obligations.template_version` was defined in the schema and
+accepted as a function parameter, but no caller anywhere ever actually
+passed a value for it -- confirmed by reading every real call site, not
+assumed. It has been NULL for the entire lifetime of the table. Fixed at
+the one correct point (`worker.promote_pending_approvals`, where a specific
+template is actually frozen for sending) -- one added column in an existing
+UPDATE, nothing else changed.
+
+**No certificate of posting is fabricated.** The codebase has no
+provider-issued document/certificate mechanism at all (confirmed by reading
+every provider adapter's return type) -- the view states this plainly
+rather than implying one exists.
+
+Full regression suite: 580/580 passing (up from 568 -- new coverage, no
+regressions). Nothing deployed, charged, sent, or configured live; live
+sending remains disabled throughout.

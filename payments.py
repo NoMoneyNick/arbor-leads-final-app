@@ -193,44 +193,62 @@ PLANS = {
     # appended by plan_description()/plan_roi() when
     # fulfilment.letter_sending_live() is True. Do not read these dict
     # entries directly for customer-facing text.
+    # 2026-09-24, mailed-introduction wording audit (Nick's ask: "audit and
+    # update buyer-facing product wording to match the mailed-introduction
+    # model"): "name" and "real_world_roi" below used to say "Unlock" and
+    # "Instant unlocked property address ... plus a Street View brief" --
+    # both wrong under the current model. TreeKey does not hand the buyer
+    # the homeowner's exact address; it arranges an approved postal
+    # introduction to the homeowner (see letter_suffix/roi_letter_suffix,
+    # already correctly gated on fulfilment.letter_sending_live() -- left
+    # untouched by this pass). Street View was never something a buyer
+    # could rely on for a new purchase either: main.py's street_view_
+    # redirect route 403s and shows the redacted placeholder unless
+    # address_release.lead_address_release_allowed() is True for that
+    # specific lead, which it is not for a newly-purchased, non-historical
+    # lead -- so promising it here as a standard inclusion was never
+    # accurate. "description" is left as-is: "100% Exclusive... never sold
+    # again" describes TreeKey's own no-resale policy (a lead sold once,
+    # never resold to another contractor), not a claim that nobody else in
+    # the world is aware of the underlying public planning notice.
     "single_lead_small": {
-        "name": "Single Lead Unlock (Entry)",
+        "name": "Single Lead Purchase (Entry)",
         "description": "100% Exclusive unshared planning lead. Once purchased, this lead is permanently deleted from all systems and never sold again.",
         "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 1900,   # £19 one-off -- Standard value, past its freshest window
         "mode": "payment",
         "badge": "Single Purchase",
-        "real_world_roi": "Instant unlocked property address and application details, plus a Street View brief. Applicant name included when the council has published one.",
+        "real_world_roi": "Full public planning application details for this job, exclusively yours to pursue. Applicant name included when the council has published one.",
         "roi_letter_suffix": " Also includes one printed & posted introduction letter."
     },
     "single_lead_medium": {
-        "name": "Single Lead Unlock (Standard)",
+        "name": "Single Lead Purchase (Standard)",
         "description": "100% Exclusive unshared planning lead. Permanently burned from inventory upon purchase.",
         "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 2900,   # £29 one-off -- Standard value fresh, or Priority value past its freshest window
         "mode": "payment",
         "badge": "Single Purchase",
-        "real_world_roi": "Instant unlocked property address and application details, plus a Street View brief. Applicant name included when the council has published one.",
+        "real_world_roi": "Full public planning application details for this job, exclusively yours to pursue. Applicant name included when the council has published one.",
         "roi_letter_suffix": " Also includes one printed & posted introduction letter."
     },
     "single_lead_priority": {
-        "name": "Single Lead Unlock (Priority)",
+        "name": "Single Lead Purchase (Priority)",
         "description": "100% Exclusive unshared planning lead with elevated statutory/legal weight or scale. Permanently burned from inventory upon purchase.",
         "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 3900,   # £39 one-off -- Priority value fresh, or Elite value past its freshest window
         "mode": "payment",
         "badge": "Single Purchase",
-        "real_world_roi": "Instant unlocked property address and application details, plus a Street View brief. Applicant name included when the council has published one.",
+        "real_world_roi": "Full public planning application details for this job, exclusively yours to pursue. Applicant name included when the council has published one.",
         "roi_letter_suffix": " Also includes one printed & posted introduction letter."
     },
     "single_lead_large": {
-        "name": "Single Lead Unlock (Elite)",
+        "name": "Single Lead Purchase (Elite)",
         "description": "100% Exclusive high-value planning lead -- statutory weight or genuine urgency. Burned from inventory immediately upon purchase.",
         "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 4900,   # £49 one-off -- Elite value, freshest window
         "mode": "payment",
         "badge": "Single Purchase",
-        "real_world_roi": "Instant unlocked property address and full planning specs. Applicant name included when the council has published one.",
+        "real_world_roi": "Full public planning application details and complete planning specs for this job, exclusively yours to pursue. Applicant name included when the council has published one.",
         "roi_letter_suffix": " Also includes one printed & posted introduction letter."
     }
 }
@@ -355,7 +373,7 @@ def _resolve_live_single_lead_price(lead_id: str) -> Optional[dict]:
         return {
             "amount_pence": int(price_pounds) * 100,
             "plan_key": live_plan_key,
-            "name": live_plan["name"] if live_plan else "Single Lead Unlock",
+            "name": live_plan["name"] if live_plan else "Single Lead Purchase",
             # 2026-09-18 review, Section 4: gated through plan_description()
             # so the letter-posting sentence only appears when
             # fulfilment.letter_sending_live() is True -- never read

@@ -106,6 +106,41 @@ class TestPromotePendingApprovals(unittest.TestCase):
         self.assertEqual(report.promoted_to_pending_funding, 1)
         self.assertEqual(report.left_pending_approval, 0)
 
+    def test_promotion_stamps_template_version_onto_the_obligation(self):
+        """2026-09-24 handoff ("My Introductions" account view, "template/
+        version used" field): letter_obligations.template_version was
+        defined in the schema and accepted by fulfilment.
+        create_allocation_and_obligation, but no caller anywhere ever
+        actually passed a value for it -- confirmed by grepping every real
+        call site. This is the one place a specific template is actually
+        frozen for an obligation (the same UPDATE that freezes
+        approved_content_html), so it's the fix: the settings row's own
+        template_version (7 in the mocked settings row below) must now flow
+        into the UPDATE's params. The approval fingerprint must be computed
+        against a settings object with the SAME template_version=7 --
+        template_fingerprint bakes in str(settings.template_version), so a
+        mismatched version here would make is_approval_current legitimately
+        false and the obligation would never reach the UPDATE at all."""
+        fp = letter_content.template_fingerprint(
+            letter_content.ContractorLetterSettings(
+                contractor_email="contractor@example.com", business_name="Apex Tree Care",
+                phone="0113 000 0000", template_version=7,
+            ),
+        )
+        cur = FakeCursor(
+            fetchall_results=[[("ob-1", "PLANIT-001", "1 Test St", "J Bloggs", "contractor@example.com")]],
+            fetchone_results=[
+                ("contractor@example.com", "Apex Tree Care", "0113 000 0000", "", "", "", 7, True, fp,
+                 "friendly_introduction", "", "", ""),  # settings row -- template_version=7
+                ("Fell one oak", "Leeds"),   # leads row
+                ("ob-1",),                    # UPDATE ... RETURNING id
+            ],
+        )
+        worker.promote_pending_approvals(cur)
+        update_sql, update_params = cur.executed[-1]
+        self.assertIn("template_version", update_sql)
+        self.assertIn(7, update_params)
+
     def test_leaves_in_place_when_not_yet_approved(self):
         cur = FakeCursor(
             fetchall_results=[[("ob-1", "PLANIT-001", "1 Test St", "J Bloggs", "contractor@example.com")]],

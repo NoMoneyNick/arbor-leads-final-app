@@ -223,7 +223,7 @@ def _format_filed_date(registered_date) -> str:
         return str(registered_date)
 
 
-def _free_tools_and_subscribe_html(reference: str) -> str:
+def _free_tools_and_subscribe_html(reference: str, address_release_allowed: bool = True) -> str:
     """Sep 10 2026, Nick's ask: "what can we offer them free help wise in
     the purchase email? how can we encourage them to subscribe?" Reuses
     two tools that already exist and are already free once a lead is
@@ -232,14 +232,32 @@ def _free_tools_and_subscribe_html(reference: str) -> str:
     state this lead is in by the time either email sends), rather than
     inventing something new. The subscribe line is a soft, single-line
     upsell, not a hard sell -- this is a receipt-style email, not a
-    marketing blast."""
+    marketing blast.
+
+    2026-09-24, mailed-introduction wording audit: `address_release_allowed`
+    (pass the caller's own address_release.lead_address_release_allowed()
+    result -- the same per-lead decision that already gates the address
+    line and Street View link on both callers) now mirrors main.py's own
+    dashboard/my-leads gating (contractor_dashboard/my_leads_view) for a
+    NEW, non-historical allocation: /generate-street-flyer is withheld
+    entirely (that route needs the raw address, which isn't released), and
+    /generate-letter is relabelled "Preview" since it renders TreeKey's own
+    template preview, not the real posted letter, for a lead in this state.
+    Before this fix, both links were offered unconditionally regardless of
+    release state -- not a data leak (both routes are independently gated
+    server-side), but a dead-end/inconsistent promise the dashboard had
+    already stopped making."""
     ref_q = requests.utils.quote(reference or "")
+    if address_release_allowed:
+        tools_html = f"""<a href="{PUBLIC_APP_URL}/generate-letter/{ref_q}" style="color:#059669; font-weight:bold; margin-right:16px;">Generate a homeowner intro letter →</a>
+                <a href="{PUBLIC_APP_URL}/generate-street-flyer/{ref_q}" style="color:#059669; font-weight:bold;">Generate a street flyer →</a>"""
+    else:
+        tools_html = f"""<a href="{PUBLIC_APP_URL}/generate-letter/{ref_q}" style="color:#059669; font-weight:bold;">Preview your intro letter template →</a>"""
     return f"""
         <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:6px; padding:14px; margin:20px 0;">
             <p style="margin:0 0 8px 0; font-size:13px; color:#065f46;"><strong>Free help winning this job:</strong></p>
             <p style="margin:0; font-size:13px;">
-                <a href="{PUBLIC_APP_URL}/generate-letter/{ref_q}" style="color:#059669; font-weight:bold; margin-right:16px;">Generate a homeowner intro letter →</a>
-                <a href="{PUBLIC_APP_URL}/generate-street-flyer/{ref_q}" style="color:#059669; font-weight:bold;">Generate a street flyer →</a>
+                {tools_html}
             </p>
         </div>
         <p style="font-size:13px; color:#64748b; border-top:1px solid #e5e7eb; padding-top:14px; margin-top:4px;">
@@ -249,7 +267,10 @@ def _free_tools_and_subscribe_html(reference: str) -> str:
 
 
 def send_purchased_lead_email(customer_email: str, lead_data: dict):
-    """Emails the completely unlocked lead details to the buyer after a successful Stripe payment.
+    """Emails the lead details to the buyer after a successful Stripe payment
+    (address/applicant identity still redacted for a normal, non-historical
+    lead -- see address_release.py and this function's 2026-09-24 wording
+    audit note below).
 
     Sep 16 2026, production incident fix: this whole function used to build
     its HTML with NO surrounding try/except (only the final requests.post()
@@ -338,7 +359,7 @@ def _send_purchased_lead_email_inner(customer_email: str, lead_data: dict):
     _guarded_summary = address_release.guarded_summary_for_lead_reference(
         _lead_reference, lead_data.get('summary')) or 'No summary available.'
 
-    subject = f"Unlocked Lead: {lead_data.get('council_source') or 'Local'} Tree Surgery"
+    subject = f"Your Lead: {lead_data.get('council_source') or 'Local'} Tree Surgery"
 
     # Aug 30 2026: applicant_name/agent_name/agent_company/has_agent are now
     # captured by the scraper (see mesh_scrapers.py) and returned by
@@ -377,9 +398,38 @@ def _send_purchased_lead_email_inner(customer_email: str, lead_data: dict):
     filed_date = _format_filed_date(lead_data.get("registered_date"))
     filed_row = f'<p style="margin: 0 0 10px 0;"><strong>Application filed:</strong> {filed_date}</p>' if filed_date else ""
 
+    # 2026-09-24, mailed-introduction wording audit (Nick's ask: "audit and
+    # update buyer-facing product wording to match the mailed-introduction
+    # model"): this closing note used to unconditionally state "This lead
+    # includes ... the address" regardless of whether guarded_addr above
+    # was actually the real address or address_release's redacted
+    # placeholder -- true only for a historical/released lead, false for a
+    # normal new purchase. Reuses _address_release_allowed (already
+    # computed above for the address/Street View gating) rather than a new
+    # check, and reuses fulfilment.letter_sending_live() (the same
+    # executable gate payments.py/main.py already use) so this email can
+    # never promise an operational posted letter that isn't actually live.
+    import fulfilment
+    if _address_release_allowed:
+        _disclosure_note = (
+            "Note: UK councils do not publish a homeowner's phone number or email address on planning "
+            "applications. This lead includes everything that is legally published: the address, the "
+            "applicant name (when the council records it), and the application details above."
+        )
+    else:
+        _letter_note = (
+            " TreeKey will print and post an approved introduction letter to the homeowner on your behalf "
+            "-- it's their choice whether to get in touch." if fulfilment.letter_sending_live() else ""
+        )
+        _disclosure_note = (
+            "Note: TreeKey does not share the homeowner's exact address, phone number or email with you "
+            f"directly.{_letter_note} Everything the council has published about the job itself is in the "
+            "details above."
+        )
+
     html = f"""
     <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
-        <h2 style="color: #059669; margin-top: 0;">Lead Unlocked Successfully!</h2>
+        <h2 style="color: #059669; margin-top: 0;">You've Secured This Lead!</h2>
         <p style="color: #374151;">Thank you for your purchase. Here are the details for the lead you just secured. This lead has been permanently removed from the marketplace.</p>
 
         <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
@@ -399,12 +449,12 @@ def _send_purchased_lead_email_inner(customer_email: str, lead_data: dict):
             {_street_view_link_html(lead_data.get('address') or '') if _address_release_allowed else ''}
         </p>
         <p style="font-size: 12px; color: #94a3b8;">
-            Note: UK councils do not publish a homeowner's phone number or email address on planning applications. This lead includes everything that is legally published: the address, the applicant name (when the council records it), and the application details above.
+            {_disclosure_note}
         </p>
         <p style="font-size: 11px; color: #94a3b8; margin-top: 14px; padding-top: 10px; border-top: 1px solid #f1f5f9;">
             {_NOT_WHAT_YOU_EXPECTED_HTML}
         </p>
-        {_free_tools_and_subscribe_html(_buyer_ref)}
+        {_free_tools_and_subscribe_html(_buyer_ref, address_release_allowed=_address_release_allowed)}
     </div>
     """
 
@@ -492,7 +542,7 @@ def _send_free_lead_granted_email_inner(customer_email: str, lead_data: dict, un
     _guarded_summary = address_release.guarded_summary_for_lead_reference(
         _lead_reference, lead_data.get('summary')) or 'No summary available.'
 
-    subject = f"Your free lead is confirmed — {lead_data.get('council_source') or 'Local'} tree job unlocked"
+    subject = f"Your free lead is confirmed — {lead_data.get('council_source') or 'Local'} tree job"
 
     # 2026-09-23: Request D, Part 1 -- same applicant-name gate as
     # _send_purchased_lead_email_inner above; see that function's comment.
@@ -526,6 +576,27 @@ def _send_free_lead_granted_email_inner(customer_email: str, lead_data: dict, un
     filed_date = _format_filed_date(lead_data.get("registered_date"))
     filed_row = f'<p style="margin: 0 0 10px 0;"><strong>Application filed:</strong> {filed_date}</p>' if filed_date else ""
 
+    # 2026-09-24, mailed-introduction wording audit: same fix as
+    # _send_purchased_lead_email_inner's identical closing note above --
+    # see that function's comment for the full reasoning.
+    import fulfilment
+    if _address_release_allowed:
+        _disclosure_note = (
+            "Note: UK councils do not publish a homeowner's phone number or email address on planning "
+            "applications. This lead includes everything that is legally published: the address, the "
+            "applicant name (when the council records it), and the application details above."
+        )
+    else:
+        _letter_note = (
+            " TreeKey will print and post an approved introduction letter to the homeowner on your behalf "
+            "-- it's their choice whether to get in touch." if fulfilment.letter_sending_live() else ""
+        )
+        _disclosure_note = (
+            "Note: TreeKey does not share the homeowner's exact address, phone number or email with you "
+            f"directly.{_letter_note} Everything the council has published about the job itself is in the "
+            "details above."
+        )
+
     html = f"""
     <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
         <h2 style="color: #059669; margin-top: 0;">Your free lead is confirmed!</h2>
@@ -548,12 +619,12 @@ def _send_free_lead_granted_email_inner(customer_email: str, lead_data: dict, un
             {_street_view_link_html(lead_data.get('address') or '') if _address_release_allowed else ''}
         </p>
         <p style="font-size: 12px; color: #94a3b8;">
-            Note: UK councils do not publish a homeowner's phone number or email address on planning applications. This lead includes everything that is legally published: the address, the applicant name (when the council records it), and the application details above.
+            {_disclosure_note}
         </p>
         <p style="font-size: 11px; color: #94a3b8; margin-top: 14px; padding-top: 10px; border-top: 1px solid #f1f5f9;">
             {_NOT_WHAT_YOU_EXPECTED_HTML}
         </p>
-        {_free_tools_and_subscribe_html(_buyer_ref)}
+        {_free_tools_and_subscribe_html(_buyer_ref, address_release_allowed=_address_release_allowed)}
         {unsub_html}
     </div>
     """
@@ -701,7 +772,7 @@ def send_cold_email_1(email: str, lead_data: dict, code: str, director_name: str
         <p style="margin:0 0 14px 0;">Found a live tree job near {area} that nobody's claimed yet.</p>
         <p style="margin:0 0 14px 0;">{council} logged {work} this week (ref {ref}). No tree surgeon's listed as the agent on it yet.</p>
         <p style="margin:0 0 14px 0;">Nobody's contacted the homeowner yet — it's still fully unclaimed. It's yours, free, no card needed: <a href="{link}" style="color:#059669;">{link}</a></p>
-        <p style="margin:0 0 14px 0;">Your code: <strong style="font-family:monospace; letter-spacing:1px;">{code}</strong> — enter it on that page to unlock the full address.</p>
+        <p style="margin:0 0 14px 0;">Your code: <strong style="font-family:monospace; letter-spacing:1px;">{code}</strong> — enter it on that page to claim it and see the full job details.</p>
         <p style="margin:0 0 14px 0;">I run TreeKey — we scan every UK council's planning register daily for tree work and pass on jobs like this before most contractors even know they exist.</p>
         <p style="margin:0 0 20px 0;">More in a few days if it's useful. No obligation either way.</p>
         <table role="presentation" cellpadding="0" cellspacing="0" style="border-top:1px solid #e5e7eb; padding-top:12px; width:100%;">
@@ -731,8 +802,8 @@ def _blur_address_to_area(address: str) -> str:
     import re
     m = re.search(r'\b([A-Z]{1,2}[0-9][A-Z0-9]?)\s*[0-9][A-Z]{2}\b', (address or "").upper())
     if m:
-        return f"Somewhere in the {m.group(1)} area — exact address unlocks with a subscription"
-    return "Exact address unlocks with a subscription"
+        return f"Somewhere in the {m.group(1)} area — exact address kept confidential"
+    return "Exact address kept confidential"
 
 
     # Sep 10 2026: send_free_account_welcome_email removed. It was the
@@ -816,7 +887,7 @@ def send_free_lead_code_email(email: str, lead_data: dict, code: str, expires_ho
             </tr>
         </table>
         <h2 style="color: #111827; margin: 0 0 12px 0; font-size: 19px;">Your job reservation is confirmed</h2>
-        <p style="color: #374151; margin: 0 0 16px 0;">We've reserved the job below for you and taken it off the market. Use the confirmation code to view the full details.</p>
+        <p style="color: #374151; margin: 0 0 16px 0;">We've reserved the job below for you and taken it off the market. Use the confirmation code to view the full job details.</p>
         <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 0 0 20px 0; border: 1px solid #e2e8f0;">
             <p style="margin: 0 0 10px 0;"><strong>Location:</strong> {_blur_address_to_area(lead_data.get('address', ''))}</p>
             <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source', 'N/A')}</p>
@@ -864,7 +935,7 @@ def send_teaser_lead_email(email: str, lead_data: dict, unsubscribe_url: str = "
             </p>
         </div>
         <p style="font-size: 13px; color: #64748b;">
-            Subscribe to unlock the exact address and get jobs like this the moment they're filed, not after we've teased it to you:
+            Subscribe to get jobs like this the moment they're filed, not after we've teased it to you:
             <a href="https://treekey.co.uk/pricing" style="color:#059669; font-weight:bold;">See plans →</a>
         </p>
         {unsub_html}
@@ -1075,7 +1146,7 @@ def dispatch_lead_alerts(city: str, leads: list):
         )
         notice_banner = f"""
         <div style="background:#f0fdf4; border-left:3px solid #059669; padding:10px; font-size:12px; color:#065f46; margin-bottom:16px;">
-            <b>Early Access:</b> These leads match your area and category and aren't visible on the public Marketplace yet. Whoever unlocks one first gets it -- exclusively, permanently removed from sale to anyone else.{discount_line}
+            <b>Early Access:</b> These leads match your area and category and aren't visible on the public Marketplace yet. Whoever buys one first gets it -- exclusively, permanently removed from sale to anyone else.{discount_line}
         </div>
         """
 
@@ -1098,10 +1169,26 @@ def dispatch_lead_alerts(city: str, leads: list):
             # mode='payment' price shape only -- payments.create_checkout_
             # session recomputes the REAL live price from the lead itself
             # whenever lead_id is set (_resolve_live_single_lead_price),
-            # exactly like every Marketplace "Unlock" button already does.
-            ref = l.get("ref", l.get("reference", ""))
-            url = f"{PUBLIC_APP_URL}/checkout/single_lead_medium?lead_id={urllib.parse.quote(str(ref))}"
-            return f"<a href='{url}' style='background:#059669; color:white; padding:6px 14px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold; white-space:nowrap;'>Unlock →</a>"
+            # exactly like every Marketplace "Buy" button already does.
+            #
+            # 2026-09-24 privacy review fix: this used to send the raw
+            # council reference (l.get("ref"/"reference")) as `lead_id` --
+            # the same class of leak as the marketplace detail page (see
+            # main.py's lead_detail_view comment): the exact search key on
+            # the council's own public portal, handed to a subscriber who
+            # hasn't paid for this specific lead, inside an email link that
+            # can end up in server logs, link previews, or forwarding.
+            # It was also a live functional bug -- _resolve_live_single_
+            # lead_price looks the lead up by `WHERE id = %s` (a UUID
+            # column), so a raw reference string there would never match
+            # and every "Buy" click from this email would fail with
+            # "Payment System Unavailable". Every marketplace/checkout
+            # entry point already uses the lead's own opaque `id` (see
+            # marketplace_view/lead_detail_view's `lid`); this now does the
+            # same, for the same reason.
+            lead_id = l.get("id") or ""
+            url = f"{PUBLIC_APP_URL}/checkout/single_lead_medium?lead_id={urllib.parse.quote(str(lead_id))}"
+            return f"<a href='{url}' style='background:#059669; color:white; padding:6px 14px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold; white-space:nowrap;'>Buy →</a>"
 
         rows = "".join([
             f"<tr>"
@@ -1110,7 +1197,7 @@ def dispatch_lead_alerts(city: str, leads: list):
             # email goes out BEFORE any purchase, to every matching
             # subscriber, so it shows exactly what the Marketplace's own
             # pre-purchase card shows, nothing more. The full address is
-            # what unlocking the lead pays for.
+            # not handed to buyers directly (2026-09-24 wording audit).
             f"<td style='padding:8px;'><b>{l.get('area_label', 'Area unavailable')}</b></td>"
             f"<td style='padding:8px; white-space:nowrap; color:#044332; font-weight:bold;'>{_distance_cell(l)}</td>"
             # Sep 15 2026: routed through _redacted_summary (same as every
@@ -1126,7 +1213,7 @@ def dispatch_lead_alerts(city: str, leads: list):
         body = f"""
             <div style="font-family:sans-serif; max-width:640px; margin:auto; color:#0f172a;">
                 <h2 style="color:#044332; margin-bottom:4px;">TreeKey Early Access — {len(routed_leads)} New Leads</h2>
-                <p style="color:#64748b; font-size:14px; margin-top:0;">New statutory tree work applications matching your area and category, ahead of the public Marketplace. Unlock one to reveal the full address and applicant details -- it's yours exclusively, permanently removed from sale to anyone else. "Exclusive" doesn't mean the homeowner hasn't already engaged someone; check the Agent column below.</p>
+                <p style="color:#64748b; font-size:14px; margin-top:0;">New statutory tree work applications matching your area and category, ahead of the public Marketplace. Buy one to see the full application details -- it's yours exclusively, permanently removed from sale to anyone else. "Exclusive" doesn't mean the homeowner hasn't already engaged someone; check the Agent column below.</p>
 
                 {notice_banner}
 

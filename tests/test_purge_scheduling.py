@@ -125,5 +125,36 @@ class TestPrivacyPolicyExplainsActualTimingNotAnAbsoluteGuarantee(unittest.TestC
         self.assertIn("we do not guarantee deletion at the exact 72-hour mark", html)
 
 
+class TestPrivacyPolicyDistinguishesDeletionFromSystemsWeDoNotControl(unittest.TestCase):
+    """2026-09-24 retention consistency review: the 72-hour deletion
+    paragraph said data is 'permanently deleted' with no scope -- reads as
+    an absolute claim across every copy anywhere, which isn't true (a
+    database backup, the mailing provider's own delivery records, and the
+    physical letter already in the homeowner's hands are all outside
+    Tree Key's control). Fixed by scoping the claim to 'our live
+    application database' and adding one sentence naming what it does not
+    reach. Pinned here so the distinction can't silently regress."""
+
+    def _page_html(self):
+        import asyncio
+        return asyncio.run(main.privacy_policy())
+
+    def test_deletion_is_scoped_to_the_live_application_database(self):
+        html = self._page_html()
+        self.assertIn("permanently deleted from our live application database", html)
+
+    def test_backups_are_named_as_out_of_scope(self):
+        html = self._page_html()
+        self.assertIn("routine backups of that database", html)
+
+    def test_mailing_provider_records_are_named_as_out_of_scope(self):
+        html = self._page_html()
+        self.assertIn("records our mailing provider keeps", html)
+
+    def test_does_not_claim_control_over_systems_it_does_not_control(self):
+        html = self._page_html()
+        self.assertIn("We do not control those systems and do not claim to delete data from them", html)
+
+
 if __name__ == "__main__":
     unittest.main()

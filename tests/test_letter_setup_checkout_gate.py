@@ -306,7 +306,11 @@ class TestApproveLetterSettingsReturnsToCheckout(_SessionTestBase):
                                  query_params={"next": "/checkout/single_lead_small?lead_id=LEAD-1"})
         result = self._run(main.approve_letter_settings(request))
         self.assertEqual(result.status_code, 303)
-        self.assertEqual(result.url, "/checkout/single_lead_small?lead_id=LEAD-1")
+        # 2026-09-24, second pass: `letter_nudge=continue` is appended so
+        # this immediate return to checkout doesn't re-ask the same
+        # personalise-or-standard question this contractor just answered
+        # by approving -- see approve_letter_settings' own comment.
+        self.assertEqual(result.url, "/checkout/single_lead_small?lead_id=LEAD-1&letter_nudge=continue")
 
     @patch("main.letter_content.approve_template")
     @patch("main.letter_content.get_contractor_settings")
@@ -362,7 +366,12 @@ class TestLetterSettingsFormMicrocopyAndAccountIntegration(_SessionTestBase):
                                  query_params={"next": "/checkout/single_lead_small?lead_id=LEAD-1"})
         with patch("main.HTMLResponse", side_effect=lambda content=None, *a, **k: content):
             html_out = main.letter_settings_form(request, next="/checkout/single_lead_small?lead_id=LEAD-1")
-        self.assertIn("Complete and approve your letter template to continue with your purchase", html_out)
+        # 2026-09-24, second pass: wording now explicitly says
+        # personalising is optional (matching /letter-onboarding's own
+        # copy) rather than just "this is required" -- see
+        # _letter_settings_form_html's own comment on why.
+        self.assertIn("Add your business details below to continue with your purchase", html_out)
+        self.assertIn("personalise its wording now, or leave the optional fields blank", html_out)
         # the form action and preview link both carry `next` forward
         self.assertIn('action="/letter-settings?next=%2Fcheckout%2Fsingle_lead_small', html_out)
         self.assertIn('href="/letter-settings/preview?next=%2Fcheckout%2Fsingle_lead_small', html_out)

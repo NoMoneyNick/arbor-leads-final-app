@@ -121,9 +121,16 @@ class TestApprovalFreezesExactRenderedContent(unittest.TestCase):
         update_calls = [c for c in cur.executed if c[0].startswith("UPDATE letter_obligations")]
         self.assertEqual(len(update_calls), 1)
         _, params = update_calls[0]
-        frozen_fingerprint, frozen_html, obligation_id = params
+        # 2026-09-24 handoff ("My Introductions" account view): this UPDATE
+        # now also stamps template_version (settings_v1's own, 1 by
+        # default) at the same point content_fingerprint/approved_content_
+        # html are frozen -- see worker.promote_pending_approvals' own
+        # updated comment. One extra param, same position as the schema's
+        # column order.
+        frozen_fingerprint, frozen_html, frozen_template_version, obligation_id = params
         self.assertEqual(frozen_fingerprint, fp_v1)
         self.assertEqual(frozen_html, html_v1)
+        self.assertEqual(frozen_template_version, settings_v1.template_version)
 
 
 class TestSendUsesFrozenContentDespiteLaterSettingsChange(unittest.TestCase):

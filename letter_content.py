@@ -74,21 +74,129 @@ change does not invent one.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import html
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 PRIVACY_CONTACT_EMAIL_ENV = "TREEKEY_PRIVACY_CONTACT_EMAIL"
 PRIVACY_POLICY_URL_ENV = "TREEKEY_PRIVACY_POLICY_URL"
+
+# 2026-09-24 handoff ("prepare the three-template system for the final
+# TreeKey letters"): the reverse-page "Who is responsible?" notice can
+# optionally include TreeKey's correspondence address. Nick's own
+# 2026-09-22 handoff: "Nick's PO Box verification is under review; exact
+# address, acceptance and permitted use are not confirmed here. Don't
+# substitute the home address, invent a company number, invent a verified
+# PO Box." UNLIKE PRIVACY_CONTACT_EMAIL_ENV below, this is deliberately
+# OPTIONAL, not fail-loud: this address genuinely does not exist yet (it's
+# not a config value someone forgot to set), and this is part of the
+# minimum launch sequence -- a missing address must not block rendering
+# every letter (preview included, which gates contractor onboarding) over
+# an unresolved external business decision. Omitted from the notice
+# entirely when unset (never invented, never a placeholder string) -- see
+# _correspondence_address_clause below. Genuinely blocking: real posting
+# already can't happen regardless (LETTER_SENDING_LIVE / FUNDING_MODE /
+# no configured provider), so this doesn't weaken any safety gate, it only
+# affects the wording of one reverse-page sentence.
+CORRESPONDENCE_ADDRESS_ENV = "TREEKEY_CORRESPONDENCE_ADDRESS"
 
 
 class LetterConfigError(RuntimeError):
     """Raised when required, non-guessable configuration is missing.
     Deliberately loud -- 'missing configuration must fail safely and
     visibly' (brief, Authorisation and boundaries)."""
+
+
+# ---------------------------------------------------------------------------
+# Brand -- 2026-09-24 handoff ("current TreeKey branding", "no invented
+# claims"). Colours and asset choices below are NOT invented here: they are
+# taken verbatim from Nick's own approved v2 design
+# (handoff_inspect/build_letter_v2.py -- the exact hex values that script
+# uses -- and handoff_inspect/README.txt's own split of which of the seven
+# supplied brand assets are "modern" vs "tiny heritage placement only").
+# ---------------------------------------------------------------------------
+BRAND_GREEN = "#08795F"
+BRAND_DARK = "#102D27"
+BRAND_INK = "#243B35"
+BRAND_MUTED = "#5B6C65"
+BRAND_PALE = "#EDF6F1"
+BRAND_TAGLINE_LINE_1 = "LOCAL CONNECTIONS."
+BRAND_TAGLINE_LINE_2 = "PERSONAL INTRODUCTIONS."
+
+# Asset files bundled with this code (not operator configuration -- see
+# _brand_asset_data_uri below). treekey-full-logo.png and
+# treekey-icon-badge-small.png are two of the four assets README.txt marks
+# "modern branding"; treekey-tk-mark-small.png is one of the three marked
+# "tiny heritage placement only" -- used here exactly that way (a small
+# footer mark on both pages), matching build_letter_v2.py's own placement.
+# The "-small" files are locally-resized copies of the originals (full
+# print-resolution masters at 1200x1200px/560KB+ were needlessly large for
+# a mark rendered at a few millimetres) -- same image, same design, smaller
+# file. See app/assets/letter_branding/ for all three.
+_ASSET_DIR = Path(__file__).resolve().parent / "assets" / "letter_branding"
+BRAND_ASSET_FULL_LOGO = "treekey-full-logo.png"
+BRAND_ASSET_ICON_BADGE_SMALL = "treekey-icon-badge-small.png"
+BRAND_ASSET_TK_MARK_SMALL = "treekey-tk-mark-small.png"
+
+_brand_asset_cache: "dict[str, str]" = {}
+
+
+def _brand_asset_data_uri(filename: str) -> str:
+    """Self-contained (no network, no /static mount dependency) so a
+    rendered letter -- including the frozen approved_content_html snapshot
+    stored per obligation -- carries its own branding regardless of
+    whether a webserver is even running. Cached after first read (the
+    files never change at runtime). A missing file is a PACKAGING problem
+    (the asset should ship with the code in every checkpoint ZIP), not an
+    operator configuration gap -- raises plainly rather than silently
+    rendering a letter with no logo."""
+    if filename not in _brand_asset_cache:
+        path = _ASSET_DIR / filename
+        try:
+            raw = path.read_bytes()
+        except OSError as e:
+            raise RuntimeError(
+                f"Letter branding asset {filename!r} is missing from {path}. This ships as part of "
+                f"the code (app/assets/letter_branding/) -- if you see this, the asset was not "
+                f"included when this checkpoint was deployed/extracted."
+            ) from e
+        _brand_asset_cache[filename] = f"data:image/png;base64,{base64.b64encode(raw).decode('ascii')}"
+    return _brand_asset_cache[filename]
+
+
+def _correspondence_address_clause() -> str:
+    """Returns ', at <address>' if TREEKEY_CORRESPONDENCE_ADDRESS is set,
+    or '' (grammatically clean either way) if not -- omit rather than
+    invent, same principle already applied throughout this codebase to
+    other fields that cannot be safely produced (see database.py's
+    marketplace-summary redaction and address_release.py's guarded
+    disclosures). Deliberately NOT fail-loud -- see CORRESPONDENCE_ADDRESS_ENV's
+    own comment above for why a missing address must not block rendering."""
+    val = os.getenv(CORRESPONDENCE_ADDRESS_ENV, "").strip()
+    return f", at {html.escape(val)}" if val else ""
+
+
+def _letter_date_today() -> str:
+    """Europe/London calendar date, formatted for a printed letter (e.g.
+    '24 September 2026'). Same zoneinfo("Europe/London") convention already
+    used elsewhere in this codebase (see main.py/database.py). Deliberately
+    computed HERE, inside render_letter, rather than threaded through as a
+    parameter: render_letter's own 'pure function of its inputs' contract
+    is about FINGERPRINTING (template_fingerprint never calls render_letter
+    at all -- see that function's docstring), and the one place render_letter's
+    real output is ever persisted (worker.promote_pending_approvals) captures
+    the HTML immediately into approved_content_html at the moment of
+    promotion and never re-renders afterwards -- so 'the date on the letter
+    is the date it was actually frozen for sending' is exactly the correct
+    behaviour, not a purity violation in practice."""
+    import datetime
+    from zoneinfo import ZoneInfo
+    return datetime.datetime.now(ZoneInfo("Europe/London")).strftime("%-d %B %Y")
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +267,19 @@ TEMPLATE_REGISTRY: "dict[str, LetterTemplateDefinition]" = {
         sign_off_word="Regards",
     ),
 }
+
+# 2026-09-24 handoff: bump this whenever the REVERSE PAGE's own wording
+# (the "About this letter and your information" notice -- see render_letter)
+# changes. The reverse page is TreeKey's own copy, identical across every
+# contractor and every template (see
+# tests/test_letter_content.py::test_locked_reverse_page_is_identical_across_every_template),
+# exactly like TEMPLATE_REGISTRY's front-page shell text -- and the task's
+# own requirement ("any wording/version change invalidates applicable
+# reusable approval") applies to it the same way: see its inclusion in
+# template_fingerprint's material, below, which is what actually makes
+# editing this text invalidate every contractor's existing approval, not
+# just this comment.
+REVERSE_PAGE_CONTENT_VERSION = 1
 
 # TreeKey's own copy (the three templates above) must never silently assert
 # any of these -- see this module's docstring, "NO AUTOMATIC CLAIMS", and
@@ -421,6 +542,18 @@ def template_fingerprint(settings: ContractorLetterSettings) -> str:
     independent check worker.promote_pending_approvals re-verifies at
     promotion time, per that function's own docstring).
 
+    2026-09-24 handoff: also bakes in REVERSE_PAGE_CONTENT_VERSION. The
+    reverse page (privacy/supporting information) added this pass is
+    TreeKey's own locked copy, identical for every contractor and template
+    -- not part of any one contractor's editable settings, and not part of
+    TEMPLATE_REGISTRY either. Without including it here, a future edit to
+    the reverse page's wording (e.g. once real legal review revises the
+    retention text) would silently NOT invalidate any contractor's existing
+    approval, even though that wording is baked into every frozen
+    approved_content_html snapshot going forward -- the same gap the
+    template-wording fingerprinting above already closes for front-page
+    copy. Bump REVERSE_PAGE_CONTENT_VERSION whenever that wording changes.
+
     IMPORTANT, and easy to miss: this ALSO bakes in the selected template's
     own shell text (opening/quote-request/sign-off) and its registry
     `version` marker -- not just its key. Nick's wording in
@@ -444,6 +577,7 @@ def template_fingerprint(settings: ContractorLetterSettings) -> str:
         settings.business_intro.strip(), settings.services_note.strip(),
         settings.service_area_note.strip(), settings.insurance_note.strip(),
         settings.qualifications_note.strip(), str(settings.template_version),
+        str(REVERSE_PAGE_CONTENT_VERSION),
     ])
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
@@ -529,25 +663,46 @@ def _privacy_policy_url() -> str:
 
 def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, address: str,
                    summary: str, council: str) -> str:
-    """Pure function: same inputs always produce the same output (needed for
-    fingerprinting to mean anything). No network, no DB. Raises
-    LetterConfigError if required config is missing rather than silently
-    substituting a guess -- see _privacy_contact_email above.
+    """Pure function of its settings/lead inputs for fingerprinting purposes
+    (template_fingerprint never calls this -- see that function's own
+    docstring); internally reads today's Europe/London date and the two
+    module-level config values below, neither of which affects what
+    template_fingerprint tracks. No network, no DB. Raises LetterConfigError
+    if required config is missing rather than silently substituting a
+    guess -- see _privacy_contact_email above.
 
-    2026-09-23 handoff: every dynamic value -- contractor-supplied AND
-    lead-sourced (address/summary/council/lead_reference come from the
-    leads table, not from this contractor, but are still external data) --
-    is HTML-escaped here unconditionally, regardless of whether it already
-    passed ContractorLetterSettings.validate()'s stricter '<'/'>' rejection.
-    This is deliberate defense in depth: validate() is what a contractor
-    saving settings through the real routes always goes through, but this
-    function itself makes no assumption about how it was called (see
-    ContractorLetterSettings.validate's own docstring for why both layers
-    exist). The template shell (opening/quote-request/sign-off) is chosen
-    by settings.template_key; the locked privacy/data-source footer is
-    identical across all three templates -- see this module's docstring."""
+    2026-09-24 handoff ("prepare the three-template system for the final
+    TreeKey letters"): produces a genuine TWO-PAGE document -- a front page
+    (the contractor introduction) and a reverse page (supporting/privacy
+    information only, no contractor content or advertisement) -- matching
+    the two-sided A4 layout Nick approved in
+    handoff_inspect/TreeKey-branded-letter-draft-v2.pdf. Each page is a
+    fixed A4-sized block with 'page-break-after: always' between them in
+    print/PDF output, so printing or exporting this document produces
+    exactly two pages, not one long scroll. The PER-TEMPLATE wording
+    (opening/quote-request/sign-off) is UNCHANGED from before this pass --
+    still Nick's placeholder copy pending his final wording (see this
+    module's docstring) -- only REPOSITIONED into the new two-page layout.
+    The reverse page's content is new this pass and is built entirely from
+    facts already established and verified elsewhere in this codebase (the
+    lawful basis already published on /privacy-policy, the address-hiding
+    behaviour address_release.py actually implements, the 72-hour/60-day
+    retention periods actually implemented and tested this session) -- not
+    invented, and not copied from the "DESIGN DRAFT -- NOT FOR POSTING"
+    v2 PDF's own bracketed placeholder text.
+
+    Every dynamic value -- contractor-supplied AND lead-sourced
+    (address/summary/council/lead_reference come from the leads table, not
+    from this contractor, but are still external data) -- is HTML-escaped
+    here unconditionally, regardless of whether it already passed
+    ContractorLetterSettings.validate()'s stricter '<'/'>' rejection. This
+    is deliberate defense in depth: validate() is what a contractor saving
+    settings through the real routes always goes through, but this
+    function itself makes no assumption about how it was called."""
     contact_email_footer = html.escape(_privacy_contact_email())
     policy_url = html.escape(_privacy_policy_url())
+    letter_date = _letter_date_today()
+    correspondence_clause = _correspondence_address_clause()
 
     template = TEMPLATE_REGISTRY.get(settings.template_key) or TEMPLATE_REGISTRY[DEFAULT_TEMPLATE_KEY]
 
@@ -565,15 +720,144 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
     summary_e = esc(summary)
     council_e = esc(council)
 
-    opening_html = f'<p style="font-size:14px; text-align:justify;">{template.opening_line.format(council=council_e, lead_reference=lead_reference_e)}</p>'
-    quote_request_html = f'<p style="font-size:14px; text-align:justify;">{esc(template.quote_request_line)}</p>'
+    opening_html = f'<p class="body-text">{template.opening_line.format(council=council_e, lead_reference=lead_reference_e)}</p>'
+    quote_request_html = f'<p class="body-text">{esc(template.quote_request_line)}</p>'
 
     contact_email_line = f' &middot; {contact_email}' if contact_email else ""
-    service_area_html = f'<div style="font-size:12px; color:#666;">Area covered: {service_area_note}</div>' if service_area_note else ""
-    business_intro_html = f'<p style="font-size:14px;">{business_intro}</p>' if business_intro else ""
-    services_html = f'<p style="font-size:14px;"><b>Services:</b> {services_note}</p>' if services_note else ""
-    insurance_html = f'<p style="font-size:14px;">{esc(settings.insurance_note)}</p>' if settings.insurance_note.strip() else ""
-    qualifications_html = f'<p style="font-size:14px;">{esc(settings.qualifications_note)}</p>' if settings.qualifications_note.strip() else ""
+    service_area_html = f'<div class="meta-line">Area covered: {service_area_note}</div>' if service_area_note else ""
+    business_intro_html = (
+        f'<p class="body-text"><b>About the business.</b> {business_intro}</p>' if business_intro else ""
+    )
+    services_html = f'<p class="body-text"><b>Services:</b> {services_note}</p>' if services_note else ""
+    insurance_html = f'<p class="body-text">{esc(settings.insurance_note)}</p>' if settings.insurance_note.strip() else ""
+    qualifications_html = f'<p class="body-text">{esc(settings.qualifications_note)}</p>' if settings.qualifications_note.strip() else ""
+
+    full_logo_uri = _brand_asset_data_uri(BRAND_ASSET_FULL_LOGO)
+    icon_badge_uri = _brand_asset_data_uri(BRAND_ASSET_ICON_BADGE_SMALL)
+    tk_mark_uri = _brand_asset_data_uri(BRAND_ASSET_TK_MARK_SMALL)
+
+    front_page = f"""<div class="letter-page">
+  <div class="brand-header">
+    <img class="brand-header-logo" src="{full_logo_uri}" alt="TreeKey">
+    <div class="brand-header-tagline">
+      <div>{BRAND_TAGLINE_LINE_1}</div>
+      <div class="brand-header-tagline-sub">{BRAND_TAGLINE_LINE_2}</div>
+    </div>
+  </div>
+
+  <div class="front-top-row">
+    <div class="recipient-block">
+      <div class="meta-label">To the Property Owner / Occupier</div>
+      <div class="recipient-address">{address_e}</div>
+    </div>
+    <div class="intro-ref-block">
+      <div class="intro-ref-label">Your Introduction</div>
+      <div class="meta-line">Reference: {lead_reference_e}</div>
+      <div class="meta-line">{letter_date}</div>
+    </div>
+  </div>
+
+  <p class="body-text">Dear homeowner,</p>
+  {opening_html}
+  {business_intro_html}
+
+  <div class="spec-box">
+    <b>Proposed Arboricultural Specification:</b><br><i>&ldquo;{summary_e}&rdquo;</i>
+  </div>
+  {services_html}
+  {insurance_html}
+  {qualifications_html}
+  {quote_request_html}
+
+  <div class="contact-panel">
+    <div class="contact-panel-label">Speak Directly To Your Tree Surgeon</div>
+    <div class="contact-panel-phone">{phone}</div>
+    <div class="meta-line">{business_name}{contact_email_line}</div>
+  </div>
+  {service_area_html}
+
+  <p class="disclaimer-text">
+    {esc(template.sign_off_word)}, {business_name}
+  </p>
+  <p class="disclaimer-text">
+    There is no obligation. If you have already appointed someone, you can simply disregard this letter.
+    TreeKey arranged this introduction; {business_name} would provide any quotation and carry out any
+    agreed work.
+  </p>
+  <p class="disclaimer-text">
+    Why this reached you: we used information from a public council planning register. See the reverse
+    for supporting and privacy information.
+  </p>
+
+  {_brand_footer_html(tk_mark_uri, page_number=1)}
+</div>"""
+
+    reverse_page = f"""<div class="letter-page">
+  <div class="reverse-header">
+    <img class="reverse-header-mark" src="{icon_badge_uri}" alt="TreeKey">
+    <div class="reverse-header-word">TREEKEY</div>
+  </div>
+  <div class="reverse-title">About this letter and your information</div>
+
+  <div class="notice-section">
+    <div class="notice-heading">Who is responsible?</div>
+    <p class="notice-body">TreeKey is operated by Vector Data Labs, trading as TreeKey{correspondence_clause}.
+    Contact: <b>{contact_email_footer}</b>.</p>
+  </div>
+
+  <div class="notice-section">
+    <div class="notice-heading">Where did the information come from?</div>
+    <p class="notice-body">We used information from your planning application <b>{lead_reference_e}</b>,
+    a public record held by {council_e}.</p>
+  </div>
+
+  <div class="notice-section">
+    <div class="notice-heading">Why is it used?</div>
+    <p class="notice-body">TreeKey uses relevant planning information to identify possible tree-work
+    opportunities and arrange introductions from local tree-work contractors, on the basis of its
+    legitimate interests under UK GDPR Article 6(1)(f) in connecting relevant local contractors with
+    published planning notices.</p>
+  </div>
+
+  <div class="notice-section">
+    <div class="notice-heading">Who receives it?</div>
+    <p class="notice-body">We have not given {business_name} your name or postal address. They receive
+    only a general description of the work and the wider area. Our printing and postal provider need
+    your address to produce and deliver this letter.</p>
+  </div>
+
+  <div class="notice-section">
+    <div class="notice-heading">How long is it kept?</div>
+    <p class="notice-body">Once this letter has been dispatched, we delete your name, address and this
+    letter's content from our live systems within 72 hours. A minimal record of the transaction (needed
+    for accounting and to handle any complaint) is kept for longer; we have not yet set a fixed expiry
+    for that minimal record.</p>
+  </div>
+
+  <div class="notice-section">
+    <div class="notice-heading">Stop further marketing</div>
+    <p class="notice-body">You can object to this or any future TreeKey marketing at any time. Email
+    <b>{contact_email_footer}</b> with your address and reference <b>{lead_reference_e}</b>; no
+    explanation is required. TreeKey will not send another marketing letter about this application.
+    Objecting does not retract this letter or affect this contractor's ability to assist with your
+    project if you choose to contact them directly.</p>
+  </div>
+
+  <div class="notice-section">
+    <div class="notice-heading">Your other rights</div>
+    <p class="notice-body">You can also ask to see, correct or delete the information we hold, or ask us
+    to restrict how we use it, where applicable. You can complain to the Information Commissioner's
+    Office at ico.org.uk.</p>
+  </div>
+
+  <div class="notice-section">
+    <div class="notice-heading">Full privacy information</div>
+    <p class="notice-body">Our full privacy notice, including our data retention periods, is at
+    <b>{policy_url}</b>.</p>
+  </div>
+
+  {_brand_footer_html(tk_mark_uri, page_number=2)}
+</div>"""
 
     return f"""<!DOCTYPE html>
 <html lang="en-GB">
@@ -581,44 +865,96 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
 <meta charset="UTF-8">
 <title>Homeowner Notice Letter | {lead_reference_e}</title>
 <style>
-body {{ font-family: "Georgia", serif; padding: 40px; color: #111; max-width: 650px; margin: auto; line-height: 1.6; background: #fff; }}
-.header {{ border-bottom: 2px solid #044332; padding-bottom: 15px; margin-bottom: 25px; }}
-.title {{ font-size: 20px; font-weight: bold; color: #044332; }}
+{_LETTER_PAGE_CSS}
 </style>
 </head>
 <body>
-<div class="header">
-    <div class="title">{business_name}</div>
-    <div style="font-size:12px; color:#666;">Tel: {phone}{contact_email_line}</div>
-    {service_area_html}
-</div>
-<p style="font-size:14px;"><b>To the Property Owner / Occupier:</b><br>{address_e}</p>
-<p style="font-size:14px;">Dear Homeowner,</p>
-{opening_html}
-{business_intro_html}
-<div style="background:#f8fafc; border-left:3px solid #044332; padding:12px 16px; margin:15px 0; font-size:13px;">
-    <b>Proposed Arboricultural Specification:</b><br><i>"{summary_e}"</i>
-</div>
-{services_html}
-{insurance_html}
-{qualifications_html}
-{quote_request_html}
-<div style="margin-top:30px; font-size:14px;">
-{esc(template.sign_off_word)},<br><br><b>{business_name}</b><br>Direct Line: <b>{phone}</b>
-</div>
-<div style="margin-top:28px; padding-top:14px; border-top:1px solid #cbd5e1; font-size:10.5px; line-height:1.5; color:#64748b;">
-<b>How we found your details.</b> This letter was prepared using information from your planning
-application <b>{lead_reference_e}</b>, a public record held by {council_e}. TreeKey (operated by Vector Data
-Labs) processed this information on the basis of its legitimate interest in connecting relevant local
-contractors with published planning notices. You have the right to object to this processing, to ask what
-information is held about you, or to request its removal from future matching &mdash; contact
-<b>{contact_email_footer}</b>, or see the full privacy notice at <b>{policy_url}</b>, which includes our data
-retention periods and your right to complain to the ICO. Objecting to this processing does not affect this
-contractor's ability to assist with your project if you choose to contact them directly, and does not
-retract the postal notice already provided to you.
-</div>
+{front_page}
+{reverse_page}
 </body>
 </html>"""
+
+
+def _brand_footer_html(tk_mark_uri: str, *, page_number: int) -> str:
+    """Shared tiny footer mark, identical shape on both pages (a real
+    physical letter's page numbering, not contractor content) -- reuses
+    the heritage tk-mark asset at the same tiny size the approved v2
+    design used it at (README.txt: 'for tiny heritage placement only')."""
+    return f"""<div class="page-footer">
+    <img class="page-footer-mark" src="{tk_mark_uri}" alt="">
+    <span class="page-footer-domain">treekey.co.uk</span>
+    <span class="page-footer-pageno">{page_number} / 2</span>
+  </div>"""
+
+
+# Print-safe, fixed-size A4 page CSS shared by both pages. Deliberately NO
+# dynamic font-size scaling anywhere -- "do not shrink text automatically
+# to force overflowing content to fit" (2026-09-24 handoff). Overflowing
+# content is instead rejected up front by ContractorLetterSettings.validate's
+# length limits (see MAX_* below) -- a fixed, predictable layout that
+# either fits or is refused at save time, never a layout that silently
+# compresses to fit whatever was typed. word-break/overflow-wrap on every
+# text element handle a single very long word (e.g. a long business name)
+# without clipping or overflowing its box.
+_LETTER_PAGE_CSS = f"""
+* {{ box-sizing: border-box; }}
+body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Georgia, "Times New Roman", serif; }}
+.letter-page {{
+  width: 210mm; min-height: 297mm; margin: 0 auto; background: #fff; color: {BRAND_INK};
+  padding: 16mm 18mm 14mm 18mm; position: relative; line-height: 1.5;
+  word-break: break-word; overflow-wrap: break-word;
+}}
+@media print {{
+  body {{ background: #fff; }}
+  .letter-page {{ margin: 0; page-break-after: always; }}
+  .letter-page:last-child {{ page-break-after: auto; }}
+}}
+@media screen {{
+  .letter-page {{ margin-bottom: 8mm; box-shadow: 0 0 6px rgba(0,0,0,0.15); }}
+}}
+.body-text {{ font-size: 12.5px; text-align: justify; margin: 0 0 10px 0; }}
+.meta-line {{ font-size: 11px; color: {BRAND_MUTED}; }}
+.meta-label {{ font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: {BRAND_MUTED}; margin-bottom: 3px; }}
+.disclaimer-text {{ font-size: 10px; line-height: 1.5; color: {BRAND_MUTED}; margin: 8px 0; }}
+
+.brand-header {{
+  background: {BRAND_DARK}; border-radius: 6px; padding: 10px 18px; margin-bottom: 14mm;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}}
+.brand-header-logo {{ height: 13mm; max-width: 60%; object-fit: contain; }}
+.brand-header-tagline {{ color: #fff; font-size: 8px; font-weight: bold; letter-spacing: 0.03em; text-align: right; }}
+.brand-header-tagline-sub {{ color: #A5E5CD; font-weight: normal; margin-top: 2px; }}
+
+.front-top-row {{ display: flex; justify-content: space-between; gap: 16px; margin-bottom: 10mm; }}
+.recipient-block {{ max-width: 60%; }}
+.recipient-address {{ font-size: 12.5px; font-weight: bold; white-space: pre-line; }}
+.intro-ref-block {{ text-align: right; }}
+.intro-ref-label {{ font-size: 10.5px; font-weight: bold; color: {BRAND_GREEN}; margin-bottom: 4px; }}
+
+.spec-box {{ background: {BRAND_PALE}; border-left: 3px solid {BRAND_GREEN}; padding: 10px 14px; margin: 12px 0; font-size: 12px; }}
+
+.contact-panel {{ background: {BRAND_PALE}; border-left: 3px solid {BRAND_GREEN}; border-radius: 4px; padding: 12px 16px; margin: 14px 0; }}
+.contact-panel-label {{ font-size: 10.5px; font-weight: bold; color: {BRAND_GREEN}; letter-spacing: 0.02em; text-transform: uppercase; margin-bottom: 6px; }}
+.contact-panel-phone {{ font-size: 17px; font-weight: bold; color: {BRAND_DARK}; margin-bottom: 4px; }}
+
+.reverse-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 4mm; }}
+.reverse-header-mark {{ height: 7mm; width: 7mm; object-fit: contain; }}
+.reverse-header-word {{ font-size: 12px; font-weight: bold; letter-spacing: 0.04em; color: {BRAND_DARK}; }}
+.reverse-title {{ font-size: 14px; font-weight: bold; margin-bottom: 8mm; color: {BRAND_INK}; }}
+
+.notice-section {{ margin-bottom: 9px; }}
+.notice-heading {{ font-size: 10.5px; font-weight: bold; color: {BRAND_INK}; margin-bottom: 2px; }}
+.notice-body {{ font-size: 9.5px; line-height: 1.45; color: #333D38; margin: 0; }}
+
+.page-footer {{
+  position: absolute; left: 18mm; right: 18mm; bottom: 8mm;
+  border-top: 1px solid #D7E5DD; padding-top: 6px;
+  display: flex; align-items: center; gap: 8px; font-size: 9px; color: {BRAND_MUTED};
+}}
+.page-footer-mark {{ height: 5mm; width: auto; }}
+.page-footer-domain {{ color: {BRAND_GREEN}; font-weight: bold; }}
+.page-footer-pageno {{ margin-left: auto; }}
+"""
 
 
 def content_fingerprint(html_content: str) -> str:

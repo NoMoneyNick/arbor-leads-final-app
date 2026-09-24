@@ -229,7 +229,7 @@ class _JourneyFakeCursor:
             "applicant_name": applicant_name, "buyer_email": buyer_email, "status": status,
             "content_fingerprint": None, "approved_content_html": None, "claimed_by_worker": None,
             "attempts": 0, "provider_name": None, "provider_reference": None, "last_error": None,
-            "is_dry_run": False, "_seq": self.state["_next_seq"](),
+            "is_dry_run": False, "template_version": template_version, "_seq": self.state["_next_seq"](),
         }
         self._pending_fetchone = (ob_id,)
 
@@ -249,12 +249,17 @@ class _JourneyFakeCursor:
         self._pending_fetchone = row  # (summary, council) tuple, or None
 
     def _exec_update_to_pending_funding(self, params):
-        (fingerprint, content_html, ob_id) = params
+        # 2026-09-24 handoff ("My Introductions" account view): this UPDATE
+        # now also stamps template_version at the same point content_
+        # fingerprint/approved_content_html are frozen -- see worker.
+        # promote_pending_approvals' own updated comment.
+        (fingerprint, content_html, template_version, ob_id) = params
         row = self.state["letter_obligations"].get(ob_id)
         if row and row["status"] == "pending_approval":
             row["status"] = "pending_funding"
             row["content_fingerprint"] = fingerprint
             row["approved_content_html"] = content_html
+            row["template_version"] = template_version
             self._pending_fetchone = (ob_id,)
         else:
             self._pending_fetchone = None

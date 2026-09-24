@@ -3591,6 +3591,41 @@ _HOUSE_STREET_IN_TEXT_RE = re.compile(
     r'\b\d{1,4}[A-Za-z]?\s+(?:[A-Z][a-zA-Z\'\-]*\s+){0,3}(?:' + _STREET_SUFFIXES + r')\b'
 )
 
+# 2026-09-24 privacy review, Nick's own concern verbatim: "Detailed
+# descriptions and Tree Preservation Order numbers may let someone locate
+# the original application" / "regex redaction currently covers only some
+# patterns." Verified true: the two regexes above only ever looked for an
+# ADDRESS restated inline -- neither one touched a council planning/TPO
+# REFERENCE restated inline (e.g. a scraped description reading "TPO
+# ref 26/P/1118/S73 refers" or "see application 23/00568/WTCA"), even
+# though that reference is the exact search key on the council's own
+# public portal (same reasoning as the marketplace URL fix in this same
+# pass -- see lead_detail_view's comment). Two more best-effort patterns,
+# same "can't be found with 100% certainty" caveat as the two above:
+#
+# _TPO_REFERENCE_IN_TEXT_RE: an explicit "TPO" mention immediately
+# followed by a number, with or without separating slashes/dashes/spaces
+# ("TPO/2024/0142", "TPO 24-0142", "TPO2024/0142") -- always a deliberate
+# reference when "TPO" appears right next to digits like this, never a
+# false-positive date or ordinary sentence.
+#
+# _COUNCIL_REFERENCE_IN_TEXT_RE: the general shape of a UK planning
+# reference -- 2+ "/"-separated alphanumeric segments, at least one of
+# which contains a letter (real examples in this codebase: "26/P/1118/
+# S73", "23/00568/WTCA" -- see _SUSPECT_DISCHARGE_REFS_SEP11). The
+# letter-somewhere requirement is deliberate: it's what stops this from
+# also eating a plain DD/MM/YYYY date mentioned in the text (e.g.
+# "12/09/2026"), which has the same slash-segment shape but is never a
+# reference. This can still occasionally over-redact ordinary prose that
+# happens to contain a letter+slash pattern -- accepted, on the same
+# "omit rather than invent/guarantee" principle as everywhere else in
+# this pass: losing a harmless word from a description is a far smaller
+# problem than leaking the one string that unlocks the address for free.
+_TPO_REFERENCE_IN_TEXT_RE = re.compile(r'\bTPO[\s/-]?\d{2,4}[/-]?\d{0,8}\b', re.IGNORECASE)
+_COUNCIL_REFERENCE_IN_TEXT_RE = re.compile(
+    r'\b(?=[A-Za-z0-9/]*[A-Za-z])[A-Za-z0-9]{1,8}(?:/[A-Za-z0-9]{1,8}){2,4}\b'
+)
+
 
 def _redact_address_from_summary(summary: str) -> str:
     """Sep 9 2026, CRITICAL fix, Nick's ask: the marketplace and the public
@@ -3601,17 +3636,23 @@ def _redact_address_from_summary(summary: str) -> str:
     the text itself (e.g. "T1 - Ash - Fell. Site: 14 Oak Avenue, Newark,
     NG22 8AA"), which handed out exactly what buying the lead is supposed
     to pay for. This is a best-effort, regex-based scrub -- free-text
-    addresses can't be found with 100% certainty -- run over every summary
-    shown anywhere before a lead is purchased: a full postcode anywhere in
-    the text, and a "<number> <name> <Road/Street/Avenue/...>" pattern for
-    the house-number-plus-street case that doesn't include a postcode.
-    Never applied to a summary AFTER purchase/dispatch (the dashboard, the
-    unlock email, WhatsApp forwarding etc. all still use the raw summary --
-    that's the exact thing being paid for)."""
+    addresses (and, as of 2026-09-24, planning/TPO references restated
+    inline -- see _TPO_REFERENCE_IN_TEXT_RE/_COUNCIL_REFERENCE_IN_TEXT_RE's
+    own comment) can't be found with 100% certainty -- run over every
+    summary shown anywhere before a lead is purchased: a full postcode
+    anywhere in the text, a "<number> <name> <Road/Street/Avenue/...>"
+    pattern for the house-number-plus-street case that doesn't include a
+    postcode, an explicit "TPO <number>" mention, and the general
+    "/"-segmented shape of a UK planning reference. Never applied to a
+    summary AFTER purchase/dispatch (the dashboard, the unlock email,
+    WhatsApp forwarding etc. all still use the raw summary -- that's the
+    exact thing being paid for)."""
     if not summary:
         return summary
     redacted = _FULL_POSTCODE_IN_TEXT_RE.sub("[postcode hidden]", summary)
     redacted = _HOUSE_STREET_IN_TEXT_RE.sub("[address hidden]", redacted)
+    redacted = _TPO_REFERENCE_IN_TEXT_RE.sub("[reference hidden]", redacted)
+    redacted = _COUNCIL_REFERENCE_IN_TEXT_RE.sub("[reference hidden]", redacted)
     return redacted
 
 
@@ -6016,10 +6057,10 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
     value tier (see _single_lead_plan_key above) -- these bands describe
     the Standard-value case; Priority/Elite leads price higher at the same
     age:
-    - Flash Hot (Day 0-3): £29 unlock (0 competitors aware)
-    - Active Quoting (Day 4-14): £19 unlock (Prime window)
-    - Clearance / Late Window (Day 15-30): £9 unlock (Consultation closing)
-    - Granted / Approved: £25 unlock (Permitted felling ready to start)
+    - Flash Hot (Day 0-3): £29 (Just Listed)
+    - Active Quoting (Day 4-14): £19 (Prime window)
+    - Clearance / Late Window (Day 15-30): £9 (Consultation closing)
+    - Granted / Approved: £25 (Permitted felling ready to start)
 
     registered_date (Sep 3 2026, Nick's explicit ask): the real date the
     application was filed with the council, when a scan source provided one
@@ -6153,7 +6194,15 @@ def calculate_lead_freshness(discovered_at, planning_status: str = "pending", su
             "tier": "flash_hot",
             "badge_color": "#dc2626",
             "badge_bg": "#fef2f2",
-            "badge_text": "Flash Hot (Day 0–3 • 0 Competitors Aware)",
+            # 2026-09-24, mailed-introduction wording audit: was "Flash Hot
+            # (Day 0-3 * 0 Competitors Aware)" -- an unverifiable claim that
+            # literally zero other contractors know about a PUBLIC council
+            # planning notice. Freshness/urgency is real and worth
+            # advertising; "0 Competitors Aware" is not something TreeKey
+            # can know or promise. Describes exclusivity only within
+            # TreeKey's own no-resale policy from here on ("Just Listed"),
+            # not claims about who else in the world is aware of the record.
+            "badge_text": "Flash Hot (Day 0–3 • Just Listed)",
             "price": _true_unlock_price(hot_key),
             "days_left": f"{days_left} days left in consultation",
             "plan_key": hot_key
@@ -6487,7 +6536,7 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                                           target_lat: float = None, target_lng: float = None,
                                           radius_miles: float = None, max_fresh_lookups: int = 20,
                                           subscriber_early_access: bool = True,
-                                          only_reference: str = None) -> list:
+                                          only_id: str = None) -> list:
     """
     Returns unallocated leads enriched with their dynamic statutory freshness calculation.
     Supports filtering by tier ('council', 'domestic', 'flash_hot', 'active', 'clearance', 'granted'),
@@ -6497,14 +6546,21 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
     from resolve_location() on the customer's typed postcode/outcode).
     Enforces strict separation so council planning notices and private domestic leads are never conflated.
 
-    only_reference (Sep 17 2026, prepurchase detail page): when set, narrows
-    the pool to that one lead's reference before any other processing, so
-    the new /marketplace/lead/{reference} route gets the exact same
-    pricing/freshness/badge/redaction logic every marketplace card already
-    uses, computed for a single lead, instead of duplicating that logic.
-    Still subject to the same status/vertical filtering as the normal
-    listing -- a sold, reserved, or wrong-vertical reference correctly
-    returns [] rather than leaking a lead that shouldn't be shown.
+    only_id (2026-09-24 privacy review; was `only_reference` until this
+    pass -- see the accompanying report): when set, narrows the pool to
+    one lead by its opaque `leads.id` (a real, unguessable UUID) before
+    any other processing, so the /marketplace/lead/{lead_id} route gets
+    the exact same pricing/freshness/badge/redaction logic every
+    marketplace card already uses, computed for a single lead, instead of
+    duplicating that logic. Still subject to the same status/vertical
+    filtering as the normal listing -- a sold, reserved, or wrong-vertical
+    lead correctly returns [] rather than leaking a lead that shouldn't be
+    shown. Deliberately an opaque id, not the raw council reference: that
+    reference is the exact search key on the council's own public planning
+    portal (pasteable there to recover the address before anyone has paid
+    for it), so it must never appear in a public, unauthenticated URL --
+    "encoding the raw reference is not sufficient" (2026-09-24 instruction)
+    is why this is a lookup key swap, not a quoting fix.
 
     subscriber_early_access (Sep 15 2026, Phase 3): pass True (default,
     unchanged behaviour) when the viewer is a verified active subscriber or
@@ -6572,8 +6628,8 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
             # so filtering here to tree only is safe -- a future HMO-facing
             # marketplace would need its own explicit vertical parameter,
             # not silently share this default.
-            _ref_clause = " AND reference = %s" if only_reference else ""
-            _ref_params = (only_reference,) if only_reference else ()
+            _ref_clause = " AND id::text = %s" if only_id else ""
+            _ref_params = (only_id,) if only_id else ()
             try:
                 cur.execute(f"""
                     SELECT id, reference, address, summary, council_source, lead_score, lead_price,
@@ -6794,7 +6850,17 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 if l["source_type"] == "direct_homeowner":
                     l["badge_bg"] = "#ecfdf5"
                     l["badge_color"] = "#065f46"
-                    l["badge_text"] = "Direct Homeowner (Verified Phone)"
+                    # 2026-09-24, mailed-introduction wording audit: was
+                    # "Direct Homeowner (Verified Phone)" -- main.py's
+                    # /api/submit-homeowner-quote takes the phone number
+                    # straight from the intake form with no OTP or other
+                    # verification step, so "Verified" overclaimed. The
+                    # phone itself IS genuinely provided directly by the
+                    # homeowner for this lead type (unlike a council-notice
+                    # lead, this is a legitimate different flow), so that
+                    # part is kept; only the unverified "Verified" claim is
+                    # dropped.
+                    l["badge_text"] = "Direct Homeowner Enquiry"
                 elif l["source_type"] == "domestic_classified":
                     l["badge_bg"] = "#eff6ff"
                     l["badge_color"] = "#1d4ed8"
