@@ -13057,7 +13057,7 @@ def export_mail_list_csv(request: Request, secret: Optional[str] = Query(None)):
     )
 # --- LEGAL PAGES ---
 @app.get("/privacy-policy", response_class=HTMLResponse)
-async def privacy_policy(request: Optional[Request] = None):
+async def privacy_policy(request: Request = None):
     # Sep 24 2026, presentation pass: this page linked static/tailwind.css
     # but never actually called _shared_nav_html()/_shared_footer_html() --
     # it rendered as an island with no way back into the rest of the site
@@ -13164,7 +13164,7 @@ async def privacy_policy(request: Optional[Request] = None):
 """
 
 @app.get("/terms-of-service", response_class=HTMLResponse)
-async def terms_of_service(request: Optional[Request] = None):
+async def terms_of_service(request: Request = None):
     # Sep 24 2026, presentation pass: same nav/footer gap fixed on
     # /privacy-policy and /faq -- this page linked tailwind.css but never
     # called _shared_nav_html()/_shared_footer_html(), so it rendered with
@@ -13270,7 +13270,7 @@ async def terms_of_service(request: Optional[Request] = None):
 
 
 @app.get("/faq", response_class=HTMLResponse)
-async def faq_page(request: Optional[Request] = None):
+async def faq_page(request: Request = None):
     """Sep 24 2026, presentation pass: this page linked tailwind.css but
     never called _shared_nav_html()/_shared_footer_html() -- confirmed live,
     it rendered with no nav at all (not even inconsistent nav -- none), just
