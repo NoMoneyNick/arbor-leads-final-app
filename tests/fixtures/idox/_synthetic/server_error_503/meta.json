@@ -1,0 +1,26 @@
+{
+  "fixture_version": 1,
+  "provenance": "synthetic",
+  "captured_at": "2026-09-22T00:00:00Z",
+  "platform": "idox",
+  "council": "_synthetic",
+  "page_kind": "error",
+  "capture_type": "classifier_fixture",
+  "request": {
+    "method": "GET",
+    "url": "https://example-council.public-i.tbmservices.com/online-applications/search.do",
+    "search_parameters": {"searchType": "Application", "week": "2026-09-15"}
+  },
+  "response": {
+    "final_url": "https://example-council.public-i.tbmservices.com/online-applications/search.do",
+    "status": 503,
+    "headers": {"Content-Type": "text/html; charset=UTF-8"},
+    "redirects": [],
+    "encoding": "utf-8",
+    "tls_verified": true
+  },
+  "sanitisation": {
+    "applied": false,
+    "notes": "Hand-built synthetic fixture -- generic HTTP 503 body text, not a real council response. See tests/fixtures/idox/README.md."
+  }
+}

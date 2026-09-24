@@ -16,6 +16,12 @@ import research
 import payments
 import csv
 import io
+import fulfilment
+import letter_content
+import funding as funding_module
+import suppression as suppression_module
+import address_release
+import worker as fulfilment_worker
 from fastapi import FastAPI, Query, BackgroundTasks, HTTPException, Depends, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -733,6 +739,59 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
 #  Auth 
 
 
+def _admin_basic_auth_ok(request: Request) -> bool:
+    """Non-raising admin check, for routes that accept EITHER a logged-in
+    buyer OR an admin, rather than requiring Basic Auth outright (which
+    would break the normal browser flow for ordinary contractors). Reuses
+    exactly the same DASHBOARD_USER/DASHBOARD_PASS comparison
+    verify_dashboard_auth already uses (see that function just below) --
+    not a second, divergent admin mechanism."""
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Basic "):
+        return False
+    try:
+        decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+        u, p = decoded.split(":", 1)
+        DASH_USER = os.getenv("DASHBOARD_USER", "admin").strip()
+        DASH_PASS = os.getenv("DASHBOARD_PASS", "").strip()
+        return bool(DASH_PASS) and secrets.compare_digest(u.encode(), DASH_USER.encode()) and secrets.compare_digest(p.encode(), DASH_PASS.encode())
+    except Exception:
+        return False
+
+
+def require_lead_ownership(request: Request, lead_reference_or_id: str) -> str:
+    """Section 1 fix. Server-side only: the verified session cookie (never a
+    requester-supplied email/param) is compared against fulfilment.get_lead_owner's
+    authoritative record. Raises HTTPException(404) -- deliberately NOT 403 --
+    for every failure case (no session, wrong buyer, lead not claimed, lead
+    unknown) so the response can never be used to enumerate which lead_ids
+    exist or which are claimed, matching the existing street_view_redirect
+    route's own stated principle ('must never leak which references exist
+    to someone they weren't dispatched to', main.py's street_view_redirect
+    docstring). Admin (DASHBOARD_USER/PASS) always passes. Returns the
+    verified owner's email on success."""
+    if _admin_basic_auth_ok(request):
+        return "admin"
+
+    session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not session_email:
+        raise HTTPException(status_code=404, detail="Not found.")
+
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        owner = fulfilment.get_lead_owner(cur, lead_reference_or_id)
+    finally:
+        cur.close()
+        conn.close()
+
+    if not owner or owner != session_email.strip().lower():
+        logger.warning(f"[Auth] Ownership check failed for lead={lead_reference_or_id!r}: "
+                        f"session={session_email!r} owner={owner!r}.")
+        raise HTTPException(status_code=404, detail="Not found.")
+    return owner
+
+
 def verify_dashboard_auth(credentials: HTTPBasicCredentials = Depends(basic_auth)):
     DASH_USER = os.getenv("DASHBOARD_USER", "admin").strip()
     DASH_PASS = os.getenv("DASHBOARD_PASS", "").strip()
@@ -1337,12 +1396,12 @@ def public_homepage(request: Request):
                 <div class="{_card_style}">
                     {_ribbon}
                     <h3 class="text-2xl font-bold text-white mb-2">{_tier['name']}</h3>
-                    <p class="text-slate-400 mb-6 text-sm">{_tier['description']}</p>
+                    <p class="text-slate-400 mb-6 text-sm">{payments.plan_description(_tier_key, _tier)}</p>
                     <div class="flex items-baseline gap-2 mb-6">
                         <div class="text-4xl font-extrabold text-white">&pound;{_price_gbp:.0f}</div>
                         <div class="text-lg text-slate-500 font-normal">/month</div>
                     </div>
-                    <div class="bg-emerald-500/10 border-l-2 border-emerald-500 rounded p-3 mb-6 text-xs text-emerald-200">{_tier.get('real_world_roi', '')}</div>
+                    <div class="bg-emerald-500/10 border-l-2 border-emerald-500 rounded p-3 mb-6 text-xs text-emerald-200">{payments.plan_roi(_tier_key, _tier)}</div>
                     <ul class="mb-8 space-y-3 text-slate-300 text-sm font-medium">
                         <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 100% Exclusive &mdash; every lead sold once, never resold</li>
                         <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Early-access alert the moment a matching lead is filed</li>
@@ -2893,7 +2952,7 @@ def pricing(request: Request):
     for key, plan in plans.items():
         if plan["mode"] == "subscription":
             price_display = f"£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal; color:#94a3b8;'>/month</span>"
-            roi_box = f"<div style='background:rgba(16,185,129,0.1); border-left:3px solid #059669; padding:10px; font-size:12px; color:#a7f3d0; text-align:left; margin:14px 0; border-radius:4px;'><b>Real-World Math:</b> {plan.get('real_world_roi', '')}</div>"
+            roi_box = f"<div style='background:rgba(16,185,129,0.1); border-left:3px solid #059669; padding:10px; font-size:12px; color:#a7f3d0; text-align:left; margin:14px 0; border-radius:4px;'><b>Real-World Math:</b> {payments.plan_roi(key, plan)}</div>"
             highlight = "border:2px solid #059669; box-shadow:0 8px 24px rgba(5,150,105,0.15);" if key == "starter" else "border:1px solid #334155;"
 
             sub_cards += f"""
@@ -2903,7 +2962,7 @@ def pricing(request: Request):
                         <span style="font-size:11px; background:rgba(16,185,129,0.15); color:#6ee7b7; font-weight:bold; padding:4px 10px; border-radius:20px; text-transform:uppercase;">{plan['badge']}</span>
                     </div>
                     <h3 style="margin:0 0 6px 0; font-size:19px; color:#ffffff;">{plan['name']}</h3>
-                    <p style="color:#94a3b8; font-size:13px; line-height:1.5; margin:0 0 12px 0;">{plan['description']}</p>
+                    <p style="color:#94a3b8; font-size:13px; line-height:1.5; margin:0 0 12px 0;">{payments.plan_description(key, plan)}</p>
                     <div style="font-size:28px; font-weight:800; color:#34d399; margin:10px 0;">{price_display}</div>
                     {roi_box}
                 </div>
@@ -2918,7 +2977,7 @@ def pricing(request: Request):
                 <div style="max-width:480px;">
                     <span style="font-size:10px; background:rgba(148,163,184,0.15); color:#cbd5e1; font-weight:bold; padding:3px 8px; border-radius:12px; text-transform:uppercase;">{plan['badge']}</span>
                     <h4 style="margin:6px 0 4px 0; font-size:16px; color:#ffffff;">{plan['name']}</h4>
-                    <p style="color:#94a3b8; font-size:12px; margin:0;">{plan['description']}</p>
+                    <p style="color:#94a3b8; font-size:12px; margin:0;">{payments.plan_description(key, plan)}</p>
                 </div>
                 <div style="text-align:right;">
                     <div style="font-size:22px; font-weight:bold; color:#34d399; margin-bottom:6px;">{price_display}</div>
@@ -3219,17 +3278,475 @@ def trigger_qr_campaign_stats(secret: Optional[str] = Query(None)):
     return {"status": "ok", "campaigns": database.get_qr_campaign_stats()}
 
 
+# ── Contractor Letter Template Setup & Approval ────────────────────────────────
+# 2026-09-18 review, Section 1 (second pass): "Implement the contractor
+# setup, letter preview and reusable-template approval UI requested
+# originally. Verify that approval is authenticated, belongs to the
+# contractor, and corresponds to the exact content/version being
+# approved." letter_content.approve_template already existed; nothing in
+# this file called it -- address_release.py's own docstring flagged this
+# exact gap ("no contractor-approval UI wired up... this doesn't interact
+# with the address-release gate today, but read the CAUTION...before
+# building one, so its fingerprint is computed from the real render and
+# not [a] redacted placeholder"). Three routes below, each re-deriving the
+# contractor's identity from the signed session cookie -- NEVER from a
+# client-supplied email, id, or form field -- so an approval can only ever
+# be recorded against the settings row belonging to whoever is actually
+# logged in right now:
+#
+#   GET  /letter-settings          -- setup form (prefilled if already saved)
+#   POST /letter-settings          -- save (always resets approved=FALSE --
+#                                      see letter_content.upsert_contractor_settings)
+#   GET  /letter-settings/preview  -- shows the exact render a real letter
+#                                      will use (letter_content.render_letter,
+#                                      the SAME function a real send uses),
+#                                      against fixed illustrative sample lead
+#                                      data -- contractor_letter_settings is
+#                                      per-contractor, not per-lead, so there
+#                                      is no specific real lead to show yet
+#   POST /letter-settings/approve  -- records approval. The fingerprint is
+#                                      ALWAYS computed server-side, right
+#                                      here, from whatever settings row is
+#                                      CURRENTLY saved under this session's
+#                                      own contractor_email -- the request
+#                                      body is never even read for a
+#                                      fingerprint field, let alone trusted
+#                                      for one. This is what "corresponds to
+#                                      the exact content/version being
+#                                      approved" means in practice, and is
+#                                      exactly the trap address_release.py's
+#                                      CAUTION note warned a future version
+#                                      of this UI against.
+#
+# See letter_content.template_fingerprint's own docstring, and worker.
+# promote_pending_approvals, for why approval eligibility is checked at the
+# TEMPLATE level (business name/phone/notes/version) rather than against a
+# specific lead's full rendered letter -- that is what makes one approval
+# here genuinely reusable across every future lead this contractor buys,
+# not just the sample preview it was computed from.
+#
+# 2026-09-23 handoff, contractor letter-template selector: the setup form
+# now also lets a contractor pick one of letter_content.TEMPLATE_REGISTRY's
+# three template shells and edit a business introduction, relevant
+# services, and a contact email, alongside the existing business name/
+# phone/service-area/insurance/qualifications fields -- all subject to the
+# same length limits, markup rejection, and approval-invalidation-on-any-
+# change rules as the fields that already existed (see
+# letter_content.ContractorLetterSettings.validate and
+# letter_content.upsert_contractor_settings). The locked privacy/data-
+# source/address-protection/contact-policy footer is unaffected by any of
+# this -- it has no corresponding form field to tamper with in the first
+# place (see letter_content.py's module docstring).
+
+def _letter_setup_complete(account_email: str) -> bool:
+    """2026-09-23 handoff, Request E ("require completed letter setup
+    before the first purchase that includes mailing"): true only when this
+    contractor has a letter-template settings row that is BOTH approved
+    AND still current for the settings as saved right now -- the exact
+    same bar worker.promote_pending_approvals already applies before any
+    letter is actually sent (see that function, and letter_content.
+    is_approval_current's own docstring). Read-only. Any lookup failure
+    fails CLOSED (treated as incomplete) -- a transient DB error should
+    block a purchase and force a retry, not silently let a contractor
+    with no approved letter through."""
+    if not account_email:
+        return False
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        settings = letter_content.get_contractor_settings(cur, account_email)
+    except Exception:
+        logger.error(f"[LetterSetup] Could not check letter-settings completeness for {account_email}", exc_info=True)
+        return False
+    finally:
+        cur.close()
+        conn.close()
+    if settings is None or not settings.approved:
+        return False
+    return letter_content.is_approval_current(settings, letter_content.template_fingerprint(settings))
+
+
+def _letter_settings_form_html(settings: "letter_content.ContractorLetterSettings", *,
+                                saved: bool = False, approved_msg: bool = False, error: Optional[str] = None,
+                                next: Optional[str] = None) -> str:
+    # 2026-09-23 handoff, Request E ("require completed letter setup before
+    # the first purchase that includes mailing"): `next`, when present, is
+    # a same-site path (typically /checkout/...) a caller was redirected
+    # away from (see checkout()'s own comment) -- threaded through this
+    # form's own action attribute and the preview link so the whole setup
+    # -> preview -> approve journey carries it forward, and
+    # approve_letter_settings can send the contractor straight back to
+    # finish the purchase they started. Reuses the same _safe_next_url()
+    # the /login "sign in for your discount" flow already relies on (see
+    # _login_session_response) rather than a second bespoke validator --
+    # both here, defensively, and again at every route that consumes it --
+    # never trust it blindly into a redirect.
+    next = _safe_next_url(next)
+    next_q = f"?next={urllib.parse.quote(next, safe='')}" if next else ""
+
+    banner = ""
+    if next:
+        banner = '<div style="background:rgba(56,189,248,0.12); border:1px solid #38bdf8; color:#7dd3fc; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:13px;">Complete and approve your letter template to continue with your purchase -- every lead includes a posted introduction letter, so this is required before you buy.</div>'
+    elif error:
+        banner = f'<div style="background:rgba(248,113,113,0.12); border:1px solid #f87171; color:#fca5a5; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:13px;">{html.escape(error)}</div>'
+    elif approved_msg:
+        banner = '<div style="background:rgba(52,211,153,0.12); border:1px solid #34d399; color:#34d399; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:13px;">Template approved. It will now be used automatically for every lead you buy, until you change these details.</div>'
+    elif saved:
+        banner = '<div style="background:rgba(52,211,153,0.12); border:1px solid #34d399; color:#34d399; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:13px;">Saved. Preview it below, then approve it so it can be used automatically.</div>'
+    if error and next:
+        # A validation error takes priority over the "why am I here" notice
+        # once they've actually tried submitting, but next is still carried
+        # forward via next_q regardless of which banner is shown.
+        banner = f'<div style="background:rgba(248,113,113,0.12); border:1px solid #f87171; color:#fca5a5; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:13px;">{html.escape(error)}</div>'
+
+    status_line = (
+        '<span style="color:#34d399;">Approved -- in use for new letters.</span>' if settings.approved
+        else '<span style="color:#fbbf24;">Not yet approved -- letters are held until you approve a preview below.</span>'
+    )
+
+    def esc(v: str) -> str:
+        return html.escape(v or "")
+
+    # 2026-09-23 handoff, contractor letter-template selector: template
+    # choices come from letter_content.TEMPLATE_REGISTRY -- there is no
+    # hardcoded list here, so adding/renaming a template only ever touches
+    # letter_content.py. Wording for each template is a placeholder pending
+    # Nick's final copy (see that module's docstring) -- the selector and
+    # workflow around it do not need to change when that copy is replaced.
+    template_options_html = "\n".join(
+        f'<option value="{esc(key)}"{" selected" if key == settings.template_key else ""}>{esc(label)}</option>'
+        for key, label in letter_content.template_choices()
+    )
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <title>Letter Template Settings | TreeKey</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:32px 16px; }}
+            .container {{ max-width: 640px; margin: auto; }}
+            .card {{ background:#0f172a; border:1px solid #1e293b; border-radius: 12px; padding: 24px; }}
+            label {{ display:block; font-size:13px; color:#94a3b8; margin-top:14px; margin-bottom:4px; }}
+            input, textarea, select {{ width: 100%; box-sizing: border-box; padding: 10px; background:#020617; color:#e2e8f0; border:1px solid #334155; border-radius: 6px; font-family: inherit; font-size:14px; }}
+            textarea {{ min-height: 60px; resize: vertical; }}
+            .hint {{ font-size:11px; color:#64748b; margin-top:3px; }}
+            .btn {{ background:#059669; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size:14px; }}
+            .btn-secondary {{ background:#1e293b; color:#e2e8f0; border:1px solid #334155; }}
+        </style>
+    </head>
+    <body>
+    <div class="container">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h1 style="margin:0; font-size:22px; color:#34d399;">Letter Template Settings</h1>
+            <a href="/dashboard" style="color:#34d399; font-size:13px; text-decoration:none; font-weight:bold;">&larr; Dashboard</a>
+        </div>
+        <div class="card">
+            {banner}
+            <p style="font-size:13px; color:#94a3b8; margin-top:0;">These details appear on every introduction letter TreeKey posts on your behalf. Status: {status_line}</p>
+            <form method="POST" action="/letter-settings{next_q}">
+                <label for="template_key">Letter template</label>
+                <select id="template_key" name="template_key">
+                    {template_options_html}
+                </select>
+                <div class="hint">Wording for each template is still being finalised -- you can switch anytime. Switching (like any other change here) requires re-approving your preview before it's used.</div>
+                <label for="business_name">Business name *</label>
+                <input id="business_name" name="business_name" value="{esc(settings.business_name)}" maxlength="{letter_content.MAX_BUSINESS_NAME_LEN}" required>
+                <label for="phone">Phone *</label>
+                <input id="phone" name="phone" value="{esc(settings.phone)}" maxlength="{letter_content.MAX_PHONE_LEN}" required>
+                <label for="contact_email">Contact email (optional)</label>
+                <input id="contact_email" name="contact_email" type="email" value="{esc(settings.contact_email)}" maxlength="{letter_content.MAX_CONTACT_EMAIL_LEN}">
+                <label for="business_intro">Business introduction (optional -- a short paragraph about your business)</label>
+                <div style="font-size:12px; color:#94a3b8; margin:-2px 0 6px 0; font-style:italic;">(this is what customers will see on your introduction letter)</div>
+                <textarea id="business_intro" name="business_intro" maxlength="{letter_content.MAX_BUSINESS_INTRO_LEN}">{esc(settings.business_intro)}</textarea>
+                <div class="hint">Up to {letter_content.MAX_BUSINESS_INTRO_LEN} characters.</div>
+                <label for="services_note">Relevant services (optional)</label>
+                <textarea id="services_note" name="services_note" maxlength="{letter_content.MAX_SERVICES_NOTE_LEN}">{esc(settings.services_note)}</textarea>
+                <div class="hint">Up to {letter_content.MAX_SERVICES_NOTE_LEN} characters.</div>
+                <label for="service_area_note">Service area (optional)</label>
+                <input id="service_area_note" name="service_area_note" value="{esc(settings.service_area_note)}" maxlength="{letter_content.MAX_SERVICE_AREA_LEN}">
+                <label for="insurance_note">Insurance details (optional -- shown exactly as you write it; TreeKey never invents this)</label>
+                <textarea id="insurance_note" name="insurance_note" maxlength="{letter_content.MAX_INSURANCE_LEN}">{esc(settings.insurance_note)}</textarea>
+                <label for="qualifications_note">Qualifications (optional -- shown exactly as you write it; TreeKey never invents this)</label>
+                <textarea id="qualifications_note" name="qualifications_note" maxlength="{letter_content.MAX_QUALIFICATIONS_LEN}">{esc(settings.qualifications_note)}</textarea>
+                <div class="hint">Insurance, qualifications and any other credential you list here are your own claim, shown exactly as written -- TreeKey never adds "insured", "qualified", "vetted" or similar wording on your behalf.</div>
+                <button type="submit" class="btn" style="width:100%; margin-top:18px;">Save</button>
+            </form>
+            <a href="/letter-settings/preview{next_q}" style="display:block; text-align:center; margin-top:12px; color:#94a3b8; font-size:13px;">Preview current template &rarr;</a>
+        </div>
+    </div>
+    </body>
+    </html>
+    """
+
+
+@app.get("/letter-settings", response_class=HTMLResponse)
+def letter_settings_form(request: Request, saved: Optional[str] = Query(None), next: Optional[str] = Query(None)):
+    session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not session_email:
+        # 2026-09-23, Request E: if a signed-out visit to /letter-settings
+        # itself carried a `next` (shouldn't normally happen -- checkout()
+        # only ever sends an already-logged-in contractor here -- but a
+        # session cookie can expire between page load and click), send
+        # them through /login's own existing `next` mechanism so they land
+        # straight back on this same forced-setup page, `next` and all,
+        # once they're signed in again -- reusing _login_session_response's
+        # redirect rather than inventing a second login-return path.
+        login_redirect = "/login"
+        safe_next = _safe_next_url(next)
+        if safe_next:
+            login_redirect = f"/login?next={urllib.parse.quote('/letter-settings?next=' + urllib.parse.quote(safe_next, safe=''), safe='')}"
+        return RedirectResponse(url=login_redirect, status_code=303)
+
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        settings = letter_content.get_contractor_settings(cur, session_email)
+    finally:
+        cur.close()
+        conn.close()
+
+    if settings is None:
+        settings = letter_content.ContractorLetterSettings(contractor_email=session_email, business_name="", phone="")
+
+    return HTMLResponse(_letter_settings_form_html(settings, saved=(saved == "1"), approved_msg=(saved == "approved"), next=next))
+
+
+@app.post("/letter-settings")
+async def save_letter_settings(request: Request):
+    # Cookie session only -- contractor_email is NEVER taken from the form,
+    # so a contractor can only ever save/see their OWN settings row (see
+    # this section's own module-level comment above).
+    session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not session_email:
+        return RedirectResponse(url="/login", status_code=303)
+
+    next = request.query_params.get("next")
+    form = await request.form()
+    # 2026-09-23 handoff, contractor letter-template selector: only these
+    # named fields are ever read from the submitted form -- the locked
+    # privacy/data-source/contact-policy footer (built entirely from server
+    # config inside letter_content.render_letter -- see that module's
+    # docstring) has no corresponding form field at all, so there is
+    # nothing here for a tampered POST to override, whatever extra field
+    # names it includes (see tests/test_letter_settings_routes.py's locked-
+    # field-tampering test). template_key falls back to the current
+    # default when omitted/blank; an invalid value is caught by
+    # settings.validate() below, same as any other bad input.
+    settings = letter_content.ContractorLetterSettings(
+        contractor_email=session_email,
+        business_name=(form.get("business_name") or "").strip(),
+        phone=(form.get("phone") or "").strip(),
+        service_area_note=(form.get("service_area_note") or "").strip(),
+        insurance_note=(form.get("insurance_note") or "").strip(),
+        qualifications_note=(form.get("qualifications_note") or "").strip(),
+        template_key=(form.get("template_key") or letter_content.DEFAULT_TEMPLATE_KEY).strip(),
+        business_intro=(form.get("business_intro") or "").strip(),
+        services_note=(form.get("services_note") or "").strip(),
+        contact_email=(form.get("contact_email") or "").strip(),
+    )
+
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        letter_content.upsert_contractor_settings(cur, settings)
+        conn.commit()
+    except ValueError as e:
+        # validate() failed (missing business_name/phone) -- re-show the
+        # form with what they typed and a plain error, not a 500. `next`
+        # (Request E) is carried through so a forced detour from checkout
+        # survives a validation error too.
+        conn.rollback()
+        return HTMLResponse(_letter_settings_form_html(settings, error=str(e), next=next), status_code=400)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+    next_q = f"?next={urllib.parse.quote(_safe_next_url(next), safe='')}" if _safe_next_url(next) else ""
+    return RedirectResponse(url=f"/letter-settings/preview{next_q}", status_code=303)
+
+
+@app.get("/letter-settings/preview", response_class=HTMLResponse)
+def letter_settings_preview(request: Request, next: Optional[str] = Query(None)):
+    session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not session_email:
+        return RedirectResponse(url="/login", status_code=303)
+
+    next = _safe_next_url(next)
+    next_q = f"?next={urllib.parse.quote(next, safe='')}" if next else ""
+
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        settings = letter_content.get_contractor_settings(cur, session_email)
+    finally:
+        cur.close()
+        conn.close()
+
+    if settings is None:
+        return RedirectResponse(url=f"/letter-settings{next_q}", status_code=303)
+
+    try:
+        preview_html = letter_content.render_preview_letter(settings)
+    except letter_content.LetterConfigError as e:
+        logger.error(f"[LetterSettings] Cannot render preview for {session_email}: {e}")
+        return HTMLResponse(
+            "<h3>Preview cannot be generated</h3><p>TreeKey's server configuration is incomplete "
+            "(a required privacy-contact setting is missing). This has been logged.</p>",
+            status_code=500,
+        )
+
+    already_current = settings.approved and letter_content.is_approval_current(
+        settings, letter_content.template_fingerprint(settings)
+    )
+    approve_section = (
+        '<p style="color:#34d399; font-size:13px;">This exact template is already approved and in use.</p>'
+        if already_current else
+        f"""<form method="POST" action="/letter-settings/approve{next_q}">
+            <button type="submit" class="btn" style="width:100%;">Approve this wording -- use it for every future lead</button>
+        </form>"""
+    )
+    # 2026-09-23, Request E: only shown when this preview was reached via a
+    # forced checkout-time detour (see checkout()'s comment) -- reminds a
+    # contractor mid-detour why they're here instead of at Stripe.
+    next_banner = (
+        '<div style="background:rgba(56,189,248,0.12); border:1px solid #38bdf8; color:#7dd3fc; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:13px;">Approve this to continue with your purchase.</div>'
+        if next else ""
+    )
+
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html lang="en-GB">
+    <head>
+        <meta charset="UTF-8">
+        <title>Preview Letter Template | TreeKey</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:32px 16px; }}
+            .container {{ max-width: 720px; margin: auto; }}
+            .card {{ background:#0f172a; border:1px solid #1e293b; border-radius: 12px; padding: 24px; }}
+            .btn {{ background:#059669; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size:14px; }}
+            iframe {{ width:100%; height:600px; border:1px solid #334155; border-radius:8px; background:white; margin-top:12px; }}
+        </style>
+    </head>
+    <body>
+    <div class="container">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h1 style="margin:0; font-size:22px; color:#34d399;">Preview Your Letter Template</h1>
+            <a href="/letter-settings{next_q}" style="color:#34d399; font-size:13px; text-decoration:none; font-weight:bold;">&larr; Edit</a>
+        </div>
+        <div class="card">
+            {next_banner}
+            <p style="font-size:13px; color:#94a3b8; margin-top:0;">This uses illustrative example lead details ({html.escape(letter_content.PREVIEW_LEAD_REFERENCE)}) so you can see the exact wording and layout -- your real letters will use the same template with each homeowner's actual details filled in.</p>
+            <iframe srcdoc="{html.escape(preview_html)}"></iframe>
+            <div style="margin-top:16px;">{approve_section}</div>
+        </div>
+    </div>
+    </body>
+    </html>
+    """)
+
+
+@app.post("/letter-settings/approve")
+async def approve_letter_settings(request: Request):
+    # Deliberately does not call `await request.form()` at all -- there is
+    # no fingerprint (or anything else) for the client to supply here. The
+    # only inputs to this decision are (a) who the signed session cookie
+    # says is logged in, and (b) whatever settings row is CURRENTLY saved
+    # under that contractor_email, re-read fresh from the database inside
+    # this same request -- never a value carried over from an earlier
+    # preview page load, which could theoretically be stale by the time
+    # the contractor clicks Approve.
+    session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not session_email:
+        return RedirectResponse(url="/login", status_code=303)
+
+    # 2026-09-23, Request E: a same-site /checkout/... target carried
+    # through the setup -> preview -> approve journey (see checkout()'s
+    # comment and _letter_settings_form_html's) -- read from the query
+    # string only, same as save_letter_settings above, and validated
+    # again here rather than trusted from the form action alone.
+    next = _safe_next_url(request.query_params.get("next"))
+
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        settings = letter_content.get_contractor_settings(cur, session_email)
+        if settings is None:
+            conn.rollback()
+            return RedirectResponse(url=f"/letter-settings{'?next=' + urllib.parse.quote(next, safe='') if next else ''}", status_code=303)
+
+        # Server-computed, from the row just re-fetched above under THIS
+        # session's own contractor_email -- see letter_content.
+        # approve_template's docstring and this section's module-level
+        # comment for why a client-supplied fingerprint is never accepted.
+        fingerprint = letter_content.template_fingerprint(settings)
+        letter_content.approve_template(cur, session_email, preview_fingerprint=fingerprint)
+        conn.commit()
+    except letter_content.LetterConfigError as e:
+        conn.rollback()
+        logger.error(f"[LetterSettings] Approve failed for {session_email}: {e}")
+        return RedirectResponse(url="/letter-settings", status_code=303)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+    # 2026-09-23, Request E: once approved, send a contractor who was
+    # mid-checkout straight back to finish buying instead of the default
+    # "saved" confirmation page -- checkout() re-checks completeness fresh
+    # on that next request, it never trusts this redirect alone.
+    if next:
+        return RedirectResponse(url=next, status_code=303)
+    return RedirectResponse(url="/letter-settings?saved=approved", status_code=303)
+
+
 # ── 1-Tap Homeowner Introduction Letter Generator ─────────────────────────────
 
 @app.get("/generate-letter/{lead_id}", response_class=HTMLResponse)
 def generate_homeowner_letter(request: Request, lead_id: str, company: str = "Your Local Tree Specialists", phone: str = "07XXX XXXXXX"):
+    # Sep 18 2026 (this session, Section 6 of the bundled-lead-and-letter
+    # brief): this route used to hand-roll its own copy of the letter HTML
+    # inline (hardcoded £5,000,000 insurance claim, hardcoded
+    # contact@treekey.co.uk, no relationship to what would actually get
+    # posted). It now calls letter_content.render_letter -- the SAME
+    # function the fulfilment/provider path will call when actually
+    # submitting a letter (see letter_providers/registry.py's attempt_send,
+    # which takes pre-rendered content_html rather than re-rendering) -- so
+    # what a contractor previews here is provably the same content that
+    # gets posted, not a second copy that can drift. See letter_content.py's
+    # module docstring for why.
     row = None
+    settings = None
     try:
         conn = database.get_db_conn()
         cur = conn.cursor()
         try:
+            # 2026-09-23: Request D, Part 1 -- dashboard/my-leads links now
+            # send buyer-facing references (address_release.
+            # buyer_facing_reference), not the raw internal lead_reference,
+            # so a new allocation's link can't be pasted into a council
+            # portal search box to re-derive the address/applicant name.
+            # Resolve back to the real internal reference FIRST, before any
+            # existing lookup/ownership/gating logic below runs -- all of
+            # that logic is unchanged and still keys on the real reference.
+            lead_id = address_release.resolve_buyer_facing_reference(cur, lead_id)
             cur.execute("SELECT reference, address, summary, council_source, status FROM leads WHERE id::text = %s OR reference = %s;", (lead_id, lead_id))
             row = cur.fetchone()
+            # Load this contractor's saved letter settings (business name,
+            # phone, insurance/qualifications notes) if they have any, while
+            # the connection is already open. No session (e.g. the admin
+            # basic-auth bypass) or no saved row yet -> settings stays None
+            # and we fall back to the legacy company/phone query params
+            # below, with no insurance/qualifications claim invented.
+            _session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+            if _session_email:
+                settings = letter_content.get_contractor_settings(cur, _session_email)
         finally:
             cur.close()
             conn.close()
@@ -3239,12 +3756,70 @@ def generate_homeowner_letter(request: Request, lead_id: str, company: str = "Yo
 
     if not row:
         return HTMLResponse("<h3>Lead not found.</h3>", status_code=404)
-        
+
     ref, addr, summary, council, status = row
     if status != 'claimed':
         return HTMLResponse(
             "<h3>Lead Not Unlocked</h3><p>This lead has not been purchased yet. Please unlock it in the marketplace to view the full details and generate letters.</p>",
             status_code=403
+        )
+
+    # Section 1 fix (this session): status=='claimed' alone previously was
+    # the ONLY check -- meaning anyone who had ever seen this lead's id
+    # (visible, unauthenticated, on every /marketplace card per that
+    # template's "Unlock Single Lead" href -- see docs/handoff.md for how
+    # this was verified) could pull the homeowner's name/address forever,
+    # regardless of who bought it. require_lead_ownership raises a plain
+    # 404 (never 403 -- see that function's docstring on why) for anonymous
+    # visitors, the wrong buyer, or an unknown/unclaimed reference alike.
+    require_lead_ownership(request, ref)
+
+    # 2026-09-18 review, Section 5: ownership (just above) answers "did this
+    # contractor pay for this lead" -- a commercial question. It is a
+    # SEPARATE question whether TreeKey is legally clear to disclose the
+    # exact address at all (see address_release.py's module docstring --
+    # this is deliberately never derived from payment/funding/provider
+    # state). Guarded here, last, immediately before the address reaches
+    # render_letter -- a paying, verified owner still sees the redacted
+    # placeholder until a human turns this on.
+    #
+    # 2026-09-18 review, Section 2 (second pass): now per-lead
+    # (guarded_address_for_lead_reference), not just the single global
+    # flag -- a HISTORICAL claim (pre-dating this gate) keeps its address
+    # unconditionally; a NEW allocation additionally needs an explicit,
+    # operator-recorded eligibility decision on top of the global flag.
+    # See address_release.py's module docstring for the full reasoning.
+    addr = address_release.guarded_address_for_lead_reference(ref, addr)
+
+    if settings is None:
+        # No contractor_letter_settings row yet (this contractor hasn't
+        # configured their letter through the new settings form) -- fall
+        # back to the legacy query-string company/phone, WITHOUT inventing
+        # an insurance or qualifications claim (section 5: "do not invent
+        # qualifications, insurance, approvals or testimonials"). This is a
+        # deliberate transitional behaviour, not a finished state -- see
+        # docs/launch_checklist.md, "every active contractor must set up
+        # contractor_letter_settings before real sending is enabled."
+        settings = letter_content.ContractorLetterSettings(
+            contractor_email=(_verify_session_cookie(request.cookies.get("treekey_contractor_session")) or "unknown@unconfigured"),
+            business_name=company, phone=phone,
+        )
+
+    try:
+        letter_html = letter_content.render_letter(
+            settings, lead_reference=ref, address=addr, summary=summary, council=council,
+        )
+    except letter_content.LetterConfigError as e:
+        # "Missing configuration must fail safely and visibly" (brief,
+        # Authorisation and boundaries) -- not a raw stack trace, and not a
+        # silently-wrong default privacy contact address.
+        logger.error(f"[Letter] Configuration error rendering letter for {ref}: {e}")
+        return HTMLResponse(
+            "<h3>Letter cannot be generated</h3>"
+            "<p>TreeKey's server configuration is incomplete (a required privacy-contact "
+            "setting is missing). This has been logged. Please contact TreeKey support "
+            "rather than retrying -- this will not resolve itself.</p>",
+            status_code=500,
         )
 
     # Sep 10 2026, Nick's ask ("an issue on the app, how do you go back
@@ -3254,12 +3829,20 @@ def generate_homeowner_letter(request: Request, lead_id: str, company: str = "Yo
     # navigation of its own, deliberately, since it's meant to be a clean
     # printable document. Fine in a normal browser tab; inside the
     # installed standalone app, that stranded the user with no way back at
-    # all. Added a small "back" link (hidden when actually printing, same
-    # @media print rule as the Print button) that goes to wherever THIS
-    # contractor's own dashboard actually is, using the same
-    # _nav_auth_state routing logic the nav bar uses.
+    # all. Added a small "back" link (hidden when actually printing) that
+    # goes to wherever THIS contractor's own dashboard actually is, using
+    # the same _nav_auth_state routing logic the nav bar uses.
+    #
+    # The letter itself now lives in an <iframe srcdoc="..."> rather than
+    # being concatenated into this page's own <html>...</html>: render_letter
+    # returns a complete, standalone document, and the print button below
+    # calls the IFRAME's own print(), so only the actual letter content is
+    # ever sent to a printer/PDF -- the same content, byte for byte, that
+    # gets fingerprinted for template approval and (once wired to a real
+    # provider) submitted for posting.
     _back_auth = _nav_auth_state(request)
     back_url = _back_auth["dashboard_url"] if _back_auth else "/"
+    escaped_letter_html = letter_html.replace("&", "&amp;").replace('"', "&quot;")
     return f"""
     <!DOCTYPE html>
     <html lang="en-GB">
@@ -3267,74 +3850,20 @@ def generate_homeowner_letter(request: Request, lead_id: str, company: str = "Yo
         <meta charset="UTF-8">
         <title>Homeowner Notice Letter | {ref}</title>
         <style>
-            body {{ font-family: "Georgia", serif; padding: 40px; color: #111; max-width: 650px; margin: auto; line-height: 1.6; background: #fff; }}
-            .header {{ border-bottom: 2px solid #044332; padding-bottom: 15px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: flex-end; }}
-            .title {{ font-size: 20px; font-weight: bold; color: #044332; }}
+            body {{ font-family: sans-serif; margin: 0; background: #f1f5f9; }}
+            .bar {{ display:flex; justify-content:space-between; align-items:center; padding: 12px 20px; background: #fff; border-bottom: 1px solid #e2e8f0; }}
             .btn-print {{ background: #044332; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; font-family: sans-serif; }}
             .btn-back {{ color: #044332; font-family: sans-serif; font-size: 13px; text-decoration: none; font-weight: bold; }}
-            @media print {{ .btn-print {{ display: none; }} .btn-back {{ display: none; }} body {{ padding: 0; }} }}
+            iframe {{ width: 100%; border: none; min-height: 1400px; display: block; }}
+            @media print {{ .bar {{ display: none; }} body {{ background: #fff; }} }}
         </style>
     </head>
     <body>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+        <div class="bar">
             <a href="{back_url}" class="btn-back">&larr; Back to Dashboard</a>
-            <button class="btn-print" onclick="window.print()">Print / Save as PDF</button>
+            <button class="btn-print" onclick="document.getElementById('letter-frame').contentWindow.print()">Print / Save as PDF</button>
         </div>
-
-        <div class="header">
-            <div>
-                <div class="title">{company}</div>
-                <div style="font-size:12px; color:#666; font-family:sans-serif;">Professional Arboricultural & Tree Surgery Services</div>
-            </div>
-            <div style="font-size:12px; font-family:sans-serif; text-align:right;">
-                <b>Tel:</b> {phone}<br>
-                <b>Standard:</b> BS 3998:2010 Compliant
-            </div>
-        </div>
-
-        <p style="font-size:14px; margin-bottom:20px;">
-            <b>To the Property Owner / Occupier:</b><br>
-            {addr}
-        </p>
-
-        <p style="font-size:14px;">Dear Homeowner,</p>
-
-        <p style="font-size:14px; text-align:justify;">
-            We are writing to introduce our local arboricultural team in relation to your recent statutory planning notification registered with <b>{council}</b> (Application Reference: <b>{ref}</b>).
-        </p>
-
-        <div style="background:#f8fafc; border-left:3px solid #044332; padding:12px 16px; margin:15px 0; font-size:13px; font-family:sans-serif;">
-            <b>Proposed Arboricultural Specification:</b><br>
-            <i>"{summary}"</i>
-        </div>
-
-        <p style="font-size:14px; text-align:justify;">
-            As an established, fully insured local tree care contractor, our team carries full NPTC city & guilds climbing certifications and £5,000,000 Public Liability Insurance. All operations are strictly executed in accordance with <b>British Standard BS 3998:2010 (Tree Work Recommendations)</b>.
-        </p>
-
-        <p style="font-size:14px; text-align:justify;">
-            We would be pleased to provide a <b>complimentary, no-obligation on-site quotation</b> and assist with any liaison required with the local planning authority tree officer.
-        </p>
-
-        <div style="margin-top:30px; font-size:14px;">
-            Yours sincerely,<br><br>
-            <b>{company}</b><br>
-            Direct Line: <b>{phone}</b>
-        </div>
-
-        <!-- Sep 2026, Nick's business-model pivot: every unlocked lead now
-             gets a letter, no exceptions (see database._queue_letter_dispatch)
-             -- and this section is why: it's the UK GDPR Article 14 notice,
-             now delivered on paper to the actual person it's about, not just
-             sitting on a privacy-policy page nobody has a reason to visit
-             (see TreeKey_Solicitor_Evidence_Pack.md's finding that a website
-             link alone doesn't satisfy Article 14). Kept visually distinct
-             from the sales copy above -- smaller, greyed, its own divider --
-             same convention as the small-print/compliance footer any real
-             trade letter already carries, not hidden, not styled to be missed. -->
-        <div style="margin-top:28px; padding-top:14px; border-top:1px solid #cbd5e1; font-family:sans-serif; font-size:10.5px; line-height:1.5; color:#64748b;">
-            <b>How we found your details.</b> This letter was prepared using information from your planning application <b>{ref}</b>, a public record held by {council}. The application (your name and property address, and the proposed works described above) was identified by TreeKey (operated by Vector Data Labs), a service that matches public planning records with UK tree-care and arboricultural contractors. Vector Data Labs processed this information on the basis of its legitimate interest in connecting relevant local contractors with published planning notices. Vector Data Labs does not hold a phone number or email address for you. You have the right to object to this processing, to ask what information is held about you, or to request its removal from future matching &mdash; contact <b>contact@treekey.co.uk</b>, or see the full privacy notice at <b>treekey.co.uk/privacy-policy</b>. Objecting will not affect this contractor's ability to assist with your project if you choose to get in touch with them directly.
-        </div>
+        <iframe id="letter-frame" srcdoc="{escaped_letter_html}"></iframe>
     </body>
     </html>
     """
@@ -3361,6 +3890,11 @@ def generate_street_flyer(request: Request, lead_id: str, company: str = "Your L
             # real street name/address for free, before anyone had paid for
             # it -- defeating the entire "pay to unlock the exclusive
             # address" business model in one unauthenticated GET.
+            #
+            # 2026-09-23: Request D, Part 1 -- resolve a buyer-facing
+            # reference back to the real internal one first, same as
+            # generate_homeowner_letter above; see that route's comment.
+            lead_id = address_release.resolve_buyer_facing_reference(cur, lead_id)
             cur.execute("SELECT reference, address, summary, status FROM leads WHERE id::text = %s OR reference = %s;", (lead_id, lead_id))
             row = cur.fetchone()
         finally:
@@ -3379,7 +3913,28 @@ def generate_street_flyer(request: Request, lead_id: str, company: str = "Your L
             "<h3>Lead Not Unlocked</h3><p>This lead has not been purchased yet. Please unlock it in the marketplace to view the full details and generate flyers.</p>",
             status_code=403
         )
-    
+
+    # Section 1 fix (this session): same ownership gap as generate_homeowner_letter
+    # above -- see that route's comment and require_lead_ownership's docstring.
+    require_lead_ownership(request, ref)
+
+    # 2026-09-18 review, Section 5: this flyer's entire purpose is putting
+    # the exact address in front of neighbors (see the <b>{addr}</b> below)
+    # -- there is no reduced/safe version of it to show when address
+    # release isn't live, so refuse the whole route rather than deriving a
+    # nonsense "street name" from a redacted placeholder string. Same
+    # independent-of-ownership/payment gate as generate_homeowner_letter --
+    # see address_release.py's module docstring.
+    #
+    # 2026-09-18 review, Section 2 (second pass): per-lead
+    # (lead_address_release_allowed), not just the global flag -- see
+    # generate_homeowner_letter's comment above for the same change.
+    if not address_release.lead_address_release_allowed(ref):
+        return HTMLResponse(
+            f"<h3>Not available yet</h3><p>{address_release.REDACTED_ADDRESS_PLACEHOLDER}</p>",
+            status_code=403,
+        )
+
     # Extract street name from address
     parts = [p.strip() for p in addr.split(",") if p.strip()]
     street_name = parts[0] if parts else "your street"
@@ -3466,18 +4021,51 @@ def checkout(plan_key: str, request: Request):
     if not plan:
         return _branded_message_page(request, "Invalid Plan", "That package doesn't exist or may have been renamed.", cta_text="View Packages", cta_href="/pricing", status_code=404)
 
+    # Sep 15 2026: server-side subscriber discount, from the signed
+    # session cookie ONLY -- never a query param or anything else a
+    # visitor could set themselves.
+    #
+    # 2026-09-23, Request E, REVISED same day per Nick's explicit follow-up
+    # decision: every plan (single lead or subscription) results in a
+    # posted introduction letter (see the subscription page's own "Each
+    # dispatched lead includes one printed & posted introduction letter"
+    # copy further down), so account sign-in AND an approved, fingerprint-
+    # current letter template are now BOTH required before ANY purchase --
+    # including a brand-new/anonymous buyer's first one. This supersedes
+    # the original Request E cut, which deliberately left an anonymous
+    # buyer ungated to preserve payments.create_checkout_session's
+    # pre-existing "login is never required to buy a lead" docstring;
+    # Nick's follow-up instruction ("Require account creation/sign-in and
+    # completed letter approval before all purchases that include mailing,
+    # including first-time buyers") explicitly overrides that decision, so
+    # it is no longer accurate -- see that docstring's own updated note.
+    #
+    # No separate "create an account" step exists or is needed: /login
+    # already issues a signed session cookie for ANY email, new or
+    # existing ("Works whether you're an existing subscriber or signing up
+    # for the first time" -- its own page copy) -- there is no password
+    # and no separate account row to create first. So "require account
+    # creation/sign-in" here just means: no session cookie yet -> send
+    # them through /login before anything else.
+    #
+    # "Preserve the intended purchase through onboarding, but do not
+    # reserve a lead or contact Stripe until setup is approved" is
+    # satisfied by chaining the two ALREADY-EXISTING `next`-carrying
+    # detours rather than inventing a third: not logged in -> /login?next=
+    # <this checkout URL> (the pre-existing "sign in for your discount"
+    # mechanism, _login_session_response); logged in but letter setup
+    # incomplete -> /letter-settings?next=<this checkout URL>. Either way,
+    # nothing below this point (lead reservation, Stripe) runs until both
+    # checks pass on a later re-entry to this same route.
+    account_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    current_path = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+    if not account_email:
+        return RedirectResponse(url=f"/login?next={urllib.parse.quote(current_path, safe='')}", status_code=303)
+    if not _letter_setup_complete(account_email):
+        return RedirectResponse(url=f"/letter-settings?next={urllib.parse.quote(current_path, safe='')}", status_code=303)
+
     # Single lead purchase — go straight to Stripe (no area needed)
     if lead_id or plan.get("mode") == "payment":
-        # Sep 15 2026: server-side subscriber discount, from the signed
-        # session cookie ONLY -- never a query param or anything else a
-        # visitor could set themselves. Anonymous visitors (no cookie, or
-        # an account with no active subscription) buy at full price
-        # exactly as before; account_email=None is a no-op for
-        # create_checkout_session. "Reserve only when checkout starts" is
-        # satisfied here too -- this whole branch, cookie check included,
-        # only runs once the buy click actually lands on /checkout, never
-        # from merely being logged in or viewing the marketplace.
-        account_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
         url = payments.create_checkout_session(plan_key, outcode or "GB", lead_id, account_email=account_email)
         if not url:
             # Sep 15 2026: a lead purchase can now fail this early because
@@ -3567,8 +4155,12 @@ def checkout(plan_key: str, request: Request):
 
     <div class="lock-note">
         Every lead is sent to exactly one contractor and then permanently removed — never shared or resold.
-        We also check your area isn't already fully subscribed before taking payment.
+        We also check your area isn't already fully subscribed before taking payment. Each dispatched lead
+        includes one printed &amp; posted introduction letter to the homeowner on your behalf.
     </div>
+    <!-- Sep 18 2026, this session (Section 8): same copy addition and same
+         go-live gate as the marketplace card -- see marketplace_view's
+         comment on the lead card template for the full note. -->
 
     <form method="POST" action="/checkout/{plan_key}">
         <label for="outcode">Your Postcode or Outcode</label>
@@ -3631,6 +4223,21 @@ async def checkout_post(plan_key: str, request: Request, outcode: str = Form(...
     plan = payments.PLANS.get(plan_key)
     if not plan:
         return _branded_message_page(request, "Invalid Plan", "That package doesn't exist or may have been renamed.", cta_text="View Packages", cta_href="/pricing", status_code=404)
+
+    # 2026-09-23, Request E (revised same day, see checkout()'s own
+    # comment): defense-in-depth copy of the same two-step gate checkout()
+    # (GET) already applies before ever rendering this area form -- an
+    # ordinary visitor can't reach this POST without a session cookie AND
+    # completed letter setup, but a direct/replayed POST could bypass the
+    # GET-time check. On redirect they land back on the plain GET form
+    # (outcode/radius/job_size aren't preserved across this detour -- an
+    # accepted, rare-case tradeoff since normal traffic never reaches this
+    # branch).
+    account_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not account_email:
+        return RedirectResponse(url=f"/login?next={urllib.parse.quote('/checkout/' + plan_key, safe='')}", status_code=303)
+    if not _letter_setup_complete(account_email):
+        return RedirectResponse(url=f"/letter-settings?next={urllib.parse.quote('/checkout/' + plan_key, safe='')}", status_code=303)
 
     # Sep 11 2026, Nick's ask: server-side enforcement of the terms
     # checkbox -- the form's `required` attribute alone is a client-side
@@ -4589,14 +5196,17 @@ def admin_cleanup_stale_leads(request: Request, secret: Optional[str] = Query(No
     filling mark should be deleted anyway correct?" -- confirmed correct
     and now a real hard DELETE, not the earlier soft status-flag:
 
-    56 days (8 weeks) is the right threshold because it's not an arbitrary
-    number -- it's the LONGEST statutory window the app itself already
-    recognises for any lead (see database.calculate_lead_freshness): TPO-
-    flagged leads get 56 days, standard planning notices get 42 days, and
-    domestic get 7. Using 56 days as the single deletion cut-off means a
-    lead is only ever deleted after even its longest-possible legitimate
-    life has expired -- nothing that could still be legitimately live/
-    sellable under the app's own rules gets touched.
+    2026-09-22 handoff: this deletion deadline is now a SEPARATE, LATER
+    clock than sale eligibility -- database.UNSOLD_LEAD_DELETION_DAYS (60
+    days), not the 56-day figure calculate_lead_freshness uses for TPO
+    sale eligibility. A lead is already unsellable well before this
+    deadline (checkout refuses it on its own, independently, at 56/42/7
+    days depending on type), so nothing still legitimately sellable was
+    ever going to be touched by this either way -- 60 vs 56 only changes
+    how long an already-unsellable lead's personal data sits around
+    before deletion, not whether a sellable one can be. See
+    database.UNSOLD_LEAD_DELETION_DAYS's own comment for the full
+    reasoning.
 
     Double date check (Nick's ask: "the filter should have a double check
     for the date just incase"): a lead is only eligible if BOTH date
@@ -4605,8 +5215,12 @@ def admin_cleanup_stale_leads(request: Request, secret: Optional[str] = Query(No
     discovered_at) -- if only one column agreed the lead was stale and the
     other (if present) actually looked recent, that would still have
     deleted it. This version requires the MORE RECENT of the two available
-    dates to also be past 56 days, so a lead is protected unless every
-    date on it says it's stale.
+    dates to also be past the deadline, so a lead is protected unless
+    every date on it says it's stale. 2026-09-22 handoff addition: a
+    lead whose only reason for looking "old enough" is a missing,
+    implausible (pre-2015), or contradictory (registered_date after
+    discovered_at) date is also excluded rather than deleted -- see
+    database.count_deletion_quarantined_leads for visibility into that set.
 
     Still scoped to status 'new'/blank only -- a lead that was ever
     purchased/claimed/dispatched is never touched by this, deleted or
@@ -4625,25 +5239,34 @@ def admin_cleanup_stale_leads(request: Request, secret: Optional[str] = Query(No
     verify_admin_or_secret(request, secret)
 
     preview_count = database.count_stale_leads()
+    quarantined_count = database.count_deletion_quarantined_leads()
     deleted_count = None
     if confirm == "yes" and preview_count > 0:
         deleted_count = database.cleanup_stale_leads()["deleted"]
+
+    quarantine_note = (
+        f"""<p style="color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px; font-size:13px;">
+            <b>{quarantined_count}</b> other lead{'s' if quarantined_count != 1 else ''} would otherwise be old enough to consider, but ha{'ve' if quarantined_count != 1 else 's'} a missing, implausible, or contradictory date and {'are' if quarantined_count != 1 else 'is'} deliberately NOT deleted — needs a human look, not automatic cleanup.
+        </p>""" if quarantined_count else ""
+    )
 
     if deleted_count is not None:
         body = f"""
         <h2 style="color:#044332;">Cleanup Complete</h2>
         <p style="color:#065f46; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:14px;">
-            Permanently deleted <b>{deleted_count}</b> stale lead{'s' if deleted_count != 1 else ''} — over 56 days (8 weeks) old by BOTH available date fields, and never purchased/claimed (status still 'new'/blank throughout).
+            Permanently deleted <b>{deleted_count}</b> stale lead{'s' if deleted_count != 1 else ''} — over {database.UNSOLD_LEAD_DELETION_DAYS} days old by BOTH available date fields, and never purchased/claimed (status still 'new'/blank throughout).
         </p>
+        {quarantine_note}
         """
     else:
         body = f"""
         <h2 style="color:#044332;">Delete Historical Stale Leads</h2>
-        <p style="color:#64748b; font-size:13px;">This PERMANENTLY DELETES leads that are all of: still sitting at status 'new'/blank (never purchased or claimed), AND over 56 days (8 weeks) old by registered_date, AND over 56 days old by discovered_at (whichever of the two is present — this is the "double check" so one stray date field can't wrongly protect or wrongly delete a lead). 56 days is the longest statutory freshness window the app recognises anywhere (TPO leads), so nothing still legitimately sellable can be caught by this.</p>
+        <p style="color:#64748b; font-size:13px;">This PERMANENTLY DELETES leads that are all of: still sitting at status 'new'/blank (never purchased or claimed), AND over {database.UNSOLD_LEAD_DELETION_DAYS} days old by registered_date, AND over {database.UNSOLD_LEAD_DELETION_DAYS} days old by discovered_at (whichever of the two is present — this is the "double check" so one stray date field can't wrongly protect or wrongly delete a lead). This is a separate, later deadline than sale eligibility (56/42/7 days depending on type) — nothing still legitimately sellable can be caught by this.</p>
         <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin:16px 0;">
             <div style="font-size:12px; color:#64748b;">Leads that would be permanently deleted right now</div>
             <div style="font-size:28px; font-weight:800; color:{'#dc2626' if preview_count else '#059669'};">{preview_count}</div>
         </div>
+        {quarantine_note}
         {"<a href='/admin/cleanup-stale-leads?secret=" + (secret or '') + "&confirm=yes' style='background:#dc2626; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block;'>Confirm — permanently delete these " + str(preview_count) + " leads</a>" if preview_count else "<p style='color:#059669;'>Nothing to clean up.</p>"}
         """
 
@@ -4651,6 +5274,105 @@ def admin_cleanup_stale_leads(request: Request, secret: Optional[str] = Query(No
     <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:900px; margin:auto;">
         {body}
         <p style="margin-top:24px;"><a href="/admin/lead-audit?secret={secret or ''}" style="color:#044332;">← Back to Stale-Date Audit</a></p>
+    </body></html>
+    """)
+
+
+@app.get("/admin/dispatch-data-purge", response_class=HTMLResponse)
+def admin_dispatch_data_purge(request: Request, secret: Optional[str] = Query(None), confirm: str = Query("no")):
+    """2026-09-23, Request D Part 2 -- the manual/on-demand counterpart to
+    the automatic daily sweep in run_full_autonomous_cycle, same
+    relationship as /admin/cleanup-stale-leads has to database.
+    cleanup_stale_leads (same underlying function either way, so the
+    numbers always agree). See retention_dispatch_purge.py's own module
+    docstring for exactly what counts as a confirmed dispatch, what gets
+    cleared, and what's deliberately preserved. This IS a real, irreversible
+    clearing of personal data (not reversible once run), so the same
+    two-step confirm (GET with confirm=yes) as cleanup-stale-leads applies
+    -- a bare GET link must never trigger it by itself."""
+    verify_admin_or_secret(request, secret)
+    import retention_dispatch_purge
+
+    preview = retention_dispatch_purge.count_dispatch_purge_eligible()
+    unknown_count = retention_dispatch_purge.count_unknown_outcome_obligations_awaiting_reconciliation()
+    preview_total = preview["obligations"] + preview["dispatches"]
+    result = None
+    if confirm == "yes" and preview_total > 0:
+        result = retention_dispatch_purge.purge_dispatched_personal_data()
+
+    unknown_note = (
+        f"""<p style="color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px; font-size:13px;">
+            <b>{unknown_count}</b> letter obligation{'s' if unknown_count != 1 else ''} still at status='unknown' — no confirmed dispatch, so the 72-hour clock never started and this purge deliberately does not touch them. Never auto-resent either — see /admin/dispatch-reconciliation to ask the provider for its own status.
+        </p>""" if unknown_count else ""
+    )
+
+    if result is not None:
+        body = f"""
+        <h2 style="color:#044332;">Purge Complete</h2>
+        <p style="color:#065f46; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:14px;">
+            Cleared personal data and personalised letter content for <b>{result['obligations_purged']}</b> letter obligation(s), <b>{result['dispatches_purged']}</b> legacy dispatch record(s), and <b>{result['leads_purged']}</b> lead record(s) — all confirmed-dispatched more than {retention_dispatch_purge.DISPATCH_PURGE_DELAY_HOURS} hours ago. Financial, suppression and minimal evidence records (ids, references, status, timestamps, provider references) were left in place.
+        </p>
+        {unknown_note}
+        """
+    else:
+        body = f"""
+        <h2 style="color:#044332;">72-Hour Post-Dispatch Personal-Data Purge</h2>
+        <p style="color:#64748b; font-size:13px;">Clears the homeowner's address/applicant name and the frozen personalised letter HTML for every mailing that is a genuine, provider-confirmed DISPATCH (not merely accepted) more than {retention_dispatch_purge.DISPATCH_PURGE_DELAY_HOURS} hours ago. The lead record's own address/applicant name is cleared too, once nothing for that lead is still unresolved. Payment, allocation, suppression, and the mailing's own ids/status/timestamps/provider references are never touched.</p>
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin:16px 0;">
+            <div style="font-size:12px; color:#64748b;">Eligible right now</div>
+            <div style="font-size:28px; font-weight:800; color:{'#dc2626' if preview_total else '#059669'};">{preview['obligations']} obligation(s) + {preview['dispatches']} legacy dispatch(es)</div>
+        </div>
+        {unknown_note}
+        {"<a href='/admin/dispatch-data-purge?secret=" + (secret or '') + "&confirm=yes' style='background:#dc2626; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block;'>Confirm — permanently clear this data</a>" if preview_total else "<p style='color:#059669;'>Nothing eligible to clear yet.</p>"}
+        """
+
+    return HTMLResponse(f"""
+    <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:900px; margin:auto;">
+        {body}
+    </body></html>
+    """)
+
+
+@app.get("/admin/dispatch-reconciliation", response_class=HTMLResponse)
+def admin_dispatch_reconciliation(request: Request, secret: Optional[str] = Query(None), confirm: str = Query("no")):
+    """2026-09-23, Request D Part 2 -- 'restricted reconciliation' for
+    letter_obligations stuck at status='unknown'. See retention_dispatch_
+    purge.reconcile_unknown_outcome_obligations's own docstring: this never
+    resends, only ever asks the SAME provider that produced the ambiguous
+    result for its own current status, and only ever upgrades a row to
+    whatever that provider now reports. Same two-step confirm convention as
+    the purge route above, even though this is non-destructive (an
+    unattended provider call is still not something a bare GET should
+    trigger)."""
+    verify_admin_or_secret(request, secret)
+    import retention_dispatch_purge
+
+    unknown_count = retention_dispatch_purge.count_unknown_outcome_obligations_awaiting_reconciliation()
+    result = None
+    if confirm == "yes" and unknown_count > 0:
+        result = retention_dispatch_purge.reconcile_unknown_outcome_obligations()
+
+    if result is not None:
+        body = f"""
+        <h2 style="color:#044332;">Reconciliation Complete</h2>
+        <p style="color:#065f46; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:14px;">
+            Resolved <b>{result['resolved']}</b>, still unresolved <b>{result['still_unknown']}</b>, skipped (no matching configured provider) <b>{result['skipped_no_adapter']}</b>.
+        </p>
+        """
+    else:
+        body = f"""
+        <h2 style="color:#044332;">Reconciliation: Unresolved ('unknown') Obligations</h2>
+        <p style="color:#64748b; font-size:13px;">Asks each obligation's own provider for its current status (never resends). An obligation the provider still can't confirm one way or the other stays 'unknown' — this never guesses.</p>
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin:16px 0;">
+            <div style="font-size:12px; color:#64748b;">Stuck at status='unknown' right now</div>
+            <div style="font-size:28px; font-weight:800; color:{'#dc2626' if unknown_count else '#059669'};">{unknown_count}</div>
+        </div>
+        {"<a href='/admin/dispatch-reconciliation?secret=" + (secret or '') + "&confirm=yes' style='background:#044332; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block;'>Run reconciliation now</a>" if unknown_count else "<p style='color:#059669;'>Nothing to reconcile.</p>"}
+        """
+
+    return HTMLResponse(f"""
+    <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:900px; margin:auto;">
+        {body}
     </body></html>
     """)
 
@@ -4982,6 +5704,7 @@ def admin_letter_dispatches(request: Request, secret: Optional[str] = Query(None
     just assuming the code is right forever."""
     verify_admin_or_secret(request, secret)
     import letter_provider
+    import fulfilment
 
     conn = database.get_db_conn()
     cur = conn.cursor()
@@ -4999,10 +5722,28 @@ def admin_letter_dispatches(request: Request, secret: Optional[str] = Query(None
             FROM letter_dispatches ORDER BY created_at DESC LIMIT 25;
         """)
         recent = cur.fetchall()
+        # 2026-09-18 review, Section 2/3: this page previously showed only
+        # the OLD pipeline's queue, with no indication that a SECOND
+        # pipeline (letter_obligations, worker.py) exists or which one is
+        # actually authoritative right now -- an admin had no way to tell
+        # from this page alone. Best-effort: these two new tables may not
+        # exist yet on an older deployment that never ran init_db() after
+        # this session's schema additions, so failures here must not break
+        # the page that already works.
+        obligation_status_counts = {}
+        unresolved_reconciliation_count = 0
+        try:
+            cur.execute("SELECT status, count(*) FROM letter_obligations GROUP BY status;")
+            obligation_status_counts = dict(cur.fetchall())
+            cur.execute("SELECT count(*) FROM payment_allocation_reconciliation WHERE resolved = FALSE;")
+            unresolved_reconciliation_count = cur.fetchone()[0]
+        except Exception as e:
+            logger.warning(f"[Admin] Could not read new-pipeline (letter_obligations) status for this page: {e}")
     finally:
         cur.close()
         conn.close()
 
+    active_pipeline = fulfilment.active_pipeline()
     provider_name = os.getenv("LETTER_PROVIDER", "console").strip().lower() or "console"
     rows_html = "".join([
         f"""<tr>
@@ -5019,6 +5760,10 @@ def admin_letter_dispatches(request: Request, secret: Optional[str] = Query(None
     return HTMLResponse(f"""
     <html><body style="font-family:sans-serif; padding:40px; background:#f8fafc; max-width:1100px; margin:auto;">
         <h2 style="color:#044332;">Letter Dispatches</h2>
+        <div style="background:{'#fef9c3' if active_pipeline == 'legacy' else '#ecfdf5'}; border:1px solid {'#fde047' if active_pipeline == 'legacy' else '#6ee7b7'}; border-radius:8px; padding:12px 16px; margin-bottom:16px; font-size:13px;">
+            <b>Active dispatch pipeline: {active_pipeline}</b> (LETTER_DISPATCH_PIPELINE env var).
+            {"This page's queue below (letter_dispatches / LETTER_PROVIDER) is the one actually processing new sales." if active_pipeline == 'legacy' else "New sales are flowing into letter_obligations instead -- this page's queue below only reflects historical/legacy rows and will not grow."}
+        </div>
         <p style="color:#64748b; font-size:13px;">Active provider: <b>{provider_name}</b>{' (dry-run, sends nothing)' if provider_name == 'console' else ''}. Set the LETTER_PROVIDER env var to switch once a vendor is chosen and funded.</p>
         <div style="display:flex; gap:12px; margin:16px 0; flex-wrap:wrap;">
             {"".join(f'<div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px;"><div style="font-size:11px; color:#64748b;">{s}</div><div style="font-size:22px; font-weight:800;">{c}</div></div>' for s, c in status_counts.items()) or '<p>No letter dispatches yet.</p>'}
@@ -5027,7 +5772,17 @@ def admin_letter_dispatches(request: Request, secret: Optional[str] = Query(None
                 <div style="font-size:22px; font-weight:800; color:{'#dc2626' if claimed_without_letter else '#059669'};">{claimed_without_letter}</div>
             </div>
         </div>
-        <p><a href="/admin/process-letter-dispatches?secret={secret or ''}" style="background:#044332; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block;">Process queue now (one batch of 20)</a></p>
+        <h3 style="color:#044332; margin-top:24px;">New pipeline (letter_obligations)</h3>
+        <div style="display:flex; gap:12px; margin:16px 0; flex-wrap:wrap;">
+            {"".join(f'<div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px;"><div style="font-size:11px; color:#64748b;">{s}</div><div style="font-size:22px; font-weight:800;">{c}</div></div>' for s, c in obligation_status_counts.items()) or '<p>No letter_obligations rows yet.</p>'}
+            <div style="background:{'#fef2f2' if unresolved_reconciliation_count else 'white'}; border:1px solid {'#fecaca' if unresolved_reconciliation_count else '#e2e8f0'}; border-radius:8px; padding:12px 16px;">
+                <div style="font-size:11px; color:#64748b;">Unresolved payment/allocation reconciliation issues</div>
+                <div style="font-size:22px; font-weight:800; color:{'#dc2626' if unresolved_reconciliation_count else '#059669'};">{unresolved_reconciliation_count}</div>
+            </div>
+        </div>
+        <p><a href="/admin/process-letter-dispatches?secret={secret or ''}" style="background:#044332; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block;">Process queue now (one batch of 20)</a>
+        <a href="/admin/run-letter-fulfilment-worker?secret={secret or ''}" style="background:#0f172a; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block; margin-left:8px;">Run new-pipeline worker now (dry-run, one pass)</a></p>
+        <p style="font-size:11px; color:#94a3b8;">Nothing schedules either button automatically -- see docs/operator_guide.md section 5 for how to point a real scheduler at <code>/trigger-letter-fulfilment-worker</code> (new pipeline) once you're ready.</p>
         <h3 style="color:#044332; margin-top:24px;">Most recent 25</h3>
         <table style="width:100%; border-collapse:collapse; font-size:13px; background:white; border:1px solid #e2e8f0;">
             <tr style="background:#f1f5f9;"><th style="padding:6px; text-align:left;">Ref</th><th style="padding:6px; text-align:left;">Address</th><th style="padding:6px; text-align:left;">Context</th><th style="padding:6px; text-align:left;">Status</th><th style="padding:6px; text-align:left;">Attempts</th><th style="padding:6px; text-align:left;">Last error</th></tr>
@@ -5045,6 +5800,83 @@ def admin_process_letter_dispatches(request: Request, secret: Optional[str] = Qu
     to the automatic version."""
     verify_admin_or_secret(request, secret)
     result = database.process_pending_letter_dispatches(batch_size=20)
+    return RedirectResponse(f"/admin/letter-dispatches?secret={secret or ''}", status_code=302)
+
+
+@app.get("/trigger-letter-fulfilment-worker")
+def trigger_letter_fulfilment_worker(secret: Optional[str] = Query(None), live: bool = Query(False)):
+    """2026-09-18 review, Section 6: THE actual scheduling entry point for
+    the new pipeline (worker.run_one_pass) -- see that function's own
+    docstring, and docs/operator_guide.md section 5 for how a real cron
+    service (cron-job.org, a Render Cron Job) would be pointed at this,
+    the exact same pattern every other /trigger-* route in this file
+    already uses for the scanning pipeline. Nothing sets that up as part
+    of this session's work -- this route existing is not the same as it
+    being scheduled anywhere.
+
+    Deliberately named /trigger-... (verify_cron_secret, query-param
+    secret only) rather than reusing verify_admin_or_secret's basic-auth
+    fallback -- an external cron service can only ever supply a URL
+    query param, never an Authorization header, matching every sibling
+    /trigger-* route in this file.
+
+    `live` defaults to False (dry-run): a real provider call requires
+    BOTH `?live=true` here AND a configured, enabled provider slot (see
+    letter_providers/registry.py) -- setting one without the other still
+    sends nothing. This route does not decide whether real sending is
+    otherwise safe (funding mode, provider account status, the launch
+    checklist's outstanding items) -- it only decides whether the worker
+    runs at all right now."""
+    verify_cron_secret(secret)
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        report = fulfilment_worker.run_one_pass(cur, worker_id="cron-trigger", is_dry_run=not live)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"[Worker Trigger] run_one_pass failed, rolled back: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+    finally:
+        cur.close()
+        conn.close()
+
+    if not report.pipeline_active:
+        return {"status": "noop", "reason": "LETTER_DISPATCH_PIPELINE is not 'fulfilment'"}
+    return {
+        "status": "ok",
+        "is_dry_run": report.is_dry_run,
+        "approvals": vars(report.approvals) if report.approvals else None,
+        "funding": vars(report.funding) if report.funding else None,
+        "send_attempts": len(report.send_outcomes),
+        "send_outcomes": [
+            {"obligation_id": o.obligation_id, "final_status": o.final_status, "attempts_made": o.attempts_made}
+            for o in report.send_outcomes
+        ],
+    }
+
+
+@app.get("/admin/run-letter-fulfilment-worker")
+def admin_run_letter_fulfilment_worker(request: Request, secret: Optional[str] = Query(None)):
+    """Admin-page convenience wrapper around trigger_letter_fulfilment_worker
+    (same relationship /admin/process-letter-dispatches has to the legacy
+    pipeline's own manual trigger) -- lets Nick click a button on
+    /admin/letter-dispatches rather than needing the cron secret in a raw
+    URL. Always dry-run from this button; use the /trigger-... route
+    directly with ?live=true for anything else, and even then a real send
+    still needs a configured provider slot."""
+    verify_admin_or_secret(request, secret)
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        fulfilment_worker.run_one_pass(cur, worker_id="admin-manual-run", is_dry_run=True)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"[Worker Trigger] admin-triggered run_one_pass failed, rolled back: {e}", exc_info=True)
+    finally:
+        cur.close()
+        conn.close()
     return RedirectResponse(f"/admin/letter-dispatches?secret={secret or ''}", status_code=302)
 
 
@@ -5411,6 +6243,19 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
         # price + CTA are pulled into their own glowing "unlock" panel
         # (mirrors the homepage's main CTA button treatment) instead of a
         # plain right-aligned price and a separate button underneath.
+        #
+        # Sep 18 2026, this session (Section 8 of the bundled-lead-and-
+        # letter brief): added "Includes 1 printed & posted intro letter"
+        # to the small caption under the price. IMPORTANT -- this mirrors,
+        # and does not override, the Sep 12 2026 rule elsewhere in this
+        # codebase (see payments.py's PLANS dict comment) against public
+        # copy claiming a feature that isn't actually built and deployed.
+        # As of this session, letter SENDING is still dry-run only --
+        # no provider is configured, no funding is confirmed, and no
+        # migration has been run against production (see docs/handoff.md).
+        # This line must be reviewed against docs/launch_checklist.md's
+        # "copy go-live gate" before this code is deployed, exactly like
+        # every other feature-claim on this site.
         lead_cards += f"""
         <div class="relative bg-slate-800/50 rounded-2xl p-5 sm:p-6 mb-4 shadow-lg overflow-hidden transition-all duration-300 hover:brightness-110" style="border: 2px solid {cat_color};">
             <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-5">
@@ -5461,12 +6306,12 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
                     </a>
                     {member_link_html}
                     <div class="text-[10px] text-slate-500 sm:mt-1 hidden sm:block">
-                        Single-Sale • burned on unlock
+                        Single-Sale • burned on unlock<br>Includes 1 printed &amp; posted intro letter
                     </div>
                 </div>
             </div>
             <div class="text-[10px] text-slate-500 mt-3 sm:hidden">
-                Single-Sale Asset — burned permanently upon unlock.
+                Single-Sale Asset — burned permanently upon unlock. Includes 1 printed &amp; posted intro letter.
             </div>
         </div>"""
 
@@ -5694,6 +6539,10 @@ def lead_detail_view(reference: str, request: Request):
                 The exact address and applicant/agent identity are redacted above -- that's what unlocking this lead pays for. Everything else the council's own public record states about the job is shown in full.
             </p>
 
+            <!-- Sep 18 2026, this session (Section 8): same copy addition
+                 and same go-live gate as the marketplace card -- see that
+                 template's comment above (main.py's marketplace_view,
+                 "Includes 1 printed & posted intro letter"). -->
             <div class="mt-7 bg-slate-900/60 border border-emerald-900/50 rounded-xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div>
                     {price_block_html}
@@ -5701,6 +6550,7 @@ def lead_detail_view(reference: str, request: Request):
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
                         {l['days_left']}
                     </div>
+                    <div class="text-[11px] text-slate-500 mt-2">Includes 1 printed &amp; posted intro letter to the homeowner</div>
                     <div class="mt-1">{member_link_html}</div>
                 </div>
                 <a href="/checkout/{plan_key}?lead_id={lid}" class="shrink-0 bg-brand-green hover:bg-emerald-500 text-white px-7 py-4 rounded-lg no-underline font-bold text-sm transition-all duration-300 shadow-[0_0_20px_rgba(5,150,105,0.3)] hover:shadow-[0_0_30px_rgba(5,150,105,0.5)] inline-flex items-center justify-center gap-1.5 text-center">
@@ -5740,6 +6590,19 @@ async def stripe_webhook(request: Request):
     sig_header = request.headers.get("stripe-signature", "")
     result = payments.handle_stripe_webhook(payload, sig_header)
     if "error" in result:
+        # 2026-09-18 review, Section 3: payments.handle_stripe_webhook sets
+        # retry=True specifically for fulfilment.AllocationPersistenceError
+        # -- a case where Stripe's charge and the underlying reservation/
+        # claim were BOTH genuinely valid, but the local database write
+        # failed. That's a transient-looking failure worth Stripe retrying
+        # (it redelivers on any non-2xx, but 503 is the honest status for
+        # "temporarily unable, try again" rather than 400's "this request
+        # itself was invalid" -- a malformed/unsigned payload, which is a
+        # permanent rejection, stays a 400). Neither case returns a false
+        # 200: a caller reading only the HTTP status must not be able to
+        # mistake this for success.
+        if result.get("retry"):
+            raise HTTPException(status_code=503, detail=result["error"])
         raise HTTPException(status_code=400, detail=result["error"])
     return {"status": "ok", "event": result.get("event")}
 
@@ -6237,6 +7100,29 @@ async def request_magic_link(request: Request):
             err_redirect += f"&next={urllib.parse.quote(safe_next)}"
         return RedirectResponse(url=err_redirect, status_code=303)
 
+    # 2026-09-23, CRITICAL SECURITY FIX (external review finding): magic_url
+    # carries the actual bearer token (auth_data['token']) that /verify-login
+    # below accepts to create a session with NO other check. This value must
+    # reach only the private channel (the email sent below) -- see the
+    # BOTH_url_MUST_STAY_EMAIL_ONLY guard just below this function, which
+    # asserts the HTTP response never contains it. Before this fix, this
+    # exact URL (raw token included) was ALSO rendered straight into this
+    # endpoint's own HTTP response as the "Open on This Device Instead"
+    # button (see the removed line, kept here in this comment for the
+    # historical record: `<a href="{magic_url}" ...>Open on This Device
+    # Instead</a>`) -- meaning anyone who could see the response to this
+    # POST (the requester themselves, regardless of whether they actually
+    # own `contact`'s inbox; a shared/logged terminal; a proxy or browser
+    # history) received a fully valid login credential for `contact` WITHOUT
+    # ever opening that inbox. This is exactly the same class of bug the Sep
+    # 8 2026 fix (see the comment on the returned HTMLResponse below) closed
+    # for the OTP code -- that fix never caught the token/magic_url, which
+    # is at least as sensitive (a direct-use bearer credential, not a
+    # second-factor code that still needs the account's own email address).
+    # The requester now gets no clickable "same device" shortcut at all;
+    # the ONLY ways to complete login are (a) actually opening the emailed
+    # link, or (b) typing the OTP code from that same email into the form
+    # below -- both require genuine access to the `contact` inbox.
     magic_url = f"{payments.PUBLIC_APP_URL}/verify-login?token={auth_data['token']}"
     if safe_next:
         magic_url += f"&next={urllib.parse.quote(safe_next)}"
@@ -6280,7 +7166,18 @@ async def request_magic_link(request: Request):
     # the app at all, so the emailed code was unusable dead functionality)
     # -- genuinely useful for exactly the "read the email on your phone,
     # need the dashboard on your laptop" case.
-    return HTMLResponse(f"""
+    #
+    # 2026-09-23, CRITICAL SECURITY FIX (external review finding, see the
+    # long comment on magic_url's assignment above): this response used to
+    # ALSO render an "Open on This Device Instead" button linking straight
+    # to magic_url -- i.e. the raw, directly-usable bearer token, in the
+    # HTTP response returned to whoever just POSTed an email address, no
+    # matter whose inbox that email actually belongs to. That button is
+    # removed outright, not just reworded -- there is no safe way to offer
+    # a "click here" shortcut on THIS page without putting the credential
+    # in it. `page_html` is asserted, by test, to never contain the token
+    # string, the literal substring "token=", or magic_url itself.
+    page_html = f"""
     <!DOCTYPE html>
     <html lang="en-GB" class="scroll-smooth">
     <head>
@@ -6303,8 +7200,7 @@ async def request_magic_link(request: Request):
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"></path><path d="m4 4 8 8 8-8"></path></svg>
             </div>
             <h2 class="text-white text-xl font-bold m-0 mb-1.5">Check Your Inbox</h2>
-            <p class="text-slate-400 text-sm leading-relaxed">We just sent a secure login link to <b class="text-slate-200">{contact}</b>. Click it and you're in.</p>
-            <a href="{magic_url}" class="inline-block bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg no-underline font-bold text-[13px] mt-2 transition-colors">Open on This Device Instead →</a>
+            <p class="text-slate-400 text-sm leading-relaxed">We just sent a secure login link to <b class="text-slate-200">{contact}</b>. Open that email on this device and click the link in it, or enter the 6-digit code from it below.</p>
 
             <div class="text-left mt-6 pt-5 border-t border-slate-800">
                 <p class="text-xs text-slate-400 mb-2.5"><b class="text-slate-300">On a different device than your inbox?</b> Enter the 6-digit code from the email:</p>
@@ -6322,7 +7218,17 @@ async def request_magic_link(request: Request):
     {_shared_footer_html()}
     </body>
     </html>
-    """)
+    """
+    # Belt-and-braces assertion (Section: "add a regression checking
+    # returned HTML ... contain neither credential"), enforced at runtime
+    # too, not just by the test suite -- if a future edit ever
+    # reintroduces the token into this page, fail loudly rather than
+    # silently ship the leak again. auth_data['token'] is always a
+    # non-empty string here (create_magic_auth_token already returned
+    # early above if it failed), so this can never false-negative on an
+    # empty/falsy token.
+    assert auth_data["token"] not in page_html, "magic-link token must never appear in the HTTP response"
+    return HTMLResponse(page_html)
 
 
 @app.get("/verify-login")
@@ -6939,14 +7845,24 @@ def free_dashboard(request: Request):
             import notifications
             filed_date = notifications._format_filed_date(lead.get("registered_date"))
             filed_row = f'<p class="m-0 mb-2.5 text-sm"><span class="text-slate-400 font-bold">Application filed:</span> <span class="text-slate-100">{filed_date}</span></p>' if filed_date else ""
+            # 2026-09-23: Request D, Part 1 -- the raw council reference is
+            # itself an indirect identifier (pasteable into a council
+            # portal's own search box); show the buyer-facing one instead,
+            # same primitive the dashboard/my-leads/email fixes below reuse.
+            _buyer_ref = address_release.buyer_facing_reference_standalone(lead.get('reference', '') or '')
+            # 2026-09-23: Request F follow-up (external review finding) --
+            # same address-in-summary gate as contractor_dashboard's
+            # identical comment; reused here.
+            _guarded_summary = address_release.guarded_summary_for_lead_reference(
+                lead.get('reference', ''), lead.get('summary', '')) or 'No summary available.'
             lead_html = f"""
             <div class="bg-slate-800/50 border-l-4 border-emerald-500 rounded-r-xl p-5">
-                <p class="m-0 mb-2.5 text-sm"><span class="text-slate-400 font-bold">Reference:</span> <span class="text-slate-100">{lead.get('reference', 'N/A')}</span></p>
-                <p class="m-0 mb-2.5 text-sm"><span class="text-slate-400 font-bold">Address:</span> <span class="text-slate-100">{lead.get('address', 'N/A')}</span></p>
+                <p class="m-0 mb-2.5 text-sm"><span class="text-slate-400 font-bold">Reference:</span> <span class="text-slate-100">{html.escape(_buyer_ref) or 'N/A'}</span></p>
+                <p class="m-0 mb-2.5 text-sm"><span class="text-slate-400 font-bold">Address:</span> <span class="text-slate-100">{address_release.guarded_address_for_lead_reference(lead.get('reference', ''), lead.get('address', 'N/A'))}</span></p>
                 <p class="m-0 mb-2.5 text-sm"><span class="text-slate-400 font-bold">Source:</span> <span class="text-slate-100">{lead.get('council_source', 'N/A')}</span></p>
                 {filed_row}
                 <p class="m-0 text-sm"><span class="text-slate-400 font-bold">Description:</span><br>
-                   <span class="text-slate-300 text-[13px] leading-relaxed">{lead.get('summary', 'No summary available.')}</span></p>
+                   <span class="text-slate-300 text-[13px] leading-relaxed">{_guarded_summary}</span></p>
             </div>
             """
         else:
@@ -6969,7 +7885,12 @@ def free_dashboard(request: Request):
     free_ref = account.get("free_lead_ref")
     tool_cards = ""
     if free_ref:
-        ref_q = urllib.parse.quote(free_ref)
+        # 2026-09-23: Request D, Part 1 -- link with the buyer-facing
+        # reference, not the raw council reference; generate_homeowner_
+        # letter/generate_street_flyer resolve it straight back to the
+        # real one server-side (address_release.resolve_buyer_facing_
+        # reference), so this is purely a URL-content change.
+        ref_q = urllib.parse.quote(address_release.buyer_facing_reference_standalone(free_ref))
         tool_cards += f"""
             <a href="/generate-letter/{ref_q}" target="_blank" class="block bg-slate-800/50 border border-slate-700 hover:border-emerald-500 rounded-xl p-4 no-underline transition-colors">
                 <div class="text-white font-bold text-sm mb-1">Intro Letter</div>
@@ -7143,8 +8064,37 @@ def contractor_dashboard(request: Request):
     for l in leads:
         lead_id = l.get("id") or l.get("ref")
         ref = l.get("ref", "")
-        addr = l.get("addr", "")
-        summary = l.get("summary", "")
+        # 2026-09-18 review, Section 5: guarded here, before addr is used
+        # either in the on-page display below or in the WhatsApp-forward
+        # link (wa_url) -- both are "alternative routes" that would
+        # otherwise leak the real address independent of ownership/payment.
+        # See address_release.py's module docstring.
+        #
+        # 2026-09-18 review, Section 2 (second pass): per-lead, not just
+        # the global flag -- see generate_homeowner_letter's comment for
+        # the same change.
+        addr = address_release.guarded_address_for_lead_reference(ref, l.get("addr", ""))
+        # 2026-09-23: Request D, Part 1 -- the raw council reference is
+        # itself an indirect identifier (pasteable into a council portal's
+        # own search box to recover the address/applicant name this gate
+        # exists to hide for a new allocation). Every buyer-facing use of
+        # it below (the REF badge, the Letter/Street Flyer/Street View
+        # links, the WhatsApp-forward message) uses this instead; the
+        # three linked routes resolve it straight back to the real
+        # reference server-side (address_release.resolve_buyer_facing_
+        # reference). A historical claim's buyer-facing reference IS the
+        # real reference, unchanged -- see buyer_facing_reference's
+        # docstring -- so this never breaks an existing bookmarked link
+        # for that population.
+        buyer_ref = address_release.buyer_facing_reference_standalone(ref)
+        # 2026-09-23: Request F follow-up (external review finding) -- a
+        # NEW allocation's `addr` just above is already redacted, but the
+        # raw summary/description very often restates the exact address
+        # inline, undoing that redaction. Same two-tier historical/new
+        # decision, reusing database._redact_address_from_summary (already
+        # relied on pre-purchase) rather than a new mechanism -- see
+        # address_release.guarded_summary_for_lead(_reference)'s docstring.
+        summary = address_release.guarded_summary_for_lead_reference(ref, l.get("summary", ""))
         dispatched_at = str(l.get("dispatched_at", ""))[:16]
         # Sep 10 2026, Nick's ask ("give as much info as we can... date it
         # was placed"): registered_date is the real council filing date,
@@ -7169,7 +8119,7 @@ def contractor_dashboard(request: Request):
         # click, the caveat is now always shown rather than only for a
         # precise pano link -- true either way, and safer than implying
         # false precision.
-        gmap_url = f"/street-view/{urllib.parse.quote(ref)}"
+        gmap_url = f"/street-view/{urllib.parse.quote(buyer_ref)}"
         street_view_caveat = '<div style="font-size:10px; color:#64748b; margin-top:6px;">Street View imagery may be out of date or not show the exact property.</div>'
 
         # Aug 30 2026: has_agent/applicant_name are captured by the scraper but
@@ -7177,7 +8127,12 @@ def contractor_dashboard(request: Request):
         # the council record already lists an agent/contractor. has_agent is
         # True / False / None (not checked or inconclusive) -- None must read
         # as "unconfirmed", never as "no agent".
-        applicant_name = l.get("applicant_name")
+        # 2026-09-23: Request D, Part 1 -- applicant_name was never gated
+        # at all before this (unlike addr just above); it's just as much
+        # an indirect/direct identifier. Same two-tier decision as the
+        # address, reused rather than re-invented -- see address_release.
+        # guarded_applicant_name_for_lead_reference's docstring.
+        applicant_name = address_release.guarded_applicant_name_for_lead_reference(ref, l.get("applicant_name"))
         has_agent = l.get("has_agent")
         if has_agent is True:
             agent_badge = f"<span style='font-size:10px; background:rgba(217,119,6,0.15); color:#fbbf24; padding:2px 6px; border-radius:4px; font-weight:bold;'>AGENT ON RECORD{' — ' + l['agent_company'] if l.get('agent_company') else ''}</span>"
@@ -7185,12 +8140,12 @@ def contractor_dashboard(request: Request):
             agent_badge = "<span style='font-size:10px; background:rgba(16,185,129,0.12); color:#34d399; padding:2px 6px; border-radius:4px; font-weight:bold;'>NO AGENT LISTED</span>"
         else:
             agent_badge = "<span style='font-size:10px; background:#1e293b; color:#94a3b8; padding:2px 6px; border-radius:4px;'>AGENT STATUS UNCONFIRMED</span>"
-        applicant_line = f"<br><span style='font-size:11px; color:#94a3b8;'>Applicant: {applicant_name}</span>" if applicant_name else ""
+        applicant_line = f"<br><span style='font-size:11px; color:#94a3b8;'>Applicant: {html.escape(applicant_name)}</span>" if applicant_name else ""
 
         wa_button = ""
         if wants_whatsapp:
             wa_url = notifications.create_whatsapp_link(
-                ref, l.get("council", ""), addr, summary, l.get("score", "small"), l.get("price", 25)
+                buyer_ref, l.get("council", ""), addr, summary, l.get("score", "small"), l.get("price", 25)
             )
             wa_button = f"<a href='{wa_url}' target='_blank' style='background:#25D366; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;'>WhatsApp</a>"
 
@@ -7198,14 +8153,14 @@ def contractor_dashboard(request: Request):
         <div style="background:#0f172a; border:1px solid #1e293b; border-radius:10px; padding:16px; margin-bottom:12px;">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
                 <div>
-                    <span style="font-size:10px; background:#1e293b; color:#94a3b8; padding:2px 6px; border-radius:4px; font-weight:bold;">REF: {ref}</span>
+                    <span style="font-size:10px; background:#1e293b; color:#94a3b8; padding:2px 6px; border-radius:4px; font-weight:bold;">REF: {html.escape(buyer_ref)}</span>
                     {agent_badge}
                     <h4 style="margin:4px 0 2px 0; font-size:15px; color:#e2e8f0;">{addr}</h4>
                     <span style="font-size:11px; color:#94a3b8;">Received: {dispatched_at}</span>{filed_line}{applicant_line}
                 </div>
                 <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                    <a href="/generate-letter/{urllib.parse.quote(ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Letter</a>
-                    <a href="/generate-street-flyer/{urllib.parse.quote(ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street Flyer</a>
+                    <a href="/generate-letter/{urllib.parse.quote(buyer_ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Letter</a>
+                    <a href="/generate-street-flyer/{urllib.parse.quote(buyer_ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street Flyer</a>
                     <a href="{gmap_url}" target="_blank" title="Google's nearest available imagery for this address -- may be outdated or not show the exact property" style="background:#334155; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street View</a>
                     {wa_button}
                 </div>
@@ -7324,9 +8279,31 @@ def street_view_redirect(reference: str, request: Request):
     if not session_email:
         return RedirectResponse(url="/login", status_code=303)
 
+    # 2026-09-23: Request D, Part 1 -- resolve a buyer-facing reference
+    # (what dashboard/my-leads/emails now link with) back to the real
+    # internal lead_reference before the existing ownership/dispatch
+    # lookup below runs; see address_release.resolve_buyer_facing_
+    # reference's docstring and generate_homeowner_letter's identical
+    # resolution step above.
+    reference = address_release.resolve_buyer_facing_reference_standalone(reference)
+
     addr = database.get_dispatched_lead_address_for_contractor(session_email, reference)
     if not addr:
         return PlainTextResponse("Lead not found, or not dispatched to your account.", status_code=404)
+
+    # 2026-09-18 review, Section 5: the single easiest "alternative route"
+    # to leak an address -- the redirect target itself bakes the address
+    # into a URL that can be copied, bookmarked or shared independently of
+    # this app's own auth. Gated the same as every other disclosure route
+    # -- see address_release.py's module docstring. Ownership/dispatch was
+    # already confirmed just above; this is the separate legal-release
+    # check on top of it.
+    #
+    # 2026-09-18 review, Section 2 (second pass): per-lead
+    # (lead_address_release_allowed), not just the global flag -- see
+    # generate_homeowner_letter's comment for the same change.
+    if not address_release.lead_address_release_allowed(reference):
+        return PlainTextResponse(address_release.REDACTED_ADDRESS_PLACEHOLDER, status_code=403)
 
     return RedirectResponse(url=database.street_view_url(addr), status_code=302)
 
@@ -7385,12 +8362,24 @@ def my_leads_view(request: Request):
         total = len(leads)
         for l in leads:
             ref = l.get("ref", "") or ""
-            addr = l.get("addr", "") or ""
-            summary = l.get("summary", "") or ""
+            # 2026-09-18 review, Section 5: see address_release.py's module
+            # docstring -- ownership (is_paid, dispatched_leads) is a
+            # separate question from whether disclosure is legally live.
+            # 2026-09-18 review, Section 2 (second pass): per-lead, not
+            # just the global flag -- see generate_homeowner_letter's
+            # comment for the same change.
+            addr = address_release.guarded_address_for_lead_reference(ref, l.get("addr", "") or "")
+            # 2026-09-23: Request D, Part 1 -- see contractor_dashboard's
+            # identical comment above; same two primitives reused here.
+            buyer_ref = address_release.buyer_facing_reference_standalone(ref)
+            # 2026-09-23: Request F follow-up (external review finding) --
+            # same address-in-summary gate as contractor_dashboard's
+            # identical comment above; reused here.
+            summary = address_release.guarded_summary_for_lead_reference(ref, l.get("summary", "") or "")
             dispatched_at = str(l.get("dispatched_at", "") or "")[:16]
             filed_date = notifications._format_filed_date(l.get("registered_date"))
             filed_line = f"<br><span style='color:#94a3b8; font-size:11px;'>Filed: {filed_date}</span>" if filed_date else ""
-            applicant_name = l.get("applicant_name")
+            applicant_name = address_release.guarded_applicant_name_for_lead_reference(ref, l.get("applicant_name"))
             applicant_line = f"<br><span style='color:#94a3b8; font-size:11px;'>Applicant: {html.escape(applicant_name)}</span>" if applicant_name else ""
             has_agent = l.get("has_agent")
             if has_agent is True:
@@ -7399,20 +8388,20 @@ def my_leads_view(request: Request):
                 agent_badge = "<span style='font-size:10px; background:rgba(16,185,129,0.12); color:#34d399; padding:2px 6px; border-radius:4px; font-weight:bold;'>NO AGENT LISTED</span>"
             else:
                 agent_badge = "<span style='font-size:10px; background:#1e293b; color:#94a3b8; padding:2px 6px; border-radius:4px;'>AGENT STATUS UNCONFIRMED</span>"
-            gmap_url = f"/street-view/{urllib.parse.quote(ref)}"
+            gmap_url = f"/street-view/{urllib.parse.quote(buyer_ref)}"
             trimmed_summary = html.escape(summary[:220]) + ("..." if len(summary) > 220 else "")
             lead_cards += f"""
             <div style="background:#0f172a; border:1px solid #1e293b; border-radius:10px; padding:18px; margin-bottom:12px;">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
                     <div>
-                        <span style="font-size:10px; background:#1e293b; color:#94a3b8; padding:2px 6px; border-radius:4px; font-weight:bold;">REF: {html.escape(ref)}</span>
+                        <span style="font-size:10px; background:#1e293b; color:#94a3b8; padding:2px 6px; border-radius:4px; font-weight:bold;">REF: {html.escape(buyer_ref)}</span>
                         {agent_badge}
                         <h4 style="color:#f1f5f9; font-size:15px; font-weight:bold; margin:4px 0 2px 0;">{html.escape(addr)}</h4>
                         <span style="color:#94a3b8; font-size:12px;">Received: {dispatched_at}</span>{filed_line}{applicant_line}
                     </div>
                     <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                        <a href="/generate-letter/{urllib.parse.quote(ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Letter</a>
-                        <a href="/generate-street-flyer/{urllib.parse.quote(ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street Flyer</a>
+                        <a href="/generate-letter/{urllib.parse.quote(buyer_ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Letter</a>
+                        <a href="/generate-street-flyer/{urllib.parse.quote(buyer_ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street Flyer</a>
                         <a href="{gmap_url}" target="_blank" style="background:#334155; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street View</a>
                     </div>
                 </div>
@@ -7431,11 +8420,16 @@ def my_leads_view(request: Request):
                 total = 1
                 filed_date = notifications._format_filed_date(lead.get("registered_date"))
                 filed_row = f"<p style='font-size:12px; color:#94a3b8; margin:8px 0 0 0;'>Filed: {filed_date}</p>" if filed_date else ""
+                # 2026-09-23: Request F follow-up (external review finding)
+                # -- same address-in-summary gate as contractor_dashboard's
+                # identical comment; reused here.
+                _guarded_summary = address_release.guarded_summary_for_lead_reference(
+                    free_ref, lead.get('summary', '')) or 'No summary available.'
                 lead_cards = f"""
                 <div style="background:#0f172a; border-left:4px solid #10b981; border-radius:10px; padding:18px;">
-                    <p style="font-size:14px; margin:0 0 8px 0;"><span style="color:#94a3b8; font-weight:bold;">Reference:</span> <span style="color:#f1f5f9;">{html.escape(lead.get('reference', 'N/A'))}</span></p>
-                    <p style="font-size:14px; margin:0 0 8px 0;"><span style="color:#94a3b8; font-weight:bold;">Address:</span> <span style="color:#f1f5f9;">{html.escape(lead.get('address', 'N/A'))}</span></p>
-                    <p style="font-size:14px; margin:0;"><span style="color:#94a3b8; font-weight:bold;">Description:</span><br><span style="color:#cbd5e1; font-size:13px;">{html.escape(lead.get('summary', 'No summary available.'))}</span></p>
+                    <p style="font-size:14px; margin:0 0 8px 0;"><span style="color:#94a3b8; font-weight:bold;">Reference:</span> <span style="color:#f1f5f9;">{html.escape(address_release.buyer_facing_reference_standalone(free_ref) or 'N/A')}</span></p>
+                    <p style="font-size:14px; margin:0 0 8px 0;"><span style="color:#94a3b8; font-weight:bold;">Address:</span> <span style="color:#f1f5f9;">{html.escape(address_release.guarded_address_for_lead_reference(free_ref, lead.get('address', 'N/A')))}</span></p>
+                    <p style="font-size:14px; margin:0;"><span style="color:#94a3b8; font-weight:bold;">Description:</span><br><span style="color:#cbd5e1; font-size:13px;">{html.escape(_guarded_summary)}</span></p>
                     {filed_row}
                 </div>"""
         if not lead_cards:
@@ -7495,6 +8489,43 @@ def my_account_view(request: Request):
     limbo = database.get_limbo_account(session_email) if not is_paid else None
     settings = database.get_contractor_settings(session_email)
     history = database.get_payment_history_for_contractor(session_email, limit=15)
+
+    # 2026-09-23 handoff, Request E ("integrate the existing letter
+    # selector/editor into account setup" / "allow editing in account
+    # settings"): a separate lookup because letter template settings live
+    # in their own table (letter_content.ContractorLetterSettings), not
+    # the notification-preference dict `settings` above (database.
+    # get_contractor_settings -- same name, unrelated table; kept as-is
+    # rather than renamed to avoid touching every other caller of that
+    # existing function for a change outside this request's scope).
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        letter_settings = letter_content.get_contractor_settings(cur, session_email)
+    finally:
+        cur.close()
+        conn.close()
+    letter_setup_current = bool(
+        letter_settings and letter_settings.approved and
+        letter_content.is_approval_current(letter_settings, letter_content.template_fingerprint(letter_settings))
+    )
+    if letter_settings is None:
+        letter_setup_status_html = '<span style="color:#fbbf24;">Not started</span>'
+    elif letter_setup_current:
+        letter_setup_status_html = '<span style="color:#34d399;">Approved &amp; in use</span>'
+    else:
+        letter_setup_status_html = '<span style="color:#fbbf24;">Saved, not yet approved</span>'
+    letter_setup_banner = (
+        ""
+        if letter_setup_current else
+        """<div class="card" style="background:rgba(251,191,36,0.08); border-color:#fbbf24;">
+            <p style="font-size:14px; color:#fef3c7; margin:0 0 10px 0;">
+                <b>Finish your letter template</b> -- every lead you buy includes a posted introduction letter to the
+                homeowner, so this needs to be set up and approved before your next purchase.
+            </p>
+            <a href="/letter-settings" style="display:inline-block; background:#f59e0b; color:#111; padding:8px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">Complete Letter Setup &rarr;</a>
+        </div>"""
+    )
 
     display_name = (session_email.split("@")[0] or session_email).replace(".", " ").replace("_", " ").replace("+", " ").strip().title() or session_email
     if is_paid and active_sub.get("customer_name"):
@@ -7570,6 +8601,8 @@ def my_account_view(request: Request):
     <div class="container">
         <h2 style="color:white; font-size:24px; font-weight:800; margin:0 0 22px 0;">My Account</h2>
 
+        {letter_setup_banner}
+
         <div class="card">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
                 <div>
@@ -7607,6 +8640,12 @@ def my_account_view(request: Request):
                     </tbody>
                 </table>
             </div>
+        </div>
+
+        <div class="card">
+            <div class="card-label">Letter Template</div>
+            <p style="font-size:14px; color:#cbd5e1; margin:0 0 10px 0;">Status: {letter_setup_status_html} -- these business details and your chosen wording appear on every introduction letter TreeKey posts to a homeowner on your behalf.</p>
+            <a href="/letter-settings" style="display:inline-block; background:#1e293b; color:#e2e8f0; padding:8px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">{'Edit Letter Template' if letter_settings is not None else 'Set Up Letter Template'} →</a>
         </div>
 
         <div class="card">
@@ -9598,9 +10637,34 @@ def run_full_autonomous_cycle():
     try:
         stale_result = database.cleanup_stale_leads()
         if stale_result.get("deleted"):
-            logger.info(f"[AUTO] Deleted {stale_result['deleted']} stale lead(s) (56+ days, never purchased).")
+            logger.info(f"[AUTO] Deleted {stale_result['deleted']} stale lead(s) "
+                        f"({database.UNSOLD_LEAD_DELETION_DAYS}+ days, never purchased).")
+        if stale_result.get("quarantined"):
+            logger.info(f"[AUTO] {stale_result['quarantined']} lead(s) are old enough to consider but have "
+                        f"missing/implausible/contradictory dates -- deliberately not deleted, needs a human look.")
     except Exception as e:
+        # cleanup_stale_leads already raises its own admin-visible incident
+        # alert before re-raising (2026-09-22 handoff, "alert and retry on
+        # cleanup failure") -- this log line is a secondary trace, not the
+        # only record of the failure.
         logger.error(f"[AUTO] Stale-lead cleanup error: {e}")
+
+    # 2026-09-23, Request D Part 2 / Request F follow-up: the actual
+    # 72-hour personal-data purge sweep MOVED OFF this once-a-day cycle --
+    # see _autonomous_scheduler_loop's own comment for why a daily cadence
+    # doesn't actually satisfy a published "within 72 hours" commitment,
+    # and where the sweep now runs instead (every 20-minute scheduler
+    # tick, same as the expired-lead-reservation sweep). Unknown-outcome
+    # reconciliation (no published time commitment attached to it) stays
+    # on this daily cycle -- only the timed purge itself needed to move.
+    try:
+        import retention_dispatch_purge
+        unknown_count = retention_dispatch_purge.count_unknown_outcome_obligations_awaiting_reconciliation()
+        if unknown_count:
+            logger.info(f"[AUTO] {unknown_count} letter obligation(s) still at status='unknown' -- "
+                        f"not purged (no confirmed dispatch), not auto-resent. See /admin/dispatch-data-purge.")
+    except Exception as e:
+        logger.error(f"[AUTO] Unknown-outcome obligation count check error: {e}")
 
     # Sep 2026, business-model pivot: every sale queues a letter_dispatches
     # row (see database._queue_letter_dispatch) -- this is the step that
@@ -9716,6 +10780,44 @@ def _autonomous_scheduler_loop():
             database.sweep_expired_lead_reservations()
         except Exception as e:
             logger.error(f"[AUTO] Expired lead-reservation sweep error: {e}")
+        try:
+            # 2026-09-23, Request F ("ensure the purge schedule matches the
+            # published 72-hour commitment -- a daily sweep of records
+            # already 72 hours old is insufficient"): this was previously
+            # nested inside run_full_autonomous_cycle below, which only
+            # fires once every ~20 hours -- meaning a record that crossed
+            # the 72-hour mark moments after one daily sweep could sit,
+            # fully identifying, for up to another ~20 hours before the
+            # next one caught it (up to ~92h in practice, not 72h). Moved
+            # here so it runs on THIS loop's own 20-minute cadence instead
+            # -- every tick, independent of whether a full scan/enrich
+            # cycle is due -- so the worst-case gap between a record
+            # crossing 72 hours and being purged is this loop's own sleep
+            # interval (~20 minutes), not up to a full day. Idempotent
+            # (purged_at-guarded) and safe to run this often; failure here
+            # raises its own admin-visible incident alert (see
+            # retention_dispatch_purge.purge_dispatched_personal_data's own
+            # docstring) before this except re-raises into the log.
+            #
+            # This is still not an ABSOLUTE guarantee -- see /privacy-
+            # policy's own wording (deliberately not "always/guaranteed"):
+            # if the app process itself is down (a deploy, a crash, a
+            # Render outage), no tick runs at all until it restarts, and
+            # this loop only starts 120s after startup (see the sleep
+            # above). A record that crossed 72 hours during an outage is
+            # purged on the first tick after the app comes back, not at
+            # exactly 72h00m -- the published wording reflects that.
+            import retention_dispatch_purge
+            purge_result = retention_dispatch_purge.purge_dispatched_personal_data()
+            if purge_result.get("obligations_purged") or purge_result.get("dispatches_purged"):
+                logger.info(f"[AUTO] Post-dispatch personal-data purge: {purge_result}")
+        except Exception as e:
+            # purge_dispatched_personal_data already raises its own
+            # admin-visible incident alert before re-raising -- this log
+            # line is a secondary trace, not the only record of the
+            # failure. Caught here (not left to crash the loop) so one bad
+            # tick never stops every later tick's checks from running.
+            logger.error(f"[AUTO] Post-dispatch personal-data purge error: {e}")
         try:
             last_started_iso = database.get_system_state("last_autonomous_cycle_started_at")
             last_finished_iso = database.get_system_state("last_autonomous_cycle_at")
@@ -10371,21 +11473,50 @@ def _run_council_health_check():
     targets = _all_mesh_health_targets(mesh_scrapers)
     for council_name, url, fn in targets:
         start = time.time()
-        try:
-            leads = fn()
+        # 2026-09-22 review: a single failed fetch here used to be reported
+        # as "error" immediately -- but a one-off timeout/connection blip
+        # (exactly what net_utils.smart_get already retries for every real
+        # scan, see that module's own docstring) would still show up on
+        # THIS check as a false "failing council", since this loop called
+        # fn() itself, not through smart_get's retry wrapper. One retry
+        # after a short pause, mirroring the same "transient network blips
+        # deserve a second try, but this isn't for hammering a struggling
+        # server" reasoning net_utils.py already documents, before this
+        # concludes a council is genuinely down. `attempts`/
+        # `recovered_on_retry` are new, additive fields -- every existing
+        # key (status/leads_found/elapsed_seconds/error) is unchanged, so
+        # nothing that already reads this report needs to change.
+        first_error = None
+        leads = None
+        attempts = 0
+        for attempt_num in (1, 2):
+            attempts = attempt_num
+            try:
+                leads = fn()
+                break
+            except Exception as e:
+                if attempt_num == 1:
+                    first_error = str(e)[:300]
+                    time.sleep(3)  # brief pause, distinct from the 2s inter-council courtesy delay below
+                    continue
+                results.append({
+                    "council": council_name,
+                    "url": url,
+                    "status": "error",
+                    "error": str(e)[:300],
+                    "first_attempt_error": first_error,
+                    "attempts": attempts,
+                    "elapsed_seconds": round(time.time() - start, 1),
+                })
+                leads = None
+        if leads is not None:
             results.append({
                 "council": council_name,
                 "url": url,
                 "status": "ok",
                 "leads_found": len(leads),
-                "elapsed_seconds": round(time.time() - start, 1),
-            })
-        except Exception as e:
-            results.append({
-                "council": council_name,
-                "url": url,
-                "status": "error",
-                "error": str(e)[:300],
+                "attempts": attempts,
+                "recovered_on_retry": attempts > 1,
                 "elapsed_seconds": round(time.time() - start, 1),
             })
         _health_check_state["results"] = list(results)  # progress visible mid-run
@@ -11139,7 +12270,9 @@ async def privacy_policy():
         <p class="mb-4">To exercise any of these rights, contact <strong>contact@treekey.co.uk</strong>.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">9. Data Retention</h2>
-        <p class="mb-4">Lead data is retained for 24 months from discovery, after which personal identifiers are anonymized or deleted, though the underlying planning application record may be retained in non-identifying form for business analytics. Customer account data is retained for the life of the account; billing records are kept for 6 years after account closure to meet HMRC record-keeping requirements.</p>
+        <p class="mb-2">Lead data for a planning application that is never purchased is permanently deleted after 60 days.</p>
+        <p class="mb-2">Once a Lead is purchased and a physical letter to the homeowner is dispatched, the homeowner's name, home address, and the personalised letter content are permanently deleted once 72 hours have passed since dispatch was confirmed by our mailing provider. This is carried out by an automated process that checks for newly-eligible records approximately every 20 minutes, so in normal operation deletion happens within minutes of the 72-hour mark, not after a further delay. If our systems are briefly unavailable (for example during a deployment or an outage), the check resumes as soon as service is restored and deletes anything that became eligible in the meantime -- so we do not guarantee deletion at the exact 72-hour mark in every circumstance, only that it is not left to a manual or indefinite process. A minimal record of the transaction (payment reference, dispatch confirmation, and any postal-suppression request) is kept for accounting, complaint-handling, and legal purposes; we have not yet set a fixed expiry for that minimal record.</p>
+        <p class="mb-4">Customer account data is retained for the life of the account. We do not currently operate an automated deletion process for billing records or for data belonging to a closed account.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">10. Security</h2>
         <p class="mb-4">We take reasonable technical and organizational measures to protect personal data: encrypted (HTTPS) connections throughout the Service; account sessions secured with signed, tamper-evident tokens rather than plain credentials; no customer passwords are stored at all (login uses a one-time emailed link, so there is no password database to be breached); and administrative and automated-scan functions are protected by a separate access secret, not exposed publicly.</p>

@@ -1,0 +1,4 @@
+{
+  "classification": "CHALLENGED",
+  "notes": "cf-mitigated: challenge response header -- documented Cloudflare signal for a bot-mitigation challenge page, not a body-text/title match (which is fragile and could change without notice)."
+}

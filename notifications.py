@@ -298,6 +298,46 @@ def send_purchased_lead_email(customer_email: str, lead_data: dict):
 
 
 def _send_purchased_lead_email_inner(customer_email: str, lead_data: dict):
+    # 2026-09-18 review, Section 5: this outbound transactional email is an
+    # "alternative route" that bypasses every web-app gate entirely (no
+    # session, no ownership check at read time -- it's sent once, straight
+    # to the buyer's inbox, right after Stripe confirms payment). It must
+    # be gated on address release exactly like every on-site disclosure
+    # route -- see address_release.py's module docstring: payment (which
+    # is precisely what just happened here) is explicitly NOT a legal basis
+    # to disclose. guarded_addr feeds both the address line below and the
+    # Street View link, which otherwise bakes the raw address into a URL.
+    import address_release
+    # 2026-09-18 review, Section 2 (second pass): per-lead
+    # (guarded_address_for_lead_reference), not just the global flag --
+    # see main.py's generate_homeowner_letter comment for the same change.
+    _lead_reference = lead_data.get("reference") or ""
+    guarded_addr = address_release.guarded_address_for_lead_reference(_lead_reference, lead_data.get("address") or "")
+    # Same per-lead decision gates the Street View link below (it also
+    # discloses the address, just via a URL) -- was the raw global flag
+    # alone; now consistent with guarded_addr above.
+    _address_release_allowed = address_release.lead_address_release_allowed(_lead_reference)
+    # 2026-09-23: Request D, Part 1 -- the raw council reference is itself
+    # an indirect identifier and this email bakes it into both a visible
+    # "Reference:" line and the Letter/Street Flyer link hrefs below. Same
+    # buyer-facing substitute used on the dashboard/my-leads pages; the
+    # two linked routes resolve it straight back server-side.
+    _buyer_ref = address_release.buyer_facing_reference_standalone(_lead_reference)
+    # 2026-09-23: Request F follow-up (external review finding, "High":
+    # free-text descriptions remain exposed) -- guarded_addr above is
+    # already redacted for a NEW allocation, but this email's summary line
+    # below used to render the raw, unredacted description, which very
+    # often restates the exact address inline -- undoing guarded_addr's
+    # own redaction via a different field on the same email. Same
+    # two-tier historical/new decision, reusing database._redact_address_
+    # from_summary (already relied on for every pre-purchase email via
+    # _redacted_summary above) rather than a new mechanism. See
+    # address_release.guarded_summary_for_lead(_reference)'s docstring for
+    # the residual, reported (not eliminated) limitation of a regex-based
+    # scrub.
+    _guarded_summary = address_release.guarded_summary_for_lead_reference(
+        _lead_reference, lead_data.get('summary')) or 'No summary available.'
+
     subject = f"Unlocked Lead: {lead_data.get('council_source') or 'Local'} Tree Surgery"
 
     # Aug 30 2026: applicant_name/agent_name/agent_company/has_agent are now
@@ -307,7 +347,12 @@ def _send_purchased_lead_email_inner(customer_email: str, lead_data: dict):
     # and no honest signal of whether a tree surgeon may already be
     # instructed. has_agent can be True / False / None ("not checked" or
     # "checked but inconclusive" -- never treat None as "no agent").
-    applicant_name = lead_data.get("applicant_name")
+    # 2026-09-23: Request D, Part 1 -- applicant_name was never gated in
+    # this email at all before this (unlike the address just above); same
+    # two-tier historical/new decision as the address, reused rather than
+    # re-invented. See address_release.guarded_applicant_name_for_lead_
+    # reference's docstring.
+    applicant_name = address_release.guarded_applicant_name_for_lead_reference(_lead_reference, lead_data.get("applicant_name"))
     agent_name = lead_data.get("agent_name")
     agent_company = lead_data.get("agent_company")
     has_agent = lead_data.get("has_agent")
@@ -338,20 +383,20 @@ def _send_purchased_lead_email_inner(customer_email: str, lead_data: dict):
         <p style="color: #374151;">Thank you for your purchase. Here are the details for the lead you just secured. This lead has been permanently removed from the marketplace.</p>
 
         <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
-            <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {lead_data.get('reference') or 'N/A'}</p>
-            <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {lead_data.get('address') or 'N/A'}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {_buyer_ref or 'N/A'}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {guarded_addr}</p>
             <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source') or 'N/A'}</p>
             {filed_row}
             <p style="margin: 0 0 10px 0;"><strong>Estimated Value Grade:</strong> {(lead_data.get('lead_score') or 'Medium').title()}</p>
             {applicant_row}
             <p style="margin: 0;"><strong>Description / Summary:</strong><br/>
-               <span style="color: #475569; font-size: 14px;">{lead_data.get('summary') or 'No summary available.'}</span>
+               <span style="color: #475569; font-size: 14px;">{_guarded_summary}</span>
             </p>
             {agent_row}
         </div>
 
         <p style="font-size: 13px; color: #64748b;">
-            {_street_view_link_html(lead_data.get('address') or '')}
+            {_street_view_link_html(lead_data.get('address') or '') if _address_release_allowed else ''}
         </p>
         <p style="font-size: 12px; color: #94a3b8;">
             Note: UK councils do not publish a homeowner's phone number or email address on planning applications. This lead includes everything that is legally published: the address, the applicant name (when the council records it), and the application details above.
@@ -359,7 +404,7 @@ def _send_purchased_lead_email_inner(customer_email: str, lead_data: dict):
         <p style="font-size: 11px; color: #94a3b8; margin-top: 14px; padding-top: 10px; border-top: 1px solid #f1f5f9;">
             {_NOT_WHAT_YOU_EXPECTED_HTML}
         </p>
-        {_free_tools_and_subscribe_html(lead_data.get('reference') or '')}
+        {_free_tools_and_subscribe_html(_buyer_ref)}
     </div>
     """
 
@@ -425,9 +470,33 @@ def send_free_lead_granted_email(customer_email: str, lead_data: dict, unsubscri
 
 
 def _send_free_lead_granted_email_inner(customer_email: str, lead_data: dict, unsubscribe_url: str = "") -> bool:
+    # 2026-09-18 review, Section 5: same gate as _send_purchased_lead_email_
+    # inner above -- see that function's comment and address_release.py's
+    # module docstring. A free-tier grant is not a payment either, but the
+    # principle is identical: winning a lead (paid or free) is not a legal
+    # basis to disclose the address.
+    import address_release
+    # 2026-09-18 review, Section 2 (second pass): per-lead
+    # (guarded_address_for_lead_reference), not just the global flag --
+    # see main.py's generate_homeowner_letter comment for the same change.
+    _lead_reference = lead_data.get("reference") or ""
+    guarded_addr = address_release.guarded_address_for_lead_reference(_lead_reference, lead_data.get("address") or "")
+    _address_release_allowed = address_release.lead_address_release_allowed(_lead_reference)
+    # 2026-09-23: Request D, Part 1 -- same buyer-facing-reference
+    # substitution as _send_purchased_lead_email_inner above; see that
+    # function's comment.
+    _buyer_ref = address_release.buyer_facing_reference_standalone(_lead_reference)
+    # 2026-09-23: Request F follow-up (external review finding) -- same
+    # address-in-summary gate as _send_purchased_lead_email_inner above;
+    # see that function's comment for the full reasoning.
+    _guarded_summary = address_release.guarded_summary_for_lead_reference(
+        _lead_reference, lead_data.get('summary')) or 'No summary available.'
+
     subject = f"Your free lead is confirmed — {lead_data.get('council_source') or 'Local'} tree job unlocked"
 
-    applicant_name = lead_data.get("applicant_name")
+    # 2026-09-23: Request D, Part 1 -- same applicant-name gate as
+    # _send_purchased_lead_email_inner above; see that function's comment.
+    applicant_name = address_release.guarded_applicant_name_for_lead_reference(_lead_reference, lead_data.get("applicant_name"))
     agent_name = lead_data.get("agent_name")
     agent_company = lead_data.get("agent_company")
     has_agent = lead_data.get("has_agent")
@@ -463,20 +532,20 @@ def _send_free_lead_granted_email_inner(customer_email: str, lead_data: dict, un
         <p style="color: #374151;">This job is genuinely yours now — nobody else can claim it. Here are the full details.</p>
 
         <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
-            <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {lead_data.get('reference') or 'N/A'}</p>
-            <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {lead_data.get('address') or 'N/A'}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {_buyer_ref or 'N/A'}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {guarded_addr}</p>
             <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source') or 'N/A'}</p>
             {filed_row}
             <p style="margin: 0 0 10px 0;"><strong>Estimated Value Grade:</strong> {(lead_data.get('lead_score') or 'Medium').title()}</p>
             {applicant_row}
             <p style="margin: 0;"><strong>Description / Summary:</strong><br/>
-               <span style="color: #475569; font-size: 14px;">{lead_data.get('summary') or 'No summary available.'}</span>
+               <span style="color: #475569; font-size: 14px;">{_guarded_summary}</span>
             </p>
             {agent_row}
         </div>
 
         <p style="font-size: 13px; color: #64748b;">
-            {_street_view_link_html(lead_data.get('address') or '')}
+            {_street_view_link_html(lead_data.get('address') or '') if _address_release_allowed else ''}
         </p>
         <p style="font-size: 12px; color: #94a3b8;">
             Note: UK councils do not publish a homeowner's phone number or email address on planning applications. This lead includes everything that is legally published: the address, the applicant name (when the council records it), and the application details above.
@@ -484,7 +553,7 @@ def _send_free_lead_granted_email_inner(customer_email: str, lead_data: dict, un
         <p style="font-size: 11px; color: #94a3b8; margin-top: 14px; padding-top: 10px; border-top: 1px solid #f1f5f9;">
             {_NOT_WHAT_YOU_EXPECTED_HTML}
         </p>
-        {_free_tools_and_subscribe_html(lead_data.get('reference') or '')}
+        {_free_tools_and_subscribe_html(_buyer_ref)}
         {unsub_html}
     </div>
     """

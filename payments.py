@@ -4,6 +4,8 @@ from typing import Optional, Dict, Any
 import stripe
 from dotenv import load_dotenv
 
+import fulfilment
+
 load_dotenv()
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "").strip()
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
@@ -68,7 +70,14 @@ def _mark_stripe_event_fulfilled(event_id: str) -> None:
 PLANS = {
     "starter": {
         "name": "TreeKey Starter",
-        "description": "For 1-2 van operators. Domestic and small commercial jobs, every job type, 1-tap homeowner letters and Street View briefs.",
+        "description": "For 1-2 van operators. Domestic and small commercial jobs, every job type, plus 1-tap letter previews and Street View briefs.",
+        # 2026-09-18 review, Section 4: the letter-posting promise is a
+        # SUFFIX, appended by plan_description() only when
+        # fulfilment.letter_sending_live() is True -- see that function
+        # and fulfilment.py's own docstring on LETTER_SENDING_LIVE. Do not
+        # read "description" directly for anything customer-facing;
+        # call plan_description(plan_key) instead.
+        "letter_suffix": " A posted introduction letter comes with every lead.",
         "amount": 3900,   # £39/month
         "mode": "subscription",
         "badge": "Most Popular",
@@ -152,39 +161,118 @@ PLANS = {
     # value tier (scanners.classify_lead_value_tier). The old names were
     # never true; renamed to match what actually decides the price, so the
     # checkout page never claims a job category the lead may not match.
+    # Sep 18 2026, this session, Section 8 of the bundled-lead-and-letter
+    # brief: added "includes one printed & posted introduction letter" to
+    # each single-lead description/real_world_roi below, and to the
+    # marketplace/lead-detail/checkout templates in main.py that reference
+    # these plans. This is a DELIBERATE, EXPLICIT reversal of the Sep 12
+    # 2026 rule immediately above ("remove... letter sending feature off
+    # anything public until its built and deployed... including any
+    # statements that are untrue") -- Nick's own instructions this session
+    # confirm the bundled model ("every purchased lead includes one
+    # personalised introduction letter printed and posted") as the current,
+    # agreed design, not a speculative feature.
+    #
+    # BUT the underlying caution that Sep 12 rule was protecting against
+    # still applies just as much: as of this session, letter SENDING is
+    # still dry-run only. No postal provider has real credentials
+    # configured (see letter_providers/*_provider.py -- Stannp is
+    # unverified against a live API, Intelliprint/Postworks are unbuilt
+    # stubs), no funding has been confirmed through funding.FundingGate,
+    # and no migration has been run against the production database (see
+    # fulfilment.py). This copy describes the INTENDED, BUILT model, not a
+    # currently-operational one -- it must not be deployed live until
+    # real sending is actually possible end-to-end. See
+    # docs/launch_checklist.md's "copy go-live gate", which exists
+    # specifically to prevent a repeat of the exact problem the Sep 12
+    # rule was written to fix.
+    # 2026-09-18 review, Section 4: see the "starter" plan's comment above --
+    # same rule applies to every plan below. "description" and
+    # "real_world_roi" are base text with no letter-posting claim; the
+    # letter claim lives only in "letter_suffix"/"roi_letter_suffix" and is
+    # appended by plan_description()/plan_roi() when
+    # fulfilment.letter_sending_live() is True. Do not read these dict
+    # entries directly for customer-facing text.
     "single_lead_small": {
         "name": "Single Lead Unlock (Entry)",
         "description": "100% Exclusive unshared planning lead. Once purchased, this lead is permanently deleted from all systems and never sold again.",
+        "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 1900,   # £19 one-off -- Standard value, past its freshest window
         "mode": "payment",
         "badge": "Single Purchase",
-        "real_world_roi": "Instant unlocked property address and application details, plus a Street View brief. Applicant name included when the council has published one."
+        "real_world_roi": "Instant unlocked property address and application details, plus a Street View brief. Applicant name included when the council has published one.",
+        "roi_letter_suffix": " Also includes one printed & posted introduction letter."
     },
     "single_lead_medium": {
         "name": "Single Lead Unlock (Standard)",
         "description": "100% Exclusive unshared planning lead. Permanently burned from inventory upon purchase.",
+        "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 2900,   # £29 one-off -- Standard value fresh, or Priority value past its freshest window
         "mode": "payment",
         "badge": "Single Purchase",
-        "real_world_roi": "Instant unlocked property address and application details, plus a Street View brief. Applicant name included when the council has published one."
+        "real_world_roi": "Instant unlocked property address and application details, plus a Street View brief. Applicant name included when the council has published one.",
+        "roi_letter_suffix": " Also includes one printed & posted introduction letter."
     },
     "single_lead_priority": {
         "name": "Single Lead Unlock (Priority)",
         "description": "100% Exclusive unshared planning lead with elevated statutory/legal weight or scale. Permanently burned from inventory upon purchase.",
+        "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 3900,   # £39 one-off -- Priority value fresh, or Elite value past its freshest window
         "mode": "payment",
         "badge": "Single Purchase",
-        "real_world_roi": "Instant unlocked property address and application details, plus a Street View brief. Applicant name included when the council has published one."
+        "real_world_roi": "Instant unlocked property address and application details, plus a Street View brief. Applicant name included when the council has published one.",
+        "roi_letter_suffix": " Also includes one printed & posted introduction letter."
     },
     "single_lead_large": {
         "name": "Single Lead Unlock (Elite)",
         "description": "100% Exclusive high-value planning lead -- statutory weight or genuine urgency. Burned from inventory immediately upon purchase.",
+        "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 4900,   # £49 one-off -- Elite value, freshest window
         "mode": "payment",
         "badge": "Single Purchase",
-        "real_world_roi": "Instant unlocked property address and full planning specs. Applicant name included when the council has published one."
+        "real_world_roi": "Instant unlocked property address and full planning specs. Applicant name included when the council has published one.",
+        "roi_letter_suffix": " Also includes one printed & posted introduction letter."
     }
 }
+
+
+def plan_description(plan_key: str, plan: Optional[dict] = None) -> str:
+    """2026-09-18 review, Section 4: the ONLY place customer-facing plan
+    description text should be read from. Returns the plan's base
+    "description" and, ONLY when fulfilment.letter_sending_live() is True
+    at the moment of the call (read fresh every call -- never cached),
+    appends that plan's "letter_suffix" if it has one. When the flag is
+    False (the default), no plan ever mentions posting a letter, however
+    its dict entry is written -- this is the executable gate the audit
+    asked for, not just checklist/comment wording.
+
+    `plan` lets a caller pass an already-looked-up dict (e.g. the
+    synthesized "live" dict from _resolve_live_single_lead_price) instead
+    of forcing a second PLANS lookup by plan_key; falls back to
+    PLANS.get(plan_key) when omitted."""
+    import fulfilment
+    p = plan if plan is not None else PLANS.get(plan_key)
+    if not p:
+        return ""
+    text = p.get("description", "")
+    suffix = p.get("letter_suffix", "")
+    if suffix and fulfilment.letter_sending_live():
+        text = f"{text}{suffix}"
+    return text
+
+
+def plan_roi(plan_key: str, plan: Optional[dict] = None) -> str:
+    """Same gate as plan_description(), for the "real_world_roi" /
+    "roi_letter_suffix" pair."""
+    import fulfilment
+    p = plan if plan is not None else PLANS.get(plan_key)
+    if not p:
+        return ""
+    text = p.get("real_world_roi", "")
+    suffix = p.get("roi_letter_suffix", "")
+    if suffix and fulfilment.letter_sending_live():
+        text = f"{text}{suffix}"
+    return text
 
 
 def _resolve_live_single_lead_price(lead_id: str) -> Optional[dict]:
@@ -268,7 +356,11 @@ def _resolve_live_single_lead_price(lead_id: str) -> Optional[dict]:
             "amount_pence": int(price_pounds) * 100,
             "plan_key": live_plan_key,
             "name": live_plan["name"] if live_plan else "Single Lead Unlock",
-            "description": live_plan["description"] if live_plan else "Exclusive planning lead.",
+            # 2026-09-18 review, Section 4: gated through plan_description()
+            # so the letter-posting sentence only appears when
+            # fulfilment.letter_sending_live() is True -- never read
+            # live_plan["description"] directly here.
+            "description": plan_description(live_plan_key, live_plan) if live_plan else "Exclusive planning lead.",
         }
     except Exception as e:
         logger.error(f"[Stripe] Live price lookup failed for lead_id={lead_id}: {e}")
@@ -289,8 +381,21 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
     used for two things, both only for single-lead purchases: (1) looking up
     a subscriber discount server-side via database.get_subscriber_discount,
     and (2) recording who actually bought the lead on the audit-trail order
-    row. Anonymous purchases (account_email=None) still work exactly as
-    before, just at full price -- login is never required to buy a lead.
+    row. Passing account_email=None here still works exactly as before (no
+    subscriber discount applied, nothing recorded) -- this function itself
+    is unchanged and does not enforce login.
+
+    2026-09-23 UPDATE, Request E follow-up (Nick's explicit instruction):
+    the "login is never required to buy a lead" decision this paragraph
+    used to state is NO LONGER main.py's actual behaviour -- both of this
+    function's real callers, checkout()/checkout_post(), now require a
+    signed session cookie (and an approved letter template) before they
+    will ever call this function at all, since every plan includes a
+    posted letter. account_email=None therefore no longer occurs in
+    practice from either of them; it is left supported here only because
+    this function has no way to enforce a caller's login requirement
+    itself, and removing the parameter would be a larger, unrequested
+    change to this function's own contract.
 
     Single-lead purchases now go through the Available -> reserved -> sold
     state machine (database.reserve_lead_for_checkout /
@@ -322,7 +427,9 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
     try:
         unit_amount = plan["amount"]
         product_name = plan["name"]
-        product_description = plan["description"]
+        # 2026-09-18 review, Section 4: gated -- see plan_description()'s
+        # docstring. Do not read plan["description"] directly.
+        product_description = plan_description(plan_key, plan)
         discount_pct = 0
         if lead_id:
             # Single-lead purchase: charge the live price (and use the live
@@ -555,6 +662,7 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
         reservation_token = metadata.get("reservation_token")
 
         import database
+        import fulfilment
         # 1. If this was a single lead purchase, execute the Single-Sale Inventory Burn
         if lead_id and reservation_token:
             # Sep 15 2026: the reservation-based flow. This session was
@@ -563,7 +671,47 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
             # ever involved (payments.create_checkout_session) -- confirm
             # THAT exact reservation now, rather than the old "first paid
             # webhook to arrive wins" burn_lead_inventory check.
-            lead_data = database.confirm_reserved_lead_sale(lead_id, reservation_token, customer_email)
+            #
+            # 2026-09-18 review, Section 3: confirm_reserved_lead_sale can
+            # now RAISE fulfilment.AllocationPersistenceError instead of
+            # returning None, specifically for the case where the payment
+            # and reservation were both genuinely valid (the UPDATE matched)
+            # but persisting the letter obligation then failed. That is a
+            # transient DB-write problem, not "reservation lost" -- it must
+            # NOT fall into the auto-refund branch below, which exists only
+            # for a genuinely expired/stolen reservation. Caught separately,
+            # before lead_data is ever assigned from a call that could raise.
+            try:
+                lead_data = database.confirm_reserved_lead_sale(lead_id, reservation_token, customer_email)
+            except fulfilment.AllocationPersistenceError as e:
+                issue_id = database.record_payment_reconciliation_issue(
+                    reason=f"allocation_persistence_failed (reservation path): {e}",
+                    stripe_event_id=event_id, stripe_reference=reservation_token,
+                    buyer_email=customer_email, lead_reference=lead_id,
+                )
+                logger.error(f"[Stripe] Allocation persistence FAILED for lead {lead_id} / session "
+                             f"{session_id} after a VALID reservation was confirmed ({mask(customer_email)}) "
+                             f"-- not refunding, not marking fulfilled, leaving the event unmarked so "
+                             f"Stripe's retry (or a manual Resend) can complete it once the underlying "
+                             f"DB problem clears. Reconciliation issue: {issue_id}.")
+                notifications.send_system_incident_alert(
+                    category="REVENUE & BILLING",
+                    title=f"PAYMENT RECEIVED, ALLOCATION FAILED: {mask(customer_email)} — lead {lead_id}",
+                    description=(f"Customer {customer_email} paid £{amount / 100:.2f} for lead {lead_id}. "
+                                  f"Stripe confirmed payment and the reservation was valid, but saving the "
+                                  f"resulting letter obligation to the database failed: {e}"),
+                    impact=("No refund was issued and the lead was NOT marked sold. This is a database "
+                             "write failure, not a lost/stolen reservation -- the customer's payment and "
+                             "reservation are both still good. Stripe will retry this webhook "
+                             "automatically; it should self-resolve once the DB issue clears."),
+                    action_required=(f"Check application/database health now. If unresolved after Stripe's "
+                                       f"retry window (Stripe retries for up to ~3 days), resolve "
+                                       f"reconciliation issue {issue_id} manually and complete the sale by hand."),
+                    severity="CRITICAL",
+                    throttle_hours=0.0,
+                )
+                return {"error": "allocation_persistence_failed", "retry": True,
+                        "reconciliation_issue_id": issue_id, "lead_id": lead_id}
             if lead_data:
                 logger.info(f"[Stripe] Lead {lead_id} sold to {mask(customer_email)} (reservation {reservation_token[:8]}...)")
                 # Sep 16 2026, production incident fix: this used to send the
@@ -618,6 +766,44 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
                     database.update_order_fulfillment(reservation_token, "paid", "fulfilled")
                     notifications.send_purchased_lead_email(customer_email, already_sold)
                 _mark_stripe_event_fulfilled(event_id)
+            elif database.has_unresolved_payment_reconciliation_issue(
+                stripe_event_id=event_id, stripe_reference=reservation_token,
+            ):
+                # 2026-09-18 review, Section 4 (second pass): "Test
+                # successful Stripe payment followed by database failure
+                # and then a delayed retry after reservation expiry.
+                # Reconcile using durable purchase/payment identity."
+                #
+                # confirm_reserved_lead_sale found nothing to confirm
+                # (same as the "genuinely lost reservation" branch below),
+                # but there is ALREADY an open, admin-alerted
+                # reconciliation record for this exact payment (matched by
+                # the durable Stripe event id / checkout-session id, not
+                # the lead's own mutable status) -- see
+                # fulfilment.has_unresolved_reconciliation_issue's
+                # docstring for the full scenario this catches: payment
+                # succeeded, the local allocation write failed
+                # (AllocationPersistenceError, handled above), and this
+                # delivery is a DELAYED retry that arrived after
+                # RESERVATION_RELEASE_MINUTES swept the reservation back
+                # to 'new' -- at that point confirm_reserved_lead_sale can
+                # no longer tell "delayed retry of a real failure" apart
+                # from "reservation genuinely never confirmed" using lead
+                # state alone. Auto-refunding here would contradict the
+                # still-open alert asking a human to complete the sale by
+                # hand, and risks a double-refund if that human already
+                # acted differently. Instead: no refund, no fulfilment
+                # mark, same retryable shape as the AllocationPersistenceError
+                # branch above -- a human resolving the existing
+                # reconciliation issue (or the DB problem clearing so a
+                # genuine retry succeeds) is what ends this state, not an
+                # automatic refund.
+                logger.warning(f"[Stripe] Lead {lead_id} / session {session_id} has no live reservation to confirm, "
+                                f"but an OPEN reconciliation issue already exists for this exact payment "
+                                f"({mask(customer_email)}) -- not auto-refunding (would contradict a still-open "
+                                f"manual reconciliation), leaving the event unmarked so a resolved issue or a "
+                                f"successful retry can still complete it.")
+                return {"error": "unresolved_reconciliation_issue_pending", "retry": True, "lead_id": lead_id}
             else:
                 # Payment succeeded but this session's reservation is gone --
                 # expired past RESERVATION_RELEASE_MINUTES before payment
@@ -625,6 +811,10 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
                 # way defensively) stolen by another session. Nick's spec:
                 # "automatically refund it without revealing the lead" --
                 # unlike the old flow, this is no longer a manual-only alert.
+                # Only reached once has_unresolved_payment_reconciliation_
+                # issue (above) has confirmed there's no already-open
+                # reconciliation record for this exact payment -- see that
+                # branch's own comment.
                 payment_intent_id = data.get("payment_intent")
                 refunded = False
                 refund_error = None
@@ -672,7 +862,42 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
             # carries a reservation_token (set unconditionally in
             # create_checkout_session whenever lead_id is set), so this
             # branch naturally stops being hit once old sessions expire.
-            lead_data = database.burn_lead_inventory(lead_id, customer_email)
+            # 2026-09-18 review, Section 3: same distinction as the
+            # reservation path above -- burn_lead_inventory can also raise
+            # fulfilment.AllocationPersistenceError when the UPDATE genuinely
+            # matched (a real lead WAS just claimed for this buyer) but
+            # persisting the letter obligation then failed. Left uncaught,
+            # this used to be indistinguishable from "lead already claimed
+            # by someone else" below and would have wrongly fired the
+            # DOUBLE SALE RACE CONDITION alert for what is actually a
+            # transient DB-write problem on a legitimate, uncontested sale.
+            try:
+                lead_data = database.burn_lead_inventory(lead_id, customer_email)
+            except fulfilment.AllocationPersistenceError as e:
+                issue_id = database.record_payment_reconciliation_issue(
+                    reason=f"allocation_persistence_failed (legacy burn path): {e}",
+                    stripe_event_id=event_id, stripe_reference=session_id,
+                    buyer_email=customer_email, lead_reference=lead_id,
+                )
+                logger.error(f"[Stripe] Allocation persistence FAILED for lead {lead_id} (legacy checkout, "
+                             f"{mask(customer_email)}) after a valid claim -- not a double sale, a DB write "
+                             f"failure. Not refunding, leaving the event unmarked for retry. "
+                             f"Reconciliation issue: {issue_id}.")
+                notifications.send_system_incident_alert(
+                    category="REVENUE & BILLING",
+                    title=f"PAYMENT RECEIVED, ALLOCATION FAILED: {mask(customer_email)} — lead {lead_id} (legacy path)",
+                    description=(f"Customer {customer_email} paid £{amount / 100:.2f} for lead {lead_id} via "
+                                  f"the legacy pre-reservation checkout path. The lead was genuinely claimed "
+                                  f"for them, but saving the resulting letter obligation failed: {e}"),
+                    impact=("No refund was issued. This is a database write failure, not a double sale -- "
+                             "Stripe will retry this webhook automatically."),
+                    action_required=(f"Check application/database health. If unresolved after Stripe's "
+                                       f"retry window, resolve reconciliation issue {issue_id} manually."),
+                    severity="CRITICAL",
+                    throttle_hours=0.0,
+                )
+                return {"error": "allocation_persistence_failed", "retry": True,
+                        "reconciliation_issue_id": issue_id, "lead_id": lead_id}
             if lead_data:
                 logger.info(f"[Stripe] Lead {lead_id} burned from inventory for {mask(customer_email)} (legacy pre-reservation checkout)")
                 notifications.send_purchased_lead_email(customer_email, lead_data)

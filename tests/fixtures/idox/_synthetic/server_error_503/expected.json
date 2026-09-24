@@ -1,0 +1,4 @@
+{
+  "classification": "SERVER_ERROR",
+  "notes": "HTTP 503 -- one of net_utils.py's existing RETRYABLE_STATUS codes (500/502/503/504); this fixture represents what the caller sees if every retry in that layer is also exhausted, not the retry itself."
+}

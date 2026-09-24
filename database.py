@@ -7,6 +7,13 @@ import logging
 from typing import Optional, Dict, Any, Tuple, List
 from dotenv import load_dotenv
 
+# This session's letter-fulfilment work (see fulfilment.py's module
+# docstring for why this exists alongside the pre-existing
+# _queue_letter_dispatch/letter_dispatches machinery rather than replacing
+# it outright). No circular dependency: fulfilment.py does not import
+# database.py.
+import fulfilment
+
 
 load_dotenv()
 SURL = os.getenv("SUPABASE_DB_URL", "").strip()
@@ -614,6 +621,62 @@ def init_db():
 
         conn.commit()
         cur.close()
+
+        # Phase 1b (this session's letter-fulfilment work): new tables for
+        # lead_allocations/letter_obligations/payment_allocation_reconciliation
+        # (fulfilment.py), mailing_budget_confirmations (funding.py),
+        # postal_suppressions (suppression.py), and contractor_letter_settings
+        # (letter_content.py). Isolated in its own phase/commit for the exact
+        # reason Phase 1 above already documents -- a failure here must never
+        # roll back or block the core schema. Nothing in this phase touches
+        # or alters any existing table.
+        try:
+            cur = conn.cursor()
+            import fulfilment as _fulfilment
+            import funding as _funding
+            import suppression as _suppression
+            import letter_content as _letter_content
+            import address_release as _address_release
+            import retention_dispatch_purge as _retention_dispatch_purge
+            _fulfilment.init_fulfilment_schema(cur)
+            _funding.init_funding_schema(cur)
+            _suppression.init_suppression_schema(cur)
+            _letter_content.init_letter_content_schema(cur)
+            # 2026-09-18 review, Section 2: address_disclosure_decisions --
+            # the per-allocation address-release eligibility table. See
+            # address_release.py's own module docstring.
+            _address_release.init_address_release_schema(cur)
+            # 2026-09-23, Request D Part 2: purged_at tracking columns for
+            # the 72-hour post-dispatch personal-data purge. See that
+            # module's own docstring.
+            _retention_dispatch_purge.init_dispatch_purge_schema(cur)
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            logger.error(f"[DB Init] Phase 1b (letter fulfilment) schema error: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
+        # Phase 1c (2026-09-22 review): source_incident/repair_attempt/
+        # council_scan_checkpoint/council_scan_pass_metrics -- see
+        # scraper_resilience.py's own module docstring for the full origin
+        # and reasoning. Same isolated-phase discipline as Phase 1b above:
+        # a failure here must never roll back or block the core schema, and
+        # nothing in this phase touches or alters any existing table.
+        try:
+            cur = conn.cursor()
+            import scraper_resilience as _scraper_resilience
+            _scraper_resilience.init_scraper_resilience_schema(cur)
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            logger.error(f"[DB Init] Phase 1c (scraper resilience) schema error: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
 
         # Resilience: add any missing columns safely. Sep 2 2026: pulled out of the
         # CREATE TABLE/index transaction above and run through
@@ -1619,16 +1682,70 @@ def resync_all_lead_tags(commit_every: int = 500) -> dict:
 # anyone visiting a URL).
 # ---------------------------------------------------------------------------
 
-STALE_LEAD_SQL_WHERE = """
+UNSOLD_LEAD_DELETION_DAYS = 60
+# 2026-09-22 handoff: deletion is a SEPARATE, LATER clock than sale
+# eligibility, not the same deadline reused for two different questions.
+# calculate_lead_freshness's longest sale-eligibility window is 56 days
+# (TPO notices; 42 standard, 7 domestic) -- a lead older than that is
+# already unsellable (checkout's live price lookup, payments.py's
+# _live_price_lookup, refuses anything calculate_lead_freshness prices at
+# 0) well before this deletion clock can ever fire, since
+# UNSOLD_LEAD_DELETION_DAYS is deliberately set LATER than every
+# sale-eligibility window. That ordering is also what makes "check expiry
+# at read/checkout time too, not only via scheduled cleanup" already true
+# here -- checkout independently refuses a too-old lead on its own
+# schedule, it doesn't need to know about this deletion deadline at all.
+IMPLAUSIBLE_DATE_FLOOR = "2015-01-01"
+# A registered_date/discovered_at before this floor is almost certainly a
+# parsing/scrape bug (an epoch default, a garbled date) rather than a
+# genuine decade-old application -- TreeKey and the council portals it
+# scrapes didn't exist before this. Only ever NARROWS what gets
+# auto-deleted (see STALE_LEAD_SQL_WHERE below): a bogus date can make a
+# row LESS likely to be deleted, never more, and routes it to
+# count_deletion_quarantined_leads() for a human to look at instead of
+# silently deleting or silently sitting forever unnoticed.
+
+STALE_LEAD_SQL_WHERE = f"""
     (status IS NULL OR status = 'new')
-    AND COALESCE(registered_date, discovered_at) < (NOW() - INTERVAL '56 days')
-    AND COALESCE(discovered_at, registered_date) < (NOW() - INTERVAL '56 days')
+    AND COALESCE(registered_date, discovered_at) < (NOW() - INTERVAL '{UNSOLD_LEAD_DELETION_DAYS} days')
+    AND COALESCE(discovered_at, registered_date) < (NOW() - INTERVAL '{UNSOLD_LEAD_DELETION_DAYS} days')
+    AND (registered_date IS NULL OR registered_date >= DATE '{IMPLAUSIBLE_DATE_FLOOR}')
+    AND (discovered_at IS NULL OR discovered_at >= TIMESTAMPTZ '{IMPLAUSIBLE_DATE_FLOOR}')
+    AND (
+        registered_date IS NULL OR discovered_at IS NULL
+        OR registered_date <= (discovered_at::date + INTERVAL '1 day')
+    )
+"""
+# The double COALESCE above is deliberate, not redundant -- when both
+# dates are present it expands to "registered_date < cutoff AND
+# discovered_at < cutoff" (each COALESCE isolates one field, falling back
+# to the other only when its own is missing), which is exactly "the MORE
+# RECENT of the two available dates must also be past the cutoff" (Nick's
+# original ask, Sep 11 2026). When only one date is present, both
+# COALESCEs collapse to that same field. When neither is present, the
+# comparison is NULL (unknown) and the row is excluded -- fail-safe by
+# construction, not by a special case. The three added clauses below it
+# are new: they exclude a row whose only reason for looking "old enough"
+# is an implausible or self-contradictory date, rather than genuine age.
+
+DELETION_QUARANTINE_SQL_WHERE = f"""
+    (status IS NULL OR status = 'new')
+    AND (
+        (registered_date IS NULL AND discovered_at IS NULL)
+        OR (registered_date IS NOT NULL AND registered_date < DATE '{IMPLAUSIBLE_DATE_FLOOR}')
+        OR (discovered_at IS NOT NULL AND discovered_at < TIMESTAMPTZ '{IMPLAUSIBLE_DATE_FLOOR}')
+        OR (
+            registered_date IS NOT NULL AND discovered_at IS NOT NULL
+            AND registered_date > (discovered_at::date + INTERVAL '1 day')
+        )
+    )
 """
 
 
 def count_stale_leads() -> int:
     """Preview count for STALE_LEAD_SQL_WHERE -- see cleanup_stale_leads for
-    the full reasoning (56-day double date-check, status 'new'/blank only)."""
+    the full reasoning (60-day double date-check, status 'new'/blank only,
+    implausible/contradictory dates excluded rather than deleted)."""
     conn = get_db_conn()
     cur = conn.cursor()
     try:
@@ -1639,22 +1756,78 @@ def count_stale_leads() -> int:
         conn.close()
 
 
+def count_deletion_quarantined_leads() -> int:
+    """Rows STALE_LEAD_SQL_WHERE deliberately never deletes because their
+    dates are missing, implausible (before IMPLAUSIBLE_DATE_FLOOR), or
+    contradictory (registered_date after discovered_at) -- fail-safe
+    exclusion is correct, but on its own it means these rows can sit
+    forever with no visibility that a human needs to look at them. Exposed
+    on the admin cleanup page (main.py::admin_cleanup_stale_leads)
+    alongside the real deletion count, not auto-resolved by anything."""
+    conn = get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(f"SELECT count(*) FROM leads WHERE {DELETION_QUARANTINE_SQL_WHERE};")
+        return cur.fetchone()[0]
+    finally:
+        cur.close()
+        conn.close()
+
+
 def cleanup_stale_leads() -> dict:
-    """Permanently DELETEs leads over 56 days (8 weeks) old by BOTH
-    available date fields, still sitting at status 'new'/blank (never
-    purchased/claimed). 56 days is the longest statutory freshness window
-    the app recognises anywhere (TPO leads) -- see calculate_lead_freshness
-    -- so nothing still legitimately sellable is ever caught by this. Safe
-    to run unattended: fully deterministic, no keyword/judgement call
-    involved, and the status scoping means a purchased lead is never
-    touched regardless of age."""
+    """Permanently DELETEs leads over UNSOLD_LEAD_DELETION_DAYS (60) days
+    old by BOTH available date fields, still sitting at status 'new'/blank
+    (never purchased/claimed) -- see UNSOLD_LEAD_DELETION_DAYS's own
+    comment for why this is a separate, later clock than sale eligibility,
+    not the same 56-day figure reused for two different questions. Safe to
+    run unattended: fully deterministic, no keyword/judgement call
+    involved, the status scoping means a purchased lead is never touched
+    regardless of age, and implausible/contradictory dates are excluded
+    (see STALE_LEAD_SQL_WHERE) rather than trusted.
+
+    2026-09-22 handoff, "alert and retry on cleanup failure": unlike the
+    version before it, a DELETE that fails (DB error, connection drop
+    mid-statement, etc) is no longer allowed to fail silently into
+    whatever generic try/except the caller happens to wrap this in --
+    it's re-raised as this function's own problem AFTER raising an
+    admin-visible incident alert (same notifications.send_system_incident_
+    alert channel payments.py's reconciliation failures already use), so
+    a genuine deletion failure is never just a line in server logs nobody
+    is watching. Callers (main.py's admin route and the daily autonomous
+    cycle) still decide for themselves whether to retry -- this only
+    guarantees the failure is never silent."""
     conn = get_db_conn()
     cur = conn.cursor()
     try:
         cur.execute(f"DELETE FROM leads WHERE {STALE_LEAD_SQL_WHERE};")
         deleted = cur.rowcount
         conn.commit()
-        return {"deleted": deleted}
+        quarantined = count_deletion_quarantined_leads()
+        return {"deleted": deleted, "quarantined": quarantined}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"[Lead Retention] cleanup_stale_leads DELETE failed: {e}")
+        try:
+            import notifications
+            notifications.send_system_incident_alert(
+                category="DATA RETENTION",
+                title="UNSOLD-LEAD DELETION SWEEP FAILED",
+                description=f"cleanup_stale_leads' DELETE against `leads` failed: {str(e)[:200]}",
+                impact=(f"Leads past the {UNSOLD_LEAD_DELETION_DAYS}-day unsold-data retention deadline "
+                         "were NOT deleted this run. No sale or customer-facing impact (these leads are "
+                         "already unsellable well before this deadline), but retained personal data is "
+                         "not being cleared down as intended until this is resolved."),
+                action_required="Check application/database health, then re-run the cleanup (admin "
+                                 "/admin/cleanup-stale-leads, or wait for tomorrow's autonomous cycle) once resolved.",
+                severity="WARNING",
+                throttle_hours=12.0,
+            )
+        except Exception as alert_err:
+            logger.error(f"[Lead Retention] Also failed to raise the incident alert for the above: {alert_err}")
+        raise
     finally:
         cur.close()
         conn.close()
@@ -2849,7 +3022,18 @@ def burn_lead_inventory(lead_id: str, buyer_email: str) -> dict:
             """, (lead_id, lead_id))
             row = cur.fetchone()
             if row:
-                _queue_letter_dispatch(cur, row[1], row[2], row[7], buyer_email, "single_purchase")
+                # Routes to exactly one of the old/new pipelines -- see
+                # _dispatch_via_active_pipeline's own docstring. Raises
+                # fulfilment.AllocationPersistenceError (deliberately NOT
+                # swallowed here -- see the except clause below) if a real,
+                # matched row (this lead WAS just claimed) then fails to get
+                # its letter obligation recorded.
+                _dispatch_via_active_pipeline(
+                    cur, lead_reference=row[1], lead_id=str(row[0]), address=row[2],
+                    applicant_name=row[7], buyer_email=buyer_email,
+                    allocation_type="single_purchase", sale_context="single_purchase",
+                    source_payment_ref=lead_id,
+                )
             conn.commit()
             if row:
                 logger.info(f"[Inventory Burn] Lead {lead_id} permanently claimed & burned by {buyer_email}.")
@@ -2868,9 +3052,25 @@ def burn_lead_inventory(lead_id: str, buyer_email: str) -> dict:
                     "registered_date": row[11],
                 }
             return None
+        except fulfilment.AllocationPersistenceError:
+            # A real claim happened (the UPDATE above matched a row) but
+            # persisting its letter obligation failed -- roll back the
+            # WHOLE sale (the lead goes back to unclaimed, not left
+            # half-claimed with no obligation record) and let the caller
+            # see a DISTINCT exception, not the generic None every other
+            # failure path returns. Section 3 of the 2026-09-18 review:
+            # payments.py's webhook must be able to tell this apart from
+            # "no such reservation" so it doesn't wrongly auto-refund a
+            # transient DB failure, or (in this function's own caller,
+            # main.py's free-lead-grant and the legacy webhook branch)
+            # wrongly log a spurious "double sale" alert.
+            conn.rollback()
+            raise
         finally:
             cur.close()
             conn.close()
+    except fulfilment.AllocationPersistenceError:
+        raise
     except Exception as e:
         logger.error(f"[Inventory Burn] Error burning lead {lead_id}: {e}")
         return None
@@ -3013,7 +3213,21 @@ def confirm_reserved_lead_sale(lead_id: str, checkout_session_id: str, buyer_ema
     unchanged) or None if this session's reservation is gone (expired,
     stolen, or never existed) -- the caller (payments.py's webhook) treats
     None here as "payment succeeded but we can't honour it" and must
-    auto-refund, never silently keep the money."""
+    auto-refund, never silently keep the money.
+
+    RAISES fulfilment.AllocationPersistenceError (added in the 2026-09-18
+    review, Section 3) in the DIFFERENT case where the UPDATE above DID
+    match a real reservation -- so the customer's payment and reservation
+    were both completely valid -- but persisting the resulting letter
+    obligation then failed (a DB write error). That is NOT the same
+    situation as "no reservation ever existed", and must not be handled
+    the same way: this function's own transaction is rolled back (the lead
+    goes back to 'reserved', not left half-claimed), and the caller MUST
+    NOT treat a caught AllocationPersistenceError as grounds to auto-refund
+    -- see payments.py's handle_stripe_webhook, which instead logs an
+    admin-visible reconciliation issue and asks Stripe to retry the
+    webhook, since the underlying DB problem may well have cleared by
+    then."""
     if not SURL or not lead_id or not checkout_session_id:
         return None
     try:
@@ -3029,7 +3243,18 @@ def confirm_reserved_lead_sale(lead_id: str, checkout_session_id: str, buyer_ema
             """, (lead_id, lead_id, checkout_session_id))
             row = cur.fetchone()
             if row:
-                _queue_letter_dispatch(cur, row[1], row[2], row[7], buyer_email, "single_purchase")
+                # Only reached when THIS UPDATE actually matched a row,
+                # which only happens once per reservation (see this
+                # function's own docstring on why a replayed webhook falls
+                # through to get_already_sold_lead_if_matching_session
+                # instead, never re-running this code) -- so this cannot
+                # double-allocate on a repeated Stripe event.
+                _dispatch_via_active_pipeline(
+                    cur, lead_reference=row[1], lead_id=str(row[0]), address=row[2],
+                    applicant_name=row[7], buyer_email=buyer_email,
+                    allocation_type="single_purchase", sale_context="single_purchase",
+                    source_payment_ref=checkout_session_id,
+                )
             conn.commit()
             if row:
                 logger.info(f"[Reservation] Lead {lead_id} sold to {buyer_email} via session {checkout_session_id}.")
@@ -3040,12 +3265,107 @@ def confirm_reserved_lead_sale(lead_id: str, checkout_session_id: str, buyer_ema
                     "has_agent": row[10], "registered_date": row[11],
                 }
             return None
+        except fulfilment.AllocationPersistenceError:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
+            conn.close()
+    except fulfilment.AllocationPersistenceError:
+        raise
+    except Exception as e:
+        logger.error(f"[Reservation] Error confirming sale of lead {lead_id} for session {checkout_session_id}: {e}")
+        return None
+
+
+def record_payment_reconciliation_issue(*, reason: str, stripe_event_id: Optional[str] = None,
+                                         stripe_reference: Optional[str] = None,
+                                         buyer_email: Optional[str] = None,
+                                         lead_reference: Optional[str] = None) -> Optional[str]:
+    """2026-09-18 review, Section 3: opens its OWN connection (the
+    connection used by confirm_reserved_lead_sale / burn_lead_inventory has
+    already been rolled back and closed by the time a caller catches
+    fulfilment.AllocationPersistenceError from them -- see those functions'
+    `finally` blocks) to durably record that a Stripe charge succeeded but
+    the local allocation write failed. This is what makes the failure
+    admin-visible (queryable in payment_allocation_reconciliation, not just
+    a log line) even when the underlying DB problem is transient.
+
+    Best-effort by design: if this write ITSELF fails (e.g. the database is
+    genuinely unreachable, not just a one-off write error), logs and
+    returns None rather than raising -- the caller's CRITICAL admin alert
+    (sent regardless, via notifications) is the backstop for that case, not
+    this database record. A caller must not treat a None return here as a
+    reason to change how it handles the original AllocationPersistenceError
+    (no refund either way)."""
+    if not SURL:
+        logger.error(f"[Reconciliation] DATABASE_URL not set -- cannot durably record reconciliation "
+                     f"issue: {reason} (stripe_event={stripe_event_id}, lead={lead_reference})")
+        return None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            issue_id = fulfilment.record_reconciliation_issue(
+                cur, reason=reason, stripe_event_id=stripe_event_id,
+                stripe_reference=stripe_reference, buyer_email=buyer_email,
+                lead_reference=lead_reference,
+            )
+            conn.commit()
+            return issue_id
         finally:
             cur.close()
             conn.close()
     except Exception as e:
-        logger.error(f"[Reservation] Error confirming sale of lead {lead_id} for session {checkout_session_id}: {e}")
+        logger.error(f"[Reconciliation] Failed to durably record reconciliation issue ({reason}): {e}")
         return None
+
+
+def has_unresolved_payment_reconciliation_issue(*, stripe_event_id: Optional[str] = None,
+                                                 stripe_reference: Optional[str] = None) -> bool:
+    """2026-09-18 review, Section 4 (second pass). Self-contained wrapper
+    around fulfilment.has_unresolved_reconciliation_issue (opens its own
+    connection, same established pattern as record_payment_reconciliation_
+    issue above) -- see that function's own docstring for what this
+    answers and why payments.py's webhook handler needs it.
+
+    FAILS SAFE TO TRUE (assume an issue might exist) on any DB error,
+    deliberately the OPPOSITE default from most read helpers in this
+    codebase, which fail safe to False/None. Reasoning: this is checked
+    only immediately before an automatic refund. Wrongly answering True
+    when there's actually no open issue costs nothing but a delayed
+    refund (the payment stays exactly as good, the response is still
+    'retry', and a genuinely-lost-reservation refund simply happens on
+    the next successful check instead of this one) -- eventually
+    consistent, never lost. Wrongly answering False when there IS an open
+    issue -- the failure mode a False default would risk here -- would
+    auto-refund a payment a human may already be in the middle of
+    resolving a different way, which is not reversible by a later retry.
+    A DB error answering this check is also, itself, exactly the kind of
+    transient condition the underlying reconciliation issue likely
+    stemmed from in the first place -- treating it as "maybe still a
+    problem" rather than "assume it's fine now" is the fail-safe
+    direction consistent with the rest of this session's "missing
+    configuration/uncertain state must fail safely" rule."""
+    if not SURL:
+        return True
+    if not stripe_event_id and not stripe_reference:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            return fulfilment.has_unresolved_reconciliation_issue(
+                cur, stripe_event_id=stripe_event_id, stripe_reference=stripe_reference,
+            )
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Reconciliation] Could not check for an open reconciliation issue "
+                     f"(stripe_event={stripe_event_id}, stripe_reference={stripe_reference}) -- "
+                     f"failing safe (assume one might exist, so no automatic refund proceeds): {e}")
+        return True
 
 
 def get_already_sold_lead_if_matching_session(lead_id: str, checkout_session_id: str) -> Optional[dict]:
@@ -3717,8 +4037,8 @@ def estimate_area_monthly_capacity(outcode: str, radius_miles: float, lookback_d
     haversine matching against a historical pool (ANY lead status, not just
     'new') instead of the live unclaimed-only pool it normally gets.
 
-    lookback_days defaults to 45 -- comfortably inside the 56-day window
-    cleanup_stale_leads uses before deleting anything, and that cleanup
+    lookback_days defaults to 45 -- comfortably inside the 60-day window
+    cleanup_stale_leads uses before deleting anything (UNSOLD_LEAD_DELETION_DAYS), and that cleanup
     only ever deletes leads that stayed 'new'/unclaimed the whole time (see
     STALE_LEAD_SQL_WHERE) -- a claimed/dispatched lead is never deleted, so
     this window doesn't undercount real historical demand.
@@ -4571,7 +4891,21 @@ def redeem_free_lead_code(email: str, code: str) -> dict:
                 conn.commit()
                 return {"ok": False, "reason": "expired", "lead": None}
 
-            _queue_letter_dispatch(cur, lead_row[1], lead_row[2], lead_row[7], email, "free_lead")
+            # source_payment_ref is the redemption code itself, which
+            # free_lead_codes.redeemed_at (checked above) already
+            # guarantees is single-use. If this raises
+            # fulfilment.AllocationPersistenceError, the whole transaction
+            # (including the lead status UPDATE above) rolls back --
+            # free_lead_codes.redeemed_at is only set AFTER this succeeds,
+            # so an unredeemed code correctly stays unredeemed and the
+            # customer can simply retry, no manual refund/reconciliation
+            # needed (no payment was taken for a free-tier grant).
+            _dispatch_via_active_pipeline(
+                cur, lead_reference=lead_row[1], lead_id=str(lead_row[0]), address=lead_row[2],
+                applicant_name=lead_row[7], buyer_email=email,
+                allocation_type="free_lead", sale_context="free_lead",
+                source_payment_ref=code,
+            )
             cur.execute("UPDATE free_lead_codes SET redeemed_at = NOW() WHERE code = %s;", (code,))
             conn.commit()
             logger.info(f"[Free Lead Promo] Code {code} redeemed by {email} for lead {lead_reference}.")
@@ -4581,6 +4915,10 @@ def redeem_free_lead_code(email: str, code: str) -> dict:
                 "applicant_name": lead_row[7], "agent_name": lead_row[8], "agent_company": lead_row[9],
                 "has_agent": lead_row[10], "registered_date": lead_row[11],
             }}
+        except fulfilment.AllocationPersistenceError as e:
+            conn.rollback()
+            logger.error(f"[Free Lead Promo] Allocation persistence failed for code {code} / {email}: {e}")
+            return {"ok": False, "reason": "allocation_error", "lead": None}
         finally:
             cur.close()
             conn.close()
@@ -5333,6 +5671,52 @@ def _queue_letter_dispatch(cur, reference: str, address: str, applicant_name: Op
     """, (reference, address, applicant_name, buyer_email, sale_context))
 
 
+# 2026-09-18 review, Section 2 ("complete the transition between the old and
+# new pipelines"): this is now the ONLY place any of the four allocation
+# call sites (burn_lead_inventory, confirm_reserved_lead_sale,
+# record_lead_dispatch_and_burn, redeem_free_lead_code) reach either
+# _queue_letter_dispatch (above) or fulfilment.create_allocation_and_obligation.
+# Routes to exactly one of the two, chosen by fulfilment.active_pipeline() --
+# see that function's module-level docstring in fulfilment.py for the full
+# reasoning (in short: main.py's run_full_autonomous_cycle already runs
+# process_pending_letter_dispatches once a day via a live external
+# scheduler, so both pipelines writing for the same sale is a real, not
+# hypothetical, double-dispatch risk once something processes the new
+# table too).
+#
+# Also closes Section 3 ("show the full recovery path when Stripe payment
+# succeeds but the database transaction fails"): raises
+# fulfilment.AllocationPersistenceError -- rather than letting a plain
+# Exception propagate indistinguishably -- so a caller can tell "the sale's
+# own UPDATE never matched anything" apart from "the sale's UPDATE matched
+# a real row, but recording the letter obligation for it then failed".
+# Callers must let this propagate (never swallow it into a bare `except
+# Exception: return None`) so the whole transaction rolls back and the
+# caller can react correctly -- see confirm_reserved_lead_sale and
+# burn_lead_inventory below, and payments.py's handle_stripe_webhook.
+def _dispatch_via_active_pipeline(cur, *, lead_reference: str, lead_id: Optional[str], address: str,
+                                   applicant_name: Optional[str], buyer_email: str, allocation_type: str,
+                                   sale_context: str, source_payment_ref: Optional[str]) -> None:
+    pipeline = fulfilment.active_pipeline()
+    try:
+        if pipeline == "legacy":
+            _queue_letter_dispatch(cur, lead_reference, address, applicant_name, buyer_email, sale_context)
+        else:
+            fulfilment.create_allocation_and_obligation(
+                cur, lead_reference=lead_reference, lead_id=lead_id, address=address,
+                applicant_name=applicant_name, buyer_email=buyer_email,
+                allocation_type=allocation_type, sale_context=sale_context,
+                source_payment_ref=source_payment_ref,
+            )
+    except fulfilment.AllocationPersistenceError:
+        raise
+    except Exception as e:
+        raise fulfilment.AllocationPersistenceError(
+            f"Failed to record the letter obligation via the {pipeline!r} pipeline for "
+            f"lead_reference={lead_reference!r} (allocation_type={allocation_type!r}): {e}"
+        ) from e
+
+
 def count_pending_letter_dispatches() -> int:
     conn = get_db_conn()
     cur = conn.cursor()
@@ -5350,7 +5734,49 @@ def process_pending_letter_dispatches(batch_size: int = 20) -> dict:
     into the same admin-route + autonomous-cycle pattern the rest of the
     app already uses. Each dispatch's own attempts/last_error is updated
     regardless of outcome, so a persistently-failing address is visible on
-    the admin side rather than silently retried forever."""
+    the admin side rather than silently retried forever.
+
+    2026-09-18 review, Section 2 ("the old dry-run-as-sent issue is
+    relevant to this transition, not simply out of scope"): two fixes made
+    as part of completing the legacy/fulfilment pipeline transition, not
+    left as documentation-only flags (see docs/letter_provider_assessment.md
+    for the original finding, superseded by this fix):
+
+    1. REFUSES TO RUN when fulfilment.active_pipeline() == 'fulfilment' --
+       mirrors the guard worker.py's promote_*/run_batch functions apply in
+       the opposite direction (see fulfilment.py's own module docstring on
+       ACTIVE_PIPELINE). Before this guard, switching LETTER_DISPATCH_PIPELINE
+       to 'fulfilment' stopped NEW sales from being queued into
+       letter_dispatches (_dispatch_via_active_pipeline routes them to
+       letter_obligations instead) but did nothing to stop this function
+       itself continuing to run against whatever's still sitting in
+       letter_dispatches from before the cutover -- 'exactly one pipeline
+       may act on a given sale' was true at the allocation step but not at
+       the processing step. Historical letter_dispatches rows are left
+       exactly as they are either way (never requeued into the new
+       pipeline, never deleted) -- this guard only stops NEW processing
+       runs, it is not a migration.
+    2. NEVER sets a real sent_at for a dry-run result. The previous version
+       set `sent_at = NOW()` whenever `result.ok` was True, which is also
+       True for ConsoleLetterProvider's dry-run "success" (status=
+       'queued_dry_run') -- every dry-run row got a real-looking sent
+       timestamp indistinguishable from an actual physical send. Fixed by
+       branching on `result.status == 'queued_dry_run'` explicitly, the
+       same is_dry_run-aware discipline fulfilment.mark_provider_result
+       already enforces for the new pipeline. This does NOT retroactively
+       correct any already-corrupted historical rows -- see
+       docs/letter_provider_assessment.md's suggested one-time audit query
+       for that; this only stops the bug from continuing to fire on rows
+       processed from now on."""
+    import fulfilment
+    if fulfilment.active_pipeline() == "fulfilment":
+        logger.warning("[Letter Dispatch] Refusing to run: LETTER_DISPATCH_PIPELINE='fulfilment' -- "
+                        "the new pipeline (worker.py) owns sending now. This is the same "
+                        "'exactly one pipeline acts' guarantee _dispatch_via_active_pipeline enforces "
+                        "at allocation time, applied here at processing time too.")
+        return {"sent": 0, "failed": 0, "dry_run": 0, "batch_size": 0,
+                "refused": "active_pipeline_is_fulfilment"}
+
     import letter_provider
     provider = letter_provider.get_letter_provider()
 
@@ -5367,7 +5793,7 @@ def process_pending_letter_dispatches(batch_size: int = 20) -> dict:
         cur.close()
         conn.close()
 
-    sent, failed = 0, 0
+    sent, dry_run, failed = 0, 0, 0
     for dispatch_id, reference, address, applicant_name, sale_context in rows:
         result = provider.send({
             "reference": reference,
@@ -5378,7 +5804,8 @@ def process_pending_letter_dispatches(batch_size: int = 20) -> dict:
         conn = get_db_conn()
         cur = conn.cursor()
         try:
-            if result.ok:
+            is_dry_run_result = (result.status == "queued_dry_run")
+            if result.ok and not is_dry_run_result:
                 cur.execute("""
                     UPDATE letter_dispatches
                     SET status = %s, provider = %s, provider_reference = %s,
@@ -5386,6 +5813,16 @@ def process_pending_letter_dispatches(batch_size: int = 20) -> dict:
                     WHERE id = %s;
                 """, (result.status, result.provider_name, result.provider_reference, dispatch_id))
                 sent += 1
+            elif result.ok and is_dry_run_result:
+                # Same status/provider bookkeeping as a real send, but
+                # sent_at is deliberately left NULL -- this is the fix.
+                cur.execute("""
+                    UPDATE letter_dispatches
+                    SET status = %s, provider = %s, provider_reference = %s,
+                        attempts = attempts + 1, last_error = NULL
+                    WHERE id = %s;
+                """, (result.status, result.provider_name, result.provider_reference, dispatch_id))
+                dry_run += 1
             else:
                 cur.execute("""
                     UPDATE letter_dispatches
@@ -5399,8 +5836,8 @@ def process_pending_letter_dispatches(batch_size: int = 20) -> dict:
             conn.close()
 
     if failed:
-        logger.warning(f"[Letter Dispatch] Batch complete: {sent} sent, {failed} failed -- check letter_dispatches.last_error.")
-    return {"sent": sent, "failed": failed, "batch_size": len(rows)}
+        logger.warning(f"[Letter Dispatch] Batch complete: {sent} sent, {dry_run} dry-run, {failed} failed -- check letter_dispatches.last_error.")
+    return {"sent": sent, "dry_run": dry_run, "failed": failed, "batch_size": len(rows)}
 
 
 def record_lead_dispatch_and_burn(lead_id: str, sub_id: str, contractor_email: str, dispatch_type: str = "standard") -> bool:
@@ -5427,7 +5864,30 @@ def record_lead_dispatch_and_burn(lead_id: str, sub_id: str, contractor_email: s
                 return False  # Already burned or claimed by someone else
 
             real_lead_uuid = burned_lead[0]
-            _queue_letter_dispatch(cur, burned_lead[1], burned_lead[2], burned_lead[3], contractor_email, "subscription_dispatch")
+            # source_payment_ref is (sub_id, lead_reference) so this is
+            # idempotent per subscriber+lead even if a caller retried this
+            # function for the same pair -- though the UPDATE above
+            # (status = 'new' OR status IS NULL) already prevents the same
+            # lead being burned twice at all, by any subscriber. No Stripe
+            # charge happens at dispatch time (the subscription was already
+            # paid) so a failure here has no refund implication -- but it
+            # must still roll back the whole dispatch (see the except
+            # clause below) rather than leave a lead burned with no
+            # obligation record, and must be logged distinctly from an
+            # ordinary quota-hit so the two aren't confused when reading
+            # [Seniority Router] logs.
+            try:
+                _dispatch_via_active_pipeline(
+                    cur, lead_reference=burned_lead[1], lead_id=str(real_lead_uuid), address=burned_lead[2],
+                    applicant_name=burned_lead[3], buyer_email=contractor_email,
+                    allocation_type="subscription_dispatch", sale_context="subscription_dispatch",
+                    source_payment_ref=f"{sub_id}:{burned_lead[1]}",
+                )
+            except fulfilment.AllocationPersistenceError as e:
+                conn.rollback()
+                logger.error(f"[Seniority Router] Allocation persistence failed dispatching lead {lead_id} to "
+                             f"sub {sub_id} ({contractor_email}) -- rolled back, lead remains unclaimed: {e}")
+                return False
 
             # 2. Record dispatch audit log
             cur.execute("""

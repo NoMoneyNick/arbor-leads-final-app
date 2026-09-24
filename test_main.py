@@ -356,6 +356,27 @@ class TestMagicLinkGoesToTheRealContractorNotTestEmail(unittest.IsolatedAsyncioT
         mock_old_send.assert_not_called()
 
 
+# 2026-09-23, CRITICAL SECURITY FIX (external review finding): the new
+# regression coverage for "the magic-link token must never appear in
+# /api/request-magic-link's own HTTP response" lives in
+# tests/test_magic_link_credential_exposure.py instead of here.
+# Reason: this file, standalone, cannot actually import main.py in this
+# sandbox -- main.py unconditionally does `import scanners` / `import
+# research` at module level, and neither module is present in this working
+# copy (a pre-existing gap, confirmed before writing any new test: `python
+# -m unittest test_main -v` fails with ModuleNotFoundError on `scanners`
+# even without any of this session's edits). The docstring at the top of
+# this file references test_scrapers.py/test_payments.py/test_research.py
+# as the files that stub those modules first when run together under a
+# fuller discovery -- none of those three files exist in this working
+# copy either. tests/test_access_control.py (imported by every file under
+# tests/) already stubs scanners/research/payments before importing main,
+# and `python -m unittest discover -s tests -v` is this session's own
+# established, actually-runnable full-suite command (see ERROR_LOG.md /
+# docs/operator_guide.md), so the new test lives there instead of adding
+# dead-on-arrival tests to a file that cannot execute here.
+
+
 class TestFreeAccountSignup(unittest.IsolatedAsyncioTestCase):
     """Sep 5 2026, Nick's "limbo account" ask: sign up free (no card) ->
     get one real lead immediately -> land on /free-dashboard, logged in.

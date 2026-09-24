@@ -1,0 +1,26 @@
+{
+  "fixture_version": 1,
+  "provenance": "synthetic",
+  "captured_at": "2026-09-22T00:00:00Z",
+  "platform": "idox",
+  "council": "_synthetic",
+  "page_kind": "challenge",
+  "capture_type": "classifier_fixture",
+  "request": {
+    "method": "GET",
+    "url": "https://example-council.public-i.tbmservices.com/online-applications/search.do",
+    "search_parameters": {"searchType": "Application", "week": "2026-09-15"}
+  },
+  "response": {
+    "final_url": "https://example-council.public-i.tbmservices.com/online-applications/search.do",
+    "status": 403,
+    "headers": {"Content-Type": "text/html; charset=UTF-8", "cf-mitigated": "challenge"},
+    "redirects": [],
+    "encoding": "utf-8",
+    "tls_verified": true
+  },
+  "sanitisation": {
+    "applied": false,
+    "notes": "Hand-built synthetic fixture -- generic Cloudflare interstitial-challenge page text, not a real council response. See tests/fixtures/idox/README.md. The cf-mitigated: challenge response header is the documented Cloudflare signal Astra's review pointed to for detecting this case reliably (header-based, not fragile body-text matching)."
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "classification": "RATE_LIMITED",
+  "notes": "HTTP 429 with a Retry-After header -- the clearest, least ambiguous rate-limit signal, matches net_utils.py's own existing comment that a 429 is deliberately left untouched by the retry layer and returned straight to the caller."
+}
