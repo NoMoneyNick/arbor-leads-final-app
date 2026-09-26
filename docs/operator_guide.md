@@ -492,14 +492,16 @@ following, every call, fresh (no caching):
    reconciliation logic can be tested locally with no real vendor account
    (see `letter_providers/fake_provider.py`), and a deploy with only that
    configured has no way to actually post a letter, so the public promise
-   must not imply one will be sent. Today `stannp` is the only adapter
-   that can ever report itself configured (`STANNP_API_KEY` +
-   `STANNP_TEMPLATE_ID` both set) -- `intelliprint`/`postworks` are
-   unimplemented placeholders hard-coded to always report unconfigured
-   (see their own module docstrings), and Stannp itself is an
-   unverified-against-live-API placeholder (section 5/1 above), so no real
-   deploy can make this condition true with a genuinely working provider
-   today. That's expected, not a bug in this gate -- it correctly stays
+   must not imply one will be sent. **UPDATED 2026-09-26:** `intelliprint`
+   is now a real, working adapter (`INTELLIPRINT_API_KEY` set) -- see
+   Section 23's update below and `letter_providers/intelliprint_provider.py`'s
+   own module docstring. `stannp` remains the other adapter that can
+   report itself configured (`STANNP_API_KEY` + `STANNP_TEMPLATE_ID` both
+   set), still unverified against a live account. `postworks` remains an
+   unimplemented placeholder hard-coded to always report unconfigured.
+   So this condition CAN now be genuinely true with a real, working
+   provider (Intelliprint, once `LETTER_PROVIDER_PRIMARY=intelliprint` or
+   a backup slot is set) -- it correctly still stays
    off until that's actually resolved.
 
 All three are independent operator actions, exercisable in any order --
@@ -1797,6 +1799,8 @@ data change.
 | What Nick can actually access today | A real, zero-balance account -- reached PDF upload, no live test letter confirmed sent. | Described as having "unresolved login friction" (`handoff_inspect/CLAUDE-TREEKEY-BUILD-PROMPT.md` line 91) -- current access status unknown to this session. |
 
 **Recommendation, given before writing any adapter code, per the task's own instruction:** on automation fit and cost alone, **Intelliprint** is the stronger candidate against verified current docs -- real bearer-token auth vs. plaintext credentials on every legacy-API request; an instant self-service sandbox vs. an emailed request; a documented status lifecycle vs. none found; no minimum spend vs. a £5 top-up; cheaper 2nd-class pricing. The one factor this session cannot verify is "what we can actually access" -- presented as the comparison above and asked as the one required business-decision question via `AskUserQuestion`. **Nick's answer: "Let me get account access sorted first."** No adapter was implemented this pass, and none was guessed at or built speculatively against either provider while that's still open.
+
+**UPDATE, 2026-09-26 -- account access resolved, adapter built.** Nick confirmed Intelliprint login is fixed and he can access his account. `letter_providers/intelliprint_provider.py` is now a real adapter (no longer a stub), built against the exact request/response field names confirmed by re-fetching Intelliprint's current live docs this pass (the 2026-09-24 research above established the comparison/lifecycle/pricing but not the literal payload shape). New findings from that re-fetch: (1) the create endpoint accepts plain HTML/text directly via a `content` field -- no PDF-rendering step was needed, `worker.py`'s existing `approved_content_html` is submitted as-is; (2) the address-window figure (23mm/43mm) describes what **Intelliprint itself** prints, separately, from the API's structured `recipients[].address` fields -- our rendered letter's content does not need to leave that zone blank or position anything there, resolving the "not verified" flag from the 2026-09-24 entry above with a definite answer rather than leaving it open; (3) the exact create-request field names (`recipients[0][address][line]` etc., form-urlencoded, not literal multipart) came from Intelliprint's own worked example. Unit-tested against these documented shapes (`tests/test_providers.py`); a real test-mode HTTP call could not be completed from this sandbox (its network egress cannot reach `api.intelliprint.net` -- confirmed by trying, not assumed), so `scripts/intelliprint_test_send.py` / `RUN_INTELLIPRINT_TEST.bat` exist for Nick to run once locally, with his own key in a local `.env` file (see `.env.example.letter-fulfilment`, never pasted into chat). See `docs/launch_checklist.md` item 1 for the current status of what's still open.
 
 **Sources consulted (fetched and read this pass):**
 - https://www.pc2paper.co.uk/api-and-developers.aspx

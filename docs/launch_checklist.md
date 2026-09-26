@@ -13,18 +13,29 @@ session found while implementing and is refusing to silently paper over.
 
 ## Must decide before ANY real letter is sent
 
-1. **Provider selection and account setup.** No postal provider has a real,
-   funded account. `letter_providers/stannp_provider.py` is adapted from
-   `standalone_mailer/mailer.py`'s already-unverified integration -- its
-   endpoint/field names have not been re-checked against Stannp's current
-   API docs this session, and no live account exists to test against.
-   `intelliprint_provider.py` and `postworks_provider.py` are honest stubs
-   (`is_configured()` always `False`, `send()` raises `NotImplementedError`)
-   -- see the note on `letter_provider.py` below for why these three
-   candidates specifically. **Decision needed:** which provider(s) to
-   actually open an account with, and someone needs to verify the Stannp
-   integration against live docs (or build a different one) before it can
-   be trusted with real mail.
+1. **UPDATED 2026-09-26 -- Provider selection and account setup, first
+   provider now built.** Nick chose Intelliprint (account login fixed
+   2026-09-26) and `letter_providers/intelliprint_provider.py` is now a
+   real adapter, built and verified against Intelliprint's current live
+   API docs this pass (endpoint, auth, request fields, status lifecycle,
+   error shapes -- see that file's own module docstring for exact
+   citations). Address-window positioning was checked and found NOT
+   applicable: Intelliprint prints the recipient address separately from
+   the submitted letter content, from the API's own `recipients[]` data --
+   nothing in `letter_content.py` needed to change. Unit-tested against
+   the documented request/response shapes (`tests/test_providers.py`),
+   but **not yet empirically confirmed against a live test-mode call**
+   -- this sandbox's network egress cannot reach api.intelliprint.net
+   directly (confirmed by trying), so `scripts/intelliprint_test_send.py`
+   / `RUN_INTELLIPRINT_TEST.bat` are provided for Nick to run locally,
+   once, with his own API key in a local `.env` (never pasted into
+   chat -- see `.env.example.letter-fulfilment`). **Decision needed:**
+   none for provider selection (made); still needed before ANY real
+   letter -- run that local test-mode check, and see item 2026-09-24
+   below (real sending stays off via `LETTER_SENDING_LIVE` regardless).
+   `letter_providers/stannp_provider.py` (unverified, no account) and
+   `postworks_provider.py` (honest stub) are unchanged and not currently
+   needed now that a primary provider is real.
 
 2. **Funding reconciliation depth.** `funding.py`'s `hold` mode (the
    recommended default) requires an admin to manually call
