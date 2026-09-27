@@ -193,10 +193,23 @@ def _letter_date_today() -> str:
     the HTML immediately into approved_content_html at the moment of
     promotion and never re-renders afterwards -- so 'the date on the letter
     is the date it was actually frozen for sending' is exactly the correct
-    behaviour, not a purity violation in practice."""
+    behaviour, not a purity violation in practice.
+
+    2026-09-26 fix: previously used strftime("%-d %B %Y") for an unpadded
+    day number. "%-d" is a glibc/Linux strftime extension, not part of the
+    C standard -- it raises ValueError: Invalid format string on Windows
+    (Python there uses the platform C runtime's strftime, which does not
+    recognise "%-d"; Windows' own unpadded-day directive is "%#d" instead,
+    which is in turn not portable to Linux). Nick hit this running
+    scripts/intelliprint_test_send.py locally on Windows. Fixed
+    platform-independently by taking the day number directly from the
+    date object (an int, so it's naturally unpadded, e.g. 4 not 04) and
+    using strftime only for the month/year, which has no padding-style
+    platform difference."""
     import datetime
     from zoneinfo import ZoneInfo
-    return datetime.datetime.now(ZoneInfo("Europe/London")).strftime("%-d %B %Y")
+    today = datetime.datetime.now(ZoneInfo("Europe/London"))
+    return f"{today.day} {today.strftime('%B %Y')}"
 
 
 # ---------------------------------------------------------------------------
@@ -737,6 +750,11 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
     tk_mark_uri = _brand_asset_data_uri(BRAND_ASSET_TK_MARK_SMALL)
 
     front_page = f"""<div class="letter-page">
+  <div class="address-clear-zone">
+    <div class="meta-label">To the Property Owner / Occupier</div>
+    <div class="recipient-address">{address_e}</div>
+  </div>
+
   <div class="brand-header">
     <img class="brand-header-logo" src="{full_logo_uri}" alt="TreeKey">
     <div class="brand-header-tagline">
@@ -745,19 +763,13 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
     </div>
   </div>
 
-  <div class="front-top-row">
-    <div class="recipient-block">
-      <div class="meta-label">To the Property Owner / Occupier</div>
-      <div class="recipient-address">{address_e}</div>
-    </div>
-    <div class="intro-ref-block">
-      <div class="intro-ref-label">Your Introduction</div>
-      <div class="meta-line">Reference: {lead_reference_e}</div>
-      <div class="meta-line">{letter_date}</div>
-    </div>
+  <div class="intro-ref-block">
+    <div class="intro-ref-label">Your Introduction</div>
+    <div class="meta-line">Reference: {lead_reference_e}</div>
+    <div class="meta-line">{letter_date}</div>
   </div>
 
-  <p class="body-text">Dear homeowner,</p>
+  <p class="body-text greeting-text">Dear homeowner,</p>
   {opening_html}
   {business_intro_html}
 
@@ -896,7 +908,29 @@ def _brand_footer_html(tk_mark_uri: str, *, page_number: int) -> str:
 # compresses to fit whatever was typed. word-break/overflow-wrap on every
 # text element handle a single very long word (e.g. a long business name)
 # without clipping or overflowing its box.
+#
+# 2026-09-26 fix -- no @page rule was ever declared here. Without one, an
+# HTML-to-PDF engine falls back to ITS OWN default paper size and margins
+# (commonly US Letter with a non-zero default margin on every side, e.g.
+# ~1in/25.4mm) rather than the 210mm-wide, zero-margin page this document's
+# own .letter-page div assumes. A .letter-page div that is exactly 210mm
+# wide, centred with `margin: 0 auto`, only fits with no clipping if the
+# actual print canvas is also exactly 210mm wide with zero page margin --
+# otherwise the excess width has nowhere to go and the right edge (whichever
+# side `auto`-centring doesn't push the overflow to) gets cut off. This is
+# the most likely cause, by code inspection, of Nick's reported
+# right-edge clipping; verify against Intelliprint's OWN rendering (not
+# just this file's local preview) before treating it as fully confirmed --
+# see the accompanying report. This @page rule does not change any
+# dimension, margin value, or piece of content already in .letter-page --
+# it only makes the actual print canvas match what that div already
+# assumed, and it deliberately still says nothing about bleed/safe-zone
+# insets (Intelliprint's documented 3mm-bleed/204x291mm-safe-zone figures
+# are stated for pre-designed template ARTWORK uploads, not confirmed to
+# apply to this letter's HTML/text `content` submission path -- see the
+# report for why that wasn't assumed here either).
 _LETTER_PAGE_CSS = f"""
+@page {{ size: A4; margin: 0; }}
 * {{ box-sizing: border-box; }}
 body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Georgia, "Times New Roman", serif; }}
 .letter-page {{
@@ -919,16 +953,118 @@ body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Georgia, "Times
 
 .brand-header {{
   background: {BRAND_DARK}; border-radius: 6px; padding: 10px 18px; margin-bottom: 14mm;
+  /* 2026-09-26 fix (ninth pass -- corrects the two 2026-09-26 fixes above
+     this one, both of which turn out to have been reasoning about the
+     WRONG target position). This margin-top used to be 20mm, sized so the
+     header would clear .address-clear-zone, which was (wrongly) placed at
+     top:20mm. Nick's real Intelliprint submission (978ce488-preview_1.pdf,
+     the file-based/duplex-fixed output) showed our address rendering
+     ABOVE the provider's own orange address/barcode guide box, and the
+     header instead overlapping the TOP of that real box -- proof the
+     20mm/40mm reading (taken from a WebFetch text-summary of Intelliprint's
+     A4_Template.pdf, a vector PDF WebFetch could not extract precise
+     coordinates from) was wrong or inapplicable to this file-upload path.
+     Re-measured the REAL required zone directly from that PDF (PIL/numpy
+     pixel measurement of the orange outline at 200dpi, px->mm at
+     25.4/200): left=18.5mm, top=45.0mm, right=106.9mm, bottom=90.3mm. The
+     zone now starts at 45mm, far below where the header naturally sits
+     (padding-top:16mm + this rule's own ~18mm height ends around 34mm),
+     so the header no longer needs any extra push-down at all -- margin-top
+     goes back to 0. (The old value's whole page-count-fitting history
+     above -- attempts at 30mm/22mm/20mm -- was solving how to fit the
+     header UNDER a zone that does not actually start where it was assumed
+     to; removing the margin only gives pagination more headroom, it
+     cannot regress it. Re-ran run_pagination_check.py after this change to
+     confirm: still 2 pages across every validate()-accepting case in all 3
+     templates, same as before.) */
+  margin-top: 0;
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }}
 .brand-header-logo {{ height: 13mm; max-width: 60%; object-fit: contain; }}
 .brand-header-tagline {{ color: #fff; font-size: 8px; font-weight: bold; letter-spacing: 0.03em; text-align: right; }}
 .brand-header-tagline-sub {{ color: #A5E5CD; font-weight: normal; margin-top: 2px; }}
 
-.front-top-row {{ display: flex; justify-content: space-between; gap: 16px; margin-bottom: 10mm; }}
-.recipient-block {{ max-width: 60%; }}
+/* 2026-09-26 fix (ninth pass -- supersedes the previous top:20mm/left:40mm/
+   width:120mm fix directly below this comment in version history).
+     Nick's instruction: "your earlier '40mm from the left, 20mm from the
+   top' interpretation may be reversed or otherwise inapplicable... Measure
+   the actual provider output." That earlier figure came from a WebFetch
+   text-summary of Intelliprint's A4_Template.pdf (a vector-graphic PDF
+   WebFetch repeatedly struggled to extract precise coordinates from -- a
+   previously-disclosed limitation) and turned out not to match reality:
+   the real provider PDF (978ce488-preview_1.pdf, produced by the eighth
+   fix's file-upload route) shows our address rendering ABOVE Intelliprint's
+   own orange-outlined address/barcode guide box, which does not start
+   until much further down the page.
+     Measured DIRECTLY off that real PDF instead of trusting documentation
+   a second time: rasterised page 1 at 200dpi (pdftoppm), isolated the
+   orange outline by colour mask ((r>200)&(90<g<180)&(b<100), i.e.
+   darkorange) and took its pixel bounding box, px->mm at 25.4/200:
+     zone: left=18.5mm top=45.0mm right=106.9mm bottom=90.3mm
+       (88.4mm x 45.3mm -- closely matches a standard C5/DL window-envelope
+       address-window size, which is corroborating evidence the measurement
+       is right, not an artifact).
+   Then isolated Intelliprint's own barcode within that zone the same way
+   (near-black pixel mask, restricted to below the header's contamination
+   band so header pixels couldn't be mistaken for it -- confirmed visually
+   first via a cropped render before trusting the numeric mask):
+     barcode: left=77.1mm right=89.8mm top=69.5mm bottom=82.2mm
+       (a ~12.7mm square sitting in the zone's right-centre -- consistent
+       with a Royal Mail Mailmark-style 2D datamatrix).
+   This leaves the zone's left/upper area (x:18.5-77.1mm, all of
+   y:45.0-90.3mm) clear for our own address text. Positioned with a small
+   inward buffer from the measured edges so rounding/anti-aliasing in the
+   measurement can't put us back outside the real zone, and a width that
+   stops comfortably short of the barcode's left edge (74mm right edge vs
+   the barcode's measured 77.1mm -- ~3mm clearance):
+     top:46mm left:19mm width:55mm
+   Whether the orange outline itself is print-visible ink or a preview-only
+   diagnostic guide is NOT resolved by this fix (see the accompanying
+   report) -- but that doesn't change what to do here: the barcode is
+   printed either way, and the zone is exactly where Intelliprint's OCR
+   reads the address from (confirmed by the eighth fix's own finding that
+   file-based submissions read the address off the page), so staying inside
+   it is required regardless of whether its outline itself prints.
+   Absolutely positioned (unchanged from the earlier fix) so it lands at
+   these exact coordinates from the physical page edge regardless of what
+   else is on the page; .letter-page has no border, so position:absolute's
+   offsets are still relative to the page's own physical edge. Pending
+   confirmation against a fresh real Intelliprint submission before being
+   called fixed -- per Nick's own explicit instruction, a local render is
+   not sufficient evidence for this specific claim. */
+.address-clear-zone {{ position: absolute; top: 46mm; left: 19mm; width: 55mm; }}
 .recipient-address {{ font-size: 12.5px; font-weight: bold; white-space: pre-line; }}
-.intro-ref-block {{ text-align: right; }}
+.intro-ref-block {{ text-align: right; margin-bottom: 4mm; }}
+/* 2026-09-26 fix (ninth pass, continued). .address-clear-zone above is
+   position:absolute, so it does NOT push flowed content down by its own
+   height -- confirmed by measuring the flow with Playwright's
+   getBoundingClientRect BEFORE this rule existed: "Dear homeowner," and
+   the paragraph after it started at y=66.24mm, deep inside the real
+   45.0-90.3mm zone measured off Nick's actual Intelliprint PDF, and being
+   a full-width paragraph it would have spanned the zone's whole x-range
+   too -- exactly the "branding/body text outside reserved areas" failure
+   Nick's instruction called out, independent of whether it visually
+   collided with our own address text (it starts below that, so it
+   wouldn't have). This margin-top is sized to clear the zone's bottom
+   (90.3mm) with a buffer.
+     First attempt (26mm) was sized assuming plain addition
+   (62.24mm .intro-ref-block bottom + 4mm its own margin-bottom + 26mm =
+   92.24mm) but re-measuring with getBoundingClientRect after adding it
+   showed the greeting actually starting at 88.24mm -- still 2mm INSIDE
+   the zone. Cause: adjoining vertical margins collapse in normal flow, so
+   .intro-ref-block's 4mm margin-bottom and this rule's margin-top don't
+   add, only the larger of the two applies (62.24 + 26 = 88.24, matching
+   what was measured). Caught by re-measuring rather than trusting the
+   arithmetic -- the "measure, don't assume" rule applies to CSS mechanics
+   here too, not just to Intelliprint's own specs.
+     Raised to 31mm: expected/measured greeting top = 93.24mm, ~3mm clear
+   of the zone's 90.3mm bottom edge. Scoped to .greeting-text (the single
+   "Dear homeowner," paragraph) rather than all of .body-text, so it does
+   not add unwanted gaps between the rest of the letter's paragraphs or
+   affect the second (privacy) page, which has its own layout. Re-ran
+   run_pagination_check.py after adding this to confirm the extra space
+   does not push any validate()-accepting edge case to a 3rd page. */
+.greeting-text {{ margin-top: 31mm; }}
 .intro-ref-label {{ font-size: 10.5px; font-weight: bold; color: {BRAND_GREEN}; margin-bottom: 4px; }}
 
 .spec-box {{ background: {BRAND_PALE}; border-left: 3px solid {BRAND_GREEN}; padding: 10px 14px; margin: 12px 0; font-size: 12px; }}

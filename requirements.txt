@@ -10,3 +10,15 @@ beautifulsoup4>=4.12.0
 lxml>=4.9.0
 google-generativeai>=0.7.0
 svix>=1.0.0
+# 2026-09-26, eighth Intelliprint fix (see letter_providers/intelliprint_provider.py's
+# module docstring): Intelliprint's HTML-content submission mode always adds its own
+# extra address/barcode page ahead of our letter, with no documented way to suppress
+# it. The documented fix is to submit a pre-rendered PDF instead (their 'file' route,
+# which reads the address from the page and adds no extra sheet) -- letter_content.py's
+# HTML is now rendered to that PDF at send time using the same Chromium engine already
+# verified (tests/letter_pagination_check/run_pagination_check.py) rather than a
+# different, unverified PDF engine. THIS IS NOW A REAL PRODUCTION DEPENDENCY, not just
+# a test-time one: wherever this code actually sends live letters needs both
+# `pip install playwright` (this line) AND a one-time `playwright install chromium` to
+# download the actual browser -- pip alone is not enough.
+playwright>=1.40.0

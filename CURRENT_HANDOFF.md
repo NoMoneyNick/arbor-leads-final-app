@@ -1,0 +1,92 @@
+# CURRENT_HANDOFF.md — Intelliprint address/barcode positioning (ninth pass)
+
+Written 2026-09-26. See `ERROR_LOG.md`'s "ninth pass" entry (top of the
+Entries list) for the full technical account; this file is the short
+status snapshot for "what state is this in right now."
+
+## Completed changes (applied directly to this project folder)
+
+- `letter_content.py`:
+  - `.address-clear-zone` repositioned from `top:20mm; left:40mm;
+    width:120mm;` to `top:46mm; left:19mm; width:55mm;` — measured
+    directly off Nick's real Intelliprint output, not documentation.
+  - `.brand-header`'s `margin-top:20mm` removed (was only clearing the
+    old, wrong address-zone position; no longer needed).
+  - New `.greeting-text` class (`margin-top:31mm`) added to the "Dear
+    homeowner," paragraph only, so it starts below Intelliprint's real
+    address/barcode zone instead of inside it.
+- `tests/test_letter_content.py`: `TestAddressClearZoneMatchesIntelliprintTemplate`
+  updated for the new coordinates; 3 new tests added.
+
+Wording, letter content, the two-page front/reverse design, and the
+file-based (base64 PDF) submission route from the previous pass are all
+**unchanged** in this pass.
+
+## Applied file paths (this project, i.e. what `UPDATE_WEBSITE.bat` deploys from)
+
+- `C:\Users\twobo\Projects\VECTOR DATA LABS\letter_content.py`
+- `C:\Users\twobo\Projects\VECTOR DATA LABS\tests\test_letter_content.py`
+- `C:\Users\twobo\Projects\VECTOR DATA LABS\ERROR_LOG.md`
+
+Backup of the pre-change versions of these files (plus
+`letter_providers\intelliprint_provider.py`, unchanged this pass but
+included for completeness) is at:
+`C:\Users\twobo\Desktop\TreeKey_Backup_2026-09-26_addresspositioning\`
+
+`letter_providers\intelliprint_provider.py` itself was **not** touched
+this pass — the fix is entirely in `letter_content.py`'s CSS/markup, and
+`send()`'s file-upload submission logic (two pages, one sheet, duplex,
+forced testmode) is untouched from the previous pass.
+
+## Tests actually run
+
+- `tests/letter_pagination_check/run_pagination_check.py` (21 renders:
+  7 edge cases x 3 templates) — same result as before this change: every
+  `validate()`-accepting case is 2 pages across all 3 templates;
+  `max_length_everything` (a case `validate()` itself rejects, so it can
+  never reach a real send) is still 3 pages, unchanged, already disclosed
+  as a known residual in earlier passes — not a new regression.
+- `python3 -m unittest discover -s tests -p "test_*.py"` — 646/646 passing.
+- Local, non-mocked render of the exact letter `scripts/intelliprint_test_send.py`
+  would submit (same sample data, same `_render_html_to_pdf_bytes` path) —
+  produced a real 2-page PDF. Saved as a preview and sent in chat.
+- Playwright `getBoundingClientRect` measurements and a visual overlay of
+  the measured real zone/barcode rectangles onto a fresh render, confirming
+  our address sits inside the zone clear of the barcode, and the header/
+  reference block/greeting all sit outside it.
+
+None of the above is a real Intelliprint submission — the sandbox this
+runs in cannot reach `api.intelliprint.net`. See "Unresolved" below.
+
+## Unresolved / not attempted this pass
+
+- **Not empirically confirmed against a real Intelliprint submission.**
+  Everything above is local rendering and pixel measurement against the
+  *previous* real submission's PDF. Per Nick's own instruction on this
+  task ("Validate against the provider-generated PDF before calling the
+  positioning fixed"), this is not called "fixed" until a fresh real
+  test-mode submission is inspected the same way this one was.
+- **Whether Intelliprint's orange guide outline itself prints, or is a
+  preview-only diagnostic guide, is unanswered.** Nick asked this
+  directly. The Intelliprint docs pages most likely to answer it
+  (`design-specs`, `choose-a-content-strategy`) are blocked by their own
+  `robots.txt` from this session's fetch tool, and no workaround around
+  that block was attempted (against this project's rules). This does not
+  block the fix itself — the zone and the barcode inside it are measured
+  from Intelliprint's own real rendered output, not inferred from the
+  outline's print status, and the eighth pass already established
+  Intelliprint reads the address from this same area for file-route
+  submissions.
+- Whether real (non-test) sends will need `recipients[]` restored for
+  postage-cost calculation, despite the file-route docs saying it isn't
+  required — flagged in the eighth pass, still open, irrelevant to
+  testmode.
+
+## Exact next step
+
+Run `RUN_INTELLIPRINT_TEST.bat` once (test mode is hard-coded on in that
+script regardless of `.env`). Send back the console output/screenshot and,
+if Intelliprint's dashboard lets you download the rendered PDF for that
+job, that PDF specifically — the address-position claim above can only be
+confirmed against Intelliprint's own real output, not this project's local
+preview.

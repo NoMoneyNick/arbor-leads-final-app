@@ -9,10 +9,13 @@ and same-key-different-content rejection all verified by direct
 execution) -- see docs/handoff.md for that transcript. These tests cover
 the NEW adapter interface built on the same pattern.
 """
+import email.message
+import io
 import json
 import os
 import sys
 import unittest
+import urllib.error
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -115,6 +118,21 @@ def _fake_http_response(body: dict, status: int = 200):
     return _Resp()
 
 
+def _fake_http_error(status: int, reason: str, body_bytes: bytes, headers: dict = None) -> urllib.error.HTTPError:
+    """Builds a real urllib.error.HTTPError (not a mock) with a readable
+    body and a header collection that behaves like the one
+    intelliprint_provider.py actually receives (http.client.HTTPMessage
+    supports the same .keys()/.get() interface as email.message.Message,
+    which this uses as a lightweight stand-in)."""
+    msg = email.message.Message()
+    for k, v in (headers or {}).items():
+        msg[k] = v
+    return urllib.error.HTTPError(
+        url="https://api.intelliprint.net/v1/prints",
+        code=status, msg=reason, hdrs=msg, fp=io.BytesIO(body_bytes),
+    )
+
+
 class TestIntelliprintProviderConfiguration(unittest.TestCase):
     def tearDown(self):
         os.environ.pop("INTELLIPRINT_API_KEY", None)
@@ -159,10 +177,23 @@ class TestIntelliprintProviderSendMapping(unittest.TestCase):
 
     def _send_with_response(self, body):
         provider = IntelliprintProvider()
-        with patch("letter_providers.intelliprint_provider.build_opener") as mock_build_opener:
+        # 2026-09-26, eighth fix: send() now renders the letter to a real
+        # PDF (via Playwright/Chromium) before submitting it. Mocked here
+        # to fixed bytes -- this test class exercises request-building and
+        # response-mapping, not PDF rendering fidelity (that is covered
+        # empirically by tests/letter_pagination_check/run_pagination_check.py,
+        # which already uses the real engine; invoking real Chromium in
+        # every one of these tests would make the main suite slow and add
+        # a hard Playwright/Chromium dependency to `unittest discover`,
+        # which this codebase deliberately avoids elsewhere -- see that
+        # script's own docstring).
+        with patch("letter_providers.intelliprint_provider.build_opener") as mock_build_opener, \
+             patch("letter_providers.intelliprint_provider._render_html_to_pdf_bytes",
+                   return_value=b"%PDF-1.4 fake pdf bytes for testing") as mock_render:
             mock_build_opener.return_value.open.return_value = _fake_http_response(body)
             result = provider.send(_request())
         request_sent = mock_build_opener.return_value.open.call_args[0][0]
+        self.assertEqual(mock_render.call_count, 1)  # rendered exactly once, not skipped or repeated
         return result, request_sent
 
     def test_draft_status_maps_to_accepted(self):
@@ -228,10 +259,128 @@ class TestIntelliprintProviderSendMapping(unittest.TestCase):
         _, request_sent = self._send_with_response({"id": "print_abc", "status": "draft"})
         self.assertEqual(request_sent.get_header("Authorization"), "Bearer test-key-123")
 
+    def test_request_sends_an_honest_non_browser_user_agent(self):
+        # 2026-09-26, third fix: no User-Agent at all left urllib sending
+        # its own generic default, which Cloudflare could reject outright
+        # (browser_signature_banned) before Intelliprint's own app code
+        # ever saw the request. Must be an honest app identifier -- never
+        # a spoofed/impersonated browser string.
+        _, request_sent = self._send_with_response({"id": "print_abc", "status": "draft"})
+        user_agent = request_sent.get_header("User-agent")
+        self.assertEqual(user_agent, "TreeKey/1.0 (+https://treekey.co.uk)")
+        for browser_token in ("Mozilla", "Chrome", "Safari", "AppleWebKit", "Gecko"):
+            self.assertNotIn(browser_token, user_agent)
+
     def test_request_defaults_to_testmode_true(self):
         _, request_sent = self._send_with_response({"id": "print_abc", "status": "draft"})
         body = request_sent.data.decode()
         self.assertIn("testmode=true", body)
+
+    def test_request_sets_double_sided_yes_so_reverse_page_prints_on_the_back(self):
+        # 2026-09-26, fourth fix: previously unset -- Intelliprint's own
+        # documented default (double_sided="no") would print this letter's
+        # two pages as two separate one-sided sheets, not one sheet
+        # printed front and back as the two-page design intends.
+        _, request_sent = self._send_with_response({"id": "print_abc", "status": "draft"})
+        body = request_sent.data.decode()
+        self.assertIn("printing%5Bdouble_sided%5D=yes", body)
+
+    def test_request_never_sends_add_address_sheet(self):
+        # 2026-09-26, seventh fix: a real submission returned HTTP 400
+        # parameter_unknown for this exact field. Re-checked
+        # reference/prints/create's REQUEST schema directly: add_address_sheet
+        # is documented ONLY in the RESPONSE ("whether the address is
+        # printed on a separate page... or the same page as your letter") --
+        # it is Intelliprint's own report of what it did, not a
+        # caller-settable input, and no other documented field controls
+        # this either. Must never be sent again.
+        _, request_sent = self._send_with_response({"id": "print_abc", "status": "draft"})
+        body = request_sent.data.decode()
+        self.assertNotIn("add_address_sheet", body)
+
+    def test_request_only_uses_documented_request_schema_fields(self):
+        # 2026-09-26, seventh fix: the add_address_sheet 400 happened
+        # because a field was added to the payload that "sounded right" but
+        # was never actually checked against Intelliprint's REQUEST schema
+        # (it turned out to be response-only). This test guards against
+        # that class of mistake recurring for ANY field, not just this one:
+        # every top-level key this adapter sends must be one of the fields
+        # reference/prints/create documents as REQUEST parameters (checked
+        # 2026-09-26 via Intelliprint's current live docs -- see this
+        # module's own docstring, seventh fix, for the full list and its
+        # source). A key like "printing[double_sided]" is checked by its
+        # top-level name ("printing") since Intelliprint's own docs nest
+        # sub-fields that way.
+        DOCUMENTED_REQUEST_TOP_LEVEL_FIELDS = {
+            "type", "testmode", "confirmed", "content", "template", "file",
+            "reference", "mailing_list", "recipients", "splitting", "printing",
+            "postage", "background", "confidential", "extra_documents",
+            "remove_letters", "nudge", "confirmation_email", "address_window",
+            "insert", "metadata",
+        }
+        _, request_sent = self._send_with_response({"id": "print_abc", "status": "draft"})
+        body = request_sent.data.decode()
+        sent_top_level_names = set()
+        for pair in body.split("&"):
+            key = pair.split("=", 1)[0]
+            top_level = key.split("%5B", 1)[0].split("[", 1)[0]  # strip [nested] suffix, encoded or not
+            sent_top_level_names.add(top_level)
+        undocumented = sent_top_level_names - DOCUMENTED_REQUEST_TOP_LEVEL_FIELDS
+        self.assertEqual(undocumented, set(),
+                          f"Sending undocumented request field(s): {undocumented} -- "
+                          f"verify against Intelliprint's current live docs before adding, don't guess.")
+
+    def test_pdf_preview_url_surfaces_in_result_message_when_present(self):
+        # Intelliprint's own documented response shape (reference/prints/
+        # retrieve): each letter carries a signed `pdf` preview URL. This
+        # must reach ProviderResult.message so it's visible in
+        # scripts/intelliprint_test_send.py's own printed output --
+        # the only reliable way to inspect what was actually rendered,
+        # rather than assuming a successful submission means correct
+        # rendering.
+        result, _ = self._send_with_response({
+            "id": "print_abc", "status": "draft",
+            "letters": [{"id": "letter_1", "status": "draft",
+                         "pdf": "https://api.intelliprint.net/files/signed/letter_1.pdf?sig=abc"}],
+        })
+        self.assertIn("https://api.intelliprint.net/files/signed/letter_1.pdf?sig=abc", result.message)
+
+    def test_missing_pdf_preview_url_does_not_crash_and_says_so(self):
+        result, _ = self._send_with_response({"id": "print_abc", "status": "draft"})
+        self.assertNotIn("None", result.message)
+        self.assertIn("no PDF preview URL", result.message)
+
+    def test_pages_sheets_surfaced_and_flagged_as_duplex_evidence_when_sheets_less_than_pages(self):
+        # 2026-09-26, fifth fix: Nick's correction -- "two PDF pages alone
+        # do not establish front-and-back printing." pages=2/sheets=1 IS
+        # that evidence (per Intelliprint's own docs: sheets < pages means
+        # double-sided printing was actually used).
+        result, _ = self._send_with_response({"id": "print_abc", "status": "draft", "pages": 2, "sheets": 1})
+        self.assertIn("pages=2", result.message)
+        self.assertIn("sheets=1", result.message)
+        self.assertIn("consistent with duplex", result.message)
+
+    def test_pages_sheets_flagged_as_not_duplexed_when_equal_and_over_one(self):
+        # The opposite, equally important case: if double_sided=yes was
+        # sent but Intelliprint still printed two separate one-sided
+        # sheets, sheets would equal pages (both 2) -- must be called out,
+        # not silently treated as fine.
+        result, _ = self._send_with_response({"id": "print_abc", "status": "draft", "pages": 2, "sheets": 2})
+        self.assertIn("does NOT look duplexed", result.message)
+
+    def test_missing_pages_sheets_does_not_crash_and_says_so(self):
+        result, _ = self._send_with_response({"id": "print_abc", "status": "draft"})
+        self.assertIn("cannot confirm duplex", result.message)
+
+    def test_response_add_address_sheet_is_surfaced_when_present(self):
+        # 2026-09-26, seventh fix: add_address_sheet turned out to be
+        # response-only (see send()'s payload -- sending it as a request
+        # field caused a real 400). Surfaced here instead, since it's
+        # Intelliprint's own statement of whether it separated the address
+        # onto its own sheet -- exactly what Nick's original report needs
+        # confirmed from the provider, not assumed.
+        result, _ = self._send_with_response({"id": "print_abc", "status": "draft", "add_address_sheet": False})
+        self.assertIn("add_address_sheet=False", result.message)
 
     def test_testmode_false_is_actually_sent_when_explicitly_configured(self):
         os.environ["INTELLIPRINT_TEST_MODE"] = "false"
@@ -239,11 +388,153 @@ class TestIntelliprintProviderSendMapping(unittest.TestCase):
         body = request_sent.data.decode()
         self.assertIn("testmode=false", body)
 
-    def test_address_line_and_city_are_combined(self):
+    def test_request_never_sends_recipients(self):
+        # 2026-09-26, eighth fix: superseded test_address_line_and_city_are_combined
+        # above (which asserted the OLD recipients[0][address][line] field
+        # this adapter no longer sends at all). Per
+        # reference/prints/create's documented base64 file-upload route:
+        # "you do not need to provide recipients as Intelliprint will
+        # automatically extract the addresses from the file" -- our PDF
+        # already carries the address in letter_content.py's
+        # .address-clear-zone. Omitted deliberately, not by oversight; see
+        # this module's docstring, eighth fix, for the open question this
+        # leaves for real (non-test) sends.
         _, request_sent = self._send_with_response({"id": "print_abc", "status": "draft"})
         body = request_sent.data.decode()
-        # _request() in this file uses address_lines={"line1": "1 Test St", "city": "Leeds", ...}
-        self.assertIn("recipients%5B0%5D%5Baddress%5D%5Bline%5D=1+Test+St%2C+Leeds", body)
+        self.assertNotIn("recipients", body)
+
+    def test_request_submits_rendered_pdf_as_base64_file_content(self):
+        # 2026-09-26, eighth fix: content (raw HTML) is no longer sent --
+        # replaced by file[content] (base64-encoded rendered PDF) and
+        # file[name], per reference/prints/create's documented base64
+        # upload shape, since Intelliprint's HTML-content strategy was
+        # confirmed (Nick's real submission) to add its own extra
+        # address/barcode page that the file strategy documents avoiding.
+        _, request_sent = self._send_with_response({"id": "print_abc", "status": "draft"})
+        body = request_sent.data.decode()
+        self.assertNotIn("content=", body)  # old field, must be gone
+        self.assertIn("file%5Bname%5D=treekey_idem-1.pdf", body)
+        # The fake PDF bytes _send_with_response mocks in, base64-encoded
+        # and urlencoded, must appear as file[content]'s value.
+        import base64
+        expected_b64 = base64.b64encode(b"%PDF-1.4 fake pdf bytes for testing").decode("ascii")
+        from urllib.parse import quote
+        self.assertIn(f"file%5Bcontent%5D={quote(expected_b64, safe='')}", body)
+
+    def test_render_failure_is_unknown_and_never_touches_the_network(self):
+        # A local rendering failure (e.g. Playwright/Chromium missing or
+        # broken) means nothing was sent to Intelliprint at all -- must
+        # never be misreported as accepted/rejected, and must not attempt
+        # a network call with no PDF to send.
+        provider = IntelliprintProvider()
+        with patch("letter_providers.intelliprint_provider.build_opener") as mock_build_opener, \
+             patch("letter_providers.intelliprint_provider._render_html_to_pdf_bytes",
+                   side_effect=RuntimeError("playwright is not installed. ...")):
+            result = provider.send(_request())
+        self.assertEqual(result.outcome, OUTCOME_UNKNOWN)
+        self.assertIn("Could not render the letter to PDF", result.message)
+        mock_build_opener.assert_not_called()
+
+
+class TestIntelliprintProviderHTTPErrorClassification(unittest.TestCase):
+    """2026-09-26, second fix: opener.open() raises urllib.error.HTTPError
+    on any non-2xx response BEFORE the old code got a chance to read the
+    body -- Nick's real "HTTP Error 403: Forbidden" test run hit exactly
+    this, with the actual diagnostic body/headers discarded. These tests
+    cover the replacement behaviour: a body that matches Intelliprint's own
+    documented {"error": {...}} shape is a confirmed rejection; anything
+    else (e.g. an HTML page from a security/WAF layer) stays UNKNOWN, and
+    the API key / Authorization header value is never present in either
+    outcome's message."""
+
+    def setUp(self):
+        os.environ["INTELLIPRINT_API_KEY"] = "sk_super_secret_key_value"
+
+    def tearDown(self):
+        os.environ.pop("INTELLIPRINT_API_KEY", None)
+        os.environ.pop("INTELLIPRINT_TEST_MODE", None)
+
+    def _send_with_http_error(self, exc):
+        provider = IntelliprintProvider()
+        with patch("letter_providers.intelliprint_provider.build_opener") as mock_build_opener:
+            mock_build_opener.return_value.open.side_effect = exc
+            return provider.send(_request())
+
+    def test_403_with_documented_error_body_is_rejected_with_evidence(self):
+        body = json.dumps({"error": {
+            "type": "authentication_error", "code": "forbidden",
+            "message": "The API key provided was not authorised to access the requested resource.",
+            "param": None,
+        }}).encode("utf-8")
+        exc = _fake_http_error(403, "Forbidden", body, headers={
+            "Content-Type": "application/json", "X-Request-Id": "req_abc123",
+            "Authorization": "Bearer sk_super_secret_key_value",
+        })
+        result = self._send_with_http_error(exc)
+        self.assertEqual(result.outcome, OUTCOME_REJECTED)
+        self.assertIn("forbidden", result.message)
+        self.assertIn("not authorised", result.message)
+        self.assertIn("req_abc123", result.message)
+
+    def test_403_with_non_json_body_stays_unknown_not_guessed_rejected(self):
+        # A security/WAF layer in front of the API would typically return
+        # HTML or plain text, not Intelliprint's own documented error JSON --
+        # this must NOT be classified as a confirmed provider rejection.
+        body = b"<html><body>Request blocked by security rules (ref 9f2c)</body></html>"
+        exc = _fake_http_error(403, "Forbidden", body, headers={"Content-Type": "text/html", "CF-Ray": "8f0a1b2c-LHR"})
+        result = self._send_with_http_error(exc)
+        self.assertEqual(result.outcome, OUTCOME_UNKNOWN)
+        self.assertIn("did not match Intelliprint's documented", result.message)
+        self.assertIn("security rules", result.message)
+
+    def test_401_invalid_key_body_is_rejected_and_distinguishable_from_403(self):
+        body = json.dumps({"error": {
+            "type": "authentication_error", "code": "invalid_api_key",
+            "message": "The API key provided is invalid or has expired.", "param": None,
+        }}).encode("utf-8")
+        exc = _fake_http_error(401, "Unauthorized", body, headers={"Content-Type": "application/json"})
+        result = self._send_with_http_error(exc)
+        self.assertEqual(result.outcome, OUTCOME_REJECTED)
+        self.assertIn("invalid_api_key", result.message)
+        self.assertNotIn("forbidden", result.message)
+
+    def test_api_key_never_appears_in_diagnostic_message(self):
+        body = json.dumps({"error": {"type": "authentication_error", "code": "forbidden",
+                                       "message": "not authorised", "param": None}}).encode("utf-8")
+        exc = _fake_http_error(403, "Forbidden", body, headers={
+            "Authorization": "Bearer sk_super_secret_key_value",
+            "Set-Cookie": "session=supersecret",
+            "X-Api-Key": "sk_super_secret_key_value",
+        })
+        result = self._send_with_http_error(exc)
+        self.assertNotIn("sk_super_secret_key_value", result.message)
+        self.assertNotIn("supersecret", result.message)
+
+    def test_disallowed_headers_never_surface_even_when_present(self):
+        # Belt-and-braces check on the allow-list itself: Authorization,
+        # Set-Cookie, and anything key/token/secret-shaped must never show
+        # up in the message, whatever the response actually contains.
+        body = json.dumps({"error": {"type": "authentication_error", "code": "forbidden",
+                                       "message": "not authorised", "param": None}}).encode("utf-8")
+        exc = _fake_http_error(403, "Forbidden", body, headers={
+            "Authorization": "Bearer sk_super_secret_key_value",
+            "Set-Cookie": "session=abc123",
+            "X-Api-Key": "another-secret",
+            "X-Auth-Token": "yet-another-secret",
+            "Content-Type": "application/json",  # allow-listed: should be present
+        })
+        result = self._send_with_http_error(exc)
+        for forbidden_header_name in ("Authorization", "Set-Cookie", "X-Api-Key", "X-Auth-Token", "abc123", "another-secret", "yet-another-secret"):
+            self.assertNotIn(forbidden_header_name, result.message)
+        self.assertIn("content-type", result.message.lower())
+
+    def test_network_error_still_maps_to_unknown_not_affected_by_http_error_path(self):
+        # Regression guard: a non-HTTPError exception (no real response at
+        # all) must still take the old generic-UNKNOWN path, unaffected by
+        # the new HTTPError-specific branch.
+        result = self._send_with_http_error(TimeoutError("simulated timeout"))
+        self.assertEqual(result.outcome, OUTCOME_UNKNOWN)
+        self.assertIn("TimeoutError", result.message)
 
 
 class TestIntelliprintProviderCheckStatus(unittest.TestCase):
@@ -272,6 +563,28 @@ class TestIntelliprintProviderCheckStatus(unittest.TestCase):
     def test_check_status_without_credentials_returns_none(self):
         os.environ.pop("INTELLIPRINT_API_KEY", None)
         self.assertIsNone(IntelliprintProvider().check_status("print_abc"))
+
+    def test_check_status_surfaces_pdf_preview_url_too(self):
+        provider = IntelliprintProvider()
+        with patch("letter_providers.intelliprint_provider.build_opener") as mock_build_opener:
+            mock_build_opener.return_value.open.return_value = _fake_http_response({
+                "id": "print_abc",
+                "letters": [{"id": "letter_1", "status": "sent",
+                             "pdf": "https://api.intelliprint.net/files/signed/letter_1.pdf?sig=xyz"}],
+            })
+            result = provider.check_status("print_abc")
+        self.assertIn("https://api.intelliprint.net/files/signed/letter_1.pdf?sig=xyz", result.message)
+
+    def test_check_status_surfaces_pages_sheets_too(self):
+        provider = IntelliprintProvider()
+        with patch("letter_providers.intelliprint_provider.build_opener") as mock_build_opener:
+            mock_build_opener.return_value.open.return_value = _fake_http_response({
+                "id": "print_abc", "pages": 2, "sheets": 1,
+                "letters": [{"id": "letter_1", "status": "sent"}],
+            })
+            result = provider.check_status("print_abc")
+        self.assertIn("pages=2", result.message)
+        self.assertIn("sheets=1", result.message)
 
 
 class TestRegistryFallbackRules(unittest.TestCase):

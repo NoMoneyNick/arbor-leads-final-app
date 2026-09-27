@@ -137,6 +137,137 @@ class TestValidation(unittest.TestCase):
             letter_content.upsert_contractor_settings(cur, _settings(business_name=""))
 
 
+class TestPageBoxIsExplicit(unittest.TestCase):
+    """2026-09-26 fix: right-edge clipping + an unexpected extra page were
+    reported from Intelliprint's own rendering of this letter. Root cause
+    identified by inspection: no @page rule was ever declared, so an
+    HTML-to-PDF engine falls back to its own default paper size/margins
+    instead of the 210mm-wide, zero-margin canvas .letter-page assumes.
+    These tests only assert the missing declaration is now present and
+    correct -- they cannot themselves prove Intelliprint's own renderer
+    honours it; see the accompanying local-preview PDF and the pending
+    test-mode resubmission for that."""
+
+    def setUp(self):
+        os.environ[letter_content.PRIVACY_CONTACT_EMAIL_ENV] = "privacy@treekey.co.uk"
+
+    def test_page_css_declares_a4_with_zero_margin(self):
+        html = letter_content.render_preview_letter(_settings())
+        self.assertIn("@page { size: A4; margin: 0; }", html)
+
+    def test_page_box_declaration_precedes_the_letter_page_div_rule(self):
+        # Must actually be inside the <style> block, ahead of first use --
+        # not just present anywhere in the document (e.g. inside escaped
+        # contractor-supplied text, which would be meaningless as CSS).
+        html = letter_content.render_preview_letter(_settings())
+        style_start = html.index("<style>")
+        style_end = html.index("</style>")
+        css = html[style_start:style_end]
+        self.assertIn("@page", css)
+        self.assertLess(css.index("@page"), css.index(".letter-page {"))
+
+    def test_letter_page_dimensions_unchanged_by_the_page_box_fix(self):
+        # The fix must not shrink or resize the letter itself -- only add
+        # the missing page-box declaration around it.
+        html = letter_content.render_preview_letter(_settings())
+        self.assertIn("width: 210mm; min-height: 297mm;", html)
+        self.assertIn("padding: 16mm 18mm 14mm 18mm;", html)
+
+
+class TestAddressClearZoneMatchesIntelliprintTemplate(unittest.TestCase):
+    """2026-09-26 fix (ninth pass -- supersedes this class's own original
+    values). The original fix positioned .address-clear-zone at
+    top:20mm/left:40mm/width:120mm, taken from a WebFetch text-summary of
+    Intelliprint's A4_Template.pdf. Nick's real Intelliprint submission
+    (978ce488-preview_1.pdf, from the eighth fix's file-upload route) showed
+    that reading was wrong or inapplicable: our address rendered ABOVE
+    Intelliprint's own orange-outlined address/barcode guide box, and our
+    header/greeting text overlapped it instead.
+
+    Re-measured DIRECTLY off that real PDF (PIL/numpy pixel measurement of
+    the orange outline at 200dpi, px->mm at 25.4/200) rather than trusting
+    documentation a second time:
+      zone:    left=18.5mm top=45.0mm right=106.9mm bottom=90.3mm
+      barcode: left=77.1mm top=69.5mm right=89.8mm  bottom=82.2mm
+               (within the zone, right-of-centre)
+
+    These tests assert the CSS values chosen from that measurement (a small
+    inward buffer from the zone's edges; a width that stops clear of the
+    barcode's left edge; header and greeting spacing that keeps both
+    outside the zone's y-range) and that the address markup still lives
+    inside the zone. They cannot themselves prove Intelliprint's own
+    renderer/OCR reads the address correctly from this exact position --
+    that needs a fresh real submission and the provider's own rendered
+    PDF, not a unit test (see ERROR_LOG.md and the report given alongside
+    this fix)."""
+
+    def setUp(self):
+        os.environ[letter_content.PRIVACY_CONTACT_EMAIL_ENV] = "privacy@treekey.co.uk"
+
+    def test_address_clear_zone_is_positioned_at_measured_coordinates(self):
+        html = letter_content.render_preview_letter(_settings())
+        self.assertIn(
+            ".address-clear-zone {{ position: absolute; top: 46mm; left: 19mm; width: 55mm; }}"
+            .replace("{{", "{").replace("}}", "}"),
+            html,
+        )
+
+    def test_address_clear_zone_width_stays_clear_of_the_measured_barcode(self):
+        # left(19mm) + width must stay left of the barcode's measured
+        # left edge (77.1mm) with a margin -- not just numerically inside
+        # the zone's own right edge (106.9mm), which would run straight
+        # into the barcode instead of leaving room for a wrapped address.
+        left_mm = 19
+        width_mm = 55
+        barcode_left_mm = 77.1
+        self.assertLess(left_mm + width_mm, barcode_left_mm)
+
+    def test_brand_header_no_longer_carries_the_superseded_margin_top(self):
+        # The old margin-top:20mm existed only to clear the OLD (wrong)
+        # address-zone position. The zone has moved well below the
+        # header's natural position, so the header needs no extra push.
+        html = letter_content.render_preview_letter(_settings())
+        rule_start = html.index(".brand-header {")
+        rule_end = html.index("}", rule_start)
+        header_rule = html[rule_start:rule_end + 1]
+        self.assertIn("margin-top: 0;", header_rule)
+        self.assertNotIn("margin-top: 20mm", header_rule)
+
+    def test_greeting_paragraph_has_its_own_clearance_class(self):
+        # The greeting must be pushed below the zone's measured bottom
+        # (90.3mm) without adding spacing to every other .body-text
+        # paragraph -- scoped via a dedicated class, not the shared one.
+        html = letter_content.render_preview_letter(_settings())
+        self.assertIn('<p class="body-text greeting-text">Dear homeowner,</p>', html)
+        self.assertIn(".greeting-text {{ margin-top: 31mm; }}".replace("{{", "{").replace("}}", "}"), html)
+
+    def test_address_clear_zone_div_wraps_the_recipient_address(self):
+        html = letter_content.render_preview_letter(_settings())
+        zone_start = html.index('<div class="address-clear-zone">')
+        header_start = html.index('class="brand-header"')
+        # The recipient address markup must be inside the zone (i.e. before
+        # the next major block, .brand-header), not merely present
+        # somewhere else on the page.
+        zone_html = html[zone_start:header_start]
+        self.assertIn("recipient-address", zone_html)
+        self.assertIn(letter_content.PREVIEW_ADDRESS.splitlines()[0], zone_html)
+
+    def test_old_front_top_row_and_recipient_block_structure_is_gone(self):
+        # Superseded by .address-clear-zone -- these classes must not
+        # linger from the pre-fix layout (would mean two competing address
+        # blocks on the page, not a clean replacement).
+        html = letter_content.render_preview_letter(_settings())
+        self.assertNotIn("front-top-row", html)
+        self.assertNotIn('class="recipient-block"', html)
+
+    def test_address_clear_zone_declared_before_brand_header_in_source_order(self):
+        # It must render first in the HTML so it is unambiguously the
+        # address block a human -- or Intelliprint's OCR -- reads, not
+        # something layered awkwardly after the header.
+        html = letter_content.render_preview_letter(_settings())
+        self.assertLess(html.index('class="address-clear-zone"'), html.index('class="brand-header"'))
+
+
 class TestTemplateSelection(unittest.TestCase):
     """2026-09-23 handoff: the three-template selector."""
 
@@ -458,6 +589,52 @@ class TestFingerprintCoversNewFields(unittest.TestCase):
             letter_content.REVERSE_PAGE_CONTENT_VERSION = original_version
 
         self.assertNotEqual(fp_before, fp_after)
+
+
+class TestLetterDateIsPlatformIndependent(unittest.TestCase):
+    """2026-09-26 fix: _letter_date_today() used to build its unpadded-day
+    format with strftime("%-d %B %Y") -- "%-d" is a glibc/Linux strftime
+    extension, not standard C, and raises ValueError: Invalid format
+    string on Windows (which Nick hit running scripts/intelliprint_test_send.py
+    locally). Fixed by taking .day directly (an int, naturally unpadded)
+    and using strftime only for month/year. These tests exercise the
+    actual current platform's strftime (no mocking needed for that part --
+    the whole point is this must not raise wherever it runs) plus a
+    mocked-date check that the day is genuinely unpadded, not just
+    "happens not to crash today"."""
+
+    def test_does_not_raise_on_this_platform(self):
+        # The regression was ValueError: Invalid format string on Windows;
+        # on Linux (where this suite runs) the old code never raised, so
+        # this alone would not have caught the bug -- see the mocked test
+        # below for the actual padding assertion, which is platform-
+        # independent by construction (pure string formatting, no
+        # strftime("%-d") involved at all any more).
+        result = letter_content._letter_date_today()
+        self.assertRegex(result, r"^\d{1,2} [A-Z][a-z]+ \d{4}$")
+
+    def test_single_digit_day_is_not_zero_padded(self):
+        import datetime
+        from unittest.mock import patch
+        from zoneinfo import ZoneInfo
+
+        fixed = datetime.datetime(2026, 9, 4, 10, 30, tzinfo=ZoneInfo("Europe/London"))
+        with patch("datetime.datetime") as mock_datetime:
+            mock_datetime.now.return_value = fixed
+            result = letter_content._letter_date_today()
+        self.assertEqual(result, "4 September 2026")
+        self.assertNotIn("04", result)
+
+    def test_double_digit_day_unaffected(self):
+        import datetime
+        from unittest.mock import patch
+        from zoneinfo import ZoneInfo
+
+        fixed = datetime.datetime(2026, 9, 24, 10, 30, tzinfo=ZoneInfo("Europe/London"))
+        with patch("datetime.datetime") as mock_datetime:
+            mock_datetime.now.return_value = fixed
+            result = letter_content._letter_date_today()
+        self.assertEqual(result, "24 September 2026")
 
 
 if __name__ == "__main__":
