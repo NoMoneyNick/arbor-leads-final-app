@@ -3597,10 +3597,12 @@ def _signup_url(next_url: Optional[str] = None) -> str:
     return "/free-account" + (f"?next={urllib.parse.quote(safe, safe='')}" if safe else "")
 
 
-def _letter_optional_fields_html(settings: "letter_content.ContractorLetterSettings") -> str:
-    """The clearly-labelled OPTIONAL letter-personalisation section. Shared
-    verbatim by the My Account / onboarding form and the first-time signup
-    form, so the two can never drift apart."""
+def _letter_optional_fields_html(settings: "letter_content.ContractorLetterSettings", *, signup: bool = False) -> str:
+    """The clearly-labelled OPTIONAL letter-personalisation section, shared by
+    My Account letter settings and the first-time signup form so the two
+    cannot drift apart. `signup=True` omits the letter-style (template)
+    choice: signup collects details only; choosing a style, previewing and
+    approving the letter happen before the first purchase and in My Account."""
     def esc(v: str) -> str:
         return html.escape(v or "")
 
@@ -3608,18 +3610,29 @@ def _letter_optional_fields_html(settings: "letter_content.ContractorLetterSetti
         f'<option value="{esc(key)}"{" selected" if key == settings.template_key else ""}>{esc(label)}</option>'
         for key, label in letter_content.template_choices()
     )
-    return f"""
-                <div class="lp-section">
-                    <h2>Personalise your letter <span class="lp-tag lp-tag-opt">Optional</span></h2>
-                    <p class="lp-section-note">Everything in this section is optional, and you can edit it any time in <a href="/account">My Account</a>. Fields you leave blank are simply left out, and blank wording fields use TreeKey's complete standard wording.</p>
-
-                    <label for="template_key">Letter style</label>
+    if signup:
+        section_title = "Optional details for your letters"
+        section_note = ("Everything here is optional and can appear on your future letters. Anything you leave blank is simply "
+                        "left out, and you can edit it any time in <a href=\"/account\">My Account</a>. Nothing here approves a "
+                        "letter: you choose your letter style, preview it and approve it before your first purchase.")
+        template_block = ""
+        offer_reapproval_hint = ""
+    else:
+        section_title = "Personalise your letter"
+        section_note = ('Everything in this section is optional, and you can edit it any time in <a href="/account">My Account</a>. Fields you leave blank are simply left out, and blank wording fields use TreeKey\'s complete standard wording.')
+        template_block = f"""                    <label for="template_key">Letter style</label>
                     <select id="template_key" name="template_key">
                         {template_options_html}
                     </select>
                     <div class="lp-hint">Sets the tone of the standard wording. You can switch anytime; a change means you re-approve your preview before it is used.</div>
+"""
+        offer_reapproval_hint = '<div class="lp-hint">Changing your offer means you re-approve your preview before it is used.</div>'
+    return f"""
+                <div class="lp-section">
+                    <h2>{section_title} <span class="lp-tag lp-tag-opt">Optional</span></h2>
+                    <p class="lp-section-note">{section_note}</p>
 
-                    <label for="contact_first_name">Contact first name</label>
+{template_block}                    <label for="contact_first_name">Contact first name</label>
                     <input id="contact_first_name" name="contact_first_name" value="{esc(settings.contact_first_name)}" placeholder="e.g. Dave" maxlength="{letter_content.MAX_CONTACT_FIRST_NAME_LEN}">
                     <div class="lp-hint">Adds a personal touch in the letter's contact panel. Leave blank to show just your business name and phone.</div>
 
@@ -3646,13 +3659,17 @@ def _letter_optional_fields_html(settings: "letter_content.ContractorLetterSetti
                     <textarea id="qualifications_note" name="qualifications_note" placeholder="e.g. NPTC Level 2 Certificate in Arboriculture (state only what you actually hold)" maxlength="{letter_content.MAX_QUALIFICATIONS_LEN}">{esc(settings.qualifications_note)}</textarea>
                     <div class="lp-hint">Insurance, qualifications and any other credential you list here are your own claim, shown exactly as written. TreeKey never adds "insured", "qualified", "vetted" or similar wording on your behalf. Leave blank to leave them out.</div>
 
+                    <div class="lp-hint" style="margin:18px 0 0 0; color:#cbd5e1;"><b>Your offer appears on your letters. Leave blank for no offer. Edit anytime in My Account.</b></div>
                     <label for="offer_text">Offer</label>
-                    <input id="offer_text" name="offer_text" value="{esc(settings.offer_text)}" placeholder="e.g. £50 off work over £500. Mention TREEKEY when requesting your quote." maxlength="{letter_content.MAX_OFFER_TEXT_LEN}">
+                    <input id="offer_text" name="offer_text" value="{esc(settings.offer_text)}" placeholder="e.g. £50 off work over £500. Mention TREEKEY when requesting your quote." maxlength="{letter_content.MAX_OFFER_TEXT_LEN}" aria-describedby="offer_text_help">
+                    <div class="lp-hint" id="offer_text_help">Optional — give homeowners an extra reason to contact you with a discount or special offer. You choose the offer and honour it.</div>
                     <label for="offer_code">Offer code</label>
-                    <input id="offer_code" name="offer_code" value="{esc(settings.offer_code)}" placeholder="e.g. TREEKEY" maxlength="{letter_content.MAX_OFFER_CODE_LEN}">
+                    <input id="offer_code" name="offer_code" value="{esc(settings.offer_code)}" placeholder="e.g. TREEKEY" maxlength="{letter_content.MAX_OFFER_CODE_LEN}" aria-describedby="offer_code_help">
+                    <div class="lp-hint" id="offer_code_help">Optional — a short code homeowners can quote when contacting you to claim your offer.</div>
                     <label for="offer_conditions">Offer conditions / expiry</label>
-                    <input id="offer_conditions" name="offer_conditions" value="{esc(settings.offer_conditions)}" placeholder="e.g. Valid until 31 December 2026" maxlength="{letter_content.MAX_OFFER_CONDITIONS_LEN}">
-                    <div class="lp-hint">Shown compactly on your letter, below your contact details, exactly as you write it. TreeKey never invents or prefills a discount. Leave the offer blank to show nothing. Changing it means you re-approve your preview before it is used.</div>
+                    <input id="offer_conditions" name="offer_conditions" value="{esc(settings.offer_conditions)}" placeholder="e.g. Valid until 31 December 2026" maxlength="{letter_content.MAX_OFFER_CONDITIONS_LEN}" aria-describedby="offer_conditions_help">
+                    <div class="lp-hint" id="offer_conditions_help">Optional — explain any limits, minimum spend or expiry date.</div>
+                    {offer_reapproval_hint}
                 </div>
     """
 
@@ -7892,9 +7909,48 @@ async def verify_otp_route(request: Request):
 # viewable and date it was applied... as a sales prompt."
 
 _SIGNUP_FIELDS = ("email", "responsible_name", "business_name", "phone", "service_area_note", "insurance_note",
-                  "qualifications_note", "template_key", "business_intro", "services_note", "contact_email",
+                  "qualifications_note", "business_intro", "services_note", "contact_email",
                   "contact_first_name", "offer_text", "offer_code", "offer_conditions")
 MAX_RESPONSIBLE_NAME_LEN = 80
+
+
+# Validates the ACTUAL field values when the form is submitted, so a browser
+# autofill (which may not fire any keyboard/input event, e.g. Safari/iOS
+# before first interaction) counts immediately. The submit button is never
+# disabled and no state depends on key events; the same fields are validated
+# again server-side (_validate_signup_values), which remains authoritative.
+# Without JavaScript the native `required` attributes still apply.
+_SIGNUP_FORM_JS = r"""
+(function () {
+  var f = document.getElementById('signup-form');
+  if (!f) return;
+  f.noValidate = true;
+  var box = document.getElementById('signup-js-errors');
+  function check() {
+    var missing = [], first = null;
+    f.querySelectorAll('[data-req]').forEach(function (el) {
+      var ok = el.type === 'checkbox' ? el.checked : (el.value || '').trim() !== '';
+      if (ok && el.type === 'email') ok = /^[^@\s]+@[^@\s]+$/.test(el.value.trim());
+      el.setAttribute('aria-invalid', ok ? 'false' : 'true');
+      if (!ok) { missing.push(el.getAttribute('data-label')); if (!first) first = el; }
+    });
+    return { missing: missing, first: first };
+  }
+  f.addEventListener('submit', function (e) {
+    var r = check();
+    if (r.missing.length) {
+      e.preventDefault();
+      box.textContent = 'Please complete: ' + r.missing.join(', ') + '.';
+      box.style.display = 'block';
+      r.first.focus();
+    } else {
+      box.style.display = 'none';
+    }
+  });
+  function clear() { if (box.style.display === 'block' && check().missing.length === 0) box.style.display = 'none'; }
+  ['input', 'change', 'animationstart'].forEach(function (t) { f.addEventListener(t, clear, true); });
+})();
+"""
 
 
 def _first_time_signup_page_html(request: Optional[Request], *, values: Optional[dict] = None,
@@ -7919,7 +7975,6 @@ def _first_time_signup_page_html(request: Optional[Request], *, values: Optional
         contractor_email=g("email"), business_name=g("business_name"), phone=g("phone"),
         service_area_note=g("service_area_note"), insurance_note=g("insurance_note"),
         qualifications_note=g("qualifications_note"),
-        template_key=g("template_key") or letter_content.DEFAULT_TEMPLATE_KEY,
         business_intro=g("business_intro"), services_note=g("services_note"),
         contact_email=g("contact_email"), contact_first_name=g("contact_first_name"),
         offer_text=g("offer_text"), offer_code=g("offer_code"), offer_conditions=g("offer_conditions"),
@@ -7937,7 +7992,7 @@ def _first_time_signup_page_html(request: Optional[Request], *, values: Optional
         signin_line = ""
     else:
         email_block = f"""<label for="email">Account email *</label>
-                    <input id="email" name="email" type="email" value="{e(g('email'))}" placeholder="e.g. dave@apex-trees.co.uk" maxlength="{letter_content.MAX_CONTACT_EMAIL_LEN}" autocomplete="email" required>
+                    <input id="email" name="email" type="email" value="{e(g('email'))}" placeholder="e.g. dave@apex-trees.co.uk" maxlength="{letter_content.MAX_CONTACT_EMAIL_LEN}" autocomplete="email" required data-req data-label="your email address">
                     <div class="lp-hint">You sign in with this address. We send the confirmation link here. It is not printed on your letter.</div>"""
         intro = ("Tell us who you are and set up the details for your posted introduction letters. We will email you a "
                  "secure link to confirm your email address; nothing is saved to an account until you confirm it. "
@@ -7953,32 +8008,34 @@ def _first_time_signup_page_html(request: Optional[Request], *, values: Optional
         <div class="lp-card">
             {err_html}
             <p style="font-size:14px; color:#94a3b8; margin-top:0;">{intro}</p>
-            <form method="POST" action="{form_action}">
+            <form method="POST" action="{form_action}" id="signup-form">
+                <div id="signup-js-errors" role="alert" style="display:none; background:rgba(248,113,113,0.12); border:1px solid #f87171; color:#fca5a5; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:13px;"></div>
                 {next_field}
                 <div class="lp-section" style="border-top:none; margin-top:8px;">
                     <h2>Your details <span class="lp-tag lp-tag-req">Required</span></h2>
                     <p class="lp-section-note">The essentials for your account and every letter.</p>
                     {email_block}
                     <label for="responsible_name">Your full name *</label>
-                    <input id="responsible_name" name="responsible_name" value="{e(g('responsible_name'))}" placeholder="e.g. Dave Smith" maxlength="{MAX_RESPONSIBLE_NAME_LEN}" autocomplete="name" required>
+                    <input id="responsible_name" name="responsible_name" value="{e(g('responsible_name'))}" placeholder="e.g. Dave Smith" maxlength="{MAX_RESPONSIBLE_NAME_LEN}" autocomplete="name" required data-req data-label="your full name">
                     <div class="lp-hint">The person responsible for this account. This is kept on your account and is not printed on your letter.</div>
                     <label for="business_name">Business name *</label>
-                    <input id="business_name" name="business_name" value="{e(g('business_name'))}" placeholder="e.g. Ashcroft Tree Surgery" maxlength="{letter_content.MAX_BUSINESS_NAME_LEN}" required>
+                    <input id="business_name" name="business_name" value="{e(g('business_name'))}" placeholder="e.g. Ashcroft Tree Surgery" maxlength="{letter_content.MAX_BUSINESS_NAME_LEN}" required data-req data-label="your business name">
                     <div class="lp-hint">Printed on your letter so the homeowner knows who is writing.</div>
                     <label for="phone">Telephone *</label>
-                    <input id="phone" name="phone" type="tel" value="{e(g('phone'))}" placeholder="e.g. 01234 567890" maxlength="{letter_content.MAX_PHONE_LEN}" autocomplete="tel" required>
+                    <input id="phone" name="phone" type="tel" value="{e(g('phone'))}" placeholder="e.g. 01234 567890" maxlength="{letter_content.MAX_PHONE_LEN}" autocomplete="tel" required data-req data-label="your telephone number">
                     <div class="lp-hint">The number homeowners call. Printed on your letter.</div>
                 </div>
 
-                {_letter_optional_fields_html(optional_settings)}
+                {_letter_optional_fields_html(optional_settings, signup=True)}
 
                 <label style="display:flex; align-items:flex-start; gap:10px; margin-top:24px; cursor:pointer; font-weight:400; font-size:13px; color:#cbd5e1;">
-                    <input type="checkbox" name="agree_terms" value="yes" required style="width:auto; margin:2px 0 0 0; flex-shrink:0; accent-color:#10b981;">
+                    <input type="checkbox" name="agree_terms" value="yes" required data-req data-label="the Terms of Service tick box" style="width:auto; margin:2px 0 0 0; flex-shrink:0; accent-color:#10b981;">
                     <span>I agree to TreeKey's <a href="/terms-of-service" target="_blank">Terms of Service</a> and <a href="/privacy-policy" target="_blank">Privacy Policy</a>. *</span>
                 </label>
                 <button type="submit" class="lp-btn" style="margin-top:20px;">{submit_label}</button>
             </form>
             {signin_line}
+            <script>{_SIGNUP_FORM_JS}</script>
         </div>
     """
     return _letter_page_html(request, f"{heading} | TreeKey", inner, max_width=680)
@@ -8026,8 +8083,8 @@ def _validate_signup_values(values: dict, terms_ticked: bool):
     if len(values["responsible_name"]) > MAX_RESPONSIBLE_NAME_LEN:
         return f"Your name must be {MAX_RESPONSIBLE_NAME_LEN} characters or fewer.", None
     letter_fields = {k: values[k] for k in _SIGNUP_FIELDS if k not in ("email", "responsible_name")}
-    if not letter_fields["template_key"]:
-        letter_fields["template_key"] = letter_content.DEFAULT_TEMPLATE_KEY
+    # No template/style field at signup: the letter style keeps the module
+    # default until the person chooses one in My Account / before purchase.
     problems = letter_content.ContractorLetterSettings(contractor_email=email, **letter_fields).validate()
     if problems:
         return "; ".join(problems), None

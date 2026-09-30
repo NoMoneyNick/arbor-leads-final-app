@@ -228,6 +228,9 @@ def main() -> int:
         check("settings applied on verification (unapproved, identity + terms recorded)",
               row == ("Ashcroft Tree Surgery", "01234 567890", "We are careful.", "f", "Dave Smith", "t", "Dave"), str(row))
         check("pending cleared after use", pending_of(e) == [None], str(pending_of(e)))
+        check("new signup gets the default template and is not approved",
+              q("SELECT template_key, approved FROM contractor_letter_settings WHERE contractor_email=%s", (e,))[0]
+              == (letter_content.DEFAULT_TEMPLATE_KEY, "f"))
         # 2 reuse
         check("reused link rejected", database.verify_magic_auth_token(token=a["token"]) is None)
         check("settings unchanged after reuse", settings_row(e) == row)
@@ -269,7 +272,11 @@ def main() -> int:
         letter_content.upsert_contractor_settings(cu, letter_content.ContractorLetterSettings(
             contractor_email=e, business_name="Original Ltd", phone="0700"))
         c.commit()
+        q("UPDATE contractor_letter_settings SET template_key='professional_and_factual', approved=TRUE WHERE contractor_email=%s", (e,))
         existing_case("with letter settings", e, "SELECT %s", True)
+        check("signup never changes an existing template choice or approval",
+              q("SELECT template_key, approved FROM contractor_letter_settings WHERE contractor_email=%s", (e,))[0]
+              == ("professional_and_factual", "t"))
         existing_case("subscriber, no settings", "sub@example.com", "INSERT INTO contractor_subscriptions (customer_email) VALUES (%s)", False)
         existing_case("free/limbo account, no settings", "limbo@example.com", "INSERT INTO limbo_accounts (email, center_outcode) VALUES (%s, 'NG22')", False)
         existing_case("lead dispatch history, no settings", "disp@example.com", "INSERT INTO lead_dispatches (contractor_email) VALUES (%s)", False)

@@ -87,12 +87,56 @@ class TestSignupPage(unittest.TestCase):
         self.assertIn("Required", self.html)
         self.assertIn("Optional", self.html)
         for name in ("email", "responsible_name", "business_name", "phone", "agree_terms",
-                     "template_key", "contact_first_name", "contact_email", "business_intro", "services_note",
+                     "contact_first_name", "contact_email", "business_intro", "services_note",
                      "service_area_note", "insurance_note", "qualifications_note",
                      "offer_text", "offer_code", "offer_conditions"):
             self.assertIn(f'name="{name}"', self.html, name)
         self.assertIn("My Account", self.html)
         self.assertIn("Saving is not approval", self.html)
+
+    def test_no_letter_style_or_template_choice_at_signup(self):
+        for absent in ('name="template_key"', "Letter style", "<select", "professional_and_factual"):
+            self.assertNotIn(absent, self.html)
+        # ...and the verified-session variant of the same form
+        with patch.object(main.database, "get_db_conn", MagicMock()), \
+             patch.object(main.letter_content, "get_contractor_settings", return_value=None), \
+             patch.object(main.database, "get_limbo_account", return_value=None), \
+             patch.object(main.database, "get_contractor_subscription", return_value=None):
+            h = main.free_account_signup_page(_mock_request(cookie_value=main._sign_session_cookie("a@b.com")))
+        self.assertNotIn('name="template_key"', h)
+        self.assertNotIn("<select", h)
+
+    def test_my_account_letter_settings_still_offer_template_selection(self):
+        settings = main.letter_content.ContractorLetterSettings(contractor_email="a@b.com", business_name="X", phone="1")
+        h = main._letter_settings_form_html(settings)
+        self.assertIn('name="template_key"', h)
+        self.assertIn("Changing your offer means you re-approve your preview", h)
+
+    def test_each_offer_field_has_visible_helper_text_and_one_shared_note(self):
+        expected = {
+            "offer_text": "Optional — give homeowners an extra reason to contact you with a discount or special offer. You choose the offer and honour it.",
+            "offer_code": "Optional — a short code homeowners can quote when contacting you to claim your offer.",
+            "offer_conditions": "Optional — explain any limits, minimum spend or expiry date.",
+        }
+        for field, text in expected.items():
+            self.assertIn(f'aria-describedby="{field}_help"', self.html)
+            self.assertIn(f'id="{field}_help">{text}<', self.html)
+        note = "Your offer appears on your letters. Leave blank for no offer. Edit anytime in My Account."
+        self.assertEqual(self.html.count(note), 1)
+        # never prefilled, no results promise
+        for f in ("offer_text", "offer_code", "offer_conditions"):
+            self.assertRegex(self.html, rf'id="{f}" name="{f}" value=""')
+        for bad in ("guarantee", "more customers", "better results", "boost"):
+            self.assertNotIn(bad, self.html.lower())
+
+    def test_validation_uses_actual_values_not_keyboard_events(self):
+        self.assertIn("noValidate = true", self.html)
+        self.assertIn("addEventListener('submit'", self.html)
+        self.assertIn(".value", self.html)
+        self.assertNotIn("disabled", self.html.lower().split("<form")[1].split("</form>")[0])
+        self.assertNotIn("keyup", self.html)
+        self.assertNotIn("keydown", self.html)
+        self.assertIn('required data-req', self.html)   # native + server-side validation still apply
 
     def test_required_fields_follow_the_agreed_rules(self):
         # email, full name, business name, telephone, terms -- and nothing optional
@@ -165,6 +209,11 @@ class TestSignupSubmission(unittest.TestCase):
         self.assertNotIn("email", pending["letter"])
         saver.assert_not_called()          # no limbo / free-lead account is created
         mail.assert_called_once()          # the ordinary verification email
+
+    def test_a_posted_template_choice_is_ignored_at_signup(self):
+        cap, create, _ = self._post(dict(GOOD, template_key="professional_and_factual"))
+        create.assert_called_once()
+        self.assertNotIn("template_key", create.call_args.kwargs["pending_signup"]["letter"])
 
     def test_response_never_contains_token_or_otp(self):
         cap, _, mail = self._post(GOOD)
@@ -306,6 +355,8 @@ class TestVerifiedSessionCompletion(unittest.TestCase):
         self.assertEqual(settings.contractor_email, "unknown@example.com")     # never the form's email
         self.assertEqual(settings.business_name, "Apex Trees Ltd")
         self.assertEqual(settings.business_intro, "Hi")
+        self.assertEqual(settings.template_key, main.letter_content.DEFAULT_TEMPLATE_KEY)   # no style chosen at signup
+        self.assertFalse(settings.approved)                                                # and nothing is approved
         self.assertEqual(ins.call_args.kwargs["responsible_contact_name"], "Dave Smith")
         self.assertTrue(ins.call_args.kwargs["terms_accepted_at"])
         ups.assert_not_called()                                                # insert-only, never an overwrite
