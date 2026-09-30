@@ -1,3 +1,14 @@
+> **Pointer (30 Sep 2026):** **Current business rules and campaign copy:** see `CURRENT_BUSINESS_MODEL.md` (agreed model; what is reported-but-unverified; what is unresolved) and `OUTREACH_START_HERE.md` (approved outreach copy). Where this document disagrees with them, they win.
+> **Status note (30 Sep 2026):** the letter checkpoint below is **installed in the project files**, but **not committed or deployed**, and live behaviour is unverified. This snapshot's original body describes the 26 Sep address-positioning pass.
+>
+> **Installed (files on disk):** banner/contact-panel design; optional `contact_first_name` (omitted when blank); letter number (sequence-backed `letter_obligations.letter_number`, shown on the letter and in My Introductions); optional contractor offer (`offer_text`/`offer_code`/`offer_conditions`, changes require reapproval for future letters); blank reserved QR/logo areas (features not built). Files: `main.py`, `fulfilment.py`, `letter_content.py`, `worker.py`, `migrations/0001_letter_fulfilment.sql`, and seven test files. Preview: `docs/letter_previews/letter_number_and_offer_preview.pdf` (+ zone overlay PNG).
+>
+> **Checks run before install:** 318 focused tests across letter content, onboarding, settings, checkout gate, content freezing, fulfilment, worker, access control, providers, promise gate and migration consistency, plus 66 privacy/identifier-gating tests. All passed in the sandbox. No full suite, no provider call.
+>
+> **Deployment prerequisites (not done):** deploy the code; the new columns and the letter-number sequence are created by the app's schema initialisers on first start (`fulfilment.py`, `letter_content.py`), mirrored in `migrations/0001_letter_fulfilment.sql`. The existing-rows backfill runs once at that point. Nothing was run against production. Then verify live: a letter shows its number, and the same number appears in My Introductions.
+>
+> See `CURRENT_BUSINESS_MODEL.md` section B.
+
 # CURRENT_HANDOFF.md — Intelliprint address/barcode positioning (ninth pass)
 
 Written 2026-09-26. See `ERROR_LOG.md`'s "ninth pass" entry (top of the

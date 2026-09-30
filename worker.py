@@ -174,12 +174,12 @@ def promote_pending_approvals(cur, batch_limit: int = 100) -> PromotionReport:
         return PromotionReport(refused="active_pipeline_is_not_fulfilment")
     report = PromotionReport()
     cur.execute("""
-        SELECT id, lead_reference, address, applicant_name, buyer_email
+        SELECT id, lead_reference, address, applicant_name, buyer_email, letter_number
         FROM letter_obligations WHERE status = 'pending_approval'
         ORDER BY created_at ASC LIMIT %s;
     """, (batch_limit,))
     rows = cur.fetchall()
-    for obligation_id, lead_reference, address, applicant_name, buyer_email in rows:
+    for obligation_id, lead_reference, address, applicant_name, buyer_email, letter_number in rows:
         report.checked += 1
         try:
             settings = letter_content.get_contractor_settings(cur, buyer_email)
@@ -210,7 +210,8 @@ def promote_pending_approvals(cur, batch_limit: int = 100) -> PromotionReport:
                 report.left_pending_approval += 1
                 continue
             html = letter_content.render_letter(settings, lead_reference=lead_reference,
-                                                  address=address, summary=summary, council=council)
+                                                  address=address, summary=summary, council=council,
+                                                  letter_number=letter_number)
             fingerprint = letter_content.content_fingerprint(html)
             # 2026-09-18 review, Section 7: "an approved letter's content
             # stays fixed through submission and fallback, even if

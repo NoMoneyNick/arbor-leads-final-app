@@ -497,6 +497,7 @@ class TestGetIntroductionRecordForLeadReference(unittest.TestCase):
         "dispatched", False, 2, "Stannp", "STANNP-REF-123",
         "2026-09-20 09:00:00", "2026-09-20 15:00:00", None, None, None,
         "2026-09-18 08:00:00", "2026-09-18 07:55:00", "single_purchase",
+        1042,  # 2026-09-30: letter_number, same position as the real SELECT's new column
     )
 
     def _with_row(self, row):
@@ -545,7 +546,7 @@ class TestGetIntroductionRecordForLeadReference(unittest.TestCase):
 
     def test_provider_accepted_is_never_labelled_dispatch(self):
         row = ("provider_accepted", False, 1, "Stannp", "REF-1", "2026-09-20 09:00:00",
-               None, None, None, None, "2026-09-18 08:00:00", "2026-09-18 07:55:00", "single_purchase")
+               None, None, None, None, "2026-09-18 08:00:00", "2026-09-18 07:55:00", "single_purchase", 1099)
         conn = self._with_row(row)
         with patch("database.get_db_conn", return_value=conn, create=True):
             record = fulfilment.get_introduction_record_for_lead_reference("PLANIT-1")
@@ -554,7 +555,7 @@ class TestGetIntroductionRecordForLeadReference(unittest.TestCase):
 
     def test_dry_run_overrides_status_with_test_mode_note(self):
         row = ("dispatched", True, 1, "fake_test", "FAKE-1", None, "2026-09-20 09:00:00",
-               None, None, None, "2026-09-18 08:00:00", "2026-09-18 07:55:00", "single_purchase")
+               None, None, None, "2026-09-18 08:00:00", "2026-09-18 07:55:00", "single_purchase", 1001)
         conn = self._with_row(row)
         with patch("database.get_db_conn", return_value=conn, create=True):
             record = fulfilment.get_introduction_record_for_lead_reference("PLANIT-1")
@@ -564,7 +565,7 @@ class TestGetIntroductionRecordForLeadReference(unittest.TestCase):
 
     def test_null_template_version_is_not_fabricated(self):
         row = ("pending_approval", True, None, None, None, None, None, None, None, None,
-               "2026-09-18 08:00:00", "2026-09-18 07:55:00", "single_purchase")
+               "2026-09-18 08:00:00", "2026-09-18 07:55:00", "single_purchase", None)
         conn = self._with_row(row)
         with patch("database.get_db_conn", return_value=conn, create=True):
             record = fulfilment.get_introduction_record_for_lead_reference("PLANIT-1")
@@ -614,7 +615,7 @@ class TestStreetFlyerRemovesUnconditionalClaims(unittest.TestCase):
         settings_row = (
             "contractor@example.com", "Ashcroft Tree Surgery", "01234 567890", "",
             "Fully insured up to £2M, NPTC certified crew", "City & Guilds NPTC Level 3",
-            1, True, "fp", "friendly_introduction", "", "", "",
+            1, True, "fp", "friendly_introduction", "", "", "", "", "", "", "",
         )
         cur = MagicMock()
         cur.fetchone.side_effect = self._base_cur_side_effect(settings_row)

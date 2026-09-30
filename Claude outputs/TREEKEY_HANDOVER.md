@@ -1,3 +1,5 @@
+> **HISTORICAL snapshot (30 Sep 2026; written 8 Sep 2026).** Current business rules: `CURRENT_BUSINESS_MODEL.md`. Current campaign copy: `OUTREACH_START_HERE.md`. The old OneDrive location, obsolete pricing/no-quota statements, and free-lead/address-unlock descriptions are superseded. Actual project folder: `C:\Users\twobo\Projects\VECTOR DATA LABS`. Technical history remains useful.
+
 # TreeKey / Vector Data Labs — Full Handover
 *Written 8 Sep 2026 for a fresh Claude chat. Paste this whole file as your first message.*
 

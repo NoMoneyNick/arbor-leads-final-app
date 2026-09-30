@@ -1,3 +1,5 @@
+> **HISTORICAL - not a current business specification (30 Sep 2026; last updated 24 Aug 2026).** Current business rules: `CURRENT_BUSINESS_MODEL.md`. Current campaign copy: `OUTREACH_START_HERE.md`. Old £25/£50/£75 lead grading, obsolete subscription/credit-pack tiers, umbrella-company assumptions and projections based on old prices are superseded. Use current pricing and postal costs for any projection. Legal identity is unresolved and must be confirmed separately. Technical and operational sections may remain useful.
+
 # MASTER PROJECT MANIFEST: VECTOR DATA LABS (V4.0)
 
 **Project Status:** Secure, Deployed, Pre-Revenue  

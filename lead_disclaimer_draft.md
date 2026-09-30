@@ -1,6 +1,6 @@
 # Lead Accuracy Disclaimer & Limitation of Liability — Draft for Solicitor Review
 
-*This is a first draft to hand to a solicitor before publishing anywhere on treekey.uk. It is written to reflect how the product actually works (sourced from public council planning data, automated classification, no manual verification of every lead) so the legal language matches reality rather than overpromising.*
+*DRAFT requiring final review; not approved, not legal advice, and not evidence of implemented policy. Aligned 30 Sep 2026 to the posted-introduction model (see `CURRENT_BUSINESS_MODEL.md`): sourced from public council planning data, automated classification, no manual verification of every lead.*
 
 ## 1. Nature of the Data
 
@@ -14,14 +14,16 @@ A lead's status (including whether a tree surgeon or other contractor has alread
 
 - the underlying planning application is still active or undetermined;
 - no contractor has since been engaged by the applicant, whether or not this is reflected in the public record;
-- the contact or applicant information is current or accurate;
+- the property details or postal address are current or accurate, or that a posted introduction will be received or read;
 - the lead will result in a successful quote, contract, or completed job.
 
-Users are responsible for conducting their own due diligence — including directly confirming with the applicant whether the work is still available — before committing time or resources to a lead.
+Tree Key does not supply the household's details to the user, so the user should treat any enquiry received as unverified and make their own assessment before committing time or resources.
 
 ## 3. No Guarantee of Business Outcome
 
-Tree Key provides access to lead information only. Tree Key is not a party to, and has no involvement in, any subsequent contract, quote, or work arrangement between a user and a third party. Tree Key does not guarantee any level of lead volume, lead quality, conversion rate, or business outcome from use of the service.
+Tree Key prints and posts an approved introduction letter on the user's behalf. It does not supply the household's name, address or contact details. Tree Key is not a party to, and has no involvement in, any subsequent contract, quote, or work arrangement between a user and a third party. Tree Key does not guarantee any homeowner reply, enquiry, quote, job, level of lead quality, conversion rate or business outcome.
+
+This is separate from fulfilment of a paid package: if an introduction cannot be fulfilled, the Terms (clause 4.4) set out waiting, carry-forward, nearby alternatives with consent, and an applicable refund. A homeowner not replying is not a failure to fulfil an introduction.
 
 ## 4. Limitation of Liability
 
@@ -34,7 +36,7 @@ Nothing in this disclaimer excludes or limits liability for death or personal in
 
 ## 5. Acknowledgement
 
-By purchasing or accessing a lead, the user acknowledges that lead information is provided on an "as available" basis, sourced substantially from automated processing of public records, and agrees to conduct independent verification before relying on it commercially.
+By purchasing an introduction, the user acknowledges that opportunity information is provided on an "as available" basis, sourced substantially from automated processing of public records, and agrees to make their own assessment before relying on it commercially.
 
 ---
 

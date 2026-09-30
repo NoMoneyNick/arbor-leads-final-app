@@ -171,9 +171,15 @@ class _JourneyFakeCursor:
         # 2026-09-23 handoff, contractor letter-template selector: param
         # order here must match letter_content.upsert_contractor_settings'
         # actual INSERT statement exactly (see that function).
+        # 2026-09-27, header-resize pass: contact_first_name appended, same
+        # position as the real INSERT's new column.
+        # 2026-09-30, optional contractor offer: offer_text/offer_code/
+        # offer_conditions appended after contact_first_name, same position
+        # as the real INSERT's three new columns.
         (email, business_name, phone, service_area_note, insurance_note,
          qualifications_note, template_key, business_intro, services_note,
-         contact_email, template_version) = params
+         contact_email, contact_first_name, offer_text, offer_code, offer_conditions,
+         template_version) = params
         existing = self.state["contractor_letter_settings"].get(email)
         new_version = (existing["template_version"] + 1) if existing else template_version
         self.state["contractor_letter_settings"][email] = {
@@ -181,6 +187,8 @@ class _JourneyFakeCursor:
             "insurance_note": insurance_note, "qualifications_note": qualifications_note,
             "template_key": template_key, "business_intro": business_intro,
             "services_note": services_note, "contact_email": contact_email,
+            "contact_first_name": contact_first_name,
+            "offer_text": offer_text, "offer_code": offer_code, "offer_conditions": offer_conditions,
             "template_version": new_version, "approved": False, "approved_fingerprint": None,
         }
 
@@ -196,6 +204,8 @@ class _JourneyFakeCursor:
             row["approved"], row["approved_fingerprint"],
             row.get("template_key", "friendly_introduction"), row.get("business_intro", ""),
             row.get("services_note", ""), row.get("contact_email", ""),
+            row.get("contact_first_name", ""),
+            row.get("offer_text", ""), row.get("offer_code", ""), row.get("offer_conditions", ""),
         )
 
     def _exec_approve_template(self, params):
@@ -224,12 +234,19 @@ class _JourneyFakeCursor:
         (allocation_id, lead_reference, address, applicant_name, buyer_email,
          sale_context, status, template_version, idem_key) = params
         ob_id = self.state["_next_id"]("ob")
+        _seq = self.state["_next_seq"]()
         self.state["letter_obligations"][ob_id] = {
             "id": ob_id, "allocation_id": allocation_id, "lead_reference": lead_reference, "address": address,
             "applicant_name": applicant_name, "buyer_email": buyer_email, "status": status,
             "content_fingerprint": None, "approved_content_html": None, "claimed_by_worker": None,
             "attempts": 0, "provider_name": None, "provider_reference": None, "last_error": None,
-            "is_dry_run": False, "template_version": template_version, "_seq": self.state["_next_seq"](),
+            "is_dry_run": False, "template_version": template_version, "_seq": _seq,
+            # 2026-09-30 handoff ("simple letter-number matching"): the real
+            # schema assigns this from a DB sequence at INSERT time (see
+            # fulfilment.py's init_fulfilment_schema) -- reusing this fake
+            # DB's own already-unique, already-increasing _seq counter is a
+            # faithful-enough stand-in for these journey tests' purposes.
+            "letter_number": _seq,
         }
         self._pending_fetchone = (ob_id,)
 
@@ -240,7 +257,8 @@ class _JourneyFakeCursor:
             key=lambda o: o["_seq"],
         )
         self._pending_fetchall = [
-            (o["id"], o["lead_reference"], o["address"], o["applicant_name"], o["buyer_email"]) for o in rows
+            (o["id"], o["lead_reference"], o["address"], o["applicant_name"], o["buyer_email"], o["letter_number"])
+            for o in rows
         ]
 
     def _exec_select_lead_content(self, params):

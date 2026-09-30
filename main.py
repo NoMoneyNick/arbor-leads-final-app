@@ -3765,6 +3765,16 @@ def _letter_settings_form_html(settings: "letter_content.ContractorLetterSetting
                 <input id="phone" name="phone" value="{esc(settings.phone)}" placeholder="e.g. 01234 567890" maxlength="{letter_content.MAX_PHONE_LEN}" required>
                 <label for="contact_email">Contact email (optional)</label>
                 <input id="contact_email" name="contact_email" type="email" value="{esc(settings.contact_email)}" placeholder="e.g. jobs@yourbusiness.co.uk" maxlength="{letter_content.MAX_CONTACT_EMAIL_LEN}">
+                <label for="contact_first_name">Contact first name (optional)</label>
+                <input id="contact_first_name" name="contact_first_name" value="{esc(settings.contact_first_name)}" placeholder="e.g. Dave" maxlength="{letter_content.MAX_CONTACT_FIRST_NAME_LEN}">
+                <div class="hint">Shown alongside your business name and phone number in the letter's contact panel. Leave blank to show just the business name and phone.</div>
+                <label for="offer_text">Offer (optional -- shown exactly as you write it; TreeKey never invents or prefills a discount)</label>
+                <input id="offer_text" name="offer_text" value="{esc(settings.offer_text)}" placeholder="e.g. £50 off work over £500. Mention TREEKEY when requesting your quote." maxlength="{letter_content.MAX_OFFER_TEXT_LEN}">
+                <label for="offer_code">Offer code (optional)</label>
+                <input id="offer_code" name="offer_code" value="{esc(settings.offer_code)}" placeholder="e.g. TREEKEY" maxlength="{letter_content.MAX_OFFER_CODE_LEN}">
+                <label for="offer_conditions">Offer conditions / expiry (optional)</label>
+                <input id="offer_conditions" name="offer_conditions" value="{esc(settings.offer_conditions)}" placeholder="e.g. Valid until 31 December 2026" maxlength="{letter_content.MAX_OFFER_CONDITIONS_LEN}">
+                <div class="hint">Shown compactly on your letter, below your contact details. Leave the offer blank to show nothing -- it's entirely optional and never required. You supply and approve your own offer; changing it requires re-approving your preview before it's used.</div>
                 <label for="business_intro">Business introduction (optional -- a short paragraph about your business)</label>
                 <div style="font-size:12px; color:#94a3b8; margin:-2px 0 6px 0; font-style:italic;">(this is what customers will see on your introduction letter)</div>
                 <textarea id="business_intro" name="business_intro" placeholder="e.g. We're a family-run tree surgery covering [your area], fully accredited and known locally for tidy, careful work." maxlength="{letter_content.MAX_BUSINESS_INTRO_LEN}">{esc(settings.business_intro)}</textarea>
@@ -3886,6 +3896,10 @@ async def save_letter_settings(request: Request):
         business_intro=(form.get("business_intro") or "").strip(),
         services_note=(form.get("services_note") or "").strip(),
         contact_email=(form.get("contact_email") or "").strip(),
+        contact_first_name=(form.get("contact_first_name") or "").strip(),
+        offer_text=(form.get("offer_text") or "").strip(),
+        offer_code=(form.get("offer_code") or "").strip(),
+        offer_conditions=(form.get("offer_conditions") or "").strip(),
     )
 
     conn = database.get_db_conn()
@@ -4134,6 +4148,29 @@ def generate_homeowner_letter(request: Request, lead_id: str, company: str = "Yo
             _session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
             if _session_email:
                 settings = letter_content.get_contractor_settings(cur, _session_email)
+            # 2026-09-30 handoff ("simple letter-number matching"): looked
+            # up here, on the same already-open cursor/connection, using
+            # `lead_id` -- already resolved to the real internal reference
+            # by resolve_buyer_facing_reference above, never the council
+            # reference or any homeowner detail (see fulfilment.py's schema
+            # comment on letter_number for why). Filtered by buyer_email as
+            # defense in depth on top of require_lead_ownership's own
+            # ownership check just below -- a letter number is not itself
+            # permission to access a record. No session, or no obligation
+            # row yet (e.g. the admin preview path, or a lead bought before
+            # this field existed) -> stays None, and render_letter simply
+            # omits the "Letter number:" line (see that function's own
+            # docstring).
+            letter_number = None
+            if _session_email:
+                cur.execute("""
+                    SELECT letter_number FROM letter_obligations
+                    WHERE lead_reference = %s AND buyer_email = %s
+                    ORDER BY created_at DESC LIMIT 1;
+                """, (lead_id, _session_email))
+                _ln_row = cur.fetchone()
+                if _ln_row:
+                    letter_number = _ln_row[0]
         finally:
             cur.close()
             conn.close()
@@ -4239,6 +4276,7 @@ def generate_homeowner_letter(request: Request, lead_id: str, company: str = "Yo
     try:
         letter_html = letter_content.render_letter(
             settings, lead_reference=ref, address=addr, summary=summary, council=council,
+            letter_number=letter_number,
         )
     except letter_content.LetterConfigError as e:
         # "Missing configuration must fail safely and visibly" (brief,
@@ -9114,9 +9152,21 @@ def my_leads_view(request: Request):
                     else:
                         _provider_line = '<div style="font-size:11px; color:#64748b; margin-top:4px;">No mailing provider evidence recorded yet.</div>'
 
+                    # 2026-09-30 handoff ("simple letter-number matching"):
+                    # shown right alongside the stage, so the owning
+                    # contractor can see the same short reference that's
+                    # printed on the letter itself -- absent for any
+                    # obligation created before this field existed, or for
+                    # the odd row that somehow still has no value, rather
+                    # than showing a blank or fabricated number.
+                    _letter_number_line = (
+                        f'<div style="font-size:11px; color:#94a3b8; margin-top:2px;">Letter number: <b style="color:#e2e8f0;">{html.escape(str(intro["letter_number"]))}</b></div>'
+                        if intro.get("letter_number") is not None else ""
+                    )
                     mailing_status_line = f"""
                     <div style="background:#020617; border:1px solid #1e293b; border-radius:8px; padding:10px 12px; margin-top:8px;">
                         <div style="font-size:11px; color:#94a3b8;">Mailed introduction: <b style="color:#e2e8f0;">{html.escape(intro['stage_label'])}</b></div>
+                        {_letter_number_line}
                         <div style="font-size:11px; color:#64748b; margin-top:2px;">{html.escape(intro['stage_explanation'])}</div>
                         {_dry_run_note}
                         {_cat_area_line_html}

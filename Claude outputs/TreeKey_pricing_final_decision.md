@@ -1,3 +1,5 @@
+> **PARTLY CURRENT (30 Sep 2026).** Current business rules: `CURRENT_BUSINESS_MODEL.md`. Current campaign copy: `OUTREACH_START_HERE.md`. The monthly tiers in section 1 match the agreed packages and remain valid; section 2 pay-per-lead prices are retained pending checkout confirmation. Sections 3 and 4 below are dated: shortage handling is now waiting/carry-forward, nearby alternatives with consent, and an applicable refund (reviewed 30 days after the affected billing period ends) rather than deferred; exclusivity applies to TreeKey's own sale/introduction only.
+
 # TreeKey pricing — final plan
 
 Plain language, no jargon. This replaces the earlier draft. Once you've seen this, I'll build it into the code straight away.
@@ -31,14 +33,14 @@ Only one genuinely new price here (£39) — everything else already exists and 
 This is real, and you were right to raise it. Here's the honest answer: you don't need to rebuild anything before launch to handle it. The pay-per-lead option above already solves it — someone in a quiet area just buys leads one at a time instead of a subscription that promises more than the area can deliver. The fix is in how the pricing page explains this, not new code.
 
 Two upgrades worth doing, but AFTER launch, not before (they cost more engineering time and aren't needed to open the doors honestly):
-- Let unused leads roll over one extra month, so a quiet month doesn't feel like wasted money.
+- Let unused leads roll over one extra month, so a quiet month doesn't feel like wasted money. *(Superseded 2026-09-30: shortage handling is now waiting/carry-forward, suitable nearby alternatives with consent, or an applicable refund; not deferred to after launch.)*
 - Eventually price subscriptions by area density, the way Zillow does with property ads. Not needed yet — you don't have enough real customers yet to know the real numbers per area.
 
 ## 4. Exclusive leads — this is your actual advantage
 
 I checked what your closest real competitor (Planr) promises, and it does NOT guarantee a lead is exclusive to one contractor. Neither does anyone else I checked. If TreeKey genuinely can promise "only you get this lead," and it's actually true, that's a real difference, not just marketing.
 
-The problem: the code to enforce that already exists in your project but isn't switched on anywhere. My recommendation: treat wiring this up as a real launch requirement, not a someday task — it's the one thing that actually justifies your prices being higher than a competitor's. I'd tackle this as the next piece of work after today's pricing changes are live.
+*(Dated statement, not a current instruction; do not reimplement exclusivity from this prose. Exclusivity applies to TreeKey's own sale/introduction, not to public planning information or outside competitors.)* The problem: the code to enforce that already exists in your project but isn't switched on anywhere. My recommendation: treat wiring this up as a real launch requirement, not a someday task — it's the one thing that actually justifies your prices being higher than a competitor's. I'd tackle this as the next piece of work after today's pricing changes are live.
 
 ## 5. The two false claims on your £179 plan
 

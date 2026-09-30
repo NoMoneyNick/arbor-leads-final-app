@@ -1,3 +1,5 @@
+> **HISTORICAL, unapproved ideas (30 Sep 2026).** Current business rules: `CURRENT_BUSINESS_MODEL.md`. Current campaign copy: `OUTREACH_START_HERE.md`. Free-first-lead offers, reviews incentivised with free leads and near-zero marginal cost do not apply: each posted introduction has a per-item cost. The marketing-campaign QR idea here is distinct from the deferred contractor QR on homeowner letters.
+
 # Marketing / Outreach Ideas — Filed, Not Live
 
 Written Sep 3 2026 per Nick's instruction: "the letter and testimonials can be added to file but not added to business yet." Nothing below is built or running. Both ideas need a real decision from Nick (a vendor, a price, a legal read) before any of it touches the live product. The QR code piece these ideas originally leaned on has since been built independently (see `templates/partner_offer.html` + `generate_qr_codes.py`) and works on its own without either idea below going live.

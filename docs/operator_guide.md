@@ -1,3 +1,5 @@
+> **Pointer (30 Sep 2026):** **Current business rules and campaign copy:** see `CURRENT_BUSINESS_MODEL.md` (agreed model; what is reported-but-unverified; what is unresolved) and `OUTREACH_START_HERE.md` (approved outreach copy). Where this document disagrees with them, they win. Technical instructions here remain valid unless a dated note says otherwise; commercial and pricing descriptions may predate later decisions.
+
 # TreeKey letter-fulfilment: operator guide
 
 This covers the system built this session (2026-09-18): the pipeline that
@@ -1776,6 +1778,8 @@ clipping, no blank pages, no page-scaling. Output is in
 narrowed after a false-positive against the new branding `<img>` tags).
 Full suite: **568/568**. No deployment, charge, real letter, or production
 data change.
+
+> **Superseded in part, 2026-09-30 (provider guidance).** Intelliprint was chosen. The working submission route is a PDF with two content pages on one duplex sheet, preserving the measured address/barcode clearance (left 18.5mm, top 45.0mm, right 106.9mm, bottom 90.3mm). Any statement in this guide that the address zone needs no clearance, that raw HTML needs no PDF step, or that no live/test-mode call has happened is dated history. Test-mode results do not establish physical delivery or launch readiness. Provider document/address retention remains unconfirmed. Current business rules: `CURRENT_BUSINESS_MODEL.md`.
 
 ## 23. First postal provider -- real integration requirements, current config audit, and a verified PC2Paper-vs-Intelliprint comparison (2026-09-24, later pass; no adapter implemented this pass -- awaiting Nick's account-access decision)
 

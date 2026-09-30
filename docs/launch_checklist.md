@@ -1,3 +1,5 @@
+> **Pointer (30 Sep 2026):** **Current business rules and campaign copy:** see `CURRENT_BUSINESS_MODEL.md` (agreed model; what is reported-but-unverified; what is unresolved) and `OUTREACH_START_HERE.md` (approved outreach copy). Where this document disagrees with them, they win.
+
 # Launch checklist: genuinely outstanding decisions
 
 This is a list of decisions that block turning real sending on -- not a
@@ -13,7 +15,9 @@ session found while implementing and is refusing to silently paper over.
 
 ## Must decide before ANY real letter is sent
 
-1. **UPDATED 2026-09-26 -- Provider selection and account setup, first
+1. **SUPERSEDED IN PART, 2026-09-30 (provider approach).** The working approach is now PDF submission to Intelliprint: two content pages on one duplex sheet, preserving the measured address/barcode clearance (left 18.5mm, top 45.0mm, right 106.9mm, bottom 90.3mm). The statement below that address-window positioning is "NOT applicable" and that nothing needed to change is **obsolete; do not remove the clearance**. Supplied test-mode results show the route works in test mode only; they do not establish physical delivery, real-stock print accuracy or launch readiness. "Not yet empirically confirmed against a live test-mode call" is also dated. The original 2026-09-26 text follows as history.
+
+   **UPDATED 2026-09-26 -- Provider selection and account setup, first
    provider now built.** Nick chose Intelliprint (account login fixed
    2026-09-26) and `letter_providers/intelliprint_provider.py` is now a
    real adapter, built and verified against Intelliprint's current live

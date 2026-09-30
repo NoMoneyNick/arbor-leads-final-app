@@ -253,7 +253,7 @@ class TestGenerateLetterRouteEnforcesOwnership(unittest.TestCase):
         conn = MagicMock()
         cur = MagicMock()
         conn.cursor.return_value = cur
-        # generate_homeowner_letter now makes THREE fetchone() calls while
+        # generate_homeowner_letter now makes FOUR fetchone() calls while
         # the connection is open: (0) 2026-09-23 Request D, Part 1's new
         # resolve_buyer_facing_reference lookup at the very top of the
         # route (a lead_allocations.id lookup for the incoming path param
@@ -263,11 +263,13 @@ class TestGenerateLetterRouteEnforcesOwnership(unittest.TestCase):
         # get_contractor_settings lookup for the logged-in session (None
         # here = this contractor has no saved letter settings yet, which
         # is the common/expected case and exercises the fallback path in
-        # the route).
+        # the route), (3) 2026-09-30's letter_number lookup (also None --
+        # no obligation row for this reference either).
         cur.fetchone.side_effect = [
             None,
             ("PLANIT-REF-001", "1 Real Street, Leeds", "Fell one oak", "Leeds City Council", "claimed"),
             None,
+            None,  # 2026-09-30: letter_number lookup, no obligation row either
         ]
         mock_get_db_conn.return_value = conn
         mock_get_lead_owner.return_value = "real-buyer@example.com"
@@ -286,7 +288,9 @@ class TestGenerateLetterRouteEnforcesOwnership(unittest.TestCase):
         cur.fetchone.side_effect = [
             None,  # 2026-09-23 Request D, Part 1: resolve_buyer_facing_reference miss (see comment above)
             ("PLANIT-REF-001", "1 Real Street, Leeds", "Fell one oak", "Leeds City Council", "claimed"),
-            ("real-buyer@example.com", "Real Buyer Tree Care", "07700 900123", "", "", "", 1, True, "fp", "friendly_introduction", "", "", ""),
+            ("real-buyer@example.com", "Real Buyer Tree Care", "07700 900123", "", "", "", 1, True, "fp",
+             "friendly_introduction", "", "", "", "", "", "", ""),
+            (1042,),  # 2026-09-30: letter_number lookup (see generate_homeowner_letter's own comment)
         ]
         mock_get_db_conn.return_value = conn
         mock_get_lead_owner.return_value = "real-buyer@example.com"
@@ -330,6 +334,7 @@ class TestGenerateLetterRouteEnforcesOwnership(unittest.TestCase):
             None,  # resolve_buyer_facing_reference miss
             ("PLANIT-REF-001", "1 Real Street, Leeds", "Fell one oak", "Leeds City Council", "claimed"),
             None,  # no saved contractor_letter_settings at all
+            None,  # 2026-09-30: letter_number lookup, no obligation row either
         ]
         mock_get_db_conn.return_value = conn
         mock_get_lead_owner.return_value = "real-buyer@example.com"

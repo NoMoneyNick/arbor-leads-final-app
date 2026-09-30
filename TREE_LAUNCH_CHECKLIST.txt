@@ -1,3 +1,6 @@
+> **HISTORICAL — superseded in part (30 Sep 2026).** Compiled 2 Sep 2026. **Current business rules and campaign copy:** see `CURRENT_BUSINESS_MODEL.md` (agreed model; what is reported-but-unverified; what is unresolved) and `OUTREACH_START_HERE.md` (approved outreach copy). Where this document disagrees with them, they win.
+> Outdated below: item 5 (lockout copy), item 6 (says no sequence exists / sequence to be loaded — no emails are loaded; approved copy is in `OUTREACH_START_HERE.md`), item 9 ("few blanks", "no LIA document", and "non-refundable" — a 30 Sep LIA draft exists but is unresolved and unapproved; refunds now follow the shortage/refund rules in `CURRENT_BUSINESS_MODEL.md`; legal drafts have product mismatches being corrected). Legal identity, Article 14 and provider retention remain unresolved. Do not run any trigger URLs in this file or copy them into public documents.
+
 # TreeKey — Tree-Only Launch Checklist
 
 Compiled 2 Sep 2026, updated same day after a follow-up session fixing data-quality, security, and legal-copy issues. Pulled together from `AI_HANDOFF.md`, `PROJECT_STATE.md`, and this session's own work — this is the current single source of truth for "is tree ready to go public." HMO-only items are deliberately excluded (see bottom).

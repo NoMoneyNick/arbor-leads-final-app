@@ -94,10 +94,10 @@ class TestPromotePendingApprovals(unittest.TestCase):
     def test_promotes_when_approval_fingerprint_matches_current_render(self):
         fp = self._current_template_fingerprint()
         cur = FakeCursor(
-            fetchall_results=[[("ob-1", "PLANIT-001", "1 Test St", "J Bloggs", "contractor@example.com")]],
+            fetchall_results=[[("ob-1", "PLANIT-001", "1 Test St", "J Bloggs", "contractor@example.com", 1042)]],
             fetchone_results=[
                 ("contractor@example.com", "Apex Tree Care", "0113 000 0000", "", "", "", 1, True, fp,
-                 "friendly_introduction", "", "", ""),  # settings row
+                 "friendly_introduction", "", "", "", "", "", "", ""),  # settings row (+contact_first_name)
                 ("Fell one oak", "Leeds"),   # leads row
                 ("ob-1",),                    # UPDATE ... RETURNING id
             ],
@@ -128,10 +128,10 @@ class TestPromotePendingApprovals(unittest.TestCase):
             ),
         )
         cur = FakeCursor(
-            fetchall_results=[[("ob-1", "PLANIT-001", "1 Test St", "J Bloggs", "contractor@example.com")]],
+            fetchall_results=[[("ob-1", "PLANIT-001", "1 Test St", "J Bloggs", "contractor@example.com", 1042)]],
             fetchone_results=[
                 ("contractor@example.com", "Apex Tree Care", "0113 000 0000", "", "", "", 7, True, fp,
-                 "friendly_introduction", "", "", ""),  # settings row -- template_version=7
+                 "friendly_introduction", "", "", "", "", "", "", ""),  # settings row -- template_version=7
                 ("Fell one oak", "Leeds"),   # leads row
                 ("ob-1",),                    # UPDATE ... RETURNING id
             ],
@@ -143,7 +143,7 @@ class TestPromotePendingApprovals(unittest.TestCase):
 
     def test_leaves_in_place_when_not_yet_approved(self):
         cur = FakeCursor(
-            fetchall_results=[[("ob-1", "PLANIT-001", "1 Test St", "J Bloggs", "contractor@example.com")]],
+            fetchall_results=[[("ob-1", "PLANIT-001", "1 Test St", "J Bloggs", "contractor@example.com", 1042)]],
             fetchone_results=[None],  # get_contractor_settings -> no row at all
         )
         report = worker.promote_pending_approvals(cur)
@@ -156,10 +156,10 @@ class TestPromotePendingApprovals(unittest.TestCase):
         note) -- re-rendering now produces a different fingerprint than what
         was approved, so this must NOT be promoted."""
         cur = FakeCursor(
-            fetchall_results=[[("ob-1", "PLANIT-001", "1 Test St", "J Bloggs", "contractor@example.com")]],
+            fetchall_results=[[("ob-1", "PLANIT-001", "1 Test St", "J Bloggs", "contractor@example.com", 1042)]],
             fetchone_results=[
                 ("contractor@example.com", "A DIFFERENT NAME NOW", "0113 000 0000", "", "", "", 2, True, "stale-fingerprint-abc",
-                 "friendly_introduction", "", "", ""),
+                 "friendly_introduction", "", "", "", "", "", "", ""),
                 ("Fell one oak", "Leeds"),
             ],
         )
@@ -189,10 +189,10 @@ class TestPromotePendingApprovals(unittest.TestCase):
         letter_content.TEMPLATE_REGISTRY[letter_content.DEFAULT_TEMPLATE_KEY] = edited
         try:
             cur = FakeCursor(
-                fetchall_results=[[("ob-1", "PLANIT-001", "1 Test St", "J Bloggs", "contractor@example.com")]],
+                fetchall_results=[[("ob-1", "PLANIT-001", "1 Test St", "J Bloggs", "contractor@example.com", 1042)]],
                 fetchone_results=[
                     ("contractor@example.com", "Apex Tree Care", "0113 000 0000", "", "", "", 1, True, stale_fp,
-                     "friendly_introduction", "", "", ""),
+                     "friendly_introduction", "", "", "", "", "", "", ""),
                 ],
             )
             report = worker.promote_pending_approvals(cur)
@@ -204,10 +204,10 @@ class TestPromotePendingApprovals(unittest.TestCase):
 
     def test_leaves_in_place_when_lead_row_missing(self):
         cur = FakeCursor(
-            fetchall_results=[[("ob-1", "PLANIT-GONE", "1 Test St", "J Bloggs", "contractor@example.com")]],
+            fetchall_results=[[("ob-1", "PLANIT-GONE", "1 Test St", "J Bloggs", "contractor@example.com", 1042)]],
             fetchone_results=[
                 ("contractor@example.com", "Apex Tree Care", "0113 000 0000", "", "", "", 1, True, "whatever",
-                 "friendly_introduction", "", "", ""),
+                 "friendly_introduction", "", "", "", "", "", "", ""),
                 None,  # leads lookup finds nothing
             ],
         )
@@ -225,10 +225,10 @@ class TestPromotePendingApprovals(unittest.TestCase):
         # render_letter, which would test the wrong thing.
         matching_fp = self._current_template_fingerprint()
         cur = FakeCursor(
-            fetchall_results=[[("ob-1", "PLANIT-001", "1 Test St", "J Bloggs", "contractor@example.com")]],
+            fetchall_results=[[("ob-1", "PLANIT-001", "1 Test St", "J Bloggs", "contractor@example.com", 1042)]],
             fetchone_results=[
                 ("contractor@example.com", "Apex Tree Care", "0113 000 0000", "", "", "", 1, True, matching_fp,
-                 "friendly_introduction", "", "", ""),
+                 "friendly_introduction", "", "", "", "", "", "", ""),
                 ("Fell one oak", "Leeds"),
             ],
         )
@@ -247,17 +247,17 @@ class TestPromotePendingApprovals(unittest.TestCase):
         re-approval in between."""
         fp = self._current_template_fingerprint()
         settings_row = ("contractor@example.com", "Apex Tree Care", "0113 000 0000", "", "", "", 1, True, fp,
-                        "friendly_introduction", "", "", "")
+                        "friendly_introduction", "", "", "", "", "", "", "")
 
         cur_lead_a = FakeCursor(
-            fetchall_results=[[("ob-a", "PLANIT-AAA", "1 Test St", "J Bloggs", "contractor@example.com")]],
+            fetchall_results=[[("ob-a", "PLANIT-AAA", "1 Test St", "J Bloggs", "contractor@example.com", 1042)]],
             fetchone_results=[settings_row, ("Fell one oak", "Leeds"), ("ob-a",)],
         )
         report_a = worker.promote_pending_approvals(cur_lead_a)
         self.assertEqual(report_a.promoted_to_pending_funding, 1)
 
         cur_lead_b = FakeCursor(
-            fetchall_results=[[("ob-b", "PLANIT-BBB", "99 Another Rd, Manchester", "K Smith", "contractor@example.com")]],
+            fetchall_results=[[("ob-b", "PLANIT-BBB", "99 Another Rd, Manchester", "K Smith", "contractor@example.com", 1042)]],
             fetchone_results=[settings_row, ("Reduce two sycamores", "Manchester"), ("ob-b",)],
         )
         report_b = worker.promote_pending_approvals(cur_lead_b)
@@ -457,13 +457,13 @@ class TestRunOnePass(unittest.TestCase):
 
         cur = FakeCursor(
             fetchall_results=[
-                [("ob-1", lead_reference, address, applicant_name, contractor_email)],         # stage 1: pending_approval rows
+                [("ob-1", lead_reference, address, applicant_name, contractor_email, 1042)],    # stage 1: pending_approval rows
                 [("ob-1",)],                                                                    # stage 2: pending_funding rows
                 [("ob-1", lead_reference, address, applicant_name, "idem-1", expected_html)],   # stage 3: ready rows
             ],
             fetchone_results=[
                 (contractor_email, "Apex Tree Care", "0113 000 0000", "", "", "", 1, True, expected_template_fp,
-                 "friendly_introduction", "", "", ""),  # get_contractor_settings
+                 "friendly_introduction", "", "", "", "", "", "", ""),  # get_contractor_settings
                 (summary, council),        # _fetch_lead_content_fields
                 ("ob-1",),                 # promote_pending_approvals: UPDATE ... RETURNING id
                 ("ob-1",),                 # promote_pending_funding: UPDATE ... RETURNING id

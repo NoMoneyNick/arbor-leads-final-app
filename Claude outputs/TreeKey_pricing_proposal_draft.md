@@ -1,3 +1,5 @@
+> **HISTORICAL PROPOSAL - superseded (30 Sep 2026).** Current business rules: `CURRENT_BUSINESS_MODEL.md`. Current campaign copy: `OUTREACH_START_HERE.md`. Its old pricing grid, "no letter-sending code" claim and £2.50 postage add-on are not current. Posting is included in the introduction offer (first eligible introduction £4.99). Kept as history, not policy.
+
 # TreeKey pricing & packages — draft for review
 
 This is a first full pass, built from the real numbers already in the codebase (current `PLANS`, `TIER_QUOTAS`, `TIER_MAX_RADIUS` in payments.py/database.py) plus the lead-volume and value-tier classifiers we shipped this week. Two things are estimates rather than verified facts, and I've flagged both clearly below — treat everything else as grounded in what the product actually does today.

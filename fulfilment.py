@@ -345,6 +345,34 @@ def init_fulfilment_schema(cur) -> None:
         CREATE INDEX IF NOT EXISTS idx_letter_obligations_status ON letter_obligations(status);
         CREATE INDEX IF NOT EXISTS idx_letter_obligations_reference ON letter_obligations(lead_reference);
 
+        -- 2026-09-30 handoff ("simple letter-number matching"): a short,
+        -- sequential, contractor-facing reference ("Letter number: 1042")
+        -- printed on the letter itself and shown against the same
+        -- introduction in the contractor's account, so a homeowner who
+        -- calls in can be matched to the right introduction without
+        -- exposing (or requiring) the real council reference. Deliberately
+        -- NOT derived from lead_reference/address/applicant_name -- see
+        -- address_release.py's buyer_facing_reference for the established
+        -- principle this follows: a customer-facing reference must never
+        -- let its holder re-derive or look up the underlying record.
+        -- Written as an explicit sequence + DEFAULT (rather than the
+        -- BIGSERIAL pseudo-type, which ALTER TABLE ADD COLUMN does not
+        -- reliably support the same way CREATE TABLE does) so this whole
+        -- block is safely re-runnable, matching every other migration in
+        -- this function: CREATE SEQUENCE/INDEX IF NOT EXISTS are no-ops
+        -- once applied, SET DEFAULT is idempotent, and the UPDATE only
+        -- ever touches rows that still have NULL (i.e. pre-existing rows
+        -- the first time this runs; nothing thereafter, since every new
+        -- row gets the column's DEFAULT on INSERT).
+        CREATE SEQUENCE IF NOT EXISTS letter_obligations_letter_number_seq;
+        ALTER TABLE letter_obligations ADD COLUMN IF NOT EXISTS letter_number BIGINT;
+        ALTER TABLE letter_obligations
+            ALTER COLUMN letter_number SET DEFAULT nextval('letter_obligations_letter_number_seq');
+        UPDATE letter_obligations SET letter_number = nextval('letter_obligations_letter_number_seq')
+            WHERE letter_number IS NULL;
+        ALTER SEQUENCE letter_obligations_letter_number_seq OWNED BY letter_obligations.letter_number;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_letter_obligations_letter_number ON letter_obligations(letter_number);
+
         CREATE TABLE IF NOT EXISTS payment_allocation_reconciliation (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             stripe_event_id TEXT,
@@ -866,7 +894,8 @@ STAGE_MAP = {
     "dispatched": (
         "dispatched", "Dispatch confirmed",
         "Our mailing provider has confirmed this has left their system for posting. We have no way to confirm "
-        "actual delivery to the homeowner -- Royal Mail and other postal networks don't report that back to us.",
+        "actual delivery to the homeowner -- Royal Mail and other postal networks don't report that back to us. "
+        "If the homeowner calls, ask for the letter number to match their enquiry to this introduction.",
     ),
     "failed": (
         "needs_attention", "Needs attention",
@@ -930,7 +959,7 @@ def get_introduction_record_for_lead_reference(lead_reference: str) -> Optional[
             cur.execute("""
                 SELECT lo.status, lo.is_dry_run, lo.template_version, lo.provider_name, lo.provider_reference,
                        lo.provider_accepted_at, lo.dispatched_at, lo.failed_at, lo.suppressed_at,
-                       lo.suppressed_reason, lo.created_at, la.created_at, la.allocation_type
+                       lo.suppressed_reason, lo.created_at, la.created_at, la.allocation_type, lo.letter_number
                 FROM letter_obligations lo
                 JOIN lead_allocations la ON la.id = lo.allocation_id
                 WHERE lo.lead_reference = %s
@@ -944,7 +973,8 @@ def get_introduction_record_for_lead_reference(lead_reference: str) -> Optional[
             return None
         (status, is_dry_run, template_version, provider_name, provider_reference,
          provider_accepted_at, dispatched_at, failed_at, suppressed_at,
-         suppressed_reason, obligation_created_at, allocation_created_at, allocation_type) = row
+         suppressed_reason, obligation_created_at, allocation_created_at, allocation_type,
+         letter_number) = row
     except Exception as e:
         logger.error(f"[Fulfilment] Could not look up introduction record for {lead_reference!r}: {e}")
         return None
@@ -974,4 +1004,11 @@ def get_introduction_record_for_lead_reference(lead_reference: str) -> Optional[
         "purchase_date": allocation_created_at,
         "obligation_created_at": obligation_created_at,
         "allocation_type": allocation_type,
+        # 2026-09-30 handoff ("simple letter-number matching"): the same
+        # short reference printed on the letter itself (see letter_content.
+        # render_letter's letter_number parameter) -- a plain BIGINT column,
+        # never cleared by retention_dispatch_purge.py, so this stays
+        # available for the life of the introduction record exactly like
+        # every other field returned above.
+        "letter_number": letter_number,
     }

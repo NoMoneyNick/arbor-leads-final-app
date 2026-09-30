@@ -1,12 +1,12 @@
 # Tree Key — Terms and Conditions
 
-*Not legal advice. Nick has confirmed a solicitor review isn't affordable pre-revenue, so Claude maintains this document to the best of its ability going forward rather than leaving it stale until one is affordable — this is the same text published live at treekey.co.uk/terms-of-service (main.py), kept here as a plain-text mirror for easier review/editing outside the site. When updating either copy, update both, or note here that they've diverged. A solicitor review remains the right long-term step once revenue allows it, and either of you should flag anything that looks legally off in the meantime.*
+*DRAFT requiring final review. Not legal advice, not approved, and not evidence of implemented policy. Product descriptions and commercial policies updated 30 Sep 2026 to the posted-introduction model (see `CURRENT_BUSINESS_MODEL.md`). This is **not** a mirror of the live Terms page and may differ from it. Unresolved: legal identity/trading name, and the data-protection points in Section 8. No legal clearance is claimed.*
 
 ---
 
 ## 1. Introduction and Acceptance
 
-1.1 These Terms and Conditions ("Terms") govern access to and use of the Tree Key website (treekey.co.uk) and the lead-generation service provided through it (the "Service"), operated by Vector Data Labs, trading as Tree Key ("we", "us", "our").
+1.1 These Terms and Conditions ("Terms") govern access to and use of the Tree Key website (treekey.co.uk) and the postal-introduction service provided through it (the "Service"), operated by Vector Data Labs, trading as Tree Key ("we", "us", "our"). **[UNRESOLVED: confirm the correct legal identity/trading name before publication; this is the older description.]**
 
 1.2 By creating an account, purchasing a subscription, or otherwise using the Service, you ("you", "the Customer", "the User") agree to be bound by these Terms. If you do not agree, do not use the Service.
 
@@ -14,11 +14,11 @@
 
 ## 2. Description of the Service
 
-2.1 Tree Key identifies and aggregates leads relating to tree work ("Leads") derived substantially from publicly available UK local council planning application records, Companies House records, and related public data sources.
+2.1 Tree Key identifies and aggregates opportunities relating to tree work ("Leads") derived substantially from publicly available UK local council planning application records, Companies House records, and related public data sources. A Customer chooses a Lead, approves the letter wording, and Tree Key prints and posts an introduction letter to the household on the Customer's behalf (an "Introduction"). The household then decides whether to contact the Customer directly.
 
 2.2 Leads are processed using automated methods, including automated classification of whether a named agent or representative on a planning application appears to be a tree surgery or arboricultural business. This classification is a best-effort estimate and is not manually verified for every Lead.
 
-2.3 Tree Key provides access to Lead information only. Tree Key is not a party to, and has no involvement in, any subsequent contact, quote, contract, or work arrangement between the Customer and any third party named in or connected to a Lead.
+2.3 The Service is the printing and posting of Introductions. Tree Key does not supply the household's name, address or contact details to the Customer. Tree Key does not guarantee any reply, enquiry, quote or job. Tree Key is not a party to, and has no involvement in, any subsequent contact, quote, contract, or work arrangement between the Customer and any third party named in or connected to a Lead.
 
 ## 3. Accounts
 
@@ -28,27 +28,23 @@
 
 ## 4. Subscriptions, Pricing, and Payment
 
-4.1 Access to Leads is provided on the subscription plans, credit packages, and pricing displayed on the Service at the time of purchase. Prices and plan structures may change; changes will not affect a billing period already paid for.
+4.1 Introductions are provided on the subscription packages, individual purchases and pricing displayed on the Service at the time of purchase. A Customer's first eligible Introduction is offered at £4.99 (printing and postage included, no subscription required), limited to one per genuine business. Subscription packages match agreed preferences automatically; marketplace purchases are individually selected. Prices and plan structures may change; changes will not affect a billing period already paid for.
 
-4.2 Payments are processed by Stripe. By subscribing, you authorize recurring charges for the plan you select until you cancel in accordance with clause 4.4.
+4.2 Payments are processed by Stripe. By subscribing, you authorize recurring charges for the plan you select until you cancel in accordance with clause 4.3.
 
 4.3 Subscriptions may be cancelled via your account settings, or by emailing contact@treekey.uk, effective at the end of the current billing period.
 
-4.4 **Refunds.** Because access to Tree Key's proprietary Lead data is granted immediately upon subscribing or purchasing, all payments are non-refundable, including for unused portions of a billing cycle. This matches the policy already stated on your live Terms of Service page — carried through here rather than left open.
+4.4 **Fulfilment and refunds.** An Introduction is fulfilled when the print provider confirms dispatch. If an Introduction cannot be fulfilled (for example, a shortage of suitable opportunities or a failed dispatch), Tree Key will first carry it forward or replace it. For a subscription shortage, thirty (30) days after the end of the affected billing period Tree Key will offer continued waiting, a suitable available nearby alternative (only with the Customer's consent), or an applicable refund for the unfulfilled portion. An individual purchase (including the £4.99 first Introduction) has no subscription billing period, so that timing does not apply to it; the same principle applies instead: if the purchased Introduction cannot be fulfilled, Tree Key will offer waiting or replacement, a suitable available nearby alternative (only with the Customer's consent), or an applicable refund. Where the outcome of a dispatch is uncertain, Tree Key will not send a duplicate automatically. A homeowner not replying is not a failure to fulfil an Introduction. **[UNRESOLVED: treatment of renewals while introductions are owed, and of owed introductions after cancellation, is not settled. Whether the 30-day review is implemented is unverified. The timing of the review or refund for unfulfilled individual purchases is not yet decided.]**
 
 4.5 Nothing in this clause affects any statutory right you may have that cannot lawfully be excluded.
 
-## 4A. Free Lead Promotion
+## 4A. Introductory First Introduction Offer
 
-*[TODO: inserted 10 Sep 2026 to match the new free-lead-promo mechanic (database.py's free_lead_codes system). Numbered 4A rather than renumbering every following clause — solicitor/final-draft pass should fold this into the main sequence properly.]*
+4A.1 Tree Key offers a Customer's first eligible Introduction at £4.99, printing and postage included, with no subscription required. It is limited to one per genuine business, applies to an eligible standard opportunity, and is offered only when a suitable opportunity is available. Free browsing and previews do not include a free posted Introduction.
 
-4A.1 Tree Key may from time to time offer a free, no-payment Lead to a business signing up via the free-account signup page ("the Promotion"). The Promotion is limited to one Lead per business and per email address, for the lifetime of the Promotion, regardless of how many times a form is submitted.
+4A.2 Tree Key may limit or decline this offer where it reasonably suspects it is being used to obtain more than one discounted Introduction per business, and may withdraw or amend the offer at any time; an Introduction already purchased is unaffected.
 
-4A.2 On requesting a free Lead, Tree Key reserves a Lead matching the postcode/area supplied and issues a one-time code by email. That code is valid for 3 days from the time it is issued. If the code is not used to redeem the Lead within that window, the Lead is released back to the general pool and may be sold or granted to any other party; the original recipient may request a further code for a different, then-available Lead, subject to the request limits in clause 4A.3.
-
-4A.3 Tree Key may limit the number of times a single email address, phone number, IP address, or device may request or hold a Promotion code, and may decline to issue a further code where it reasonably suspects the Promotion is being used to obtain more than one free Lead per business.
-
-4A.4 The Promotion may be withdrawn, amended, or limited to specific Lead types or areas at any time without notice, save that a code already issued and unexpired at the time of any such change will still be honoured according to its original terms.
+*[Replaces the earlier free-lead promotion clause, which is obsolete. Abuse-prevention specifics and current cost are not independently verified.]*
 
 ## 5. Lead Accuracy — No Warranty
 
@@ -56,10 +52,10 @@
 
 - the underlying planning application remains active or undetermined;
 - no contractor has since been engaged by the applicant, whether or not this is reflected in the public record;
-- contact or applicant details are current or correct;
+- the property details or postal address are current or correct, or that a posted Introduction will be received or read;
 - use of a Lead will result in a successful quote, contract, or completed job.
 
-5.2 You are responsible for independently verifying, directly with the applicant, whether work described in a Lead remains available before committing time, quotes, or resources.
+5.2 Tree Key does not supply the household's details, so you cannot verify a Lead with the applicant before purchase. You are responsible for your own assessment of any enquiry you receive from a household before committing time, quotes, or resources.
 
 5.3 Tree Key provides the Service on an "as available" basis and, to the extent permitted by law, excludes all implied warranties and conditions relating to accuracy, completeness, fitness for a particular purpose, and satisfactory quality.
 
@@ -67,10 +63,10 @@
 
 6.1 You agree not to:
 
-- resell, redistribute, or share Lead data with any third party who is not a party to your own account, except as necessary to quote for or perform the work described;
+- resell, redistribute, or share Lead or opportunity information with any third party who is not a party to your own account, except as necessary to quote for or perform the work described;
 - use the Service to build a competing lead-generation product;
 - attempt to scrape, bulk-export beyond what the Service provides, or reverse-engineer the Service;
-- use any Lead's personal data for a purpose other than contacting that person about the specific tree work described in the Lead (see Section 8).
+- use personal data of a household who contacts you for a purpose other than responding to their enquiry about the tree work described (see Section 8).
 - misuse, harass, or make misleading representations to any person contacted via information obtained through the Service.
 
 6.2 We may suspend access for breach of this section without refund.
@@ -83,11 +79,11 @@
 
 ## 8. Data Protection
 
-8.1 Leads may include personal data (for example, an applicant's or agent's name, and in some cases contact details) sourced from public records. Tree Key processes this personal data as a data controller for the purpose of operating the lead-generation service.
+8.1 Leads are derived from public records and may include personal data (for example, an applicant's or agent's name, and a property address). Tree Key processes this personal data as a data controller for the purpose of operating the postal-introduction service. New Customers do not receive the household's name, address or contact details.
 
-8.2 **[TODO — important, flag to your solicitor specifically]:** reselling personal data derived from public sources is not automatically lawful just because the source is public. You will need a documented lawful basis under UK GDPR (most likely "legitimate interests," which requires a documented legitimate interests assessment balancing your commercial interest against the data subject's rights), a privacy notice describing this processing, and a working mechanism for someone named in a Lead to object to or request erasure of their data. This is a materially different legal question from the lead-accuracy disclaimer in Section 5, and needs its own dedicated review — it is not covered by a liability clause.
+8.2 **[UNRESOLVED — needs final review]:** the lawful basis, the UK GDPR Article 14 assessment, print-provider and backup retention, and a working mechanism for someone named in a Lead to object or request erasure are unresolved. A Legitimate Interests Assessment draft exists (30 Sep 2026) but is unapproved. This clause is not a statement that the processing has been cleared.
 
-8.3 Customers who receive personal data through a Lead must handle it in accordance with UK GDPR themselves for their own onward use (e.g., adding a contact to their own CRM), and must not use it for a purpose incompatible with the reason it was provided (see clause 6.1).
+8.3 Where a household contacts a Customer, the Customer is responsible for handling that household's personal data in accordance with UK GDPR for their own use, and must not use it for a purpose incompatible with the enquiry (see clause 6.1).
 
 8.4 See the companion `privacy_policy_draft.md` for the full Privacy Policy — this Terms document and that policy are meant to be read and published together, not one without the other.
 
@@ -125,10 +121,13 @@
 
 ---
 
-## What still needs solicitor input specifically (don't skip these)
+## Open points for final review
 
-1. **Data protection (Section 8)** is the single biggest open item — bigger than the liability clause itself, because it's a question of whether the processing is lawful at all, not just who pays if something goes wrong. See the companion Privacy Policy draft, especially its Legitimate Interests Assessment requirement.
-2. **Insert your full legal name/address** at the top of this document (see the note under the title) — the only remaining fill-in-the-blank left in this draft.
-3. Confirm nothing here contradicts what's currently live in your Stripe checkout flow or landing page copy (the refund and acceptable-use language here was aligned to match your existing live Terms of Service page, but double-check).
+This remains a draft. Nothing here is legal clearance.
 
-This is written to slot in alongside — not replace — the `lead_disclaimer_draft.md` from earlier; Section 5 here supersedes and expands on that draft, so once this is reviewed, the standalone disclaimer file can most likely be retired in favor of this fuller document, unless your solicitor prefers to keep a short-form disclaimer visible at the point of purchase in addition to the full Terms.
+1. **Data protection (Section 8):** lawful basis, Article 14 assessment, LIA approval (a draft exists), provider and backup retention, and the objection/erasure mechanism are unresolved.
+2. **Legal identity:** confirm the correct legal name/trading identity and working contact mailbox (top of document, clause 1.1, 13.4).
+3. **Shortage handling (clause 4.4):** renewals while introductions are owed and owed introductions after cancellation are unsettled; the 30-day subscription review is not verified as implemented; timing for unfulfilled individual purchases is undecided.
+4. Confirm nothing here contradicts the live Stripe checkout or landing-page copy.
+
+The standalone `lead_disclaimer_draft.md` has been aligned to the same model and can stay as a short-form notice at the point of purchase if wanted.

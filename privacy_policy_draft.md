@@ -1,14 +1,14 @@
 # Tree Key — Privacy Policy
 
-*Not legal advice. This draft has been superseded — the "we do not sell your data" liability this file originally flagged has already been fixed live (see the live `/privacy-policy` page, main.py). Nick has confirmed a solicitor review isn't affordable pre-revenue, so Claude maintains this document to the best of its ability going forward rather than leaving it stale until one is affordable; the live page is the current source of truth, this file is kept as a plain-text mirror for easier review/editing outside the site. When updating either copy, update both, or note here that they've diverged. A solicitor review remains the right long-term step once revenue allows it.*
+*DRAFT requiring final review. Not legal advice, not approved, and not evidence of implemented policy. Product descriptions updated 30 Sep 2026 to the posted-introduction model (see `CURRENT_BUSINESS_MODEL.md`); it is **not** a mirror of the live privacy page and may diverge from it. Unresolved: legal identity/controller, UK GDPR Article 14 assessment, final review and approval of the Legitimate Interests Assessment (a draft exists), print-provider and backup retention, Render region. No legal clearance is claimed.*
 
 ---
 
 ## 1. Who We Are
 
-Tree Key ("we", "us", "our") operates the website treekey.co.uk and the lead-generation service described in our Terms and Conditions. Tree Key is a trading name of Vector Data Labs, which is the data controller for the personal data described below.
+Tree Key ("we", "us", "our") operates the website treekey.co.uk and the postal-introduction service described in our Terms and Conditions. Tree Key is a trading name of Vector Data Labs, which is the data controller for the personal data described below. **[UNRESOLVED: legal identity/controller and trading name must be confirmed before publication; the wording here is the older description.]**
 
-Contact for privacy matters: **contact@treekey.uk**
+Contact for privacy matters: **contact@treekey.uk** **[UNRESOLVED: confirm this privacy/support mailbox works.]**
 
 ## 2. The Two Different Kinds of Personal Data We Handle
 
@@ -20,9 +20,9 @@ This is the part the previous policy didn't separate out, and it matters because
 
 ## 3. Our Lawful Basis for Processing Lead Data
 
-**3.1** We process Lead data (Section 2.2) on the basis of **legitimate interests** under UK GDPR Article 6(1)(f): specifically, our commercial interest in aggregating publicly available planning and company data into a usable directory for tree surgery and arboricultural businesses.
+**3.1** We process Lead data (Section 2.2) on the basis of **legitimate interests** under UK GDPR Article 6(1)(f): specifically, our commercial interest in using publicly available planning and company data to identify properties where tree work may be needed, so that approved contractor introductions can be printed and posted to the household. Contractors do not receive the household's name or address; homeowners contact the contractor directly. **[UNRESOLVED: whether this basis holds is subject to the LIA and the Article 14 assessment, neither of which is approved.]**
 
-**3.2 [TODO — do not skip this]:** relying on legitimate interests requires a documented Legitimate Interests Assessment (LIA) — a written record showing you considered the purpose, necessity, and balanced it against the individual's rights and reasonable expectations. This policy states the conclusion; the assessment itself needs to actually exist as a document you can produce if asked by the ICO. Your solicitor or a data protection consultant should help produce this alongside finalizing this policy.
+**3.2 [UNRESOLVED — Article 14 assessment also unresolved]:** a Legitimate Interests Assessment (LIA) draft exists (30 Sep 2026) but is unapproved and needs final review; this policy states an intended basis, not a cleared conclusion. Relying on legitimate interests requires a documented Legitimate Interests Assessment (LIA) — a written record showing you considered the purpose, necessity, and balanced it against the individual's rights and reasonable expectations. This policy states the conclusion; the assessment itself needs to actually exist as a document you can produce if asked by the ICO. Your solicitor or a data protection consultant should help produce this alongside finalizing this policy.
 
 **3.3** A person named in Lead data has the right to object to this processing (see Section 8). Where someone objects, we will stop processing their data for this purpose unless we can demonstrate compelling legitimate grounds that override their interests, or the data is needed for a legal claim.
 
@@ -30,7 +30,7 @@ This is the part the previous policy didn't separate out, and it matters because
 
 - Operating and improving the Service (both kinds of data);
 - Providing customer support and processing payments (customer data);
-- Compiling, classifying, and displaying Leads to subscribed customers (Lead data);
+- Compiling and classifying Leads, offering them to customers as postal opportunities (without supplying household identity to new buyers), and addressing and posting approved introduction letters to the household (Lead data);
 - Sending customers service-related communications and, where they have not opted out, marketing about the Service;
 - Complying with our legal obligations (e.g. tax, accounting).
 
@@ -48,8 +48,9 @@ We do not purchase Lead data from private data brokers or scrape data that is no
 
 - **Stripe** (payment processing) — customer payment and billing data. Stripe's standard Data Processing Agreement is incorporated automatically into its Services Agreement for all merchants, so this is very likely already in place; worth a quick confirmation but not a gap to build from scratch.
 - **Render** (hosting) — the application and database are hosted with Render. **[TODO: confirm which Render region your service runs in — this determines whether Section 7 below needs UK/EU-specific transfer wording or not.]**
-- **Our customers** — Lead data is disclosed to subscribing customers as the core of the Service.
-- We do not sell personal data to data brokers or advertisers. We do commercially license access to Lead data as the Service itself — this is described plainly here rather than denied, unlike the current live wording.
+- **Print and post provider (Intelliprint, working choice)** — receives the letter content and the household's delivery address in order to print and post the introduction. **[UNRESOLVED: the provider's retention and deletion of letter content and addresses is unconfirmed and must be asked of the provider.]**
+- **Our customers** — new buyers are not given the household's name, address or contact details. The letter they approve carries their own business details and a letter number; the homeowner chooses whether to contact them.
+- We do not sell personal data to data brokers or advertisers.
 
 ## 7. International Data Transfers
 
@@ -66,11 +67,11 @@ Both customers and individuals named in Lead data have the right, under UK GDPR,
 - request restriction of processing in certain circumstances;
 - lodge a complaint with the Information Commissioner's Office (ico.org.uk).
 
-To exercise any of these rights, contact **contact@treekey.uk**. **[TODO: build an actual process for handling this — a Lead data subject objecting or requesting erasure needs a real mechanism to remove them from active Leads, not just a promise in a policy.]**
+To exercise any of these rights, contact **contact@treekey.uk**. **[TODO: verify the existing mechanism for a Lead data subject objecting or requesting erasure, and identify any remaining operational gaps. Its implementation has not been checked in this documentation pass.]**
 
 ## 9. Data Retention
 
-Proposed default, for you to confirm or adjust: Lead data (Section 2.2) is retained for 24 months from discovery, after which personal identifiers (names) are anonymized or deleted, though the underlying planning application record may be retained in non-identifying form for business analytics. Customer account data (Section 2.1) is retained for the life of the account, and billing records are kept for 6 years after account closure to meet HMRC record-keeping requirements. **[TODO: confirm these periods match what you actually want and what the database is capable of enforcing — a stated policy that the system doesn't actually implement is its own compliance gap.]**
+Agreed business framework for Lead data (Section 2.2): ordinary sale eligibility ends at day 56 and unsold records are deleted at day 60 from council registration; addressed records become purge-eligible 72 hours after confirmed dispatch and are checked on schedule. This replaces the earlier 24-month proposal. **[UNRESOLVED: provider and backup retention; this draft does not verify that the timings are implemented.]** Customer account data (Section 2.1) is retained for the life of the account, and billing records are kept for 6 years after account closure to meet HMRC record-keeping requirements. **[TODO: confirm these periods match what you actually want and what the database is capable of enforcing — a stated policy that the system doesn't actually implement is its own compliance gap.]**
 
 ## 10. Security
 
@@ -94,9 +95,14 @@ Questions or requests regarding this policy: **contact@treekey.uk**.
 
 ---
 
-## Priority order for your solicitor / DPO conversation
+## Open points for final review (agrees with the notice at the top)
 
-1. **Take down or rewrite the "we do not sell your personal data" line on the live site now** — this is the most urgent single item across all three documents, and doesn't need to wait for the rest of this rewrite.
-2. **The Legitimate Interests Assessment (Section 3.2)** — the actual documented assessment, not just the policy's summary of its conclusion. Nothing in this session can substitute for that document actually being written.
-3. **Insert your legal name/address** (top of document) and **confirm your Render hosting region** (Section 6/7) — the only two remaining fill-in-the-blanks; everything else in this draft has been resolved against your actual codebase rather than left as a placeholder.
-4. **Build the actual mechanism** for someone named in a Lead to object or request erasure (Section 8), and confirm the retention periods proposed in Section 9 are both what you want and something the database can actually enforce.
+This remains a draft. Nothing here is legal clearance.
+
+1. **Legitimate Interests Assessment (Section 3.2):** a draft exists (30 Sep 2026) but is unapproved. It needs final review before this policy relies on it.
+2. **UK GDPR Article 14 assessment:** unresolved.
+3. **Legal identity and contact:** confirm the correct controller/trading identity (top of document; the wording here is the older description) and that the privacy/support mailbox works.
+4. **Print-provider and backup retention:** the provider's retention and deletion of letter content and addresses is unconfirmed (Section 6); backup retention is also open. Confirm the Render region (Sections 6/7).
+5. **Data-subject requests (Section 8):** verify the existing mechanism for someone named in a Lead to object or request erasure, and identify any remaining operational gaps. Its implementation has not been checked in this documentation pass.
+6. **Retention (Section 9):** the agreed 56-day / 60-day / 72-hour framework is a business rule; this draft does not verify that it is implemented.
+7. **Live page:** compare the live privacy page with this draft and note where they differ.

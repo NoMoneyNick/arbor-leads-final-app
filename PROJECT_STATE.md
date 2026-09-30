@@ -1,3 +1,6 @@
+> **Pointer and superseded notice (30 Sep 2026):** **Current business rules and campaign copy:** see `CURRENT_BUSINESS_MODEL.md` (agreed model; what is reported-but-unverified; what is unresolved) and `OUTREACH_START_HERE.md` (approved outreach copy). Where this document disagrees with them, they win.
+> Sections below that describe free-lead sequences, radial territory lockout, credit packs, £49/£80/£149 prices, £25/£50/£75 lead grading or name-and-address leads are **historical and superseded** by the posted-introduction model (£4.99 first introduction; monthly packages). Engineering history is kept as written.
+
 2. **Planning Radar (Great Britain):** **800+ Live Statutory Planning Notices** actively monitored across all 309 English councils, all 32 Scottish local authorities, and all 22 Welsh unitary councils.
 3. **Interactive Homepage Radar (`/`):** Click-to-move pin, smooth panning (zero auto-zoom), universal postcode/city lookup, continuous harmonic micro-density lead/value recalculations, and 5–25 mile radius selector.
 4. **Master Autonomous Guardian & Alert Sentry:** Predictive burn-rate calculation for API quotas, ultra-bold ALL-CAPS incident email alerts across all failure tripwires (UK Planning API, Companies House, Google Places, London GLA, Supabase, Stripe).
@@ -7,6 +10,35 @@
 ---
 
 ## 📋 MASTER SPRINT TO-DO QUEUE
+
+### 0. ✉️ Letter Design — Future Features (Not Yet Implemented)
+Added 2026-09-27 per Nick's request, at the top of the queue. Both are
+planned only -- recorded here, not built (still true 2026-09-30). The letter renderer
+(`letter_content.py`) already has two reserved, currently-blank areas on
+the front page laid out for these (`.reserved-qr-area`, `.reserved-logo-area`)
+from that same session's design pass.
+- [ ] **Business-link field and automatic letter QR code.** Add an optional
+  field during account setup, editable later in Account details. Label:
+  "Business website or social page". Help text: "Optional. Add a link for
+  customers to visit through a QR code on your letters. Change it anytime
+  in Account details." Support a website, Facebook business page, or other
+  business-page link. Generate a direct QR code in the reserved orange
+  area, without a visible border; leave that area blank when no link is
+  supplied. Include it in previews, and require re-approval when the
+  destination link changes.
+- [ ] **Optional contractor logo/advertising image upload.** Save an
+  optional image in account settings for the reserved blue area, reusable
+  on future letters, included in preview/approval. Leave that area
+  entirely blank until this feature is implemented and an image is
+  supplied by the contractor.
+
+**Completed and installed in the project files 2026-09-30 (not deployed; live behaviour unverified):**
+- [x] Banner/contact-panel letter design, optional `contact_first_name` (omitted when blank).
+- [x] Letter number (sequence-backed, stable, shown on the letter and on the contractor's My Introductions record).
+- [x] Optional contractor offer (`offer_text` / `offer_code` / `offer_conditions`); changing any of these changes the approval fingerprint, so future letters need reapproval.
+- Reserved QR and logo areas stay blank; neither future feature is built.
+
+---
 
 ### 1. 📧 Business Email & Domain Infrastructure (100% Complete)
 - [x] **Custom Domain Setup:** `https://treekey.uk` live with active SSL on Cloudflare & Render.
@@ -41,7 +73,7 @@
     "Live Signal" redesign (see below).
   - [x] **Trade Credibility & Badges — wording fixed (Aug 29 2026):** see "Wording
     precision" note below, folded into the same edit.
-  - [ ] **Pricing Table & Lockout Text:** Fine-tune exclusive radial territory lockout copy and credit pack terms. NOT done yet.
+  - [ ] **Pricing Table & Lockout Text:** *(SUPERSEDED 2026-09-30: territory lockout and credit packs are obsolete; see `CURRENT_BUSINESS_MODEL.md`.)* Fine-tune exclusive radial territory lockout copy and credit pack terms. NOT done yet.
   - [x] **FAQ Section Review — DONE (Aug 29 2026):** Replaced obsolete copy with explicit "Radial Territory Exclusivity" explanation, notice speed, and rolling monthly/credit pack options.
   - [x] **Wording precision — DONE (Aug 29 2026):** the homepage badge "Authorized UK
     Statutory Planning Data" reworded to "Published Under The Open Government
@@ -90,7 +122,8 @@
 ### 4. 📨 Multi-Channel Outreach & Revenue Launch
 
 - [ ] **Cold Email Sequence Copywriting (Operator using Claude):**
-  - **Email 1 (The Free Lead Gift):** 1 free local planning notice in their postal district.
+  - **SUPERSEDED 2026-09-30:** the three lines below are the old free-lead / territory-lockout / credit-pack sequence. Do not reuse. Current copy: `OUTREACH_START_HERE.md`. No emails have been loaded into Instantly.
+  - *(historical)* **Email 1 (The Free Lead Gift):** 1 free local planning notice in their postal district.
   - **Email 2 (The Competitive Moat):** Exclusive 15-mile radial territory lockout (£149/mo).
   - **Email 3 (The Soft Close):** £49/mo Regional Plan or £80 10-Lead Credit Pack.
   - **Personalization Tokens:** `{{director_name}}`, `{{company_name}}`, `{{city}}`, `{{recent_tpo_street}}`.
@@ -114,6 +147,64 @@
   `leads` table / `dispatch_lead_alerts` pipeline so no downstream code changes.
 - [ ] `domestic_scrapers.py` currently a no-op stub (`ingest_and_route_domestic_leads()`
   returns 0) so the 3 existing call sites in main.py don't break in the meantime.
+
+---
+
+### 6. 🚦 Launch-Readiness Verification & Business Rules (Recorded 2026-09-30)
+Added 2026-09-30 per Nick's request, alongside that session's letter-number
+and optional-offer work. Item A has since been checked (see below); the rest are recorded only,
+not investigated or built -- see each item's own scope note.
+
+- [x] **A. Verify the three personalisation opportunities.** *(Checked 2026-09-30 in the sandbox code: all three opportunities exist, no gap found; live behaviour not verified.)* Check signup, My
+  Account, and the final "Personalise / Use standard letter" opportunity
+  before first approval, including checkout-first signup. An earlier report
+  said already-approved standard-letter users received no purchase nudge --
+  establish the actual current behaviour before changing anything. Optional
+  personalisation is never compulsory or required for every letter; the
+  three complete standard templates already cover a contractor who skips
+  customisation. A genuine business name, responsible contact name, and
+  required contact details must exist before sending -- no bracketed
+  placeholders or sample identities.
+- [ ] **B. Align business rules and customer-facing wording.** Use
+  `TREEKEY_LAUNCH_LOGIC_AUDIT_2026-09-27.md` and
+  `TREEKEY_RULES_DECISIONS_2026-09-30.md` as references if available --
+  read them only when actually starting this item, not before. Decisions to
+  align wording against: TreeKey sells postal introductions, not homeowner
+  identities; subscriptions automatically match agreed preferences,
+  marketplace purchases are individually selected; carry-forward/
+  replacements come first for shortages or failed fulfilment, wider-area
+  alternatives require customer agreement; an eventual refund remains
+  available when fulfilment cannot be achieved (the exact deadline and
+  treatment of renewals/backlogs still needs a settled rule -- do not invent
+  one); fulfilment is counted at provider-confirmed dispatch, and uncertain
+  outcomes must never cause automatic duplicate mailings; cancellation,
+  repeat-contact limits, retained evidence and privacy wording must agree
+  across the whole service; final letter wording remains pending approval
+  with ChatGPT -- do not rewrite locked privacy text as part of this item.
+- [ ] **C. First-purchase offer and savings presentation.** Record the
+  planned £4.99 first eligible introduction, replacing free posted
+  introductions, with no automatic subscription. Display accurate savings
+  where relevant (introductory outreach emails, homepage, packages, purchase
+  screens); prepare/update email content only -- do not send emails. £4.99
+  vs £19 is a difference of £14.01 / 73.7%, but the comparison must be
+  supported by a genuine applicable reference price -- package savings
+  previously calculated against £19/introduction were illustrative, not
+  approved advertising figures; establish comparable opportunity types and a
+  supportable baseline before publishing any percentage. Keep package
+  savings distinct from the existing marketplace discounts (10%, 15%, 15%,
+  20%, 25%, subject to checking current pricing config). No invented "was"
+  prices, unsupported savings, or pricing changes.
+- [ ] **D. Preserve the existing deferred features.** Already tracked above
+  in section 0 (business-link/automatic QR, contractor logo/advertising
+  upload) -- not duplicated here. Both reserved areas remain blank until
+  those are actually built.
+- [ ] **E. Source reliability -- recurring scraper alerts.** Record for a
+  later *bounded diagnosis*, not a rewrite: prioritise Fife, Cheshire West
+  and Solihull's zero-lead alerts, plus Croydon/Mid Kent's overlapping
+  TLS/structure alerts. Verify actual missed applications before deciding on
+  any fix. Do not investigate these now -- separate from the already-fixed
+  "false SCRAPER PAGE STRUCTURE alerts" item recorded earlier in this file
+  (different councils, already resolved).
 
 ---
 

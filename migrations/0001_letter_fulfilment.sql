@@ -116,6 +116,22 @@ ALTER TABLE letter_obligations ADD COLUMN IF NOT EXISTS purged_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_letter_obligations_purge_eligible
     ON letter_obligations(dispatched_at) WHERE status = 'dispatched' AND purged_at IS NULL;
 
+-- 2026-09-30: letter_number -- a simple, stable, sequence-backed number
+-- printed on each letter and shown on the contractor's introduction record,
+-- so a homeowner quoting it can be matched to the right introduction. It is
+-- NOT derived from the address or any identity. Verbatim copy of the block in
+-- fulfilment.init_fulfilment_schema (explicit sequence + DEFAULT rather than
+-- BIGSERIAL, so this is safely re-runnable; the UPDATE only touches rows that
+-- still have NULL, i.e. pre-existing rows the first time it runs).
+CREATE SEQUENCE IF NOT EXISTS letter_obligations_letter_number_seq;
+ALTER TABLE letter_obligations ADD COLUMN IF NOT EXISTS letter_number BIGINT;
+ALTER TABLE letter_obligations
+    ALTER COLUMN letter_number SET DEFAULT nextval('letter_obligations_letter_number_seq');
+UPDATE letter_obligations SET letter_number = nextval('letter_obligations_letter_number_seq')
+    WHERE letter_number IS NULL;
+ALTER SEQUENCE letter_obligations_letter_number_seq OWNED BY letter_obligations.letter_number;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_letter_obligations_letter_number ON letter_obligations(letter_number);
+
 CREATE TABLE IF NOT EXISTS payment_allocation_reconciliation (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     stripe_event_id TEXT,
@@ -221,6 +237,10 @@ CREATE TABLE IF NOT EXISTS contractor_letter_settings (
 --   ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS business_intro TEXT;
 --   ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS services_note TEXT;
 --   ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS contact_email TEXT;
+--   ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS contact_first_name TEXT;
+--   ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS offer_text TEXT;
+--   ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS offer_code TEXT;
+--   ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS offer_conditions TEXT;
 
 -- ---------------------------------------------------------------------
 -- address_release.py: address_disclosure_decisions -- 2026-09-18 review,

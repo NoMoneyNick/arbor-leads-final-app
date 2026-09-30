@@ -294,6 +294,32 @@ TEMPLATE_REGISTRY: "dict[str, LetterTemplateDefinition]" = {
 # just this comment.
 REVERSE_PAGE_CONTENT_VERSION = 1
 
+# 2026-09-27 fix ("restore the visual design"): Nick supplied
+# TreeKey-short-review.pdf as the visual source of truth for typography,
+# header prominence, a front-page headline, the contact box, and
+# front/reverse hierarchy -- all of which this file already had except the
+# headline, which had been dropped somewhere between that design and this
+# file's current front_page markup. Restored as a single shared line (like
+# REVERSE_PAGE_CONTENT_VERSION above), not a per-template field, because
+# the reference shows one generic headline, not three tonal variants, and
+# because TEMPLATE_REGISTRY's three shells are wired for THEIR OWN
+# versioning already -- adding a 4th shell field to all three for one
+# shared line would be more machinery than the change needs.
+#   WORDING STATUS: copied verbatim from the reference PDF, which is NOT
+# bracketed like its [Recipient name]/[Business name] placeholders --
+# but per this file's own "PLACEHOLDER COPY, DELIBERATELY" section above,
+# EVERY front-page string in this file (TEMPLATE_REGISTRY included) is
+# still Nick's placeholder pending his final copy, not approved live
+# wording. Treat this headline the same way: draft, not confirmed, same as
+# the rest of the front page around it, until Nick says otherwise.
+# Bump this whenever the headline text itself changes -- exactly the same
+# reasoning as REVERSE_PAGE_CONTENT_VERSION, and it is hashed into
+# template_fingerprint alongside it below for the same reason: so a future
+# copy edit invalidates existing reusable approvals instead of silently
+# rendering new text under an old approval.
+FRONT_PAGE_HEADLINE_VERSION = 1
+FRONT_PAGE_HEADLINE = "Looking for a quote for your tree work?"
+
 # TreeKey's own copy (the three templates above) must never silently assert
 # any of these -- see this module's docstring, "NO AUTOMATIC CLAIMS", and
 # tests/test_letter_content.py's TestNoAutoAddedClaimWords, which scans
@@ -329,11 +355,23 @@ def template_choices() -> "list[tuple[str, str]]":
 MAX_BUSINESS_NAME_LEN = 120
 MAX_PHONE_LEN = 40
 MAX_CONTACT_EMAIL_LEN = 254
+# 2026-09-27, contact panel redesign: a first name only, never a full name
+# or surname -- kept short deliberately (see ContractorLetterSettings.
+# contact_first_name's own comment for why this exists at all).
+MAX_CONTACT_FIRST_NAME_LEN = 40
 MAX_SERVICE_AREA_LEN = 160
 MAX_BUSINESS_INTRO_LEN = 500
 MAX_SERVICES_NOTE_LEN = 300
 MAX_INSURANCE_LEN = 300
 MAX_QUALIFICATIONS_LEN = 300
+# 2026-09-30 handoff ("optional contractor offer, for launch"): the
+# contractor's own wording, supplied and approved by them -- never invented
+# or prefilled by TreeKey (see ContractorLetterSettings.offer_text's own
+# comment). Kept short deliberately: this is a compact line/two beside the
+# contact panel, not a second body of copy.
+MAX_OFFER_TEXT_LEN = 200
+MAX_OFFER_CODE_LEN = 30
+MAX_OFFER_CONDITIONS_LEN = 200
 # Combined cap across every editable field, independent of the per-field
 # caps above (a contractor could otherwise max out every field individually
 # and still produce an overlong letter).
@@ -378,6 +416,22 @@ def init_letter_content_schema(cur) -> None:
         ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS business_intro TEXT;
         ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS services_note TEXT;
         ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS contact_email TEXT;
+        -- 2026-09-27, contact panel redesign: an optional first name shown
+        -- alongside the business name and phone in the letter's contact
+        -- panel -- "use saved details only; omit a missing first name"
+        -- (Nick's own wording), so this is genuinely optional and blank by
+        -- default, same idempotent-add-column pattern as contact_email above.
+        ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS contact_first_name TEXT;
+        -- 2026-09-30 handoff ("optional contractor offer, for launch"): an
+        -- optional offer the contractor supplies and approves themselves --
+        -- blank by default, same idempotent-add-column pattern as
+        -- contact_first_name above. Three separate fields (wording, an
+        -- optional code, and optional conditions/expiry) rather than one
+        -- freeform blob, matching how the request itself separates them and
+        -- letting the code be shown/styled distinctly from the wording.
+        ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS offer_text TEXT;
+        ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS offer_code TEXT;
+        ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS offer_conditions TEXT;
     """)
 
 
@@ -399,6 +453,25 @@ class ContractorLetterSettings:
     business_intro: str = ""
     services_note: str = ""
     contact_email: str = ""
+    # 2026-09-27, contact panel redesign ("prominently show the contractor's
+    # company name, contact's first name if supplied, and telephone number...
+    # use saved details only; omit a missing first name" -- Nick's own
+    # wording): a first name only, genuinely optional, shown on the letter
+    # only when actually saved -- never invented or guessed from anywhere
+    # else (e.g. the account's own login email/company name).
+    contact_first_name: str = ""
+    # 2026-09-30 handoff ("optional contractor offer, for launch"): supplied
+    # and approved by the contractor themselves, exactly like every other
+    # editable field above -- TreeKey never invents or prefills a discount
+    # or "exclusive price" claim for a real contractor (see render_letter's
+    # offer_html for the "blank means nothing appears" behaviour this
+    # enforces). offer_code identifies a shared promotion (e.g. for the
+    # contractor's own tracking); it is NOT the per-introduction identifier
+    # -- that's letter_number, a completely separate mechanism (see
+    # render_letter's letter_number parameter).
+    offer_text: str = ""
+    offer_code: str = ""
+    offer_conditions: str = ""
 
     def validate(self) -> list[str]:
         """Returns a list of problems (empty = valid). Does not invent
@@ -428,6 +501,10 @@ class ContractorLetterSettings:
             ("business_name", self.business_name, MAX_BUSINESS_NAME_LEN),
             ("phone", self.phone, MAX_PHONE_LEN),
             ("contact_email", self.contact_email, MAX_CONTACT_EMAIL_LEN),
+            ("contact_first_name", self.contact_first_name, MAX_CONTACT_FIRST_NAME_LEN),
+            ("offer_text", self.offer_text, MAX_OFFER_TEXT_LEN),
+            ("offer_code", self.offer_code, MAX_OFFER_CODE_LEN),
+            ("offer_conditions", self.offer_conditions, MAX_OFFER_CONDITIONS_LEN),
             ("service_area_note", self.service_area_note, MAX_SERVICE_AREA_LEN),
             ("business_intro", self.business_intro, MAX_BUSINESS_INTRO_LEN),
             ("services_note", self.services_note, MAX_SERVICES_NOTE_LEN),
@@ -465,7 +542,8 @@ def get_contractor_settings(cur, contractor_email: str) -> Optional[ContractorLe
     cur.execute("""
         SELECT contractor_email, business_name, phone, service_area_note, insurance_note,
                qualifications_note, template_version, approved, approved_fingerprint,
-               template_key, business_intro, services_note, contact_email
+               template_key, business_intro, services_note, contact_email, contact_first_name,
+               offer_text, offer_code, offer_conditions
         FROM contractor_letter_settings WHERE contractor_email = %s;
     """, (contractor_email.strip().lower(),))
     row = cur.fetchone()
@@ -476,7 +554,8 @@ def get_contractor_settings(cur, contractor_email: str) -> Optional[ContractorLe
         service_area_note=row[3] or "", insurance_note=row[4] or "", qualifications_note=row[5] or "",
         template_version=row[6], approved=row[7], approved_fingerprint=row[8],
         template_key=row[9] or DEFAULT_TEMPLATE_KEY, business_intro=row[10] or "",
-        services_note=row[11] or "", contact_email=row[12] or "",
+        services_note=row[11] or "", contact_email=row[12] or "", contact_first_name=row[13] or "",
+        offer_text=row[14] or "", offer_code=row[15] or "", offer_conditions=row[16] or "",
     )
 
 
@@ -498,8 +577,10 @@ def upsert_contractor_settings(cur, settings: ContractorLetterSettings) -> None:
     cur.execute("""
         INSERT INTO contractor_letter_settings
             (contractor_email, business_name, phone, service_area_note, insurance_note, qualifications_note,
-             template_key, business_intro, services_note, contact_email, template_version, approved, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, NOW())
+             template_key, business_intro, services_note, contact_email, contact_first_name,
+             offer_text, offer_code, offer_conditions, template_version,
+             approved, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, NOW())
         ON CONFLICT (contractor_email) DO UPDATE SET
             business_name = EXCLUDED.business_name,
             phone = EXCLUDED.phone,
@@ -510,6 +591,10 @@ def upsert_contractor_settings(cur, settings: ContractorLetterSettings) -> None:
             business_intro = EXCLUDED.business_intro,
             services_note = EXCLUDED.services_note,
             contact_email = EXCLUDED.contact_email,
+            contact_first_name = EXCLUDED.contact_first_name,
+            offer_text = EXCLUDED.offer_text,
+            offer_code = EXCLUDED.offer_code,
+            offer_conditions = EXCLUDED.offer_conditions,
             template_version = contractor_letter_settings.template_version + 1,
             approved = FALSE,
             approved_fingerprint = NULL,
@@ -518,7 +603,9 @@ def upsert_contractor_settings(cur, settings: ContractorLetterSettings) -> None:
     """, (settings.contractor_email.strip().lower(), settings.business_name.strip(), settings.phone.strip(),
           settings.service_area_note.strip(), settings.insurance_note.strip(), settings.qualifications_note.strip(),
           settings.template_key.strip(), settings.business_intro.strip(), settings.services_note.strip(),
-          settings.contact_email.strip(), settings.template_version))
+          settings.contact_email.strip(), settings.contact_first_name.strip(),
+          settings.offer_text.strip(), settings.offer_code.strip(), settings.offer_conditions.strip(),
+          settings.template_version))
 
 
 def template_fingerprint(settings: ContractorLetterSettings) -> str:
@@ -582,15 +669,29 @@ def template_fingerprint(settings: ContractorLetterSettings) -> str:
     this fingerprint for every contractor on that template, without
     needing anyone to remember to also bump every affected contractor's
     template_version by hand."""
+    # 2026-09-27, contact panel redesign: contact_first_name joins
+    # contact_email in this list -- it's shown on the letter (in the contact
+    # panel, when saved) exactly like every other editable field above, so
+    # editing it must invalidate reusable approval the same way editing
+    # business_name or phone always has.
+    # 2026-09-30, optional contractor offer: offer_text/offer_code/
+    # offer_conditions join the same list for the same reason -- "changing
+    # the offer must require reapproval for future mailings" (the request's
+    # own wording). Deliberately NOT including letter_number here: it is a
+    # per-obligation value assigned once an introduction is actually
+    # created, never part of the reusable TEMPLATE a contractor approves
+    # (see render_letter's own letter_number parameter and comment).
     template = TEMPLATE_REGISTRY.get(settings.template_key) or TEMPLATE_REGISTRY[DEFAULT_TEMPLATE_KEY]
     material = "\x1f".join([
         settings.business_name.strip(), settings.phone.strip(), settings.contact_email.strip(),
+        settings.contact_first_name.strip(),
+        settings.offer_text.strip(), settings.offer_code.strip(), settings.offer_conditions.strip(),
         settings.template_key.strip(), str(template.version),
         template.opening_line, template.quote_request_line, template.sign_off_word,
         settings.business_intro.strip(), settings.services_note.strip(),
         settings.service_area_note.strip(), settings.insurance_note.strip(),
         settings.qualifications_note.strip(), str(settings.template_version),
-        str(REVERSE_PAGE_CONTENT_VERSION),
+        str(REVERSE_PAGE_CONTENT_VERSION), str(FRONT_PAGE_HEADLINE_VERSION),
     ])
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
@@ -615,6 +716,11 @@ PREVIEW_LEAD_REFERENCE = "SAMPLE-PREVIEW"
 PREVIEW_ADDRESS = "123 Sample Street, Sample Town, ST1 2AB"
 PREVIEW_SUMMARY = "Fell one silver birch and crown-reduce one oak (illustrative example only -- not a real planning application)"
 PREVIEW_COUNCIL = "Sample District Council"
+# 2026-09-30 handoff ("simple letter-number matching"): a clearly-fictional
+# sample number for the same reason PREVIEW_LEAD_REFERENCE etc above are
+# fictional -- this preview/approval UI never shows a real, in-use letter
+# number to a contractor.
+PREVIEW_LETTER_NUMBER = 1042
 
 
 def render_preview_letter(settings: ContractorLetterSettings) -> str:
@@ -626,7 +732,8 @@ def render_preview_letter(settings: ContractorLetterSettings) -> str:
     rendering path used for fulfilment" (2026-09-23 handoff) -- there is
     no separate preview renderer to keep in sync."""
     return render_letter(settings, lead_reference=PREVIEW_LEAD_REFERENCE, address=PREVIEW_ADDRESS,
-                          summary=PREVIEW_SUMMARY, council=PREVIEW_COUNCIL)
+                          summary=PREVIEW_SUMMARY, council=PREVIEW_COUNCIL,
+                          letter_number=PREVIEW_LETTER_NUMBER)
 
 
 def approve_template(cur, contractor_email: str, *, preview_fingerprint: str) -> None:
@@ -675,7 +782,7 @@ def _privacy_policy_url() -> str:
 
 
 def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, address: str,
-                   summary: str, council: str) -> str:
+                   summary: str, council: str, letter_number: Optional[int] = None) -> str:
     """Pure function of its settings/lead inputs for fingerprinting purposes
     (template_fingerprint never calls this -- see that function's own
     docstring); internally reads today's Europe/London date and the two
@@ -711,7 +818,19 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
     ContractorLetterSettings.validate()'s stricter '<'/'>' rejection. This
     is deliberate defense in depth: validate() is what a contractor saving
     settings through the real routes always goes through, but this
-    function itself makes no assumption about how it was called."""
+    function itself makes no assumption about how it was called.
+
+    2026-09-30 handoff ("simple letter-number matching"): letter_number is
+    the short, sequential, per-introduction reference ("Letter number:
+    1042") -- deliberately a plain optional parameter, not something this
+    function derives itself, so it stays a pure function of its inputs
+    (matching this docstring's opening sentence) and callers remain fully
+    responsible for sourcing it correctly (from letter_obligations.
+    letter_number -- see worker.promote_pending_approvals and main.py's
+    generate_homeowner_letter route -- never from lead_reference/address/
+    council). None is accepted (renders no line) only so existing callers
+    that genuinely have no obligation row yet cannot break; both real
+    production call sites always pass a real value."""
     contact_email_footer = html.escape(_privacy_contact_email())
     policy_url = html.escape(_privacy_policy_url())
     letter_date = _letter_date_today()
@@ -725,6 +844,7 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
     business_name = esc(settings.business_name)
     phone = esc(settings.phone)
     contact_email = esc(settings.contact_email)
+    contact_first_name = esc(settings.contact_first_name)
     service_area_note = esc(settings.service_area_note)
     business_intro = esc(settings.business_intro)
     services_note = esc(settings.services_note)
@@ -736,7 +856,44 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
     opening_html = f'<p class="body-text">{template.opening_line.format(council=council_e, lead_reference=lead_reference_e)}</p>'
     quote_request_html = f'<p class="body-text">{esc(template.quote_request_line)}</p>'
 
-    contact_email_line = f' &middot; {contact_email}' if contact_email else ""
+    # 2026-09-27, contact panel redesign ("prominently show the contractor's
+    # company name, contact's first name if supplied, and telephone number
+    # in the contact panel. Use saved details only; omit a missing first
+    # name" -- Nick's own wording, this exact pass): business name and phone
+    # are always available (both required by validate()), so they always
+    # render; contact_first_name is genuinely optional and simply omitted --
+    # never a placeholder or invented name -- when nothing is saved.
+    # contact_email keeps its own separate, smaller line beneath, unchanged
+    # from before this pass.
+    contact_first_name_html = (
+        f'<div class="contact-panel-person">{contact_first_name}</div>' if contact_first_name else ""
+    )
+    contact_email_html = f'<div class="meta-line">{contact_email}</div>' if contact_email else ""
+    # 2026-09-30, "simple letter-number matching": an uncomplicated
+    # "Letter number: 1042" line -- only rendered when a real value was
+    # actually passed in (see render_letter's own docstring on why None is
+    # accepted at all).
+    letter_number_html = (
+        f'<div class="meta-line">Letter number: {int(letter_number)}</div>' if letter_number is not None else ""
+    )
+    # 2026-09-30, "optional contractor offer, for launch": the contractor's
+    # own wording, shown compactly beside/below the contact panel -- gated
+    # entirely on offer_text so "blank offer means nothing appears" (the
+    # request's own wording) is literally true: no empty box, no filler
+    # heading, nothing in the markup at all when offer_text is blank.
+    # offer_code and offer_conditions are each independently optional too
+    # (a contractor can give wording with no code, or no conditions).
+    offer_text = esc(settings.offer_text)
+    offer_code = esc(settings.offer_code)
+    offer_conditions = esc(settings.offer_conditions)
+    offer_code_html = f' <span class="offer-panel-code">Code: {offer_code}</span>' if offer_code else ""
+    offer_conditions_html = (
+        f'<div class="offer-panel-conditions">{offer_conditions}</div>' if offer_conditions else ""
+    )
+    offer_html = (
+        f'<div class="offer-panel"><span class="offer-panel-label">Offer:</span> {offer_text}'
+        f'{offer_code_html}{offer_conditions_html}</div>'
+    ) if offer_text else ""
     service_area_html = f'<div class="meta-line">Area covered: {service_area_note}</div>' if service_area_note else ""
     business_intro_html = (
         f'<p class="body-text"><b>About the business.</b> {business_intro}</p>' if business_intro else ""
@@ -766,8 +923,11 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
   <div class="intro-ref-block">
     <div class="intro-ref-label">Your Introduction</div>
     <div class="meta-line">Reference: {lead_reference_e}</div>
+    {letter_number_html}
     <div class="meta-line">{letter_date}</div>
   </div>
+
+  <h1 class="letter-headline">{esc(FRONT_PAGE_HEADLINE)}</h1>
 
   <p class="body-text greeting-text">Dear homeowner,</p>
   {opening_html}
@@ -783,9 +943,12 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
 
   <div class="contact-panel">
     <div class="contact-panel-label">Speak Directly To Your Tree Surgeon</div>
+    <div class="contact-panel-business">{business_name}</div>
+    {contact_first_name_html}
     <div class="contact-panel-phone">{phone}</div>
-    <div class="meta-line">{business_name}{contact_email_line}</div>
+    {contact_email_html}
   </div>
+  {offer_html}
   {service_area_html}
 
   <p class="disclaimer-text">
@@ -800,6 +963,9 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
     Why this reached you: we used information from a public council planning register. See the reverse
     for supporting and privacy information.
   </p>
+
+  <div class="reserved-qr-area"></div>
+  <div class="reserved-logo-area"></div>
 
   {_brand_footer_html(tk_mark_uri, page_number=1)}
 </div>"""
@@ -932,10 +1098,42 @@ def _brand_footer_html(tk_mark_uri: str, *, page_number: int) -> str:
 _LETTER_PAGE_CSS = f"""
 @page {{ size: A4; margin: 0; }}
 * {{ box-sizing: border-box; }}
-body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Georgia, "Times New Roman", serif; }}
+/* 2026-09-27 fix ("restore the visual design"): TreeKey-short-review.pdf
+   (Nick's supplied visual source of truth) renders the whole letter in a
+   plain sans-serif face, not the serif (Georgia) this file had been using
+   -- a real, visible typography difference, not a subjective read: compare
+   the two side by side. Switched to a standard sans-serif stack (no
+   specific named font was recoverable from a rendered PDF, so this is the
+   closest safe match, not a confirmed exact font -- flagged as such in the
+   report alongside this fix). This changes text metrics for every letter
+   on the page, so tests/letter_pagination_check/run_pagination_check.py
+   was re-run after this change specifically to confirm no edge case that
+   previously fit in 2 pages now overflows to 3. */
+body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Arial, Helvetica, "Nimbus Sans", sans-serif; }}
 .letter-page {{
   width: 210mm; min-height: 297mm; margin: 0 auto; background: #fff; color: {BRAND_INK};
-  padding: 16mm 18mm 14mm 18mm; position: relative; line-height: 1.5;
+  /* 2026-09-27 fix ("restore the visual design"): bottom padding trimmed
+     from 14mm to 10mm -- pure blank whitespace below the footer, not
+     content -- to help make room for the restored headline (see
+     .letter-headline below) without shrinking any text. See that rule's
+     own comment for the full page-budget accounting.
+     2026-09-27, header-resize pass (Nick's annotated-image request, green
+     outline): top padding trimmed again, 16mm->12mm, to buy room for the
+     taller .brand-header below without pushing its bottom edge into the
+     measured address/barcode clearance zone (top=45.0mm) -- pure blank
+     whitespace above the header, same "reclaim whitespace, never shrink
+     text" rule as the earlier trim. This does NOT move
+     .address-clear-zone: that element is position:absolute, positioned
+     from .letter-page's own top edge (46mm/19mm), not from this padding,
+     so it is unaffected by either page-padding trim -- confirmed via
+     Playwright measurement, not assumed.
+     Bottom padding trimmed again this same pass, 10mm->7mm: still well
+     clear of Intelliprint's documented 3mm bleed margin (this module's
+     own docstring/Intelliprint documentation findings), and needed as
+     part of the same page-budget reclaim as .body-text/.disclaimer-text/
+     .spec-box/.contact-panel above -- see run_pagination_check.py's
+     re-verification after this whole pass's changes. */
+  padding: 12mm 18mm 7mm 18mm; position: relative; line-height: 1.5;
   word-break: break-word; overflow-wrap: break-word;
 }}
 @media print {{
@@ -946,43 +1144,65 @@ body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Georgia, "Times
 @media screen {{
   .letter-page {{ margin-bottom: 8mm; box-shadow: 0 0 6px rgba(0,0,0,0.15); }}
 }}
-.body-text {{ font-size: 12.5px; text-align: justify; margin: 0 0 10px 0; }}
+/* 2026-09-27, header-resize pass: margin-bottom trimmed 10px->6px -- pure
+   inter-paragraph whitespace, not text (font-size/line-height untouched) --
+   as part of reclaiming the page-budget the taller .brand-header and the
+   restructured .contact-panel (business name/first name/phone/email now
+   on separate lines instead of one combined line) both spent. See
+   run_pagination_check.py's own re-verification after this change. */
+.body-text {{ font-size: 12.5px; text-align: justify; margin: 0 0 6px 0; }}
 .meta-line {{ font-size: 11px; color: {BRAND_MUTED}; }}
 .meta-label {{ font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: {BRAND_MUTED}; margin-bottom: 3px; }}
-.disclaimer-text {{ font-size: 10px; line-height: 1.5; color: {BRAND_MUTED}; margin: 8px 0; }}
+/* 2026-09-27, header-resize pass: margin trimmed 8px->5px (both sides),
+   same page-budget reclaim described at .body-text above -- pure
+   whitespace between disclaimer paragraphs, text itself unchanged. */
+.disclaimer-text {{ font-size: 10px; line-height: 1.5; color: {BRAND_MUTED}; margin: 5px 0; }}
 
 .brand-header {{
-  background: {BRAND_DARK}; border-radius: 6px; padding: 10px 18px; margin-bottom: 14mm;
-  /* 2026-09-26 fix (ninth pass -- corrects the two 2026-09-26 fixes above
-     this one, both of which turn out to have been reasoning about the
-     WRONG target position). This margin-top used to be 20mm, sized so the
-     header would clear .address-clear-zone, which was (wrongly) placed at
-     top:20mm. Nick's real Intelliprint submission (978ce488-preview_1.pdf,
-     the file-based/duplex-fixed output) showed our address rendering
-     ABOVE the provider's own orange address/barcode guide box, and the
-     header instead overlapping the TOP of that real box -- proof the
-     20mm/40mm reading (taken from a WebFetch text-summary of Intelliprint's
-     A4_Template.pdf, a vector PDF WebFetch could not extract precise
-     coordinates from) was wrong or inapplicable to this file-upload path.
-     Re-measured the REAL required zone directly from that PDF (PIL/numpy
-     pixel measurement of the orange outline at 200dpi, px->mm at
-     25.4/200): left=18.5mm, top=45.0mm, right=106.9mm, bottom=90.3mm. The
-     zone now starts at 45mm, far below where the header naturally sits
-     (padding-top:16mm + this rule's own ~18mm height ends around 34mm),
-     so the header no longer needs any extra push-down at all -- margin-top
-     goes back to 0. (The old value's whole page-count-fitting history
-     above -- attempts at 30mm/22mm/20mm -- was solving how to fit the
-     header UNDER a zone that does not actually start where it was assumed
-     to; removing the margin only gives pagination more headroom, it
-     cannot regress it. Re-ran run_pagination_check.py after this change to
-     confirm: still 2 pages across every validate()-accepting case in all 3
-     templates, same as before.) */
+  background: {BRAND_DARK}; border-radius: 6px; padding: 16px 18px;
+  /* 2026-09-27, header-resize pass (Nick's annotated-image request, green
+     outline: "resize the banner to the indicated proportions, scaling its
+     logo and text appropriately"). Measured the green outline against this
+     header's own then-current rendered box in Nick's screenshot (PIL/numpy
+     colour-mask bounding boxes, both converted through that screenshot's
+     own measured page scale): width ratio ~1.03 (essentially unchanged --
+     .letter-page's own 18mm side padding already fixes this header's
+     width), height ratio ~1.586 (~59% taller). Applied that same ~1.586x
+     factor to every dimension that makes up the header's height --
+     vertical padding (10px->16px), .brand-header-logo's height (13mm->
+     20.6mm), .brand-header-tagline's font-size (8px->12.5px) and
+     .brand-header-tagline-sub's margin-top (2px->3px) -- rather than only
+     the logo, so the resize reads as one proportional banner, not a
+     stretched logo next to unchanged text, per "scaling its logo and text
+     appropriately".
+       This makes the header taller than .letter-page's top padding
+     (16mm) + old header height (~18.3mm) previously left room for before
+     hitting the measured Intelliprint zone (top=45.0mm) -- verified via
+     Playwright, not assumed: at the old 16mm top padding this resized
+     header's bottom edge lands at 34.3mm, comfortably clear once .letter-
+     page's top padding is trimmed to 12mm (below) to buy the extra room,
+     landing the header's bottom edge at 41.06mm -- a 3.94mm buffer before
+     the zone, not a razor-thin one.
+       margin-bottom trimmed 14mm->8mm as part of this same pass: the
+     taller header pushes .intro-ref-block (and therefore .letter-headline,
+     whose 31mm margin-top is relative to it -- see that rule's own
+     comment) further down than before, which is safe for the zone's
+     BOTTOM edge (90.3mm) but left an unnecessarily large buffer there
+     (9.71mm, re-measured) -- reclaiming 6mm of that back via this margin
+     lands the headline at top=94.01mm, a 3.71mm buffer, and recovers page-
+     budget height the taller header otherwise would have spent (see
+     .letter-headline's own comment for the full pagination accounting).
+     This is the same margin this project was burned by trimming blindly
+     once before (see version history / ERROR_LOG.md) -- the difference
+     this time is it was trimmed by a computed amount, then re-verified via
+     Playwright, not assumed safe. */
+  margin-bottom: 8mm;
   margin-top: 0;
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }}
-.brand-header-logo {{ height: 13mm; max-width: 60%; object-fit: contain; }}
-.brand-header-tagline {{ color: #fff; font-size: 8px; font-weight: bold; letter-spacing: 0.03em; text-align: right; }}
-.brand-header-tagline-sub {{ color: #A5E5CD; font-weight: normal; margin-top: 2px; }}
+.brand-header-logo {{ height: 20.6mm; max-width: 60%; object-fit: contain; }}
+.brand-header-tagline {{ color: #fff; font-size: 12.5px; font-weight: bold; letter-spacing: 0.03em; text-align: right; }}
+.brand-header-tagline-sub {{ color: #A5E5CD; font-weight: normal; margin-top: 3px; }}
 
 /* 2026-09-26 fix (ninth pass -- supersedes the previous top:20mm/left:40mm/
    width:120mm fix directly below this comment in version history).
@@ -1035,43 +1255,121 @@ body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Georgia, "Times
 .address-clear-zone {{ position: absolute; top: 46mm; left: 19mm; width: 55mm; }}
 .recipient-address {{ font-size: 12.5px; font-weight: bold; white-space: pre-line; }}
 .intro-ref-block {{ text-align: right; margin-bottom: 4mm; }}
-/* 2026-09-26 fix (ninth pass, continued). .address-clear-zone above is
-   position:absolute, so it does NOT push flowed content down by its own
-   height -- confirmed by measuring the flow with Playwright's
-   getBoundingClientRect BEFORE this rule existed: "Dear homeowner," and
-   the paragraph after it started at y=66.24mm, deep inside the real
-   45.0-90.3mm zone measured off Nick's actual Intelliprint PDF, and being
-   a full-width paragraph it would have spanned the zone's whole x-range
-   too -- exactly the "branding/body text outside reserved areas" failure
-   Nick's instruction called out, independent of whether it visually
-   collided with our own address text (it starts below that, so it
-   wouldn't have). This margin-top is sized to clear the zone's bottom
-   (90.3mm) with a buffer.
+/* 2026-09-26 fix (ninth pass) / 2026-09-27 fix (restoring the headline,
+   continued). .address-clear-zone above is position:absolute, so it does
+   NOT push flowed content down by its own height -- confirmed by
+   measuring the flow with Playwright's getBoundingClientRect BEFORE this
+   rule existed: the first full-width flowed element after
+   .intro-ref-block started at y=66.24mm, deep inside the real
+   45.0-90.3mm zone measured off Nick's actual Intelliprint PDF, and would
+   have spanned the zone's whole x-range too -- exactly the
+   "branding/body text outside reserved areas" failure Nick's instruction
+   called out, independent of whether it visually collided with our own
+   address text (it starts below that, so it wouldn't have). This
+   margin-top is sized to clear the zone's bottom (90.3mm) with a buffer.
      First attempt (26mm) was sized assuming plain addition
    (62.24mm .intro-ref-block bottom + 4mm its own margin-bottom + 26mm =
    92.24mm) but re-measuring with getBoundingClientRect after adding it
-   showed the greeting actually starting at 88.24mm -- still 2mm INSIDE
-   the zone. Cause: adjoining vertical margins collapse in normal flow, so
-   .intro-ref-block's 4mm margin-bottom and this rule's margin-top don't
-   add, only the larger of the two applies (62.24 + 26 = 88.24, matching
-   what was measured). Caught by re-measuring rather than trusting the
-   arithmetic -- the "measure, don't assume" rule applies to CSS mechanics
-   here too, not just to Intelliprint's own specs.
-     Raised to 31mm: expected/measured greeting top = 93.24mm, ~3mm clear
-   of the zone's 90.3mm bottom edge. Scoped to .greeting-text (the single
-   "Dear homeowner," paragraph) rather than all of .body-text, so it does
-   not add unwanted gaps between the rest of the letter's paragraphs or
-   affect the second (privacy) page, which has its own layout. Re-ran
-   run_pagination_check.py after adding this to confirm the extra space
-   does not push any validate()-accepting edge case to a 3rd page. */
-.greeting-text {{ margin-top: 31mm; }}
+   showed the next element actually starting at 88.24mm -- still 2mm
+   INSIDE the zone. Cause: adjoining vertical margins collapse in normal
+   flow, so .intro-ref-block's 4mm margin-bottom and this rule's
+   margin-top don't add, only the larger of the two applies (62.24 + 26 =
+   88.24, matching what was measured). Caught by re-measuring rather than
+   trusting the arithmetic -- the "measure, don't assume" rule applies to
+   CSS mechanics here too, not just to Intelliprint's own specs.
+     Raised to 31mm: expected/measured top = 93.24mm, ~3mm clear of the
+   zone's 90.3mm bottom edge. Re-ran run_pagination_check.py after adding
+   this to confirm the extra space does not push any validate()-accepting
+   edge case to a 3rd page.
+     2026-09-27: this rule moved from .greeting-text to .letter-headline
+   below, because the restored headline (TreeKey-short-review.pdf) is now
+   the element directly after .intro-ref-block in source order -- it,
+   not the greeting, is what needs to clear the zone now. Re-measured
+   after moving it: same 93.24mm result, since it's the same sibling
+   relationship the arithmetic above already covers. .greeting-text keeps
+   a small margin-top of its own, just for normal paragraph spacing under
+   the headline, not zone clearance. */
+/* 2026-09-27 fix ("restore the visual design"), page-budget accounting:
+   restoring this headline (a real, ~7mm-tall new line of content, not
+   just whitespace) plus switching the base font to sans-serif (which
+   wraps some long-field edge cases onto more lines than Georgia did)
+   pushed the existing 'max_length_within_combined_budget' edge case --
+   the realistic worst case a real contractor's own saved settings could
+   actually reach, see run_pagination_check.py's own comment on it -- from
+   2 pages to 3 (measured via Playwright: front page content totalled
+   305.46mm against the 297mm A4 budget, ~8.5mm over). Not fixed by
+   shrinking the headline's own text or line-height (this codebase's
+   long-standing rule: never shrink text to force overflow to fit --
+   see run_pagination_check.py's own docstring).
+     IMPORTANT constraint discovered while fixing this: whitespace ABOVE
+   this rule's 31mm margin-top (e.g. .brand-header's own margin-bottom)
+   cannot be trimmed without a cost -- this margin-top is relative to
+   whatever immediately precedes it in flow, so shrinking space upstream
+   of it shifts this headline's absolute page position up by the same
+   amount, eating straight back into the Intelliprint zone clearance it
+   exists to provide (tried trimming .brand-header's margin-bottom first;
+   caught by re-measuring that it pushed this headline back to
+   top=87.24mm, inside the zone; reverted -- see that rule's own comment).
+   Only whitespace DOWNSTREAM of this headline reclaims cleanly without
+   touching the zone clearance. Trimmed: .letter-page's bottom padding
+   (14mm->10mm, 4mm), this rule's own margin-bottom (6mm->2mm, 4mm), and
+   .contact-panel's margin (14px->8px top+bottom, ~3.2mm) -- 11.2mm
+   combined, a ~2.7mm buffer over the ~8.5mm overage rather than a
+   razor-thin one (the sixth-pass fix's own history, a previous
+   ~1.3mm-clearance decision, is exactly the kind of thin margin this
+   project has already been burned by once). Re-ran
+   run_pagination_check.py after these trims: every validate()-accepting
+   edge case is back to 2 pages across all 3 templates, including this
+   one. None of this touches the 31mm top-margin itself, which is the
+   empirically-measured Intelliprint zone clearance and stays exactly as
+   measured. */
+.letter-headline {{
+  font-size: 21px; font-weight: bold; color: {BRAND_DARK}; margin: 31mm 0 2mm 0;
+  line-height: 1.25;
+}}
+.greeting-text {{ margin-top: 0; }}
 .intro-ref-label {{ font-size: 10.5px; font-weight: bold; color: {BRAND_GREEN}; margin-bottom: 4px; }}
 
-.spec-box {{ background: {BRAND_PALE}; border-left: 3px solid {BRAND_GREEN}; padding: 10px 14px; margin: 12px 0; font-size: 12px; }}
+/* 2026-09-27, header-resize pass: margin trimmed 12px->8px, same
+   page-budget reclaim as .body-text/.disclaimer-text above. */
+.spec-box {{ background: {BRAND_PALE}; border-left: 3px solid {BRAND_GREEN}; padding: 10px 14px; margin: 8px 0; font-size: 12px; }}
 
-.contact-panel {{ background: {BRAND_PALE}; border-left: 3px solid {BRAND_GREEN}; border-radius: 4px; padding: 12px 16px; margin: 14px 0; }}
+/* margin trimmed from 14px to 8px top+bottom as part of the page-budget
+   accounting in .letter-headline's comment above -- pure whitespace
+   downstream of the restored headline/Intelliprint-zone clearance, safe
+   to reclaim without affecting either.
+   2026-09-27, header-resize pass: margin trimmed again, 8px->4px, and
+   vertical padding 12px->10px -- the panel itself now holds more content
+   (business name, optional first name, phone, optional email each on
+   their own line -- see contact_first_name_html/contact_email_html in
+   render_letter) than the single combined line it replaced, so its own
+   whitespace is trimmed to help offset that, same page-budget reclaim as
+   .body-text/.disclaimer-text/.spec-box above. */
+.contact-panel {{ background: {BRAND_PALE}; border-left: 3px solid {BRAND_GREEN}; border-radius: 4px; padding: 10px 16px; margin: 4px 0; }}
 .contact-panel-label {{ font-size: 10.5px; font-weight: bold; color: {BRAND_GREEN}; letter-spacing: 0.02em; text-transform: uppercase; margin-bottom: 6px; }}
+/* 2026-09-27, contact panel redesign (Nick's annotated-image request, red
+   circle: "prominently show the contractor's company name, contact's first
+   name if supplied, and telephone number"). Business name now gets its own
+   prominent line (previously folded into a small .meta-line alongside the
+   email address); contact-panel-person is genuinely optional and only
+   rendered at all when a first name is actually saved (see render_letter's
+   contact_first_name_html) -- never a placeholder. */
+.contact-panel-business {{ font-size: 15px; font-weight: bold; color: {BRAND_DARK}; margin-bottom: 2px; }}
+.contact-panel-person {{ font-size: 12px; color: {BRAND_INK}; margin-bottom: 4px; }}
 .contact-panel-phone {{ font-size: 17px; font-weight: bold; color: {BRAND_DARK}; margin-bottom: 4px; }}
+
+/* 2026-09-30, optional contractor offer: compact, sits directly below the
+   contact panel -- gated entirely on offer_text in render_letter (see
+   offer_html there), so this rule is present in every stylesheet but
+   produces nothing on the page when a contractor has no offer saved (no
+   empty box, no filler heading). Kept deliberately plain/small (11.5px, no
+   background or border of its own) so it reads as a small addition to the
+   contact panel above it, not a second competing panel -- and short by
+   MAX_OFFER_TEXT_LEN/MAX_OFFER_CODE_LEN/MAX_OFFER_CONDITIONS_LEN construction. */
+.offer-panel {{ font-size: 11.5px; color: {BRAND_INK}; margin: 2px 0 4px 0; }}
+.offer-panel-label {{ font-weight: bold; color: {BRAND_GREEN}; }}
+.offer-panel-code {{ font-weight: bold; }}
+.offer-panel-conditions {{ font-size: 9.5px; color: #333D38; margin-top: 1px; }}
 
 .reverse-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 4mm; }}
 .reverse-header-mark {{ height: 7mm; width: 7mm; object-fit: contain; }}
@@ -1081,6 +1379,33 @@ body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Georgia, "Times
 .notice-section {{ margin-bottom: 9px; }}
 .notice-heading {{ font-size: 10.5px; font-weight: bold; color: {BRAND_INK}; margin-bottom: 2px; }}
 .notice-body {{ font-size: 9.5px; line-height: 1.45; color: #333D38; margin: 0; }}
+
+/* 2026-09-27, Nick's annotated-image request (orange + blue areas: "leave
+   blank for now") plus the two matching to-do-list additions ("the reserved
+   orange area" for a future QR code, "the reserved blue area" for a future
+   contractor logo/advertising image). Genuinely reserved page real estate,
+   not yet-rendered content -- so, same technique as .address-clear-zone
+   above: position:absolute, taken entirely out of normal flow. That makes
+   this pass's own "preserve the two-page layout" requirement automatic
+   (an empty, transparent, absolutely-positioned box cannot push anything
+   onto a third page, however tall it is) and safe against the front page's
+   variable content length (a maximum-length letter's flowed disclaimer
+   text may run underneath these boxes rather than clear of them, but since
+   neither box has a background or border -- "without a visible border" is
+   Nick's own wording for the QR box, kept consistent for both -- an
+   overlap is invisible, not a rendering defect).
+     Position/size approximated from Nick's own annotated screenshot
+   (PIL/numpy colour-mask bounding boxes, converted from screenshot pixels
+   to page mm via that screenshot's own measured page edges/scale -- left
+   edge at x=39px, top edge at y=43px, ~2.457px/mm both axes, cross-checked
+   against the page's known 210x297mm size on two independent axes).
+   Nick's own drawn boxes are a rough visual indication of roughly where
+   and how large ("small" / "larger"), not a stated exact spec -- flagged
+   in the handoff as an approximation, to be refined once the QR-code/
+   logo-image features are actually built (the to-do items above), not a
+   number Nick dictated. */
+.reserved-qr-area {{ position: absolute; left: 20mm; top: 203mm; width: 25mm; height: 22mm; }}
+.reserved-logo-area {{ position: absolute; left: 52mm; top: 201mm; width: 133mm; height: 73mm; }}
 
 .page-footer {{
   position: absolute; left: 18mm; right: 18mm; bottom: 8mm;

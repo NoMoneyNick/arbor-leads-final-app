@@ -171,7 +171,15 @@ class TestPageBoxIsExplicit(unittest.TestCase):
         # the missing page-box declaration around it.
         html = letter_content.render_preview_letter(_settings())
         self.assertIn("width: 210mm; min-height: 297mm;", html)
-        self.assertIn("padding: 16mm 18mm 14mm 18mm;", html)
+        # 2026-09-27 fix ("restore the visual design"): bottom padding
+        # trimmed from 14mm to 10mm as part of that pass's page-budget
+        # accounting (see .letter-page's own comment) -- pure whitespace,
+        # not a resize of the letter's actual content area width/height.
+        # 2026-09-27, header-resize pass: top padding trimmed 16mm->12mm
+        # (room for the taller .brand-header) and bottom padding trimmed
+        # again 10mm->7mm (page-budget reclaim for the taller header and
+        # restructured .contact-panel) -- same "whitespace only" rule.
+        self.assertIn("padding: 12mm 18mm 7mm 18mm;", html)
 
 
 class TestAddressClearZoneMatchesIntelliprintTemplate(unittest.TestCase):
@@ -233,13 +241,36 @@ class TestAddressClearZoneMatchesIntelliprintTemplate(unittest.TestCase):
         self.assertIn("margin-top: 0;", header_rule)
         self.assertNotIn("margin-top: 20mm", header_rule)
 
-    def test_greeting_paragraph_has_its_own_clearance_class(self):
-        # The greeting must be pushed below the zone's measured bottom
-        # (90.3mm) without adding spacing to every other .body-text
-        # paragraph -- scoped via a dedicated class, not the shared one.
+    def test_restored_headline_carries_the_zone_clearance_margin(self):
+        # 2026-09-27 fix ("restore the visual design"): the headline
+        # restored from TreeKey-short-review.pdf is now the element
+        # directly after .intro-ref-block, so IT (not the greeting) is
+        # what must clear the zone's measured 90.3mm bottom edge -- scoped
+        # via its own rule, not the shared .body-text class.
+        html = letter_content.render_preview_letter(_settings())
+        self.assertIn(f'<h1 class="letter-headline">{letter_content.FRONT_PAGE_HEADLINE}</h1>', html)
+        self.assertIn(
+            ".letter-headline {{\n  font-size: 21px; font-weight: bold; color: {BRAND_DARK}; margin: 31mm 0 2mm 0;"
+            .replace("{{", "{").replace("{BRAND_DARK}", letter_content.BRAND_DARK),
+            html,
+        )
+
+    def test_greeting_paragraph_no_longer_carries_the_clearance_margin(self):
+        # The clearance margin moved to .letter-headline above; the
+        # greeting itself just needs normal paragraph spacing now.
         html = letter_content.render_preview_letter(_settings())
         self.assertIn('<p class="body-text greeting-text">Dear homeowner,</p>', html)
-        self.assertIn(".greeting-text {{ margin-top: 31mm; }}".replace("{{", "{").replace("}}", "}"), html)
+        self.assertIn(".greeting-text {{ margin-top: 0; }}".replace("{{", "{").replace("}}", "}"), html)
+
+    def test_headline_declared_between_intro_ref_block_and_greeting(self):
+        # Matches TreeKey-short-review.pdf's front-page hierarchy: address
+        # + reference row, then headline, then the greeting/body.
+        html = letter_content.render_preview_letter(_settings())
+        intro_ref_idx = html.index('class="intro-ref-block"')
+        headline_idx = html.index('class="letter-headline"')
+        greeting_idx = html.index('class="body-text greeting-text"')
+        self.assertLess(intro_ref_idx, headline_idx)
+        self.assertLess(headline_idx, greeting_idx)
 
     def test_address_clear_zone_div_wraps_the_recipient_address(self):
         html = letter_content.render_preview_letter(_settings())
@@ -421,6 +452,17 @@ class TestLengthLimitsAndContentBudget(unittest.TestCase):
     def test_blank_contact_email_is_fine(self):
         self.assertEqual(_settings(contact_email="").validate(), [])
 
+    def test_offer_text_over_the_limit_is_rejected(self):
+        problems = _settings(offer_text="x" * (letter_content.MAX_OFFER_TEXT_LEN + 1)).validate()
+        self.assertTrue(any("offer_text" in p and "characters or fewer" in p for p in problems))
+
+    def test_offer_code_over_the_limit_is_rejected(self):
+        problems = _settings(offer_code="x" * (letter_content.MAX_OFFER_CODE_LEN + 1)).validate()
+        self.assertTrue(any("offer_code" in p for p in problems))
+
+    def test_blank_offer_fields_are_fine(self):
+        self.assertEqual(_settings(offer_text="", offer_code="", offer_conditions="").validate(), [])
+
 
 class TestRejectsMarkupInjection(unittest.TestCase):
     """Section: 'Escape user input and reject arbitrary HTML or scripts.'
@@ -589,6 +631,233 @@ class TestFingerprintCoversNewFields(unittest.TestCase):
             letter_content.REVERSE_PAGE_CONTENT_VERSION = original_version
 
         self.assertNotEqual(fp_before, fp_after)
+
+
+class TestContactPanelRedesign(unittest.TestCase):
+    """2026-09-27, header-resize pass (Nick's annotated-image request, red
+    circle: 'prominently show the contractor's company name, contact's
+    first name if supplied, and telephone number in the contact panel.
+    Use saved details only; omit a missing first name.')."""
+
+    def setUp(self):
+        os.environ[letter_content.PRIVACY_CONTACT_EMAIL_ENV] = "privacy@treekey.co.uk"
+
+    def _render(self, **overrides):
+        return letter_content.render_letter(
+            _settings(**overrides), lead_reference="PLANIT-001", address="1 Test St",
+            summary="Fell one oak", council="Leeds",
+        )
+
+    def test_business_name_and_phone_are_always_prominent(self):
+        html_out = self._render(business_name="Apex Tree Care", phone="0113 000 0000")
+        self.assertIn('<div class="contact-panel-business">Apex Tree Care</div>', html_out)
+        self.assertIn('<div class="contact-panel-phone">0113 000 0000</div>', html_out)
+
+    def test_contact_first_name_shown_when_saved(self):
+        html_out = self._render(contact_first_name="Dave")
+        self.assertIn('<div class="contact-panel-person">Dave</div>', html_out)
+
+    def test_contact_first_name_omitted_when_not_saved_not_invented(self):
+        """The whole point of 'use saved details only; omit a missing first
+        name' -- no placeholder, no fallback to a business name or anything
+        else, just absent. The CSS class itself is always in the
+        stylesheet (static rules render regardless of content), so this
+        checks for the actual <div> markup, not the bare class name."""
+        html_out = self._render(contact_first_name="")
+        self.assertNotIn('<div class="contact-panel-person">', html_out)
+
+    def test_contact_email_still_renders_on_its_own_line_when_present(self):
+        html_out = self._render(contact_email="office@apextreecare.example")
+        self.assertIn('<div class="meta-line">office@apextreecare.example</div>', html_out)
+
+    def test_contact_first_name_is_escaped(self):
+        html_out = self._render(contact_first_name="<b>Dave</b>")
+        self.assertNotIn("<b>Dave</b>", html_out)
+        self.assertIn("&lt;b&gt;Dave&lt;/b&gt;", html_out)
+
+
+class TestFingerprintCoversContactFirstName(unittest.TestCase):
+    def test_changing_contact_first_name_changes_the_fingerprint(self):
+        fp1 = letter_content.template_fingerprint(_settings(contact_first_name=""))
+        fp2 = letter_content.template_fingerprint(_settings(contact_first_name="Dave"))
+        self.assertNotEqual(fp1, fp2)
+
+
+class TestBrandHeaderResize(unittest.TestCase):
+    """2026-09-27, header-resize pass (Nick's annotated-image request, green
+    outline): the banner is resized ~1.586x taller (logo/text scaled
+    proportionally), the coloured annotation outline itself is never part
+    of the output, and the resize must not have regressed the measured
+    Intelliprint address/barcode clearance zone (see
+    TestAddressClearZoneMatchesIntelliprintTemplate for that zone's own
+    coordinates -- this class only checks the header's own new dimensions
+    render as expected)."""
+
+    def test_header_logo_and_tagline_are_scaled_up(self):
+        html_out = letter_content.render_preview_letter(_settings())
+        self.assertIn(".brand-header-logo {{ height: 20.6mm;".replace("{{", "{"), html_out)
+        self.assertIn("font-size: 12.5px; font-weight: bold; letter-spacing: 0.03em; text-align: right;", html_out)
+
+    def test_no_visible_border_or_outline_on_the_header(self):
+        """Nick's own wording: 'The coloured outline itself must not
+        appear.' There is no border/outline property on .brand-header at
+        all -- confirmed by absence, not by asserting a 'none' value that
+        could be trivially satisfied by border-color instead. CSS comments
+        are stripped first -- this rule's own engineering comments discuss
+        Nick's green annotation outline in prose, which would otherwise be
+        a false positive for a plain substring check."""
+        html_out = letter_content.render_preview_letter(_settings())
+        import re
+        m = re.search(r"\.brand-header \{.*?\n\}", html_out, re.S)
+        self.assertIsNotNone(m)
+        rule_without_comments = re.sub(r"/\*.*?\*/", "", m.group(0), flags=re.S)
+        self.assertNotIn("border:", rule_without_comments)
+        self.assertNotIn("outline:", rule_without_comments)
+
+
+class TestReservedFeatureAreas(unittest.TestCase):
+    """2026-09-27, Nick's annotated-image request (orange + blue areas:
+    'leave blank for now') and the matching to-do-list additions (a future
+    QR code in 'the reserved orange area', a future contractor logo/ad
+    image in 'the reserved blue area'). Neither renders any content yet --
+    these tests only confirm the reserved areas exist, are empty, and are
+    positioned out of normal flow (so they can never be the cause of a
+    pagination regression, whatever their size)."""
+
+    def test_both_reserved_areas_are_present_and_empty(self):
+        html_out = letter_content.render_preview_letter(_settings())
+        self.assertIn('<div class="reserved-qr-area"></div>', html_out)
+        self.assertIn('<div class="reserved-logo-area"></div>', html_out)
+
+    def test_both_reserved_areas_are_positioned_absolute(self):
+        html_out = letter_content.render_preview_letter(_settings())
+        self.assertIn(".reserved-qr-area {{ position: absolute;".replace("{{", "{"), html_out)
+        self.assertIn(".reserved-logo-area {{ position: absolute;".replace("{{", "{"), html_out)
+
+    def test_neither_reserved_area_has_a_visible_border(self):
+        html_out = letter_content.render_preview_letter(_settings())
+        import re
+        for cls in ("reserved-qr-area", "reserved-logo-area"):
+            m = re.search(r"\." + cls + r" \{[^}]*\}", html_out)
+            self.assertIsNotNone(m)
+            self.assertNotIn("border", m.group(0))
+
+
+class TestLetterNumberMatching(unittest.TestCase):
+    """2026-09-30 handoff ("simple letter-number matching"): an
+    uncomplicated 'Letter number: 1042' reference on each introduction --
+    render_letter never derives it from lead_reference/address/council
+    (the caller supplies it; see main.py's generate_homeowner_letter and
+    worker.promote_pending_approvals for the two real sourcing paths)."""
+
+    def setUp(self):
+        os.environ[letter_content.PRIVACY_CONTACT_EMAIL_ENV] = "privacy@treekey.co.uk"
+
+    def _render(self, letter_number=None, **overrides):
+        return letter_content.render_letter(
+            _settings(**overrides), lead_reference="PLANIT-001", address="1 Test St",
+            summary="Fell one oak", council="Leeds", letter_number=letter_number,
+        )
+
+    def test_letter_number_renders_when_supplied(self):
+        html_out = self._render(letter_number=1042)
+        self.assertIn('<div class="meta-line">Letter number: 1042</div>', html_out)
+
+    def test_letter_number_omitted_when_not_supplied(self):
+        """No caller can invent one, and this function itself never
+        derives one from lead_reference/address/council -- see this
+        function's own docstring."""
+        html_out = self._render(letter_number=None)
+        self.assertNotIn("Letter number:", html_out)
+
+    def test_letter_number_never_derived_from_lead_reference(self):
+        """Changing lead_reference alone (letter_number held fixed) must
+        not change the rendered letter number -- proves it's a genuinely
+        independent value, not something computed from the reference."""
+        html_a = letter_content.render_letter(
+            _settings(), lead_reference="PLANIT-AAA", address="1 Test St",
+            summary="Fell one oak", council="Leeds", letter_number=777,
+        )
+        html_b = letter_content.render_letter(
+            _settings(), lead_reference="PLANIT-BBB", address="1 Test St",
+            summary="Fell one oak", council="Leeds", letter_number=777,
+        )
+        self.assertIn("Letter number: 777", html_a)
+        self.assertIn("Letter number: 777", html_b)
+
+    def test_preview_letter_uses_a_clearly_fictional_letter_number(self):
+        html_out = letter_content.render_preview_letter(_settings())
+        self.assertIn(f"Letter number: {letter_content.PREVIEW_LETTER_NUMBER}", html_out)
+
+
+class TestOptionalContractorOffer(unittest.TestCase):
+    """2026-09-30 handoff ("optional contractor offer, for launch"): the
+    contractor's own wording, supplied and approved by them -- blank means
+    nothing appears at all, never a fabricated discount."""
+
+    def setUp(self):
+        os.environ[letter_content.PRIVACY_CONTACT_EMAIL_ENV] = "privacy@treekey.co.uk"
+
+    def _render(self, **overrides):
+        return letter_content.render_letter(
+            _settings(**overrides), lead_reference="PLANIT-001", address="1 Test St",
+            summary="Fell one oak", council="Leeds",
+        )
+
+    def test_blank_offer_renders_nothing(self):
+        html_out = self._render(offer_text="")
+        self.assertNotIn('class="offer-panel"', html_out)
+
+    def test_offer_text_alone_renders(self):
+        html_out = self._render(offer_text="£50 off work over £500.")
+        self.assertIn('<div class="offer-panel">', html_out)
+        self.assertIn("£50 off work over £500.", html_out)
+        self.assertNotIn('class="offer-panel-code"', html_out)
+        self.assertNotIn('class="offer-panel-conditions"', html_out)
+
+    def test_offer_code_and_conditions_are_independently_optional(self):
+        html_out = self._render(
+            offer_text="£50 off work over £500.", offer_code="TREEKEY",
+            offer_conditions="Valid until 31 December 2026",
+        )
+        self.assertIn("Code: TREEKEY", html_out)
+        self.assertIn('<div class="offer-panel-conditions">Valid until 31 December 2026</div>', html_out)
+
+    def test_offer_code_never_appears_without_offer_text(self):
+        """offer_code alone (no offer_text) must not somehow surface the
+        offer panel -- 'blank offer means nothing appears' is about the
+        wording, and a code with no wording is not a usable offer."""
+        html_out = self._render(offer_text="", offer_code="TREEKEY")
+        self.assertNotIn('class="offer-panel"', html_out)
+
+    def test_offer_fields_are_escaped(self):
+        html_out = self._render(offer_text="<b>£50 off</b>", offer_code="<i>X</i>")
+        self.assertNotIn("<b>£50 off</b>", html_out)
+        self.assertIn("&lt;b&gt;£50 off&lt;/b&gt;", html_out)
+
+    def test_reserved_areas_stay_blank_regardless_of_offer(self):
+        html_out = self._render(offer_text="£50 off work over £500. Mention TREEKEY when requesting your quote.")
+        self.assertIn('<div class="reserved-qr-area"></div>', html_out)
+        self.assertIn('<div class="reserved-logo-area"></div>', html_out)
+
+
+class TestFingerprintCoversOfferFields(unittest.TestCase):
+    def test_changing_offer_text_changes_the_fingerprint(self):
+        fp1 = letter_content.template_fingerprint(_settings(offer_text=""))
+        fp2 = letter_content.template_fingerprint(_settings(offer_text="£50 off work over £500."))
+        self.assertNotEqual(fp1, fp2)
+
+    def test_changing_offer_code_changes_the_fingerprint(self):
+        fp1 = letter_content.template_fingerprint(_settings(offer_text="£50 off", offer_code=""))
+        fp2 = letter_content.template_fingerprint(_settings(offer_text="£50 off", offer_code="TREEKEY"))
+        self.assertNotEqual(fp1, fp2)
+
+    def test_changing_offer_conditions_changes_the_fingerprint(self):
+        fp1 = letter_content.template_fingerprint(_settings(offer_text="£50 off", offer_conditions=""))
+        fp2 = letter_content.template_fingerprint(
+            _settings(offer_text="£50 off", offer_conditions="Valid until 31 December 2026")
+        )
+        self.assertNotEqual(fp1, fp2)
 
 
 class TestLetterDateIsPlatformIndependent(unittest.TestCase):

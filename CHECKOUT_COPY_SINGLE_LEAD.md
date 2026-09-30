@@ -1,43 +1,59 @@
-# Single-Lead Checkout Page Copy — Draft v1
+# Introduction Checkout Page Copy — Draft v2 (aligned 30 Sep 2026)
 
-For the three pay-as-you-go tiers in `payments.py` (`single_lead_small/medium/large`). Same honesty constraints as the cold email draft — nothing promised here that the product doesn't actually deliver (confirmed against `payments.py`'s existing, already-corrected `real_world_roi` copy).
+*Rewritten from Draft v1, which described a name-and-address lead purchase. Current model: `CURRENT_BUSINESS_MODEL.md`. Draft copy only: not confirmed against checkout configuration, and not approved advertising. Wording has not had final legal review.*
+
+For the three pay-as-you-go tiers in `payments.py` (`single_lead_small/medium/large`). Nothing promised here that the product doesn't deliver: TreeKey prints and posts an approved introduction letter to the household; the contractor receives no homeowner name, address or contact details; the homeowner decides whether to get in touch.
+
+Prices below are the earlier pay-per-lead figures (£19 / £29 / £49), kept as-is. **Confirm them against the live checkout configuration before use.**
+
+---
+
+### Your first introduction — £4.99
+
+**Printing and postage included. No subscription.**
+
+TreeKey prints and posts your approved letter to the property associated with the selected tree-work planning application. One first introduction per business.
+
+**[Send my first introduction — £4.99]**
 
 ---
 
 ### Domestic Maintenance — £19
 
-**One real lead. Yours the moment you pay, gone from sale forever after.**
+**One posted introduction, sent on your behalf.**
 
-Property address, application details, and a Street View brief — pulled straight from the council's own planning register, not a directory listing. Applicant name included when the council itself published one.
+Choose an opportunity, approve your letter, and TreeKey prints and posts it. Your letter carries your business details and a letter number, so the homeowner can get in touch with you directly. Sourced from the council's own planning register.
 
-No subscription. No expiry. Buy it, use it.
+No subscription.
 
-**[Unlock this lead — £19]**
+**[Send this introduction — £19]**
 
 ---
 
 ### Standard Felling / Tree Removal — £29
 
-**A real felling job, not a shared listing.**
+**A real felling opportunity, posted for you.**
 
-Once you buy this lead, it's permanently removed from TreeKey — nobody else sees it, nobody else quotes it. Full application details and property address, plus a Street View brief so you can size up access before you even call.
+Once you buy this opportunity, TreeKey won't sell it to another contractor. Approve your letter, we print and post it, and the homeowner decides whether to contact you.
 
-**[Unlock this lead — £29]**
+**[Send this introduction — £29]**
 
 ---
 
 ### Commercial / Site Clearance / TPO — £49
 
-**Bigger job, same exclusivity.**
+**Bigger job, same posted introduction.**
 
-Commercial clearances and TPO applications tend to mean bigger invoices — this tier gets you the full planning specs and address the moment the council filed them, burned from our inventory the second you buy it.
+Commercial clearances and TPO applications tend to mean bigger invoices. Same process: you approve your letter, TreeKey prints and posts it, and the homeowner contacts you directly.
 
-**[Unlock this lead — £49]**
+**[Send this introduction — £49]**
 
 ---
 
-## Shared trust line (use under all three)
+## Shared lines (use under all)
 
-*Sourced directly from UK council planning registers, published under the Open Government Licence. TreeKey aggregates public records — we're not a certifying body or a surveyor.*
+*We don't guarantee a reply or a job — the homeowner decides whether to get in touch. If we can't fulfil an introduction, we'll offer to keep waiting, a suitable nearby alternative (only with your agreement), or an applicable refund.*
 
-(That line is deliberate: it's the same honest, non-fabricated trust framing already live on the homepage after the Aug 30 cleanup — don't reintroduce the removed "BS5837/ArbAC" accreditation-style badges here.)
+*Sourced directly from UK council planning registers. TreeKey aggregates public records — we're not a certifying body or a surveyor.*
+
+(The second line is deliberate: it's the honest, non-fabricated trust framing already live on the homepage after the Aug 30 cleanup — don't reintroduce the removed "BS5837/ArbAC" accreditation-style badges here. Don't add a "£4.99 vs £19" saving claim: it is not approved advertising.)

@@ -1,3 +1,6 @@
+> **Pointer (30 Sep 2026):** **Current business rules and campaign copy:** see `CURRENT_BUSINESS_MODEL.md` (agreed model; what is reported-but-unverified; what is unresolved) and `OUTREACH_START_HERE.md` (approved outreach copy). Where this document disagrees with them, they win.
+> This file is a dated technical checkpoint (Sep 2026); its commercial descriptions, prices and free-lead references may be superseded.
+
 # START HERE — TreeKey / Vector Data Labs letter-fulfilment work
 
 Originally written 2026-09-18 as a resumable checkpoint under a "stop and

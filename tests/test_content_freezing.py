@@ -86,9 +86,15 @@ class TestApprovalFreezesExactRenderedContent(unittest.TestCase):
 
     def test_promotion_stores_the_exact_html_it_rendered(self):
         settings_v1 = _settings("Apex Tree Care")
+        # 2026-09-30: letter_number=1042 matches the fake obligation row's
+        # own letter_number below -- promote_pending_approvals now threads
+        # that value through to render_letter, so this test's own
+        # expected html/fingerprint must be computed the same way to
+        # actually prove "the exact html it rendered" (not a different,
+        # letter-number-less render that would never match).
         html_v1 = letter_content.render_letter(
             settings_v1, lead_reference="PLANIT-001", address="1 Test St",
-            summary="Fell one oak", council="Leeds",
+            summary="Fell one oak", council="Leeds", letter_number=1042,
         )
         fp_v1 = letter_content.content_fingerprint(html_v1)
         # 2026-09-18 review, Section 1 (second pass): the settings row's
@@ -107,10 +113,12 @@ class TestApprovalFreezesExactRenderedContent(unittest.TestCase):
         settings_v1_approved = _settings("Apex Tree Care", fingerprint=template_fp_v1)
 
         cur = FakeCursor(
-            fetchall_results=[[("ob-1", "PLANIT-001", "1 Test St", "J Bloggs", "contractor@example.com")]],
+            # 2026-09-30: letter_number appended, same position as the real
+            # SELECT's new column (see worker.promote_pending_approvals).
+            fetchall_results=[[("ob-1", "PLANIT-001", "1 Test St", "J Bloggs", "contractor@example.com", 1042)]],
             fetchone_results=[
                 ("contractor@example.com", "Apex Tree Care", "0113 000 0000", "", "", "", 1, True, template_fp_v1,
-                 "friendly_introduction", "", "", ""),
+                 "friendly_introduction", "", "", "", "", "", "", ""),
                 ("Fell one oak", "Leeds"),
                 ("ob-1",),
             ],

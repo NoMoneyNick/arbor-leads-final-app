@@ -165,7 +165,8 @@ class TestActualDashboardLinkNavigation(_EnvBase):
             ("PLANIT-NEW-777",),  # resolve_buyer_facing_reference hit
             ("PLANIT-NEW-777", "1 Real Street, Leeds", "Fell one oak", "Leeds City Council", "claimed"),
             ("contractor@example.com", "Leeds Tree Care Ltd", "0113 000 0000", "", "", "", 1, True, "fp",
-             "friendly_introduction", "", "", ""),  # a real saved settings row
+             "friendly_introduction", "", "", "", "", "", "", ""),  # a real saved settings row (+offer fields)
+            (4242,),  # 2026-09-30: letter_number lookup (see generate_homeowner_letter's own comment)
             ("contractor@example.com",),  # require_lead_ownership -> get_lead_owner
             (1,),  # guarded_address_for_lead_reference -> historical
         ]
@@ -194,6 +195,7 @@ class TestActualDashboardLinkNavigation(_EnvBase):
             ("PLANIT-NEW-777",),
             ("PLANIT-NEW-777", "1 Real Street, Leeds", "Fell one oak", "Leeds City Council", "claimed"),
             None,  # no saved contractor_letter_settings
+            None,  # 2026-09-30: letter_number lookup, no obligation row either
             ("contractor@example.com",),
             (1,),
         ]
@@ -239,7 +241,7 @@ class TestFakeIdentityFallbackFix(_EnvBase):
             None,
             ("PLANIT-001", "1 Real Street, Leeds, LS1 1AA", "Fell one oak", "claimed"),
             ("contractor@example.com", "Ashcroft Tree Surgery", "01234 567890", "", "", "", 1, True, "fp",
-             "friendly_introduction", "", "", ""),
+             "friendly_introduction", "", "", "", "", "", "", ""),  # +offer fields
         ]
         conn = MagicMock()
         conn.cursor.return_value = cur
