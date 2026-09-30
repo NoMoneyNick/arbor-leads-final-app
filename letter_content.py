@@ -432,6 +432,15 @@ def init_letter_content_schema(cur) -> None:
         ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS offer_text TEXT;
         ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS offer_code TEXT;
         ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS offer_conditions TEXT;
+        -- 2026-09-30, integrated first-time signup: the responsible
+        -- contact's full name and the moment the Terms checkbox was ticked
+        -- on the signup form. Account-identity records, NOT letter content:
+        -- deliberately outside ContractorLetterSettings, the approval
+        -- fingerprint and every letter render, so they can never appear on
+        -- (or force re-approval of) a letter. NULL for accounts that
+        -- existed before this signup form.
+        ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS responsible_contact_name TEXT;
+        ALTER TABLE contractor_letter_settings ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ;
     """)
 
 
@@ -606,6 +615,62 @@ def upsert_contractor_settings(cur, settings: ContractorLetterSettings) -> None:
           settings.contact_email.strip(), settings.contact_first_name.strip(),
           settings.offer_text.strip(), settings.offer_code.strip(), settings.offer_conditions.strip(),
           settings.template_version))
+
+
+def insert_initial_contractor_settings(cur, settings: ContractorLetterSettings,
+                                       responsible_contact_name: str = "",
+                                       terms_accepted_at: Optional[str] = None) -> bool:
+    """First-time signup only: INSERT ... ON CONFLICT DO NOTHING. Unlike
+    upsert_contractor_settings this can never overwrite an existing row --
+    it returns False (and changes nothing) if the account already has
+    settings. Always creates the row unapproved; approval stays a separate,
+    explicit step (approve_template). The responsible-contact name and terms
+    timestamp are written in the same statement so they exist only together
+    with the row they belong to."""
+    problems = settings.validate()
+    if problems:
+        raise ValueError(f"Invalid contractor letter settings: {'; '.join(problems)}")
+    cur.execute("""
+        INSERT INTO contractor_letter_settings
+            (contractor_email, business_name, phone, service_area_note, insurance_note, qualifications_note,
+             template_key, business_intro, services_note, contact_email, contact_first_name,
+             offer_text, offer_code, offer_conditions, template_version,
+             approved, responsible_contact_name, terms_accepted_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s, NOW())
+        ON CONFLICT (contractor_email) DO NOTHING;
+    """, (settings.contractor_email.strip().lower(), settings.business_name.strip(), settings.phone.strip(),
+          settings.service_area_note.strip(), settings.insurance_note.strip(), settings.qualifications_note.strip(),
+          settings.template_key.strip(), settings.business_intro.strip(), settings.services_note.strip(),
+          settings.contact_email.strip(), settings.contact_first_name.strip(),
+          settings.offer_text.strip(), settings.offer_code.strip(), settings.offer_conditions.strip(),
+          settings.template_version, (responsible_contact_name or "").strip() or None, terms_accepted_at))
+    return cur.rowcount == 1
+
+
+def get_account_identity(cur, contractor_email: str) -> Optional[dict]:
+    """The account-identity fields captured at signup, kept apart from the
+    letter content: {"responsible_contact_name", "terms_accepted_at"}, or
+    None if the account has no settings row."""
+    cur.execute("SELECT responsible_contact_name, terms_accepted_at FROM contractor_letter_settings "
+                "WHERE contractor_email = %s;", (contractor_email.strip().lower(),))
+    row = cur.fetchone()
+    if not row:
+        return None
+    return {"responsible_contact_name": row[0], "terms_accepted_at": row[1]}
+
+
+def update_responsible_contact_name(cur, contractor_email: str, name: str) -> bool:
+    """For later account editing. Changes ONLY the responsible-contact name:
+    it never touches the letter content, approval, or the Terms acceptance
+    record, so editing it cannot force re-approval or rewrite consent.
+    Returns False if the account has no settings row or the name is blank
+    (the field is required, so it cannot be blanked out)."""
+    name = (name or "").strip()
+    if not name or len(name) > 80:
+        return False
+    cur.execute("UPDATE contractor_letter_settings SET responsible_contact_name = %s "
+                "WHERE contractor_email = %s;", (name, contractor_email.strip().lower()))
+    return cur.rowcount == 1
 
 
 def template_fingerprint(settings: ContractorLetterSettings) -> str:

@@ -37,6 +37,7 @@ from that same session's design pass.
 - [x] Letter number (sequence-backed, stable, shown on the letter and on the contractor's My Introductions record).
 - [x] Optional contractor offer (`offer_text` / `offer_code` / `offer_conditions`); changing any of these changes the approval fingerprint, so future letters need reapproval.
 - Reserved QR and logo areas stay blank; neither future feature is built.
+- [x] Integrated first-time signup (2026-09-30): one form at `/free-account` (required: email, responsible contact, business name, telephone, Terms; optional letter personalisation on the same page); details held on the verification record and applied once on verification; existing accounts never overwritten; Log In sends unknown emails to the same form after verification with checkout `next` kept; free-lead routes retired. Installed in project files, NOT deployed; see `CURRENT_HANDOFF.md` for deployment prerequisites and open items. Wider customer-page presentation work remains OUTSTANDING (`TREEKEY_CUSTOMER_PAGE_QUALITY_BRIEF_2026-09-30.md`).
 
 ---
 

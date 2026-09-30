@@ -80,12 +80,13 @@ class TestLetterSettingsFormAuth(_SessionTestBase):
 
     @patch("main.letter_content.get_contractor_settings")
     @patch("main.database.get_db_conn")
-    def test_logged_in_contractor_with_no_saved_row_gets_a_blank_form(self, mock_get_db_conn, mock_get_settings):
+    def test_logged_in_contractor_with_no_saved_row_is_sent_to_the_integrated_signup_form(self, mock_get_db_conn, mock_get_settings):
         mock_get_db_conn.return_value = MagicMock()
         mock_get_settings.return_value = None
         request = _mock_request(cookie_value=self._signed_cookie("contractor@example.com"))
-        result = main.letter_settings_form(request)
-        self.assertEqual(result.status_code, 200)
+        result = main.letter_settings_form(request, next="/checkout/starter")
+        self.assertEqual(result.status_code, 303)
+        self.assertEqual(result.url, "/free-account?next=%2Fcheckout%2Fstarter")
 
     @patch("main.letter_content.get_contractor_settings")
     @patch("main.database.get_db_conn")

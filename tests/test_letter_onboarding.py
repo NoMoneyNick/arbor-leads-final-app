@@ -260,17 +260,26 @@ class TestFakeIdentityFallbackFix(_EnvBase):
 
 
 class TestFirstTimeOnboardingOffer(_EnvBase):
+    """2026-09-30: there is no separate setup experience any more. A login
+    whose account has no saved letter details continues to the ONE
+    integrated signup form (/free-account), with `next` preserved."""
 
-    def test_login_offers_onboarding_when_no_letter_settings_exist_yet(self):
+    def test_login_sends_an_account_without_letter_details_to_the_integrated_signup_form(self):
         with patch("main.database.get_contractor_subscription", return_value={"active": True}), \
              patch("main.database.get_db_conn") as mock_conn, \
              patch("main.letter_content.get_contractor_settings", return_value=None):
             mock_conn.return_value = MagicMock()
             response = main._login_session_response("new-contractor@example.com")
-        self.assertIn("/letter-onboarding", response.url)
-        self.assertIn("next=", response.url)
+        self.assertEqual(response.url, "/free-account")
 
-    def test_login_skips_onboarding_once_a_settings_row_exists(self):
+    def test_checkout_continuation_is_preserved_through_the_signup_form(self):
+        with patch("main.database.get_db_conn") as mock_conn, \
+             patch("main.letter_content.get_contractor_settings", return_value=None):
+            mock_conn.return_value = MagicMock()
+            response = main._login_session_response("mid-checkout@example.com", next_url="/checkout/starter")
+        self.assertEqual(response.url, "/free-account?next=%2Fcheckout%2Fstarter")
+
+    def test_login_skips_signup_once_a_settings_row_exists(self):
         settings = letter_content.ContractorLetterSettings(
             contractor_email="returning@example.com", business_name="Returning Co", phone="0113 000 0000")
         with patch("main.database.get_contractor_subscription", return_value={"active": True}), \
@@ -280,13 +289,13 @@ class TestFirstTimeOnboardingOffer(_EnvBase):
             response = main._login_session_response("returning@example.com")
         self.assertEqual(response.url, "/dashboard")
 
-    def test_login_never_offers_onboarding_when_a_next_destination_is_already_pending(self):
-        """Preserves the original purchase destination when signup began
-        from checkout: onboarding must not intercept a login that already
-        has somewhere specific to go."""
-        with patch("main.letter_content.get_contractor_settings") as mock_settings:
-            response = main._login_session_response("mid-checkout@example.com", next_url="/checkout/starter")
-        mock_settings.assert_not_called()
+    def test_returning_user_with_details_still_goes_straight_to_next(self):
+        settings = letter_content.ContractorLetterSettings(
+            contractor_email="returning@example.com", business_name="Returning Co", phone="0113 000 0000")
+        with patch("main.database.get_db_conn") as mock_conn, \
+             patch("main.letter_content.get_contractor_settings", return_value=settings):
+            mock_conn.return_value = MagicMock()
+            response = main._login_session_response("returning@example.com", next_url="/checkout/starter")
         self.assertEqual(response.url, "/checkout/starter")
 
     def test_login_fails_open_on_a_lookup_error_and_signs_in_normally(self):
@@ -295,61 +304,69 @@ class TestFirstTimeOnboardingOffer(_EnvBase):
             response = main._login_session_response("contractor@example.com")
         self.assertEqual(response.url, "/dashboard")
 
-    def test_onboarding_page_offers_both_choices_and_never_forces_writing(self):
-        request = _mock_request(cookie_value=_signed("new-contractor@example.com"), path="/letter-onboarding")
+    def test_old_letter_onboarding_links_redirect_to_the_one_signup_form(self):
+        response = main.letter_onboarding(_mock_request(cookie_value=None), next="/checkout/starter")
+        self.assertEqual(response.url, "/free-account?next=%2Fcheckout%2Fstarter")
+        response = main.letter_onboarding(_mock_request(cookie_value=None), next="https://evil.example")
+        self.assertEqual(response.url, "/free-account")
+
+    def test_verified_session_without_details_sees_the_integrated_form_with_confirmed_email(self):
+        request = _mock_request(cookie_value=_signed("new-contractor@example.com"), path="/free-account")
         with patch("main.database.get_db_conn") as mock_conn, \
              patch("main.letter_content.get_contractor_settings", return_value=None), \
-             patch("main.HTMLResponse", side_effect=_capture_html()):
+             patch("main.database.get_limbo_account", return_value=None), \
+             patch("main.database.get_contractor_subscription", return_value=None):
             mock_conn.return_value = MagicMock()
-            response = main.letter_onboarding(request, next="/dashboard")
-        body = response if isinstance(response, str) else getattr(response, "body", str(response))
-        self.assertIn("Personalise my letter", body)
-        self.assertIn("Use the standard letter", body)
-        self.assertIn("/letter-settings", body)
-        self.assertIn("intent=standard", body)
+            body = main.free_account_signup_page(request, next="/dashboard")
+        self.assertEqual(body.count("<form"), 1)
+        self.assertIn('action="/api/signup/complete"', body)
+        self.assertIn("new-contractor@example.com", body)
+        self.assertNotIn('name="email"', body)          # email comes from the session only
+        for name in ("responsible_name", "business_name", "phone", "agree_terms", "business_intro", "offer_text"):
+            self.assertIn(f'name="{name}"', body)
+        self.assertIn("Required", body)
+        self.assertIn("Optional", body)
+        self.assertIn("Saving is not approval", body)
+        self.assertNotIn("Use the standard letter", body)
+        self.assertNotIn("[your", body)
+        self.assertNotIn("[Business name]", body)
 
-    def test_onboarding_page_does_not_repeat_once_settings_exist(self):
+    def test_verified_session_with_details_does_not_repeat_signup(self):
         settings = letter_content.ContractorLetterSettings(
             contractor_email="returning@example.com", business_name="Returning Co", phone="0113 000 0000")
-        request = _mock_request(cookie_value=_signed("returning@example.com"), path="/letter-onboarding")
+        request = _mock_request(cookie_value=_signed("returning@example.com"), path="/free-account")
         with patch("main.database.get_db_conn") as mock_conn, \
              patch("main.letter_content.get_contractor_settings", return_value=settings):
             mock_conn.return_value = MagicMock()
-            response = main.letter_onboarding(request, next="/dashboard")
-        self.assertEqual(getattr(response, "status_code", None), 303)
-        self.assertEqual(response.url, "/dashboard")
+            response = main.free_account_signup_page(request, next="/checkout/starter")
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.url, "/checkout/starter")
 
 
 class TestPrefillNeverAssumesAPersonalNameIsABusinessName(_EnvBase):
 
-    @patch("main.letter_content.get_contractor_settings", return_value=None)
-    @patch("main.database.get_db_conn")
-    def test_company_name_from_limbo_account_prefills_business_name(self, mock_get_db_conn, mock_get_settings):
-        mock_get_db_conn.return_value = MagicMock()
-        with patch("main.database.get_limbo_account",
-                    return_value={"company_name": "Fenwick Tree Services", "phone": "0121 000 0000"}), \
-             patch("main.HTMLResponse", side_effect=_capture_html()):
-            request = _mock_request(cookie_value=_signed("fenwick@example.com"), path="/letter-settings")
-            response = main.letter_settings_form(request)
-        body = response if isinstance(response, str) else getattr(response, "body", str(response))
-        self.assertIn("Fenwick Tree Services", body)
+    def _verified_form(self, email, limbo, sub):
+        with patch("main.database.get_db_conn") as mock_conn, \
+             patch("main.letter_content.get_contractor_settings", return_value=None), \
+             patch("main.database.get_limbo_account", return_value=limbo), \
+             patch("main.database.get_contractor_subscription", return_value=sub):
+            mock_conn.return_value = MagicMock()
+            return main.free_account_signup_page(
+                _mock_request(cookie_value=_signed(email), path="/free-account"))
+
+    def test_company_name_from_limbo_account_prefills_business_name(self):
+        body = self._verified_form("fenwick@example.com",
+                                    {"company_name": "Fenwick Tree Services", "phone": "0121 000 0000"}, None)
+        self.assertIn('id="business_name" name="business_name" value="Fenwick Tree Services"', body)
         self.assertIn("0121 000 0000", body)
 
-    @patch("main.letter_content.get_contractor_settings", return_value=None)
-    @patch("main.database.get_db_conn")
-    def test_a_subscribers_personal_customer_name_never_prefills_business_name(self, mock_get_db_conn, mock_get_settings):
-        """contractor_subscriptions only ever holds customer_name/phone --
-        never a company name -- and a personal name must never be used as
-        a business name (task item 3's explicit instruction)."""
-        mock_get_db_conn.return_value = MagicMock()
-        with patch("main.database.get_limbo_account", return_value=None), \
-             patch("main.database.get_contractor_subscription",
-                    return_value={"customer_name": "Dave Smith", "phone": "0121 999 8888"}), \
-             patch("main.HTMLResponse", side_effect=_capture_html()):
-            request = _mock_request(cookie_value=_signed("dave@example.com"), path="/letter-settings")
-            response = main.letter_settings_form(request)
-        body = response if isinstance(response, str) else getattr(response, "body", str(response))
-        self.assertNotIn("Dave Smith", body)
+    def test_a_subscribers_personal_customer_name_never_prefills_business_name(self):
+        """A person's own name may pre-fill the responsible-contact field,
+        but must never be used as a business name (task item 3)."""
+        body = self._verified_form("dave@example.com", None,
+                                    {"customer_name": "Dave Smith", "phone": "0121 999 8888"})
+        self.assertIn('id="business_name" name="business_name" value=""', body)
+        self.assertIn('id="responsible_name" name="responsible_name" value="Dave Smith"', body)
         self.assertIn("0121 999 8888", body)  # phone is still safe to prefill
 
 

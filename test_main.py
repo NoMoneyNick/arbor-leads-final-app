@@ -378,10 +378,11 @@ class TestMagicLinkGoesToTheRealContractorNotTestEmail(unittest.IsolatedAsyncioT
 
 
 class TestFreeAccountSignup(unittest.IsolatedAsyncioTestCase):
-    """Sep 5 2026, Nick's "limbo account" ask: sign up free (no card) ->
-    get one real lead immediately -> land on /free-dashboard, logged in.
-    These lock in the route-level wiring; the underlying DB/email logic
-    itself is covered in test_database.py/test_notifications.py."""
+    """2026-09-30: the free-lead signup (account creation, lead reservation,
+    code email, free-lead grant) is retired. POST /api/free-signup now only
+    redirects to the one integrated signup form and touches nothing. The
+    fuller retirement checks (all three legacy routes, no side effects) live
+    in tests/test_first_time_signup.py."""
 
     class _FakeRequest:
         def __init__(self, fields: dict):
@@ -391,85 +392,18 @@ class TestFreeAccountSignup(unittest.IsolatedAsyncioTestCase):
         async def form(self):
             return dict(self._fields)
 
-    def setUp(self):
-        # Sep 5 2026: these are shared MagicMocks on the module-level
-        # database stub (persisting across every test in this file), so
-        # each test here resets the ones it cares about rather than
-        # inheriting call counts/return values left over from another test.
-        for mock_attr in ("find_nearest_unclaimed_lead", "burn_lead_inventory",
-                          "record_free_lead_grant", "create_or_update_limbo_account",
-                          "lookup_outcode_centroid"):
-            getattr(_database, mock_attr).reset_mock(side_effect=True)
-        _database.lookup_outcode_centroid.return_value = (53.0, -1.0)
-        _database.find_nearest_unclaimed_lead.return_value = None
-        _database.burn_lead_inventory.return_value = None
-        _database.record_free_lead_grant.return_value = True
-        _database.create_or_update_limbo_account.return_value = {
-            "id": "id-1", "email": "dave@apex-trees.co.uk", "free_lead_ref": None,
-        }
-
-    async def test_valid_signup_grants_lead_and_sets_session_cookie(self):
-        _database.find_nearest_unclaimed_lead.return_value = {"reference": "TREE-1", "address": "1 A Rd, NG22 8AA"}
-        _database.burn_lead_inventory.return_value = {"reference": "TREE-1", "address": "1 A Rd, NG22 8AA",
-                                                        "summary": "Felling", "council_source": "Test Council"}
-        _database.create_or_update_limbo_account.return_value = {
-            "id": "id-1", "email": "dave@apex-trees.co.uk", "free_lead_ref": None,
-        }
+    async def test_free_signup_only_redirects_to_the_integrated_form(self):
+        for attr in ("find_nearest_unclaimed_lead", "burn_lead_inventory",
+                     "record_free_lead_grant", "create_or_update_limbo_account"):
+            getattr(_database, attr).reset_mock(side_effect=True)
         fake_request = self._FakeRequest({"name": "Dave", "email": "dave@apex-trees.co.uk",
                                            "phone": "", "postcode": "NG22"})
-        with patch.object(main, "_check_rate_limit", return_value=True), \
-             patch.object(_notifications, "send_free_account_welcome_email", return_value=True) as mock_welcome:
-            response = await main.free_signup(fake_request)
-
-        _database.find_nearest_unclaimed_lead.assert_called_once()
-        _database.burn_lead_inventory.assert_called_once_with("TREE-1", "dave@apex-trees.co.uk")
-        _database.record_free_lead_grant.assert_called_once_with("dave@apex-trees.co.uk", "TREE-1")
-        mock_welcome.assert_called_once()
-        self.assertEqual(response.url, "/free-dashboard")
-
-    async def test_signup_with_no_nearby_lead_still_creates_account(self):
-        """No lead available near them right now must not block account
-        creation -- they still land on /free-dashboard, just with a
-        "we'll email you one" message there (that page's own concern)."""
-        _database.find_nearest_unclaimed_lead.return_value = None
-        _database.create_or_update_limbo_account.return_value = {
-            "id": "id-2", "email": "nolead@example.com", "free_lead_ref": None,
-        }
-        fake_request = self._FakeRequest({"name": "", "email": "nolead@example.com",
-                                           "phone": "", "postcode": "ZZ1"})
-        with patch.object(main, "_check_rate_limit", return_value=True):
-            response = await main.free_signup(fake_request)
-        _database.burn_lead_inventory.assert_not_called()
-        self.assertEqual(response.url, "/free-dashboard")
-
-    async def test_repeat_signup_does_not_grant_a_second_lead(self):
-        """create_or_update_limbo_account already has a free_lead_ref ->
-        must not call find_nearest_unclaimed_lead/burn_lead_inventory again."""
-        _database.create_or_update_limbo_account.return_value = {
-            "id": "id-1", "email": "dave@apex-trees.co.uk", "free_lead_ref": "TREE-ALREADY-GRANTED",
-        }
-        fake_request = self._FakeRequest({"name": "Dave", "email": "dave@apex-trees.co.uk",
-                                           "phone": "", "postcode": "NG22"})
-        with patch.object(main, "_check_rate_limit", return_value=True):
-            response = await main.free_signup(fake_request)
+        response = await main.free_signup(fake_request)
+        _database.create_or_update_limbo_account.assert_not_called()
         _database.find_nearest_unclaimed_lead.assert_not_called()
         _database.burn_lead_inventory.assert_not_called()
-        self.assertEqual(response.url, "/free-dashboard")
-
-    async def test_unrecognised_postcode_redirects_with_error_and_creates_no_account(self):
-        _database.lookup_outcode_centroid.return_value = (None, None)
-        fake_request = self._FakeRequest({"name": "Dave", "email": "dave@apex-trees.co.uk",
-                                           "phone": "", "postcode": "NOTAPOSTCODE"})
-        with patch.object(main, "_check_rate_limit", return_value=True):
-            response = await main.free_signup(fake_request)
-        _database.create_or_update_limbo_account.assert_not_called()
-        self.assertIn("/free-account", response.url)
-
-    async def test_missing_email_redirects_with_error(self):
-        fake_request = self._FakeRequest({"name": "Dave", "email": "", "phone": "", "postcode": "NG22"})
-        with patch.object(main, "_check_rate_limit", return_value=True):
-            response = await main.free_signup(fake_request)
-        self.assertIn("/free-account", response.url)
+        _database.record_free_lead_grant.assert_not_called()
+        self.assertEqual(response.url, "/free-account")
 
 
 class TestVerifyLoginRoutesLimboAccountsToFreeDashboard(unittest.TestCase):

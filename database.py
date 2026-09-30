@@ -818,6 +818,12 @@ def init_db():
             # see admin_terms_consent_audit) or, if seen on a NEW row, a bug.
             "ALTER TABLE contractor_subscriptions ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ;",
             "ALTER TABLE limbo_accounts ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ;",
+            # 2026-09-30, integrated first-time signup: details submitted on the
+            # signup form wait HERE, on the one verification record they were
+            # requested with (JSON text). Applied and cleared in the same
+            # transaction that consumes the record; also cleared when the
+            # record expires. See create_magic_auth_token / verify_magic_auth_token.
+            "ALTER TABLE contractor_auth_tokens ADD COLUMN IF NOT EXISTS pending_signup TEXT;",
             # Sep 12 2026, Nick's ask ("give me a system that ... must be
             # logically sound" -> the exclusive-purchase reservation flow):
             # leads previously only had a 2-state status (new/claimed) with
@@ -7073,13 +7079,62 @@ def get_contractor_financial_summary(contractor_email: str) -> dict:
         }
 
 
-def create_magic_auth_token(email: str) -> Optional[dict]:
+def _email_has_existing_account(cur, email: str, exclude_token_id=None) -> bool:
+    """True if this email already belongs to ANY kind of TreeKey account: a
+    subscription row (active or lapsed), a free/limbo account, saved letter
+    settings, a lead dispatch, or an earlier verified login. "No letter
+    settings yet" alone does NOT make an account new. The token being
+    verified right now is excluded from the earlier-login check."""
+    email = email.strip().lower()
+    checks = [
+        ("SELECT 1 FROM contractor_subscriptions WHERE customer_email = %s LIMIT 1", (email,)),
+        ("SELECT 1 FROM limbo_accounts WHERE email = %s LIMIT 1", (email,)),
+        ("SELECT 1 FROM contractor_letter_settings WHERE contractor_email = %s LIMIT 1", (email,)),
+        ("SELECT 1 FROM lead_dispatches WHERE contractor_email = %s LIMIT 1", (email,)),
+    ]
+    for sql, params in checks:
+        cur.execute(sql, params)
+        if cur.fetchone():
+            return True
+    if exclude_token_id is None:
+        cur.execute("SELECT 1 FROM contractor_auth_tokens WHERE customer_email = %s AND used = TRUE LIMIT 1", (email,))
+    else:
+        cur.execute("SELECT 1 FROM contractor_auth_tokens WHERE customer_email = %s AND used = TRUE AND id <> %s LIMIT 1",
+                    (email, exclude_token_id))
+    return cur.fetchone() is not None
+
+
+def email_has_existing_account(email: str) -> bool:
+    """Public wrapper used when a signup is submitted. FAILS CLOSED: on any
+    error it reports True, so pending details are simply not stored (the
+    person still gets a normal login link)."""
+    if not SURL or not email:
+        return True
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            return _email_has_existing_account(cur, email)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Signup] Existing-account check failed for {email}: {e}")
+        return True
+
+
+def create_magic_auth_token(email: str, pending_signup: Optional[dict] = None) -> Optional[dict]:
     """
     Generates a cryptographically secure 1-tap Magic Token and 6-digit OTP code.
     Valid for 15 minutes.
+
+    pending_signup: optional first-time-signup details (a JSON-able dict).
+    Stored on this exact record only; nothing is saved to any account until
+    the record is verified. Never returned to the caller.
     """
     import secrets
     import random
+    import json
     if not SURL or not email:
         return None
     try:
@@ -7088,11 +7143,17 @@ def create_magic_auth_token(email: str) -> Optional[dict]:
         conn = get_db_conn()
         cur = conn.cursor()
         try:
+            # Opportunistic clearing: pending details on a record that has
+            # expired or been used must not linger.
             cur.execute("""
-                INSERT INTO contractor_auth_tokens (customer_email, token, otp_code)
-                VALUES (%s, %s, %s)
+                UPDATE contractor_auth_tokens SET pending_signup = NULL
+                WHERE pending_signup IS NOT NULL AND (used = TRUE OR expires_at <= NOW());
+            """)
+            cur.execute("""
+                INSERT INTO contractor_auth_tokens (customer_email, token, otp_code, pending_signup)
+                VALUES (%s, %s, %s, %s)
                 RETURNING token, otp_code, expires_at;
-            """, (email.strip().lower(), token, otp))
+            """, (email.strip().lower(), token, otp, json.dumps(pending_signup) if pending_signup else None))
             row = cur.fetchone()
             conn.commit()
             if row:
@@ -7106,11 +7167,47 @@ def create_magic_auth_token(email: str) -> Optional[dict]:
         return None
 
 
+def _apply_pending_signup(cur, email: str, token_id, pending: dict) -> bool:
+    """Runs inside verify_magic_auth_token's transaction. Saves the pending
+    signup details as the account's FIRST letter settings, only if the email
+    has no existing account of any kind. Serialised per email so a double
+    click / two open links can apply at most once. Returns True if applied."""
+    import letter_content
+    cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (email,))
+    if _email_has_existing_account(cur, email, exclude_token_id=token_id):
+        return False
+    f = pending.get("letter") or {}
+    settings = letter_content.ContractorLetterSettings(
+        contractor_email=email,
+        business_name=f.get("business_name", ""), phone=f.get("phone", ""),
+        service_area_note=f.get("service_area_note", ""), insurance_note=f.get("insurance_note", ""),
+        qualifications_note=f.get("qualifications_note", ""),
+        template_key=f.get("template_key") or letter_content.DEFAULT_TEMPLATE_KEY,
+        business_intro=f.get("business_intro", ""), services_note=f.get("services_note", ""),
+        contact_email=f.get("contact_email", ""), contact_first_name=f.get("contact_first_name", ""),
+        offer_text=f.get("offer_text", ""), offer_code=f.get("offer_code", ""),
+        offer_conditions=f.get("offer_conditions", ""),
+    )
+    return letter_content.insert_initial_contractor_settings(
+        cur, settings,
+        responsible_contact_name=pending.get("responsible_contact_name", ""),
+        terms_accepted_at=pending.get("terms_accepted_at"),
+    )
+
+
 def verify_magic_auth_token(token: str = None, otp: str = None, email: str = None) -> Optional[str]:
     """
     Verifies a magic token or OTP code, ensuring it is unexpired and unused.
     Marks used = TRUE upon successful verification to prevent replay attacks.
+
+    2026-09-30: if the record carries pending first-time-signup details, they
+    are applied (see _apply_pending_signup) and cleared in the SAME
+    transaction that consumes the record. A failure to apply never blocks the
+    login itself (it is isolated in a savepoint); the pending details are
+    cleared either way, and the person simply lands on the normal
+    letter-details page instead.
     """
+    import json
     if not SURL or (not token and not (otp and email)):
         return None
     try:
@@ -7118,20 +7215,32 @@ def verify_magic_auth_token(token: str = None, otp: str = None, email: str = Non
         cur = conn.cursor()
         try:
             if token:
-                cur.execute("""
-                    UPDATE contractor_auth_tokens
-                    SET used = TRUE
-                    WHERE token = %s AND used = FALSE AND expires_at > NOW()
-                    RETURNING customer_email;
-                """, (token.strip(),))
+                cond, params = "token = %s", (token.strip(),)
             else:
-                cur.execute("""
-                    UPDATE contractor_auth_tokens
-                    SET used = TRUE
-                    WHERE otp_code = %s AND customer_email = %s AND used = FALSE AND expires_at > NOW()
-                    RETURNING customer_email;
-                """, (otp.strip(), email.strip().lower()))
+                cond, params = "otp_code = %s AND customer_email = %s", (otp.strip(), email.strip().lower())
+            cur.execute(f"""
+                WITH old AS (
+                    SELECT id, customer_email, pending_signup FROM contractor_auth_tokens
+                    WHERE {cond} AND used = FALSE AND expires_at > NOW()
+                    FOR UPDATE
+                )
+                UPDATE contractor_auth_tokens t
+                SET used = TRUE, pending_signup = NULL
+                FROM old WHERE t.id = old.id
+                RETURNING old.customer_email, old.pending_signup, t.id;
+            """, params)
             row = cur.fetchone()
+            if row and row[1]:
+                cur.execute("SAVEPOINT apply_pending_signup")
+                try:
+                    _apply_pending_signup(cur, row[0], row[2], json.loads(row[1]))
+                    cur.execute("RELEASE SAVEPOINT apply_pending_signup")
+                except Exception as e:
+                    cur.execute("ROLLBACK TO SAVEPOINT apply_pending_signup")
+                    logger.error(f"[Signup] Could not apply pending signup details for {row[0]}: {e}")
+            if not row:
+                cur.execute("UPDATE contractor_auth_tokens SET pending_signup = NULL "
+                            "WHERE pending_signup IS NOT NULL AND expires_at <= NOW()")
             conn.commit()
             if row:
                 return row[0]

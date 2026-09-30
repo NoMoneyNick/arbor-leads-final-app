@@ -392,6 +392,11 @@ class TestCompleteContractorToFakeProviderJourney(unittest.TestCase):
         return patch("main.database.get_db_conn", return_value=mock_conn)
 
     def test_full_journey_two_different_leads_one_approval_both_accepted_by_fake_provider(self):
+        # The account already completed signup (first-ever settings are
+        # created only by the integrated signup form, never by an ordinary
+        # settings save): seed that state, then exercise the edit route.
+        letter_content.upsert_contractor_settings(self._cur(), letter_content.ContractorLetterSettings(
+            contractor_email=self.contractor_email, business_name="Seed Trees", phone="0000"))
         signed_cookie = main._sign_session_cookie(self.contractor_email)
 
         # Step 1: contractor saves their letter settings via the real HTTP
@@ -491,6 +496,11 @@ class TestCompleteContractorToFakeProviderJourney(unittest.TestCase):
         stay in pending_approval until the contractor re-approves -- proven
         here through the real route functions + a real worker pass, not
         just the isolated unit test in tests/test_worker.py."""
+        # The account already completed signup (first-ever settings are
+        # created only by the integrated signup form, never by an ordinary
+        # settings save): seed that state, then exercise the edit route.
+        letter_content.upsert_contractor_settings(self._cur(), letter_content.ContractorLetterSettings(
+            contractor_email=self.contractor_email, business_name="Seed Trees", phone="0000"))
         signed_cookie = main._sign_session_cookie(self.contractor_email)
 
         with self._conn_patch():

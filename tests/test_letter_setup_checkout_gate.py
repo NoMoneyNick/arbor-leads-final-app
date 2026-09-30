@@ -346,7 +346,8 @@ class TestLetterSettingsFormMicrocopyAndAccountIntegration(_SessionTestBase):
         """Request E, verbatim: beside the introduction text box display
         '(this is what customers will see on your introduction letter)'."""
         mock_get_db_conn.return_value = MagicMock()
-        mock_get_settings.return_value = None
+        mock_get_settings.return_value = letter_content.ContractorLetterSettings(
+            contractor_email="contractor@example.com", business_name="", phone="")
         request = _mock_request(cookie_value=self._signed_cookie("contractor@example.com"), path="/letter-settings")
         with patch("main.HTMLResponse", side_effect=lambda content=None, *a, **k: content):
             # `next`/`saved` are real FastAPI query-param bindings on this
@@ -361,7 +362,8 @@ class TestLetterSettingsFormMicrocopyAndAccountIntegration(_SessionTestBase):
     @patch("main.database.get_db_conn")
     def test_forced_detour_via_next_shows_a_why_am_i_here_banner(self, mock_get_db_conn, mock_get_settings):
         mock_get_db_conn.return_value = MagicMock()
-        mock_get_settings.return_value = None
+        mock_get_settings.return_value = letter_content.ContractorLetterSettings(
+            contractor_email="contractor@example.com", business_name="", phone="")
         request = _mock_request(cookie_value=self._signed_cookie("contractor@example.com"), path="/letter-settings",
                                  query_params={"next": "/checkout/single_lead_small?lead_id=LEAD-1"})
         with patch("main.HTMLResponse", side_effect=lambda content=None, *a, **k: content):

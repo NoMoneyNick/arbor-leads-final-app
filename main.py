@@ -935,7 +935,7 @@ def _nav_auth_state(request: Optional[Request]) -> Optional[dict]:
 
 
 def _nav_auth_block_html(request: Optional[Request]) -> str:
-    """The bit of the nav that swaps between "Sign Up / Log In" and a
+    """The bit of the nav that swaps between "Create Account / Log In" and a
     logged-in state -- pulled out so both _shared_nav_html and the
     homepage's own nav render it identically.
 
@@ -973,8 +973,9 @@ def _nav_auth_block_html(request: Optional[Request]) -> str:
                     </a>
                     <a href="/logout" class="text-slate-400 hover:text-white transition-colors text-xs font-mono uppercase">Log Out</a>"""
     return """
+                    <a href="/free-account" class="text-emerald-300 hover:brightness-125 transition-all font-bold text-xs sm:text-sm">Create Account</a>
                     <a href="/login" class="bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 px-3.5 py-1.5 rounded-lg font-bold uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-[0_0_15px_rgba(5,150,105,0.2)]">
-                        Sign Up / Log In &#10132;
+                        Log In &#10132;
                     </a>"""
 
 
@@ -1065,18 +1066,12 @@ def _shared_footer_html() -> str:
     <footer class="bg-slate-950 border-t border-slate-800 pt-10 pb-8 mt-16">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-start gap-8">
             <div class="text-slate-500 text-xs text-center md:text-left max-w-2xl">
-                <img src="/static/images/footer-mark.png" alt="" class="h-7 w-auto opacity-50 mb-2 mx-auto md:mx-0" loading="lazy">
+                <img src="/static/images/footer-mark.png" alt="" width="28" height="28" class="h-7 w-auto opacity-50 mb-2 mx-auto md:mx-0" style="height:28px;width:auto;max-width:64px;" loading="lazy">
                 <div class="mb-3">
-                    <b class="text-slate-300 text-sm">Tree Key</b> by Vector Data Labs.<br>
+                    <b class="text-slate-300 text-sm">Tree Key</b><br>
                 </div>
-                <p class="mb-2">
-                    Operating in compliance with UK Town and Country Planning statutory register regulations.
-                    Data is aggregated from UK Local Planning Authorities under the Open Government Licence v3.0.
-                </p>
-                <p class="mb-2">
-                    &copy; 2026 Vector Data Labs. All rights reserved. Tree Key is a trading name of Vector Data Labs.
-                    Platform is 256-bit SSL Encrypted &amp; GDPR Compliant.
-                </p>
+                <p class="mb-2">Planning information comes from public UK council planning registers.</p>
+                <p class="mb-2">&copy; 2026 Tree Key. All rights reserved.</p>
                 <p class="text-slate-400 mt-4 mb-1 flex items-center justify-center md:justify-start gap-2">
                     Proudly engineered in the United Kingdom &#127468;&#127463;
                 </p>
@@ -1800,7 +1795,7 @@ def public_homepage(request: Request):
                              Removed the unneeded flex display so the text just flows
                              normally, with "Free" as a plain inline coloured span. -->
                         <a href="/free-account" class="bg-transparent text-emerald-400 border-2 border-emerald-500/50 px-8 py-4 rounded font-bold text-lg hover:bg-emerald-500/10 transition-all duration-300 text-center">
-                            Claim a <span class="text-amber-400">Free</span> Lead — No Card Needed
+                            Create Your Account — No Card Needed
                         </a>
                     </div>
                     <!-- Sep 8 2026, Nick's ask: the free-lead CTA was easy to skim
@@ -1808,7 +1803,7 @@ def public_homepage(request: Request):
                          directly names the "too good to be true?" objection and
                          answers it in one line, without sounding desperate. -->
                     <p class="text-sm text-amber-300 max-w-md text-center leading-relaxed font-medium">
-                        Sounds too good to be true? Sign up free today and we'll send you a real, FREE lead from your area today — no card, no commitment!
+                        Create an account in a couple of minutes: confirm your email and set up the details for your posted introduction letters. No card needed to sign up.
                     </p>
                 </div>
 
@@ -2188,18 +2183,12 @@ def public_homepage(request: Request):
                      small and muted into the small print rather than
                      displayed as a real logo -- deliberately tiny given the
                      source image's resolution. -->
-                <img src="/static/images/footer-mark.png" alt="" class="h-7 w-auto opacity-50 mb-2 mx-auto md:mx-0" loading="lazy">
+                <img src="/static/images/footer-mark.png" alt="" width="28" height="28" class="h-7 w-auto opacity-50 mb-2 mx-auto md:mx-0" style="height:28px;width:auto;max-width:64px;" loading="lazy">
                 <div class="mb-3">
-                    <b class="text-slate-300 text-sm">Tree Key</b> by Vector Data Labs.<br>
+                    <b class="text-slate-300 text-sm">Tree Key</b><br>
                 </div>
-                <p class="mb-2">
-                    Operating in compliance with UK Town and Country Planning statutory register regulations. 
-                    Data is aggregated from UK Local Planning Authorities under the Open Government Licence v3.0.
-                </p>
-                <p class="mb-2">
-                    &copy; 2026 Vector Data Labs. All rights reserved. Tree Key is a trading name of Vector Data Labs. 
-                    Platform is 256-bit SSL Encrypted & GDPR Compliant. 
-                </p>
+                <p class="mb-2">Planning information comes from public UK council planning registers.</p>
+                <p class="mb-2">&copy; 2026 Tree Key. All rights reserved.</p>
                 <p class="text-slate-400 mt-4 mb-1 flex items-center justify-center md:justify-start gap-2">
                     Proudly engineered in the United Kingdom 
                 </p>
@@ -3038,7 +3027,7 @@ def pricing(request: Request):
         msg_banner = (
             "<div class='bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-5 text-red-200'>"
             "<b>No active subscription found</b> for that email. Pick a tier below to activate your dashboard —"
-            " or, if you're not ready to subscribe yet, <a href='/free-account' class='text-red-300 font-bold'>get one free lead first, no card needed</a>."
+            " or, if you're new to TreeKey, <a href='/free-account' class='text-red-300 font-bold'>create your account first, no card needed</a>."
             "</div>"
         )
 
@@ -3483,6 +3472,67 @@ _LETTER_PURCHASE_NUDGE_DISMISS_PARAM = "letter_nudge"
 _LETTER_PURCHASE_NUDGE_DISMISS_VALUE = "continue"
 
 
+# 2026-09-30, customer-page presentation pass: every letter-journey page
+# (the integrated setup form, the preview, the purchase-time nudge) now
+# renders through this one shell. The demonstrated defect was that the
+# shared nav/footer emit Tailwind utility classes, but the letter pages'
+# own <head> never linked /static/tailwind.css, so the header/footer showed
+# as raw browser-default links and the footer T/k mark had no size limit.
+# Fixing it once here (stylesheet link, viewport, one CSS block with
+# deliberate link/focus states, mobile padding) covers all of them. Classes
+# are lp-prefixed so they cannot collide with Tailwind's own .container/.card.
+_LETTER_PAGE_CSS = """
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; line-height:1.5; }
+.lp-wrap { margin:0 auto; padding:32px 16px 8px; box-sizing:border-box; width:100%; }
+.lp-card { background:#0f172a; border:1px solid #1e293b; border-radius:12px; padding:24px; }
+.lp-wrap label { display:block; font-size:14px; font-weight:600; color:#cbd5e1; margin-top:16px; margin-bottom:4px; }
+.lp-wrap input, .lp-wrap textarea, .lp-wrap select { width:100%; box-sizing:border-box; padding:10px 12px; background:#020617; color:#e2e8f0; border:1px solid #475569; border-radius:6px; font-family:inherit; font-size:15px; }
+.lp-wrap textarea { min-height:64px; resize:vertical; }
+.lp-wrap input:focus, .lp-wrap textarea:focus, .lp-wrap select:focus { outline:2px solid #34d399; outline-offset:1px; border-color:#34d399; }
+.lp-hint { font-size:12.5px; color:#94a3b8; margin-top:4px; }
+.lp-btn { display:block; width:100%; box-sizing:border-box; text-align:center; background:#059669; color:#ffffff; border:none; padding:13px 20px; border-radius:6px; font-weight:700; cursor:pointer; font-size:15px; text-decoration:none; }
+.lp-btn:hover { background:#047857; }
+.lp-wrap a { color:#34d399; text-decoration:underline; text-underline-offset:2px; }
+.lp-wrap a:visited { color:#34d399; }
+.lp-wrap a:hover { color:#6ee7b7; }
+.lp-wrap a.lp-btn { color:#ffffff; text-decoration:none; }
+.lp-wrap a:focus-visible, .lp-btn:focus-visible { outline:2px solid #34d399; outline-offset:2px; }
+.lp-section { border-top:1px solid #1e293b; margin-top:24px; padding-top:8px; }
+.lp-section h2 { margin:12px 0 4px 0; font-size:17px; color:#ffffff; }
+.lp-section-note { font-size:13.5px; color:#94a3b8; margin:0 0 4px 0; }
+.lp-tag { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; padding:2px 8px; border-radius:999px; margin-left:8px; vertical-align:middle; }
+.lp-tag-req { background:rgba(52,211,153,.15); color:#6ee7b7; }
+.lp-tag-opt { background:rgba(148,163,184,.15); color:#cbd5e1; }
+.lp-static { padding:10px 12px; background:#0b1220; border:1px solid #1e293b; border-radius:6px; font-size:15px; color:#e2e8f0; word-break:break-all; }
+.lp-choice { display:block; width:100%; box-sizing:border-box; text-align:left; padding:14px 16px; border-radius:8px; margin-top:10px; font-size:15px; }
+.lp-choice-primary { background:#059669; color:#ffffff; font-weight:700; }
+.lp-choice-secondary { background:#1e293b; color:#e2e8f0; border:1px solid #334155; }
+.lp-wrap a.lp-choice { text-decoration:none; }
+.lp-wrap a.lp-choice-primary { color:#ffffff; }
+.lp-wrap a.lp-choice-secondary { color:#e2e8f0; }
+.lp-wrap iframe { width:100%; height:600px; border:1px solid #334155; border-radius:8px; background:#ffffff; margin-top:12px; }
+.lp-footmark { height:28px; width:auto; max-width:64px; }
+@media (max-width:520px) { .lp-wrap { padding:20px 12px 4px; } .lp-card { padding:18px; } .lp-wrap iframe { height:440px; } }
+"""
+
+
+def _letter_page_html(request: Optional[Request], title: str, inner: str, *, max_width: int = 680) -> str:
+    """Full document for a letter-journey page: stylesheet, viewport, shared
+    nav and footer, then `inner` inside the standard card column."""
+    return (
+        '<!DOCTYPE html><html lang="en-GB"><head><meta charset="UTF-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+        f'<title>{html.escape(title)} | TreeKey</title>'
+        '<link rel="icon" href="/static/icon-192.png">'
+        '<link href="/static/tailwind.css" rel="stylesheet">'
+        f'<style>{_LETTER_PAGE_CSS}</style></head><body>'
+        f'{_shared_nav_html(request)}'
+        f'<div class="lp-wrap" style="max-width:{int(max_width)}px;">{inner}</div>'
+        f'{_shared_footer_html()}'
+        '</body></html>'
+    )
+
+
 def _letter_purchase_nudge_response(request: Request, account_email: str, current_path: str) -> Optional[HTMLResponse]:
     """None means "don't show it, let the purchase proceed" -- covers
     "already personalised, proceed normally" (item: "Already-approved
@@ -3521,115 +3571,96 @@ def _letter_purchase_nudge_response(request: Request, account_email: str, curren
     continue_url = current_path + continue_q
     personalise_url = f"/letter-settings?next={urllib.parse.quote(current_path, safe='')}"
 
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html lang="en-GB">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Your Letter Introduction | TreeKey</title>
-        <link rel="icon" href="/static/icon-192.png">
-        <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:0; }}
-            .card {{ background:#0f172a; border:1px solid #1e293b; border-radius: 12px; padding: 24px; }}
-            .choice {{ display:block; width:100%; box-sizing:border-box; text-align:left; padding:14px 16px; border-radius:8px; text-decoration:none; margin-top:10px; font-size:14px; }}
-            .choice-primary {{ background:#059669; color:white; font-weight:bold; }}
-            .choice-secondary {{ background:#1e293b; color:#e2e8f0; border:1px solid #334155; }}
-        </style>
-    </head>
-    <body>
-    {_shared_nav_html(request)}
-    <div style="max-width:480px; margin:auto; padding:48px 16px;">
-        <div class="card">
-            <h1 style="margin:0 0 8px 0; font-size:18px; color:white;">Add a personal introduction, or continue with your standard letter.</h1>
-            <p style="color:#94a3b8; font-size:13px; line-height:1.5; margin:0 0 4px 0;">Your letter template is approved and ready to use as-is -- this takes one click either way.</p>
-            <a class="choice choice-secondary" href="{continue_url}">Continue with your standard letter</a>
-            <a class="choice choice-primary" href="{personalise_url}">Personalise my letter</a>
+    return HTMLResponse(_letter_page_html(request, "Your Letter Introduction", f"""
+        <div class="lp-card">
+            <h1 style="margin:0 0 8px 0; font-size:20px; color:#ffffff;">Add a personal introduction, or continue with your standard letter.</h1>
+            <p style="color:#94a3b8; font-size:14px; line-height:1.5; margin:0 0 4px 0;">Your letter template is approved and ready to use as-is. This takes one click either way.</p>
+            <a class="lp-choice lp-choice-secondary" href="{continue_url}">Continue with your standard letter</a>
+            <a class="lp-choice lp-choice-primary" href="{personalise_url}">Personalise my letter</a>
         </div>
-    </div>
-    {_shared_footer_html()}
-    </body>
-    </html>
-    """)
+    """, max_width=520))
 
 
-# 2026-09-24 handoff, task item 2 ("After first-time email verification,
-# offer: Personalise my letter / Use the standard letter"): a one-time
-# choice screen, reached only from _login_session_response's own new
-# first-time check above -- it does no gating of its own (a signed-out
-# visit just bounces to /login the same way /letter-settings already
-# does), and neither button invents anything or skips the existing
-# save -> preview -> explicit-approve pipeline (item 5: "approval remains
-# explicit... skipping personalisation must not silently count as
-# approval") -- both simply land on the SAME existing /letter-settings
-# form, which already treats every field but business_name/phone as
-# optional. "Use the standard letter" only changes the banner copy shown
-# there (see _letter_settings_form_html's `intent` handling) and prefills
-# anything already known -- it does not create or approve a settings row
-# by itself.
-def _letter_onboarding_choice_html(request: Request, next_dest: str) -> str:
-    next_q = f"?next={urllib.parse.quote(next_dest, safe='')}" if next_dest else ""
-    return f"""
-    <!DOCTYPE html>
-    <html lang="en-GB">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Your Letter Introduction | TreeKey</title>
-        <link rel="icon" href="/static/icon-192.png">
-        <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:0; }}
-            .card {{ background:#0f172a; border:1px solid #1e293b; border-radius: 12px; padding: 28px; }}
-            .choice {{ display:block; width:100%; box-sizing:border-box; text-align:left; padding:16px 18px; border-radius:8px; text-decoration:none; margin-top:12px; font-size:14px; }}
-            .choice-primary {{ background:#059669; color:white; font-weight:bold; }}
-            .choice-secondary {{ background:#1e293b; color:#e2e8f0; border:1px solid #334155; }}
-        </style>
-    </head>
-    <body>
-    {_shared_nav_html(request)}
-    <div style="max-width:560px; margin:auto; padding:56px 16px;">
-        <div class="card">
-            <h1 style="margin:0 0 10px 0; font-size:22px; color:white;">Your Letter Introduction</h1>
-            <p style="color:#94a3b8; font-size:14px; line-height:1.6; margin:0 0 4px 0;">Personalise the introduction homeowners will receive from your business. You can change this later in your account.</p>
-            <a class="choice choice-primary" href="/letter-settings{next_q}">Personalise my letter</a>
-            <a class="choice choice-secondary" href="/letter-settings{next_q}{'&' if next_q else '?'}intent=standard">Use the standard letter</a>
-        </div>
-    </div>
-    {_shared_footer_html()}
-    </body>
-    </html>
-    """
-
-
-@app.get("/letter-onboarding", response_class=HTMLResponse)
+# 2026-09-30: the former two-button onboarding choice page and the
+# post-verification setup form are gone. /letter-onboarding survives only as
+# a redirect for old links/bookmarks: first-time details are collected by the
+# ONE integrated signup form at /free-account (see _first_time_signup_page_html),
+# with `next` carried through.
+@app.get("/letter-onboarding")
 def letter_onboarding(request: Request, next: Optional[str] = Query(None)):
-    session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
-    if not session_email:
-        return RedirectResponse(url="/login", status_code=303)
+    return RedirectResponse(url=_signup_url(next), status_code=303)
 
-    dest = _safe_next_url(next) or "/dashboard"
 
-    # If this contractor already made a letter choice since this page was
-    # offered (e.g. they've been here before, or opened it twice), don't
-    # show it again -- straight on to wherever they were headed.
-    conn = database.get_db_conn()
-    cur = conn.cursor()
-    try:
-        already_chosen = letter_content.get_contractor_settings(cur, session_email) is not None
-    except Exception:
-        already_chosen = False
-    finally:
-        cur.close()
-        conn.close()
-    if already_chosen:
-        return RedirectResponse(url=dest, status_code=303)
+def _signup_url(next_url: Optional[str] = None) -> str:
+    """The one first-time signup form, carrying a validated `next`."""
+    safe = _safe_next_url(next_url)
+    return "/free-account" + (f"?next={urllib.parse.quote(safe, safe='')}" if safe else "")
 
-    return HTMLResponse(_letter_onboarding_choice_html(request, dest))
+
+def _letter_optional_fields_html(settings: "letter_content.ContractorLetterSettings") -> str:
+    """The clearly-labelled OPTIONAL letter-personalisation section. Shared
+    verbatim by the My Account / onboarding form and the first-time signup
+    form, so the two can never drift apart."""
+    def esc(v: str) -> str:
+        return html.escape(v or "")
+
+    template_options_html = "\n".join(
+        f'<option value="{esc(key)}"{" selected" if key == settings.template_key else ""}>{esc(label)}</option>'
+        for key, label in letter_content.template_choices()
+    )
+    return f"""
+                <div class="lp-section">
+                    <h2>Personalise your letter <span class="lp-tag lp-tag-opt">Optional</span></h2>
+                    <p class="lp-section-note">Everything in this section is optional, and you can edit it any time in <a href="/account">My Account</a>. Fields you leave blank are simply left out, and blank wording fields use TreeKey's complete standard wording.</p>
+
+                    <label for="template_key">Letter style</label>
+                    <select id="template_key" name="template_key">
+                        {template_options_html}
+                    </select>
+                    <div class="lp-hint">Sets the tone of the standard wording. You can switch anytime; a change means you re-approve your preview before it is used.</div>
+
+                    <label for="contact_first_name">Contact first name</label>
+                    <input id="contact_first_name" name="contact_first_name" value="{esc(settings.contact_first_name)}" placeholder="e.g. Dave" maxlength="{letter_content.MAX_CONTACT_FIRST_NAME_LEN}">
+                    <div class="lp-hint">Adds a personal touch in the letter's contact panel. Leave blank to show just your business name and phone.</div>
+
+                    <label for="contact_email">Contact email</label>
+                    <input id="contact_email" name="contact_email" type="email" value="{esc(settings.contact_email)}" placeholder="e.g. jobs@yourbusiness.co.uk" maxlength="{letter_content.MAX_CONTACT_EMAIL_LEN}">
+                    <div class="lp-hint">An extra way for homeowners to reach you. Leave blank to show your phone only.</div>
+
+                    <label for="business_intro">Business introduction</label>
+                    <div class="lp-hint" style="font-style:italic; margin:-2px 0 6px 0;">(this is what customers will see on your introduction letter)</div>
+                    <textarea id="business_intro" name="business_intro" placeholder="e.g. We're a family-run tree surgery covering Leeds, known locally for tidy, careful work." maxlength="{letter_content.MAX_BUSINESS_INTRO_LEN}">{esc(settings.business_intro)}</textarea>
+                    <div class="lp-hint">A short paragraph about your business, shown on your letter exactly as you write it. Up to {letter_content.MAX_BUSINESS_INTRO_LEN} characters. Leave blank to use our standard wording instead.</div>
+
+                    <label for="services_note">Relevant services</label>
+                    <textarea id="services_note" name="services_note" placeholder="e.g. Tree felling, crown reduction, hedge trimming, stump grinding" maxlength="{letter_content.MAX_SERVICES_NOTE_LEN}">{esc(settings.services_note)}</textarea>
+                    <div class="lp-hint">Tells homeowners what you offer. Up to {letter_content.MAX_SERVICES_NOTE_LEN} characters. Leave blank to leave it out.</div>
+
+                    <label for="service_area_note">Service area</label>
+                    <input id="service_area_note" name="service_area_note" value="{esc(settings.service_area_note)}" placeholder="e.g. Covering Leeds and the surrounding 15 miles" maxlength="{letter_content.MAX_SERVICE_AREA_LEN}">
+                    <div class="lp-hint">Tells homeowners where you work. Leave blank to leave it out.</div>
+
+                    <label for="insurance_note">Insurance details</label>
+                    <textarea id="insurance_note" name="insurance_note" placeholder="e.g. Public liability insurance held (state your actual cover)" maxlength="{letter_content.MAX_INSURANCE_LEN}">{esc(settings.insurance_note)}</textarea>
+                    <label for="qualifications_note">Qualifications</label>
+                    <textarea id="qualifications_note" name="qualifications_note" placeholder="e.g. NPTC Level 2 Certificate in Arboriculture (state only what you actually hold)" maxlength="{letter_content.MAX_QUALIFICATIONS_LEN}">{esc(settings.qualifications_note)}</textarea>
+                    <div class="lp-hint">Insurance, qualifications and any other credential you list here are your own claim, shown exactly as written. TreeKey never adds "insured", "qualified", "vetted" or similar wording on your behalf. Leave blank to leave them out.</div>
+
+                    <label for="offer_text">Offer</label>
+                    <input id="offer_text" name="offer_text" value="{esc(settings.offer_text)}" placeholder="e.g. £50 off work over £500. Mention TREEKEY when requesting your quote." maxlength="{letter_content.MAX_OFFER_TEXT_LEN}">
+                    <label for="offer_code">Offer code</label>
+                    <input id="offer_code" name="offer_code" value="{esc(settings.offer_code)}" placeholder="e.g. TREEKEY" maxlength="{letter_content.MAX_OFFER_CODE_LEN}">
+                    <label for="offer_conditions">Offer conditions / expiry</label>
+                    <input id="offer_conditions" name="offer_conditions" value="{esc(settings.offer_conditions)}" placeholder="e.g. Valid until 31 December 2026" maxlength="{letter_content.MAX_OFFER_CONDITIONS_LEN}">
+                    <div class="lp-hint">Shown compactly on your letter, below your contact details, exactly as you write it. TreeKey never invents or prefills a discount. Leave the offer blank to show nothing. Changing it means you re-approve your preview before it is used.</div>
+                </div>
+    """
 
 
 def _letter_settings_form_html(settings: "letter_content.ContractorLetterSettings", *,
                                 saved: bool = False, approved_msg: bool = False, error: Optional[str] = None,
-                                next: Optional[str] = None, intent: Optional[str] = None) -> str:
+                                next: Optional[str] = None, intent: Optional[str] = None,
+                                request: Optional[Request] = None) -> str:
     # 2026-09-23 handoff, Request E ("require completed letter setup before
     # the first purchase that includes mailing"): `next`, when present, is
     # a same-site path (typically /checkout/...) a caller was redirected
@@ -3726,77 +3757,85 @@ def _letter_settings_form_html(settings: "letter_content.ContractorLetterSetting
         for key, label in letter_content.template_choices()
     )
 
-    return f"""
-    <!DOCTYPE html>
-    <html lang="en-GB">
-    <head>
-        <meta charset="UTF-8">
-        <title>Letter Template Settings | TreeKey</title>
-        <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:32px 16px; }}
-            .container {{ max-width: 640px; margin: auto; }}
-            .card {{ background:#0f172a; border:1px solid #1e293b; border-radius: 12px; padding: 24px; }}
-            label {{ display:block; font-size:13px; color:#94a3b8; margin-top:14px; margin-bottom:4px; }}
-            input, textarea, select {{ width: 100%; box-sizing: border-box; padding: 10px; background:#020617; color:#e2e8f0; border:1px solid #334155; border-radius: 6px; font-family: inherit; font-size:14px; }}
-            textarea {{ min-height: 60px; resize: vertical; }}
-            .hint {{ font-size:11px; color:#64748b; margin-top:3px; }}
-            .btn {{ background:#059669; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size:14px; }}
-            .btn-secondary {{ background:#1e293b; color:#e2e8f0; border:1px solid #334155; }}
-        </style>
-    </head>
-    <body>
-    <div class="container">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-            <h1 style="margin:0; font-size:22px; color:#34d399;">Letter Template Settings</h1>
-            <a href="/dashboard" style="color:#34d399; font-size:13px; text-decoration:none; font-weight:bold;">&larr; Dashboard</a>
+    page_title = "Letter Template Settings"
+    back_link = '<a href="/dashboard" style="font-size:14px; font-weight:600;">&larr; Dashboard</a>'
+    inner = f"""
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
+            <h1 style="margin:0; font-size:24px; color:#34d399;">{page_title}</h1>
+            {back_link}
         </div>
-        <div class="card">
+        <div class="lp-card">
             {banner}
-            <p style="font-size:13px; color:#94a3b8; margin-top:0;">These details appear on every introduction letter TreeKey posts on your behalf. Status: {status_line}</p>
+            <p style="font-size:14px; color:#94a3b8; margin-top:0;">These details appear on the introduction letters TreeKey posts on your behalf. Saving is not approval: you will preview your letter and approve it before it is used. Status: {status_line}</p>
             <form method="POST" action="/letter-settings{next_q}{intent_q}">
-                <label for="template_key">Letter template</label>
-                <select id="template_key" name="template_key">
-                    {template_options_html}
-                </select>
-                <div class="hint">Wording for each template is still being finalised -- you can switch anytime. Switching (like any other change here) requires re-approving your preview before it's used.</div>
-                <label for="business_name">Business name *</label>
-                <input id="business_name" name="business_name" value="{esc(settings.business_name)}" placeholder="e.g. Ashcroft Tree Surgery" maxlength="{letter_content.MAX_BUSINESS_NAME_LEN}" required>
-                <label for="phone">Phone *</label>
-                <input id="phone" name="phone" value="{esc(settings.phone)}" placeholder="e.g. 01234 567890" maxlength="{letter_content.MAX_PHONE_LEN}" required>
-                <label for="contact_email">Contact email (optional)</label>
-                <input id="contact_email" name="contact_email" type="email" value="{esc(settings.contact_email)}" placeholder="e.g. jobs@yourbusiness.co.uk" maxlength="{letter_content.MAX_CONTACT_EMAIL_LEN}">
-                <label for="contact_first_name">Contact first name (optional)</label>
-                <input id="contact_first_name" name="contact_first_name" value="{esc(settings.contact_first_name)}" placeholder="e.g. Dave" maxlength="{letter_content.MAX_CONTACT_FIRST_NAME_LEN}">
-                <div class="hint">Shown alongside your business name and phone number in the letter's contact panel. Leave blank to show just the business name and phone.</div>
-                <label for="offer_text">Offer (optional -- shown exactly as you write it; TreeKey never invents or prefills a discount)</label>
-                <input id="offer_text" name="offer_text" value="{esc(settings.offer_text)}" placeholder="e.g. £50 off work over £500. Mention TREEKEY when requesting your quote." maxlength="{letter_content.MAX_OFFER_TEXT_LEN}">
-                <label for="offer_code">Offer code (optional)</label>
-                <input id="offer_code" name="offer_code" value="{esc(settings.offer_code)}" placeholder="e.g. TREEKEY" maxlength="{letter_content.MAX_OFFER_CODE_LEN}">
-                <label for="offer_conditions">Offer conditions / expiry (optional)</label>
-                <input id="offer_conditions" name="offer_conditions" value="{esc(settings.offer_conditions)}" placeholder="e.g. Valid until 31 December 2026" maxlength="{letter_content.MAX_OFFER_CONDITIONS_LEN}">
-                <div class="hint">Shown compactly on your letter, below your contact details. Leave the offer blank to show nothing -- it's entirely optional and never required. You supply and approve your own offer; changing it requires re-approving your preview before it's used.</div>
-                <label for="business_intro">Business introduction (optional -- a short paragraph about your business)</label>
-                <div style="font-size:12px; color:#94a3b8; margin:-2px 0 6px 0; font-style:italic;">(this is what customers will see on your introduction letter)</div>
-                <textarea id="business_intro" name="business_intro" placeholder="e.g. We're a family-run tree surgery covering [your area], fully accredited and known locally for tidy, careful work." maxlength="{letter_content.MAX_BUSINESS_INTRO_LEN}">{esc(settings.business_intro)}</textarea>
-                <div class="hint">Up to {letter_content.MAX_BUSINESS_INTRO_LEN} characters. Leave blank to use our standard wording instead.</div>
-                <label for="services_note">Relevant services (optional)</label>
-                <textarea id="services_note" name="services_note" placeholder="e.g. Tree felling, crown reduction, hedge trimming, stump grinding" maxlength="{letter_content.MAX_SERVICES_NOTE_LEN}">{esc(settings.services_note)}</textarea>
-                <div class="hint">Up to {letter_content.MAX_SERVICES_NOTE_LEN} characters.</div>
-                <label for="service_area_note">Service area (optional)</label>
-                <input id="service_area_note" name="service_area_note" value="{esc(settings.service_area_note)}" placeholder="e.g. Covering Leeds and the surrounding 15 miles" maxlength="{letter_content.MAX_SERVICE_AREA_LEN}">
-                <label for="insurance_note">Insurance details (optional -- shown exactly as you write it; TreeKey never invents this)</label>
-                <textarea id="insurance_note" name="insurance_note" placeholder="e.g. Public liability insured up to £[your actual cover amount]" maxlength="{letter_content.MAX_INSURANCE_LEN}">{esc(settings.insurance_note)}</textarea>
-                <label for="qualifications_note">Qualifications (optional -- shown exactly as you write it; TreeKey never invents this)</label>
-                <textarea id="qualifications_note" name="qualifications_note" placeholder="e.g. NPTC Level 2 Certificate in Arboriculture (state only what you actually hold)" maxlength="{letter_content.MAX_QUALIFICATIONS_LEN}">{esc(settings.qualifications_note)}</textarea>
-                <div class="hint">Insurance, qualifications and any other credential you list here are your own claim, shown exactly as written -- TreeKey never adds "insured", "qualified", "vetted" or similar wording on your behalf.</div>
-                <button type="submit" class="btn" style="width:100%; margin-top:18px;">Save</button>
+                <div class="lp-section" style="border-top:none; margin-top:8px;">
+                    <h2>Your details <span class="lp-tag lp-tag-req">Required</span></h2>
+                    <p class="lp-section-note">The essentials for your account and every letter.</p>
+                    <label for="account_email_display">Account email</label>
+                    <div id="account_email_display" class="lp-static">{esc(settings.contractor_email)}</div>
+                    <div class="lp-hint">The address you signed in with. It is not printed on your letter.</div>
+                    <label for="business_name">Business name *</label>
+                    <input id="business_name" name="business_name" value="{esc(settings.business_name)}" placeholder="e.g. Ashcroft Tree Surgery" maxlength="{letter_content.MAX_BUSINESS_NAME_LEN}" required>
+                    <div class="lp-hint">Printed on your letter so the homeowner knows who is writing.</div>
+                    <label for="phone">Phone *</label>
+                    <input id="phone" name="phone" value="{esc(settings.phone)}" placeholder="e.g. 01234 567890" maxlength="{letter_content.MAX_PHONE_LEN}" required>
+                    <div class="lp-hint">The number homeowners call. Printed on your letter.</div>
+                </div>
+
+                {_letter_optional_fields_html(settings)}
+
+                <button type="submit" class="lp-btn" style="margin-top:24px;">Save and preview my letter</button>
             </form>
-            <a href="/letter-settings/preview{next_q}" style="display:block; text-align:center; margin-top:12px; color:#94a3b8; font-size:13px;">{preview_link_label}</a>
+            <a href="/letter-settings/preview{next_q}" style="display:block; text-align:center; margin-top:14px; font-size:14px;">{preview_link_label}</a>
         </div>
-    </div>
-    </body>
-    </html>
     """
+    return _letter_page_html(request, page_title, inner, max_width=680)
+
+
+def _known_contact_prefill(email: str) -> dict:
+    """Best-effort prefill for the verified-session signup form from details
+    already on file for this email (task item 3: "Do not assume a personal
+    name is a business name"): limbo_accounts may hold a company name and
+    phone; a subscription only ever has customer_name/phone -- never a
+    company name. A person's own name is used ONLY for the responsible-
+    contact field, never as the business name. Any lookup failure leaves
+    the form blank."""
+    out = {"business_name": "", "phone": "", "responsible_name": ""}
+    try:
+        limbo = database.get_limbo_account(email)
+        if limbo:
+            out["business_name"] = (limbo.get("company_name") or "").strip()
+            out["phone"] = (limbo.get("phone") or "").strip()
+            out["responsible_name"] = (limbo.get("customer_name") or "").strip()
+        sub = database.get_contractor_subscription(email)
+        if sub:
+            out["phone"] = out["phone"] or (sub.get("phone") or "").strip()
+            out["responsible_name"] = out["responsible_name"] or (sub.get("customer_name") or "").strip()
+    except Exception as e:
+        logger.error(f"[Signup] Could not look up known business/contact details for {email}: {e}")
+    return out
+
+
+def _letter_settings_page_response(request: Request, session_email: str, *, saved: bool = False,
+                                    approved_msg: bool = False, next: Optional[str] = None,
+                                    intent: Optional[str] = None):
+    """My Account letter settings (/letter-settings): edits the saved row.
+    An account with NO saved row has not completed signup, so it is sent to
+    the one integrated signup form instead of a second setup experience."""
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        settings = letter_content.get_contractor_settings(cur, session_email)
+    finally:
+        cur.close()
+        conn.close()
+
+    if settings is None:
+        return RedirectResponse(url=_signup_url(next), status_code=303)
+
+    return HTMLResponse(_letter_settings_form_html(
+        settings, saved=saved, approved_msg=approved_msg, next=next, intent=intent, request=request,
+    ))
 
 
 @app.get("/letter-settings", response_class=HTMLResponse)
@@ -3818,49 +3857,9 @@ def letter_settings_form(request: Request, saved: Optional[str] = Query(None), n
             login_redirect = f"/login?next={urllib.parse.quote('/letter-settings?next=' + urllib.parse.quote(safe_next, safe=''), safe='')}"
         return RedirectResponse(url=login_redirect, status_code=303)
 
-    conn = database.get_db_conn()
-    cur = conn.cursor()
-    try:
-        settings = letter_content.get_contractor_settings(cur, session_email)
-    finally:
-        cur.close()
-        conn.close()
-
-    if settings is None:
-        # 2026-09-24 handoff, task item 3 ("Prefill verified/saved business
-        # and contact details already held... Do not assume a personal
-        # name is a business name"): before falling back to a fully blank
-        # form, check the two existing places a phone number/company name
-        # may already be on file for this email -- database.
-        # get_limbo_account (the free-lead-promo signup form, which
-        # explicitly collects a company_name -- see that table's own Sep
-        # 10 2026 comment) and database.get_contractor_subscription (a
-        # paying subscriber, which only ever has customer_name/phone, NOT
-        # a company name). customer_name is deliberately never used for
-        # business_name here -- a person's own name is not their business
-        # name, and this codebase has no reliable way to tell the two
-        # apart, so the safer of the two knowns is used and nothing is
-        # guessed beyond it. Best-effort: any lookup failure just leaves
-        # the form blank, same as before this existed.
-        business_name_guess, phone_guess = "", ""
-        try:
-            limbo = database.get_limbo_account(session_email)
-            if limbo:
-                business_name_guess = (limbo.get("company_name") or "").strip()
-                phone_guess = (limbo.get("phone") or "").strip()
-            if not phone_guess:
-                sub = database.get_contractor_subscription(session_email)
-                if sub:
-                    phone_guess = (sub.get("phone") or "").strip()
-        except Exception as e:
-            logger.error(f"[LetterSettings] Could not look up known business/contact details for {session_email}: {e}")
-        settings = letter_content.ContractorLetterSettings(
-            contractor_email=session_email, business_name=business_name_guess, phone=phone_guess,
-        )
-
-    return HTMLResponse(_letter_settings_form_html(
-        settings, saved=(saved == "1"), approved_msg=(saved == "approved"), next=next, intent=intent,
-    ))
+    return _letter_settings_page_response(
+        request, session_email, saved=(saved == "1"), approved_msg=(saved == "approved"), next=next, intent=intent,
+    )
 
 
 @app.post("/letter-settings")
@@ -3905,6 +3904,13 @@ async def save_letter_settings(request: Request):
     conn = database.get_db_conn()
     cur = conn.cursor()
     try:
+        # 2026-09-30: an ordinary settings save only EDITS an existing
+        # record. The first-ever save for an account goes through the
+        # integrated signup form (/free-account), which is what captures
+        # the responsible contact and the Terms acceptance; this route must
+        # not be a second way to create an account's first settings.
+        if letter_content.get_contractor_settings(cur, session_email) is None:
+            return RedirectResponse(url=_signup_url(next), status_code=303)
         letter_content.upsert_contractor_settings(cur, settings)
         conn.commit()
     except ValueError as e:
@@ -3913,7 +3919,7 @@ async def save_letter_settings(request: Request):
         # (Request E) is carried through so a forced detour from checkout
         # survives a validation error too.
         conn.rollback()
-        return HTMLResponse(_letter_settings_form_html(settings, error=str(e), next=next, intent=intent), status_code=400)
+        return HTMLResponse(_letter_settings_form_html(settings, error=str(e), next=next, intent=intent, request=request), status_code=400)
     except Exception:
         conn.rollback()
         raise
@@ -3962,7 +3968,7 @@ def letter_settings_preview(request: Request, next: Optional[str] = Query(None))
         '<p style="color:#34d399; font-size:13px;">This exact template is already approved and in use.</p>'
         if already_current else
         f"""<form method="POST" action="/letter-settings/approve{next_q}">
-            <button type="submit" class="btn" style="width:100%;">Approve this wording -- use it for every future lead</button>
+            <button type="submit" class="lp-btn">Approve this wording -- use it for every future lead</button>
         </form>"""
     )
     # 2026-09-23, Request E: only shown when this preview was reached via a
@@ -3973,36 +3979,19 @@ def letter_settings_preview(request: Request, next: Optional[str] = Query(None))
         if next else ""
     )
 
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html lang="en-GB">
-    <head>
-        <meta charset="UTF-8">
-        <title>Preview Letter Template | TreeKey</title>
-        <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:32px 16px; }}
-            .container {{ max-width: 720px; margin: auto; }}
-            .card {{ background:#0f172a; border:1px solid #1e293b; border-radius: 12px; padding: 24px; }}
-            .btn {{ background:#059669; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size:14px; }}
-            iframe {{ width:100%; height:600px; border:1px solid #334155; border-radius:8px; background:white; margin-top:12px; }}
-        </style>
-    </head>
-    <body>
-    <div class="container">
+    return HTMLResponse(_letter_page_html(request, "Preview Letter Template", f"""
+    
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
             <h1 style="margin:0; font-size:22px; color:#34d399;">Preview Your Letter Template</h1>
-            <a href="/letter-settings{next_q}" style="color:#34d399; font-size:13px; text-decoration:none; font-weight:bold;">&larr; Edit</a>
+            <a href="/letter-settings{next_q}" style="font-size:14px; font-weight:600;">&larr; Edit</a>
         </div>
-        <div class="card">
+        <div class="lp-card">
             {next_banner}
             <p style="font-size:13px; color:#94a3b8; margin-top:0;">This uses illustrative example lead details ({html.escape(letter_content.PREVIEW_LEAD_REFERENCE)}) so you can see the exact wording and layout -- your real letters will use the same template with each homeowner's actual details filled in.</p>
             <iframe srcdoc="{html.escape(preview_html)}"></iframe>
             <div style="margin-top:16px;">{approve_section}</div>
         </div>
-    </div>
-    </body>
-    </html>
-    """)
+    """, max_width=760))
 
 
 @app.post("/letter-settings/approve")
@@ -7557,43 +7546,17 @@ def _login_session_response(verified_email: str, next_url: Optional[str] = None)
         return response
 
     safe_next = _safe_next_url(next_url)
-    if safe_next:
-        return _session_redirect(safe_next)
 
-    active_sub = database.get_contractor_subscription(verified_email)
-    if active_sub and active_sub.get("active"):
-        dest = "/dashboard"
-    elif database.get_limbo_account(verified_email):
-        dest = "/free-dashboard"
-    else:
-        return RedirectResponse(url="/pricing?msg=no_subscription", status_code=303)
-
-    # 2026-09-24 handoff, task item 2 ("After first-time email
-    # verification, offer: Personalise my letter / Use the standard
-    # letter... Do not force custom writing or repeat onboarding on every
-    # login"): only reached here -- no `next` was carried through, i.e.
-    # this login wasn't a checkout continuation, which already gets its
-    # own forced detour via _letter_setup_complete/checkout() further
-    # down the line and must not be interrupted here (see checkout()'s
-    # own comment -- "preserve the original purchase destination when
-    # signup began from checkout" is satisfied simply by never reaching
-    # this branch in that case, not by new code).
-    #
-    # "First-time" is read as "has this contractor ever made a letter
-    # choice at all" -- a saved contractor_letter_settings row -- rather
-    # than tracked separately (e.g. counting used magic-link/OTP tokens):
-    # that is the exact piece of state item 2 is actually gating on, it
-    # already exists, and choosing "Use the standard letter" saves a row
-    # too (see letter_onboarding_use_standard below) -- so this offer is
-    # shown once, ever, until a choice is made, and never again after.
-    #
-    # Deliberately fails OPEN on any error: this is a friendly one-time
-    # prompt, not a security or mailing gate -- unlike _letter_setup_
-    # complete (fail-CLOSED on purpose, since it blocks real purchases),
-    # a lookup failure here should never block an ordinary sign-in. The
-    # real requirement -- a completed, approved letter template before
-    # anything is ever posted -- is still enforced for real at checkout,
-    # completely unchanged by this.
+    # 2026-09-30: an account with no saved letter details has not completed
+    # signup. Whoever it is -- a brand-new address entered at Log In, or an
+    # older account that pre-dates the letter feature -- and whether or not
+    # a checkout `next` is pending, they continue to the ONE integrated
+    # signup form (email already verified by this login), with `next`
+    # preserved. Reached only AFTER the emailed link/code proves inbox
+    # access, so the Log In form never reveals whether an address is
+    # registered. Deliberately fails OPEN on a lookup error (a friendly
+    # gate, not a security gate: real sending still needs an approved
+    # letter, enforced at checkout).
     try:
         conn = database.get_db_conn()
         cur = conn.cursor()
@@ -7603,11 +7566,21 @@ def _login_session_response(verified_email: str, next_url: Optional[str] = None)
             cur.close()
             conn.close()
     except Exception as e:
-        logger.error(f"[LetterOnboarding] Could not check letter-settings for {verified_email} at login -- skipping offer: {e}")
+        logger.error(f"[Signup] Could not check letter-settings for {verified_email} at login -- skipping signup form: {e}")
         has_settings = True
-
     if not has_settings:
-        return _session_redirect(f"/letter-onboarding?next={urllib.parse.quote(dest, safe='')}")
+        return _session_redirect(_signup_url(safe_next))
+
+    if safe_next:
+        return _session_redirect(safe_next)
+
+    active_sub = database.get_contractor_subscription(verified_email)
+    if active_sub and active_sub.get("active"):
+        dest = "/dashboard"
+    elif database.get_limbo_account(verified_email):
+        dest = "/free-dashboard"
+    else:
+        dest = "/pricing?msg=no_subscription"
     return _session_redirect(dest)
 
 
@@ -7627,13 +7600,16 @@ def login_page(request: Request, error: Optional[str] = None, next: Optional[str
     safe_next = _safe_next_url(next)
     next_field_html = f"""<input type="hidden" name="next" value="{html.escape(safe_next)}">""" if safe_next else ""
     next_note_html = """<p class="text-emerald-400 text-[13px] font-bold text-center m-0 mb-4">Sign in to see your member discount on that lead →</p>""" if safe_next else ""
+    # 2026-09-30: first-time signup has ONE entry form (/free-account); the
+    # link to it keeps any checkout `next` so the destination survives signup.
+    signup_next_q = f"?next={urllib.parse.quote(safe_next, safe='')}" if safe_next else ""
     return f"""
     <!DOCTYPE html>
     <html lang="en-GB" class="scroll-smooth">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Sign Up / Log In | TreeKey</title>
+        <title>Log In | TreeKey</title>
         <link rel="icon" href="/static/icon-192.png">
         <link href="/static/tailwind.css" rel="stylesheet">
         <style>
@@ -7650,7 +7626,7 @@ def login_page(request: Request, error: Optional[str] = None, next: Optional[str
             <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30 mx-auto mb-2.5 sm:mb-3">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"/></svg>
             </div>
-            <h2 class="text-white text-xl font-bold m-0 mb-1">Sign Up / Log In</h2>
+            <h2 class="text-white text-xl font-bold m-0 mb-1">Log In</h2>
             <p class="text-slate-400 text-[13px] m-0">Zero-Password — enter your email, we'll send you a secure link</p>
         </div>
 
@@ -7668,11 +7644,11 @@ def login_page(request: Request, error: Optional[str] = None, next: Optional[str
             <input id="login-email" type="email" name="contact" placeholder="e.g. dave@apex-trees.co.uk" required autofocus>
             <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3.5 rounded-lg font-bold text-[15px] cursor-pointer w-full transition-colors">Send Secure Login Link →</button>
         </form>
-        <p class="text-center text-xs text-slate-500 mt-3 mb-0">Works whether you're an existing subscriber or signing up for the first time.</p>
+        <p class="text-center text-xs text-slate-500 mt-3 mb-0">For existing TreeKey accounts. New here? Use the link below to create your account.</p>
 
         <div class="text-center mt-4 pt-3 sm:mt-6 sm:pt-4 border-t border-slate-800">
-            <p class="text-xs text-slate-400 mb-2">New here and not ready to subscribe?</p>
-            <a href="/free-account" class="text-[13px] font-bold text-emerald-400 hover:brightness-125 no-underline transition-colors">Get a free lead first, no card needed →</a>
+            <p class="text-xs text-slate-400 mb-2">New to TreeKey?</p>
+            <a href="/free-account{signup_next_q}" class="text-[13px] font-bold text-emerald-400 hover:brightness-125 no-underline transition-colors">Create your account, no card needed →</a>
         </div>
 
         <div class="flex items-center justify-center gap-2 text-center mt-4 sm:mt-5 text-xs text-slate-500">
@@ -7715,6 +7691,14 @@ async def request_magic_link(request: Request):
             err_redirect += f"&next={urllib.parse.quote(safe_next)}"
         return RedirectResponse(url=err_redirect, status_code=303)
 
+    return _deliver_login_link(request, contact, auth_data, safe_next)
+
+
+def _deliver_login_link(request: Request, contact: str, auth_data: dict, safe_next: Optional[str]):
+    """Emails the magic link + OTP to `contact` and returns the 'Check Your
+    Inbox' page. Shared by /api/request-magic-link and the first-time signup
+    (/api/signup); neither the token nor the OTP may ever appear in the
+    returned page (asserted at the end)."""
     # 2026-09-23, CRITICAL SECURITY FIX (external review finding): magic_url
     # carries the actual bearer token (auth_data['token']) that /verify-login
     # below accepts to create a session with NO other check. This value must
@@ -7907,135 +7891,231 @@ async def verify_otp_route(request: Request):
 # address viewable (blurred out or something) but the job details
 # viewable and date it was applied... as a sales prompt."
 
-@app.get("/free-account", response_class=HTMLResponse)
-def free_account_signup_page(request: Request, error: Optional[str] = None, sent: Optional[str] = None, code: Optional[str] = None,
-                              expired: Optional[str] = None):
-    # Sep 9 2026, Nick's ask: brought onto the same dark design system as
-    # the login page -- shared nav/footer, dark text-box styling, no
-    # emojis (the title mark and button glyph are both gone, replaced
-    # by the same SVG brand mark used on /login).
-    #
-    # Sep 10 2026, free-lead-promo redesign: this is now a single form used
-    # by all three traffic types Nick called out (cold-email code click,
-    # organic search, and a lapsed-code re-request) -- no more instant
-    # grant. Submitting without a code reserves a lead and emails a code;
-    # submitting WITH a code (either typed in, or pre-filled via ?code=
-    # from the emailed link) redeems it. `sent=1` shows the
-    # check-your-email confirmation state instead of the form.
-    err_html = f"""<div class="bg-red-950/40 border border-red-500/40 text-red-300 px-3.5 py-2.5 rounded-lg mb-4 text-sm">{error}</div>""" if error else ""
-    code_val = html.escape(code) if code else ""
+_SIGNUP_FIELDS = ("email", "responsible_name", "business_name", "phone", "service_area_note", "insurance_note",
+                  "qualifications_note", "template_key", "business_intro", "services_note", "contact_email",
+                  "contact_first_name", "offer_text", "offer_code", "offer_conditions")
+MAX_RESPONSIBLE_NAME_LEN = 80
 
-    if expired:
-        # Sep 10 2026, Nick's explicit ask: a lapsed code gets its own
-        # focused state -- "unfortunately this code has expired, hit the
-        # button to get a fresher one" -- rather than a generic error
-        # dumped back onto the full form. The button reuses the postcode/
-        # phone already on file (see /api/request-new-code) so there's
-        # nothing to retype.
-        body = f"""
-        <div class="text-center mb-4 sm:mb-5">
-            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-amber-600 to-amber-900 flex items-center justify-center shadow-lg border border-amber-500/30 mx-auto mb-2.5 sm:mb-3">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fde68a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
-            </div>
-            <h2 class="text-white text-xl font-bold m-0 mb-1">That code has expired</h2>
-            <p class="text-slate-400 text-[13px] m-0">Unfortunately that lead's gone back on the market. Hit the button below and we'll email you a code for a fresher one near you.</p>
-        </div>
-        {err_html}
-        <form action="/api/request-new-code" method="POST">
-            <input type="hidden" name="email" value="{html.escape(expired)}">
-            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3.5 rounded-lg font-bold text-[15px] cursor-pointer w-full transition-colors">Email Me A Fresh Code →</button>
-        </form>
-        <div class="text-center mt-4 pt-3 sm:mt-5 sm:pt-4 border-t border-slate-800 text-xs text-slate-400">
-            Details changed, or that email not working? <a href="/free-account" class="text-emerald-400 hover:brightness-125 font-bold no-underline transition-colors">Fill in the full form instead</a>
-        </div>
-        """
-    elif sent:
-        body = f"""
-        <div class="text-center mb-4 sm:mb-5">
-            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30 mx-auto mb-2.5 sm:mb-3">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"/></svg>
-            </div>
-            <h2 class="text-white text-xl font-bold m-0 mb-1">Check your email</h2>
-            <p class="text-slate-400 text-[13px] m-0">We've reserved a real job near you and emailed you a code. Enter it below once it arrives (valid for 3 days) to claim it.</p>
-        </div>
-        {err_html}
-        <form action="/api/free-signup" method="POST">
-            <input type="hidden" name="email" value="{html.escape(sent)}">
-            <label for="fs-confirm-code" class="text-xs font-bold text-slate-300">Your Code:</label>
-            <input id="fs-confirm-code" type="text" name="code" placeholder="e.g. 4F91A2C0" required style="text-transform:uppercase;">
-            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3.5 rounded-lg font-bold text-[15px] cursor-pointer w-full transition-colors">Claim My Lead →</button>
-        </form>
-        """
+
+def _first_time_signup_page_html(request: Optional[Request], *, values: Optional[dict] = None,
+                                 error: Optional[str] = None, next: Optional[str] = None,
+                                 verified_email: Optional[str] = None) -> str:
+    """2026-09-30: THE first-time signup form -- account email, the required
+    business/contact details and the existing optional letter-personalisation
+    fields on one page. Nothing submitted here is saved to any account until
+    the emailed link/code is verified (see /api/signup and
+    database.verify_magic_auth_token)."""
+    v = dict(values or {})
+    if verified_email:
+        v["email"] = verified_email
+
+    def g(k: str) -> str:
+        return (v.get(k) or "").strip()
+
+    safe_next = _safe_next_url(next)
+    next_field = f'<input type="hidden" name="next" value="{html.escape(safe_next)}">' if safe_next else ""
+    signin_q = f"?next={urllib.parse.quote(safe_next, safe='')}" if safe_next else ""
+    optional_settings = letter_content.ContractorLetterSettings(
+        contractor_email=g("email"), business_name=g("business_name"), phone=g("phone"),
+        service_area_note=g("service_area_note"), insurance_note=g("insurance_note"),
+        qualifications_note=g("qualifications_note"),
+        template_key=g("template_key") or letter_content.DEFAULT_TEMPLATE_KEY,
+        business_intro=g("business_intro"), services_note=g("services_note"),
+        contact_email=g("contact_email"), contact_first_name=g("contact_first_name"),
+        offer_text=g("offer_text"), offer_code=g("offer_code"), offer_conditions=g("offer_conditions"),
+    )
+    e = html.escape
+    if verified_email:
+        email_block = f"""<label for="account_email_display">Account email</label>
+                    <div id="account_email_display" class="lp-static">{e(verified_email)}</div>
+                    <div class="lp-hint">Confirmed. You sign in with this address. It is not printed on your letter.</div>"""
+        intro = ("Your email address is confirmed. Tell us who you are and set up the details for your posted "
+                 "introduction letters. Saving is not approval: you will preview your letter and approve it before it is used.")
+        heading = "Set up your TreeKey account"
+        form_action = "/api/signup/complete"
+        submit_label = "Save my details"
+        signin_line = ""
     else:
-        body = f"""
-        <div class="text-center mb-4 sm:mb-5">
-            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30 mx-auto mb-2.5 sm:mb-3">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"/></svg>
-            </div>
-            <h2 class="text-white text-xl font-bold m-0 mb-1">Get a free tree lead</h2>
-            <p class="text-slate-400 text-[13px] m-0">No card. No subscription. Just a real job near you.</p>
-        </div>
-        {err_html}
-        <form action="/api/free-signup" method="POST">
-            <label for="fs-name" class="text-xs font-bold text-slate-300">Name:</label>
-            <input id="fs-name" type="text" name="name" placeholder="e.g. Dave Smith" required>
-            <label for="fs-company-name" class="text-xs font-bold text-slate-300">Company Name:</label>
-            <input id="fs-company-name" type="text" name="company_name" placeholder="e.g. Apex Trees Ltd" required>
-            <label for="fs-email" class="text-xs font-bold text-slate-300">Email Address:</label>
-            <input id="fs-email" type="email" name="email" placeholder="e.g. dave@apex-trees.co.uk" required>
-            <label for="fs-phone" class="text-xs font-bold text-slate-300">Phone:</label>
-            <input id="fs-phone" type="tel" name="phone" placeholder="e.g. 07123 456789" required>
-            <label for="fs-postcode" class="text-xs font-bold text-slate-300">Your Postcode or Area:</label>
-            <input id="fs-postcode" type="text" name="postcode" placeholder="e.g. NG22" required>
-            <label for="fs-code" class="text-xs font-bold text-slate-300">Already have a code from our email? Enter it here, otherwise leave blank:</label>
-            <input id="fs-code" type="text" name="code" placeholder="e.g. 4F91A2C0" value="{code_val}" style="text-transform:uppercase;">
-            <!-- Sep 11 2026, Nick's ask ("we should have an 'i agree to
-                 terms and conditions' button"): required here too, and
-                 enforced server-side in free_signup (see
-                 database.record_free_account_terms_acceptance). Inline
-                 style deliberately, not new Tailwind utility classes --
-                 static/tailwind.css is precompiled and only contains
-                 classes already scanned in at some past build (see the
-                 Sep 10 "reduce the box 20%" incident); an unusual class
-                 combo like this can silently render as nothing until
-                 someone reruns the build on Nick's machine. -->
-            <label style="display:flex; align-items:flex-start; gap:10px; margin-bottom:16px; cursor:pointer; font-weight:400; font-size:13px; color:#cbd5e1;">
-                <input type="checkbox" name="agree_terms" value="yes" required style="width:auto; margin:2px 0 0 0; flex-shrink:0; accent-color:#10b981;">
-                <span>I agree to TreeKey's <a href="/terms-of-service" target="_blank" style="color:#34d399;">Terms of Service</a> and <a href="/privacy-policy" target="_blank" style="color:#34d399;">Privacy Policy</a>.</span>
-            </label>
-            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3.5 rounded-lg font-bold text-[15px] cursor-pointer w-full transition-colors">Get My Free Lead →</button>
-        </form>
-        <div class="text-center mt-4 pt-3 sm:mt-5 sm:pt-4 border-t border-slate-800 text-xs text-slate-400">
-            Already have an account? <a href="/login" class="text-emerald-400 hover:brightness-125 font-bold no-underline transition-colors">Sign in</a>
-        </div>
-        """
+        email_block = f"""<label for="email">Account email *</label>
+                    <input id="email" name="email" type="email" value="{e(g('email'))}" placeholder="e.g. dave@apex-trees.co.uk" maxlength="{letter_content.MAX_CONTACT_EMAIL_LEN}" autocomplete="email" required>
+                    <div class="lp-hint">You sign in with this address. We send the confirmation link here. It is not printed on your letter.</div>"""
+        intro = ("Tell us who you are and set up the details for your posted introduction letters. We will email you a "
+                 "secure link to confirm your email address; nothing is saved to an account until you confirm it. "
+                 "Saving is not approval: you will preview your letter and approve it before it is used.")
+        heading = "Create your TreeKey account"
+        form_action = "/api/signup"
+        submit_label = "Create account and confirm my email"
+        signin_line = f'<p style="text-align:center; font-size:13px; color:#94a3b8; margin:16px 0 0 0;">Already have an account? <a href="/login{signin_q}">Log in</a></p>'
+    err_html = (f'<div style="background:rgba(248,113,113,0.12); border:1px solid #f87171; color:#fca5a5; '
+                f'padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:13px;">{e(error)}</div>') if error else ""
+    inner = f"""
+        <h1 style="margin:0 0 16px 0; font-size:24px; color:#34d399;">{heading}</h1>
+        <div class="lp-card">
+            {err_html}
+            <p style="font-size:14px; color:#94a3b8; margin-top:0;">{intro}</p>
+            <form method="POST" action="{form_action}">
+                {next_field}
+                <div class="lp-section" style="border-top:none; margin-top:8px;">
+                    <h2>Your details <span class="lp-tag lp-tag-req">Required</span></h2>
+                    <p class="lp-section-note">The essentials for your account and every letter.</p>
+                    {email_block}
+                    <label for="responsible_name">Your full name *</label>
+                    <input id="responsible_name" name="responsible_name" value="{e(g('responsible_name'))}" placeholder="e.g. Dave Smith" maxlength="{MAX_RESPONSIBLE_NAME_LEN}" autocomplete="name" required>
+                    <div class="lp-hint">The person responsible for this account. This is kept on your account and is not printed on your letter.</div>
+                    <label for="business_name">Business name *</label>
+                    <input id="business_name" name="business_name" value="{e(g('business_name'))}" placeholder="e.g. Ashcroft Tree Surgery" maxlength="{letter_content.MAX_BUSINESS_NAME_LEN}" required>
+                    <div class="lp-hint">Printed on your letter so the homeowner knows who is writing.</div>
+                    <label for="phone">Telephone *</label>
+                    <input id="phone" name="phone" type="tel" value="{e(g('phone'))}" placeholder="e.g. 01234 567890" maxlength="{letter_content.MAX_PHONE_LEN}" autocomplete="tel" required>
+                    <div class="lp-hint">The number homeowners call. Printed on your letter.</div>
+                </div>
 
-    return f"""
-    <!DOCTYPE html>
-    <html lang="en-GB" class="scroll-smooth">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Get a Free Lead | TreeKey</title>
-        <link rel="icon" href="/static/icon-192.png">
-        <link href="/static/tailwind.css" rel="stylesheet">
-        <style>
-            .box input {{ width:100%; box-sizing:border-box; padding:12px 14px; border:1px solid #334155; border-radius:8px; margin-top:6px; margin-bottom:16px; font-family:inherit; font-size:15px; background:#020617; color:#e2e8f0; }}
-            .box input:focus {{ outline:none; border-color:#10b981; box-shadow:0 0 0 3px rgba(16,185,129,0.15); }}
-            .box input::placeholder {{ color:#475569; }}
-        </style>
-    </head>
-    <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
-    {_shared_nav_html(request)}
-    <div class="px-4 py-6 sm:py-16">
-    <div class="box max-w-[440px] mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl">
-        {body}
-    </div>
-    </div>
-    {_shared_footer_html()}
-    </body>
-    </html>
+                {_letter_optional_fields_html(optional_settings)}
+
+                <label style="display:flex; align-items:flex-start; gap:10px; margin-top:24px; cursor:pointer; font-weight:400; font-size:13px; color:#cbd5e1;">
+                    <input type="checkbox" name="agree_terms" value="yes" required style="width:auto; margin:2px 0 0 0; flex-shrink:0; accent-color:#10b981;">
+                    <span>I agree to TreeKey's <a href="/terms-of-service" target="_blank">Terms of Service</a> and <a href="/privacy-policy" target="_blank">Privacy Policy</a>. *</span>
+                </label>
+                <button type="submit" class="lp-btn" style="margin-top:20px;">{submit_label}</button>
+            </form>
+            {signin_line}
+        </div>
     """
+    return _letter_page_html(request, f"{heading} | TreeKey", inner, max_width=680)
+
+
+@app.get("/free-account", response_class=HTMLResponse)
+def free_account_signup_page(request: Request, error: Optional[str] = None, next: Optional[str] = None):
+    """The first-time signup entry point (the URL predates the retired
+    free-lead offer and is kept so existing links keep working). Renders the
+    one integrated form; see _first_time_signup_page_html.
+
+    A visitor who already has a verified session (they entered an unknown
+    email at Log In, or checkout sent them here) gets the same form with
+    their confirmed email shown instead of an email box -- unless their
+    account already has saved letter details, in which case there is nothing
+    to sign up for and they simply continue."""
+    session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not session_email:
+        return _first_time_signup_page_html(request, error=error, next=next)
+    try:
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+        try:
+            has_settings = letter_content.get_contractor_settings(cur, session_email) is not None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[Signup] Could not check letter-settings for {session_email}: {e}")
+        return _first_time_signup_page_html(request, error=error, next=next)
+    if has_settings:
+        return RedirectResponse(url=_safe_next_url(next) or "/account", status_code=303)
+    prefill = _known_contact_prefill(session_email)
+    return _first_time_signup_page_html(request, values=prefill, error=error, next=next, verified_email=session_email)
+
+
+def _validate_signup_values(values: dict, terms_ticked: bool):
+    """Shared by both signup submissions. Returns (error_message, letter_fields);
+    letter_fields excludes the email and the responsible-contact name."""
+    email = values["email"]
+    if not email or "@" not in email or " " in email or len(email) > letter_content.MAX_CONTACT_EMAIL_LEN:
+        return "Please enter a valid email address.", None
+    if not values["responsible_name"]:
+        return "Please enter your full name.", None
+    if len(values["responsible_name"]) > MAX_RESPONSIBLE_NAME_LEN:
+        return f"Your name must be {MAX_RESPONSIBLE_NAME_LEN} characters or fewer.", None
+    letter_fields = {k: values[k] for k in _SIGNUP_FIELDS if k not in ("email", "responsible_name")}
+    if not letter_fields["template_key"]:
+        letter_fields["template_key"] = letter_content.DEFAULT_TEMPLATE_KEY
+    problems = letter_content.ContractorLetterSettings(contractor_email=email, **letter_fields).validate()
+    if problems:
+        return "; ".join(problems), None
+    if not terms_ticked:
+        return "Please tick the Terms of Service checkbox to continue.", None
+    return None, letter_fields
+
+
+@app.post("/api/signup/complete")
+async def first_time_signup_complete(request: Request):
+    """Second half of signup for someone whose email is ALREADY verified
+    (a signed session): saves their first letter details, responsible
+    contact and Terms acceptance. The email comes only from the session
+    cookie, never from the form. Insert-only: it can never overwrite an
+    existing settings row, and it is serialised per email so a double
+    submit applies once."""
+    session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    form = await request.form()
+    safe_next = _safe_next_url(form.get("next"))
+    if not session_email:
+        login_q = f"?next={urllib.parse.quote(_signup_url(safe_next), safe='')}"
+        return RedirectResponse(url=f"/login{login_q}", status_code=303)
+
+    values = {k: (form.get(k) or "").strip() for k in _SIGNUP_FIELDS}
+    values["email"] = session_email
+    terms_ticked = (form.get("agree_terms") or "").strip().lower() in ("yes", "on", "true", "1")
+    error, letter_fields = _validate_signup_values(values, terms_ticked)
+    if error:
+        return HTMLResponse(_first_time_signup_page_html(request, values=values, error=error, next=safe_next,
+                                                         verified_email=session_email), status_code=400)
+    settings = letter_content.ContractorLetterSettings(contractor_email=session_email, **letter_fields)
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (session_email,))
+        letter_content.insert_initial_contractor_settings(
+            cur, settings, responsible_contact_name=values["responsible_name"],
+            terms_accepted_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+    return _login_session_response(session_email, next_url=safe_next)
+
+
+@app.post("/api/signup")
+async def first_time_signup(request: Request):
+    """Submits the integrated first-time signup form. Validates everything,
+    then stores the submitted details ONLY on the verification record that
+    the emailed link/code belongs to (database.create_magic_auth_token's
+    pending_signup) -- nothing is written to any account here. They are
+    applied, once, by database.verify_magic_auth_token if and only if the
+    email turns out to have no existing account of any kind. An email that
+    already has an account gets an ordinary login link and its details are
+    never touched; the response is identical either way, so this form does
+    not reveal whether an address is registered."""
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        return HTMLResponse(_first_time_signup_page_html(request, error="Too many attempts. Please wait a minute and try again."), status_code=429)
+
+    form = await request.form()
+    values = {k: (form.get(k) or "").strip() for k in _SIGNUP_FIELDS}
+    values["email"] = values["email"].lower()
+    safe_next = _safe_next_url(form.get("next"))
+    terms_ticked = (form.get("agree_terms") or "").strip().lower() in ("yes", "on", "true", "1")
+
+    def _fail(msg: str):
+        return HTMLResponse(_first_time_signup_page_html(request, values=values, error=msg, next=safe_next), status_code=400)
+
+    email = values["email"]
+    error, letter_fields = _validate_signup_values(values, terms_ticked)
+    if error:
+        return _fail(error)
+
+    pending = None
+    if not database.email_has_existing_account(email):
+        pending = {
+            "responsible_contact_name": values["responsible_name"],
+            "terms_accepted_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "letter": letter_fields,
+        }
+    auth_data = database.create_magic_auth_token(email, pending_signup=pending)
+    if not auth_data:
+        return _fail("We could not send your confirmation link. Please try again.")
+    return _deliver_login_link(request, email, auth_data, safe_next)
 
 
 FREE_LEAD_DAILY_CAP = 50  # Sep 10 2026: circuit-breaker, see _issue_free_lead_code. Raise/lower by editing this constant.
@@ -8138,232 +8218,31 @@ def _issue_free_lead_code(email: str, phone: str, lat: float, lon: float,
     return response
 
 
+# 2026-09-30: the free-lead offer is retired. These three routes used to
+# create free/"limbo" accounts, reserve real leads, email redemption codes
+# and grant free leads (with a session cookie on code redemption). They now
+# do NOTHING except send the visitor to the one integrated signup form:
+# no database read or write, no lead reserved or granted, no email, no
+# cookie. The routes are kept (rather than removed) so an old bookmark, an
+# open browser tab or an already-sent email link lands somewhere sensible
+# instead of a 404/405. Existing limbo_accounts rows, granted leads and
+# reserved codes are untouched (reservations lapse via the existing sweep);
+# _issue_free_lead_code and the database helpers are left in place with no
+# remaining callers. Cold Email 1 still names this offer and must not be
+# sent (see CURRENT_HANDOFF.md).
 @app.get("/api/cold-email-1-test")
-def cold_email_1_test(request: Request, email: str = Query(...), postcode: str = Query(...),
-                       name: str = Query(""), company: str = Query("")):
-    """Sep 10 2026, Nick's ask verbatim: "I want you to cold email me...
-    naming me specifically and mentioning an area near me, and giving me a
-    code and a link to tap" -- a manual test send of the real, approved
-    cold-outreach Email 1 (see notifications.send_cold_email_1) using a
-    genuinely reserved lead and a genuinely redeemable code, not a mockup.
-
-    Deliberately NOT linked from any page -- the actual cold-outreach
-    system (enriching a list of real prospects and sending this at scale)
-    is not built yet; this exists only so this one email can be tested on
-    demand. It reuses every abuse guard _issue_free_lead_code already has
-    (rate limit, one active code per email, request cap, IP/device/phone
-    checks, daily circuit-breaker) since it burns the exact same real
-    inventory a public signup would -- so it's no more exposed than the
-    already-public /free-account form, just not advertised anywhere. Safe
-    to delete this route once you're done evaluating the email; nothing
-    else depends on it."""
-    client_ip = request.client.host if request.client else "unknown"
-    if not _check_rate_limit(client_ip):
-        return PlainTextResponse("Too many attempts. Please wait a minute and try again.", status_code=429)
-    resolved = database.resolve_location(postcode)
-    if resolved.get("lat") is None:
-        return PlainTextResponse(f"Couldn't resolve {postcode!r} to a UK postcode/outcode.", status_code=400)
-    device_id = request.cookies.get("treekey_device_id") or secrets.token_hex(16)
-    # Sep 10 2026, CRITICAL FIX: this route skipped create_or_update_limbo_
-    # account, unlike the real /api/free-signup path. Nick's live test
-    # redeemed a code fine (the lead genuinely flipped to 'claimed' in the
-    # database) but then hit a blank /free-account page with zero
-    # explanation -- root cause was record_free_lead_grant being a no-op
-    # UPDATE against a limbo_accounts row that never existed for this test
-    # email, so /free-dashboard found no account and silently bounced back
-    # to the blank form. A real cold-email click always has this row by
-    # the time they redeem (the real form creates it first); this test
-    # helper now does the same so a test send behaves exactly like the
-    # real flow it's meant to be previewing.
-    database.create_or_update_limbo_account(email=email, name=name or None, phone=None,
-                                             outcode=resolved["outcode"], lat=resolved["lat"], lon=resolved["lon"],
-                                             company_name=company or None)
-    return _issue_free_lead_code(email, phone="", lat=resolved["lat"], lon=resolved["lon"],
-                                  client_ip=client_ip, device_id=device_id,
-                                  email_style="cold_email_1", director_name=name, company_name=company)
+def cold_email_1_test(request: Request):
+    return RedirectResponse(url="/free-account", status_code=303)
 
 
 @app.post("/api/free-signup")
 async def free_signup(request: Request):
-    # Sep 10 2026, free-lead-promo redesign (Nick's spec, verbatim): every
-    # free-lead request -- cold-email code click, organic search, or a
-    # lapsed-code re-request -- now goes through the same reserve-then-
-    # redeem loop instead of the old instant grant, so the lead promised in
-    # an email is genuinely the one they get, and it's off the market the
-    # moment the code is sent, not when it's redeemed. See database.py's
-    # reserve_lead_as_pending / generate_free_lead_code / redeem_free_lead_
-    # code / sweep_expired_lead_reservations docstrings for the full
-    # mechanics and the abuse-prevention layers stacked on top.
-    client_ip = request.client.host if request.client else "unknown"
-    if not _check_rate_limit(client_ip):
-        return RedirectResponse(url="/free-account?error=Too+many+attempts.+Please+wait+a+minute+and+try+again.", status_code=303)
-
-    form = await request.form()
-    name = (form.get("name") or "").strip()
-    company_name = (form.get("company_name") or "").strip()
-    email = (form.get("email") or "").strip().lower()
-    phone = (form.get("phone") or "").strip()
-    postcode_input = (form.get("postcode") or "").strip()
-    code_input = (form.get("code") or "").strip().upper()
-    terms_ticked = (form.get("agree_terms") or "").strip().lower() in ("yes", "on", "true", "1")
-
-    if not email or "@" not in email:
-        return RedirectResponse(url="/free-account?error=Please+enter+a+valid+email.", status_code=303)
-
-    # Sep 11 2026, Nick's ask: server-side enforcement of the terms
-    # checkbox on the main /free-account form. postcode_input is only ever
-    # non-empty when this POST came from that full form (name/company/
-    # email/phone/postcode/code/agree_terms all together) -- the smaller
-    # "check your email, enter your code" continuation form has no
-    # postcode field and never shows the checkbox either, because whoever
-    # reaches that step already ticked it moments earlier on the full
-    # form that got them there. Gating on postcode_input rather than
-    # code_input means a cold-email link (which pre-fills code_input but
-    # still renders the full form with the checkbox) is correctly required
-    # to tick it, while the genuine two-step continuation isn't asked to
-    # tick a box it was never shown.
-    if postcode_input and not terms_ticked:
-        return RedirectResponse(url="/free-account?error=Please+tick+the+Terms+of+Service+checkbox+to+continue.", status_code=303)
-
-    device_id = request.cookies.get("treekey_device_id") or secrets.token_hex(16)
-
-    # ---- Branch 1: redeeming a code (from the "check your email" step, or
-    # typed straight in on the main form if they already had one) ----
-    if code_input:
-        result = database.redeem_free_lead_code(email, code_input)
-        if not result["ok"]:
-            if result["reason"] == "expired":
-                # Sep 10 2026, Nick's explicit ask: a lapsed code gets its
-                # own dedicated state with a one-click "get me a new code"
-                # button, not a generic error dumped back onto the full form.
-                return RedirectResponse(url=f"/free-account?expired={urllib.parse.quote(email)}", status_code=303)
-            reason_copy = {
-                "invalid_code_or_email": "That code doesn't match this email address -- double check both and try again.",
-                "already_redeemed": "That code has already been used.",
-                "missing_fields": "Please enter your email and code.",
-                "error": "Something went wrong redeeming that code. Please try again.",
-            }.get(result["reason"], "Something went wrong redeeming that code. Please try again.")
-            return RedirectResponse(url=f"/free-account?error={urllib.parse.quote(reason_copy)}", status_code=303)
-
-        # Sep 10 2026, CRITICAL FIX: this return value used to be ignored.
-        # record_free_lead_grant is an UPDATE against limbo_accounts -- if
-        # no row exists for this email (found live: a cold-email-1-test
-        # recipient with no account yet, now fixed at the source, but this
-        # is the general safety net for any other way that could happen),
-        # it's a silent no-op, and the unconditional redirect to
-        # /free-dashboard below used to send them straight into a dead end:
-        # that page looks up the account, finds nothing, and silently
-        # bounces back to a blank /free-account form -- no error, no
-        # explanation, even though the lead itself really was claimed.
-        # Nick hit exactly this live. Now checked, with a real (if unusual)
-        # error message instead of a page that looks like nothing happened.
-        if not database.record_free_lead_grant(email, result["lead"]["reference"]):
-            logger.error(f"[Free Signup] Code redeemed for {email} but record_free_lead_grant found no "
-                         f"limbo_accounts row -- lead {result['lead']['reference']} is claimed but ungranted.")
-            return RedirectResponse(
-                url="/free-account?error=Your+code+worked+and+the+job+is+now+yours%2C+but+we+couldn%27t+load+your+account+to+show+it.+Please+contact+contact%40treekey.co.uk+with+your+email+so+we+can+fix+this+manually.",
-                status_code=303)
-
-        # Sep 10 2026, Nick's ask ("once they own a lead we give them
-        # everything we have on it"): a paid marketplace purchase already
-        # gets a full-details email via send_purchased_lead_email -- a
-        # successful free-lead redemption never did under the reserve+code
-        # redesign, confirmed live. Best-effort: a failed send here must
-        # never block the redirect to their dashboard, since the lead is
-        # already genuinely theirs regardless of whether this email lands.
-        try:
-            import notifications
-            notifications.send_free_lead_granted_email(email, result["lead"], unsubscribe_url=_make_unsubscribe_url(email))
-        except Exception as e:
-            logger.error(f"[Free Signup] send_free_lead_granted_email failed for {email}: {e}")
-
-        # Sep 11 2026: only stamp consent if the checkbox was actually
-        # ticked on THIS submission (terms_ticked) -- this branch is also
-        # reached by the smaller "enter your code" continuation form,
-        # which has no checkbox at all because consent was already
-        # captured on the earlier full-form submission that led here.
-        # COALESCE inside record_free_account_terms_acceptance means this
-        # never overwrites that earlier real timestamp anyway.
-        if terms_ticked:
-            database.record_free_account_terms_acceptance(email)
-
-        response = RedirectResponse(url="/free-dashboard", status_code=303)
-        response.set_cookie(key="treekey_contractor_session", value=_sign_session_cookie(email),
-                             max_age=86400 * 30, httponly=True, secure=True, samesite="lax")
-        response.set_cookie(key="treekey_device_id", value=device_id, max_age=86400 * 365,
-                             httponly=True, secure=True, samesite="lax")
-        return response
-
-    # ---- Branch 2: fresh request (organic search, an email-code click
-    # without the code re-typed, or requesting a replacement after a lapsed
-    # code) -- reserve a lead and email a code instead of granting instantly ----
-    if not postcode_input:
-        return RedirectResponse(url="/free-account?error=Please+enter+your+postcode+to+get+a+code.", status_code=303)
-    if not phone:
-        return RedirectResponse(url="/free-account?error=Please+enter+a+phone+number.", status_code=303)
-
-    # Resolve the typed postcode/area to an outcode + lat/lon the same way
-    # the rest of this app locates a lead or a subscriber -- see
-    # database.lookup_outcode_centroid (postcodes.io outcode centroid).
-    outcode_guess = postcode_input.strip().upper().split(" ")[0]
-    lat, lon = database.lookup_outcode_centroid(outcode_guess)
-    if lat is None or lon is None:
-        return RedirectResponse(url="/free-account?error=Couldn%27t+recognise+that+postcode+-+please+try+again+(e.g.+NG22).", status_code=303)
-
-    account = database.create_or_update_limbo_account(email=email, name=name or None, phone=phone or None,
-                                                        outcode=outcode_guess, lat=lat, lon=lon,
-                                                        company_name=company_name or None)
-    if not account:
-        return RedirectResponse(url="/free-account?error=Something+went+wrong+creating+your+account.+Please+try+again.", status_code=303)
-
-    # Sep 11 2026: this is the actual account-creation path (the row now
-    # exists), and postcode_input being non-empty (checked above) already
-    # confirms this came from the full form with the checkbox -- so
-    # terms_ticked is guaranteed true by this point (the early return
-    # above would have fired otherwise). Stamped here rather than earlier
-    # so it only ever applies to a row that's confirmed to exist.
-    database.record_free_account_terms_acceptance(email)
-
-    # Already redeemed their one lifetime free lead -- straight to their
-    # dashboard rather than a scary error, this is a perfectly normal
-    # return visit.
-    if account.get("free_lead_ref"):
-        response = RedirectResponse(url="/free-dashboard", status_code=303)
-        response.set_cookie(key="treekey_contractor_session", value=_sign_session_cookie(email),
-                             max_age=86400 * 30, httponly=True, secure=True, samesite="lax")
-        return response
-
-    return _issue_free_lead_code(email, phone, lat, lon, client_ip, device_id)
+    return RedirectResponse(url="/free-account", status_code=303)
 
 
 @app.post("/api/request-new-code")
 async def request_new_code(request: Request):
-    """Sep 10 2026, Nick's explicit ask: the button shown on the "this code
-    has expired" state. Deliberately only needs the email -- reuses the
-    postcode/phone already on file from their original request instead of
-    making them retype the whole form."""
-    client_ip = request.client.host if request.client else "unknown"
-    if not _check_rate_limit(client_ip):
-        return RedirectResponse(url="/free-account?error=Too+many+attempts.+Please+wait+a+minute+and+try+again.", status_code=303)
-
-    form = await request.form()
-    email = (form.get("email") or "").strip().lower()
-    if not email or "@" not in email:
-        return RedirectResponse(url="/free-account?error=Please+enter+a+valid+email.", status_code=303)
-
-    account = database.get_limbo_account(email)
-    if not account or account.get("lat") is None or account.get("lon") is None or not account.get("phone"):
-        # No account on file (or it's missing the details this needs) --
-        # send them through the full form instead of failing silently.
-        return RedirectResponse(url=f"/free-account?error=We+don%27t+have+enough+details+on+file+for+that+email+-+please+fill+in+the+form+below.&code=", status_code=303)
-    if account.get("free_lead_ref"):
-        response = RedirectResponse(url="/free-dashboard", status_code=303)
-        response.set_cookie(key="treekey_contractor_session", value=_sign_session_cookie(email),
-                             max_age=86400 * 30, httponly=True, secure=True, samesite="lax")
-        return response
-
-    device_id = request.cookies.get("treekey_device_id") or secrets.token_hex(16)
-    return _issue_free_lead_code(email, account["phone"], account["lat"], account["lon"], client_ip, device_id)
+    return RedirectResponse(url="/free-account", status_code=303)
 
 
 @app.post("/webhooks/resend")
@@ -13372,7 +13251,7 @@ async def faq_page(request: Request = None):
         ]),
         ("Pricing & Plans", [
             ("What are my options if I'm not ready to pay?",
-             "You can sign up for a free account with no card required and get one real free lead near you to start with, plus occasional teaser emails after that. When you're ready for full coverage, upgrade to a subscription tier from your dashboard at any time."),
+             "You can create an account with no card required and set up your business and letter details. When you're ready, choose a subscription tier, or buy individual opportunities from the Marketplace."),
             ("What's the difference between a subscription and the Marketplace?",
              "A subscription includes a set number of opportunities each month (6 to 20, depending on tier), matched to your job types and radius and dispatched to you automatically &mdash; each one already includes a printed &amp; posted introduction letter to the homeowner, at no extra charge. Want more than your monthly amount? Buy additional opportunities from the Marketplace any time at a member discount (10&ndash;25% off, depending on tier). Anyone without an active subscription can still buy individual opportunities from the Marketplace at the standard price &mdash; useful for topping up, or for trying Tree Key out before subscribing."),
             ("Am I tied into a long contract?",
