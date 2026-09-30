@@ -61,6 +61,23 @@ class TestLetterPageShell(unittest.TestCase):
             self.assertIn("Continue with your standard letter", page)
             self.assertIn("Personalise my letter", page)
 
+    def test_autofilled_fields_are_styled_like_ordinary_filled_fields(self):
+        css = main._LETTER_PAGE_CSS
+        for sel in (".lp-wrap input:-webkit-autofill", ".lp-wrap input:-webkit-autofill:focus",
+                    ".lp-wrap textarea:-webkit-autofill", ".lp-wrap select:-webkit-autofill",
+                    ".lp-wrap input:autofill"):
+            self.assertIn(sel, css)
+        self.assertIn("-webkit-text-fill-color:#e2e8f0", css)
+        self.assertIn("caret-color:#e2e8f0", css)
+        self.assertIn("0 0 0 1000px #020617 inset", css)
+        # the standard and -webkit- forms are separate rules (an unsupported pseudo-class would
+        # otherwise invalidate a combined list), and the focus outline rule is untouched
+        import re
+        rules = re.sub(r"/\*.*?\*/", "", css, flags=re.S).split("}")
+        mixed = [r for r in rules if re.search(r"(?<!-webkit-):autofill", r) and "-webkit-autofill" in r]
+        self.assertEqual(mixed, [])
+        self.assertIn(".lp-wrap input:focus, .lp-wrap textarea:focus, .lp-wrap select:focus { outline:2px solid #34d399;", css)
+
 
 if __name__ == "__main__":
     unittest.main()

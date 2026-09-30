@@ -3489,6 +3489,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .lp-wrap input, .lp-wrap textarea, .lp-wrap select { width:100%; box-sizing:border-box; padding:10px 12px; background:#020617; color:#e2e8f0; border:1px solid #475569; border-radius:6px; font-family:inherit; font-size:15px; }
 .lp-wrap textarea { min-height:64px; resize:vertical; }
 .lp-wrap input:focus, .lp-wrap textarea:focus, .lp-wrap select:focus { outline:2px solid #34d399; outline-offset:1px; border-color:#34d399; }
+/* Browser autofill must look like an ordinary filled field: dark fill, light text and caret. Chrome/Safari paint the pale fill with an internal rule that background-color cannot beat, so it is covered with a large inset shadow (plus a long background-color transition as a fallback); Firefox and current Chrome use the standard :autofill. Written as separate rules because an unsupported pseudo-class would invalidate a combined selector list. Border and the focus outline above are deliberately left alone. */
+.lp-wrap input:-webkit-autofill, .lp-wrap input:-webkit-autofill:hover, .lp-wrap input:-webkit-autofill:focus, .lp-wrap input:-webkit-autofill:active,
+.lp-wrap textarea:-webkit-autofill, .lp-wrap textarea:-webkit-autofill:hover, .lp-wrap textarea:-webkit-autofill:focus, .lp-wrap textarea:-webkit-autofill:active,
+.lp-wrap select:-webkit-autofill, .lp-wrap select:-webkit-autofill:hover, .lp-wrap select:-webkit-autofill:focus, .lp-wrap select:-webkit-autofill:active { -webkit-text-fill-color:#e2e8f0; caret-color:#e2e8f0; -webkit-box-shadow:0 0 0 1000px #020617 inset; box-shadow:0 0 0 1000px #020617 inset; transition:background-color 9999s ease-out 0s; }
+.lp-wrap input:autofill, .lp-wrap textarea:autofill, .lp-wrap select:autofill { background-color:#020617; color:#e2e8f0; caret-color:#e2e8f0; box-shadow:0 0 0 1000px #020617 inset; }
 .lp-hint { font-size:12.5px; color:#94a3b8; margin-top:4px; }
 .lp-btn { display:block; width:100%; box-sizing:border-box; text-align:center; background:#059669; color:#ffffff; border:none; padding:13px 20px; border-radius:6px; font-weight:700; cursor:pointer; font-size:15px; text-decoration:none; }
 .lp-btn:hover { background:#047857; }
