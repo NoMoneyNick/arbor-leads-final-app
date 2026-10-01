@@ -293,6 +293,39 @@ class TestPackageCardsAndOfferPromo(unittest.TestCase):
                    dict(boom=True)):                                         # lookup failure fails closed
             self.assertEqual(self._promo(cookie=True, **kw), "", kw)
 
+    def test_homepage_offer_is_the_same_component_placed_under_the_usp(self):
+        # hero variant: new headline, large price, same destinations and gates
+        out = self._promo_hero(cookie=False)
+        self.assertIn('Your first introduction for <span class="tk-offer-amt">&pound;4.99</span>', out)
+        self.assertIn("Printing and postage included. No subscription required.", out)
+        self.assertIn("One per eligible business, on selected Standard opportunities.", out)
+        self.assertIn("Find my first introduction", out)
+        self.assertIn('href="/login?next=%2Fwelcome"', out)
+        self.assertNotIn("animation", out.lower())
+        out2 = self._promo_hero(cookie=True, offer={"eligible": True, "reason": None})
+        self.assertIn('href="/marketplace"', out2)
+        for kw in (dict(offer={"eligible": False, "reason": "offer_used"}),
+                   dict(sub={"active": True}, offer={"eligible": True}), dict(boom=True)):
+            self.assertEqual(self._promo_hero(cookie=True, **kw), "", kw)
+        with open(os.path.join(_APP_DIR, "main.py"), encoding="utf-8") as fh:
+            src = fh.read()
+        a = src.index("def public_homepage"); b = src.index("\n@app.", a)
+        seg = src[a:b]
+        self.assertEqual(seg.count("{_homepage_offer_promo}"), 1)          # moved, not duplicated
+        self.assertIn("_first_offer_promo_html(request, hero=True)", seg)
+        usp = seg.index('<section id="usp"'); radar = seg.index('<section id="radar"')
+        self.assertLess(usp, seg.index("{_homepage_offer_promo}"))
+        self.assertLess(seg.index("{_homepage_offer_promo}"), radar)        # directly under the USP, above the radar
+        self.assertLess(seg.index("{_homepage_offer_promo}"), seg.index("Featured packages"))
+
+    def _promo_hero(self, *, cookie, sub=None, offer=None, boom=False):
+        r = MagicMock(); r.cookies = {"treekey_contractor_session": _cookie()} if cookie else {}
+        fo = MagicMock(side_effect=RuntimeError("x")) if boom else MagicMock(return_value=offer or {"eligible": False})
+        with patch.object(main.database, "get_contractor_subscription", return_value=sub, create=True), \
+             patch.object(main.database, "first_offer_status", fo, create=True), \
+             patch.object(main.payments, "FIRST_INTRO_PRICE_PENCE", 499, create=True):
+            return main._first_offer_promo_html(r, hero=True)
+
     def test_pricing_page_shows_all_five_cards_and_offer_above_them(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location("realpay_cards", os.path.join(_APP_DIR, "payments.py"))

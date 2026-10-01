@@ -1018,6 +1018,22 @@ _PACKAGE_CARD_CSS = """
 """
 
 
+# 2026-10-01: prominent homepage version of the same first-introduction
+# component (see _first_offer_promo_html(hero=True)). Static, no animation.
+_FIRST_OFFER_HERO_CSS = """
+.tk-offer-hero { box-sizing:border-box; display:grid; grid-template-columns:1fr; gap:14px; margin:10px 0 0 0; padding:22px 20px; text-align:left; background:linear-gradient(135deg,#065f46 0%,#022c22 100%); border:2px solid #34d399; border-radius:16px; box-shadow:0 0 32px rgba(16,185,129,.25); font-family:"Inter", ui-sans-serif, system-ui, sans-serif; }
+.tk-offer-hero * { box-sizing:border-box; }
+.tk-offer-hero h3 { margin:0; font-size:20px; line-height:1.25; font-weight:800; color:#ffffff; }
+.tk-offer-hero .tk-offer-amt { display:inline-block; font-size:2.3em; line-height:1.1; font-weight:900; color:#fcd34d; letter-spacing:-.01em; }
+.tk-offer-hero .tk-offer-sup { margin:6px 0 0 0; font-size:16px; line-height:1.5; color:#d1fae5; }
+.tk-offer-hero .tk-offer-cta, .tk-offer-hero .tk-offer-cta:visited { display:block; text-align:center; background:#fbbf24; color:#022c22; font-weight:800; font-size:17px; padding:14px 22px; border-radius:10px; text-decoration:none; }
+.tk-offer-hero .tk-offer-cta:hover { background:#fcd34d; }
+.tk-offer-hero .tk-offer-cta:focus-visible { outline:3px solid #ffffff; outline-offset:3px; }
+.tk-offer-hero .tk-offer-note { margin:0; padding-top:10px; border-top:1px solid rgba(167,243,208,.3); font-size:13px; line-height:1.5; color:#a7f3d0; }
+@media (min-width:640px) { .tk-offer-hero { grid-template-columns:1fr auto; align-items:center; gap:14px 28px; padding:24px 28px; } .tk-offer-hero h3 { font-size:24px; } .tk-offer-hero .tk-offer-cta { white-space:nowrap; } .tk-offer-hero .tk-offer-note { grid-column:1 / -1; } }
+"""
+
+
 def _package_card_html(key: str, plan: dict, *, cta_href: str) -> str:
     """One subscription package card: name, who it suits, monthly price, the
     included introductions (prominent), printing and postage, the discount on
@@ -1043,7 +1059,7 @@ def _package_card_html(key: str, plan: dict, *, cta_href: str) -> str:
             </div>"""
 
 
-def _first_offer_promo_html(request: Optional[Request]) -> str:
+def _first_offer_promo_html(request: Optional[Request], *, hero: bool = False) -> str:
     """The conditional GBP 4.99 first-introduction invitation shown on the
     homepage and /pricing. Visitors see it (the copy says it is conditional);
     a signed-in account sees it ONLY if the server-side check says it is
@@ -1071,6 +1087,19 @@ def _first_offer_promo_html(request: Optional[Request]) -> str:
         href = "/login?next=%2Fwelcome"
     pence = getattr(payments, "FIRST_INTRO_PRICE_PENCE", 499)
     price = f"&pound;{pence / 100:.2f}" if isinstance(pence, int) else "&pound;4.99"
+    if hero:
+        # Homepage: same component, same eligibility and destination, shown
+        # prominently directly under the USP.
+        return f"""
+            <style>{_FIRST_OFFER_HERO_CSS}</style>
+            <div class="tk-offer-hero" id="first-offer">
+                <div>
+                    <h3>Your first introduction for <span class="tk-offer-amt">{price}</span></h3>
+                    <p class="tk-offer-sup">Printing and postage included. No subscription required.</p>
+                </div>
+                <a href="{href}" class="tk-offer-cta">Find my first introduction</a>
+                <p class="tk-offer-note">New to TreeKey? One per eligible business, on selected Standard opportunities.</p>
+            </div>"""
     return f"""
             <div class="tk-offer">
                 <div>
@@ -1565,7 +1594,7 @@ def public_homepage(request: Request):
         # checkout route itself still asks for the postcode/area first and
         # applies its own login, setup and letter-approval gates.
         _homepage_tier_cards += _package_card_html(_tier_key, payments.PLANS[_tier_key], cta_href=f"/checkout/{_tier_key}")
-    _homepage_offer_promo = _first_offer_promo_html(request)
+    _homepage_offer_promo = _first_offer_promo_html(request, hero=True)
 
     return f"""<!DOCTYPE html>
 <html lang="en-GB" class="scroll-smooth">
@@ -1988,6 +2017,7 @@ def public_homepage(request: Request):
         <div style="max-width:48rem; margin:0 auto; text-align:center;">
             <h2 style="margin:0 0 12px 0; font-size:clamp(24px,4vw,34px); line-height:1.25; font-weight:800; color:#ffffff;">Your business. Your introduction. Their choice.</h2>
             <p style="margin:0; font-size:17px; line-height:1.65; color:#cbd5e1;">Choose a local tree-work opportunity. We print and post your approved introduction, and interested homeowners contact you directly. TreeKey sells each introduction to one contractor only.</p>
+            {_homepage_offer_promo}
         </div>
     </section>
 
@@ -2133,8 +2163,6 @@ def public_homepage(request: Request):
                 {_homepage_tier_cards}
             </div>
             <p class="text-center -mt-4 mb-8"><a href="/pricing" class="text-emerald-400 hover:text-emerald-300 font-bold underline" style="font-family:'Inter', ui-sans-serif, system-ui, sans-serif;">Compare all five packages &rarr;</a></p>
-
-            {_homepage_offer_promo}
 
             <!-- Sep 9 2026, Nick's ask: "under the 3 price groups I want a
                  section saying ... buy your leads one at a time ... with
