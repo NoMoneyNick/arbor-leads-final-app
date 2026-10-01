@@ -3590,8 +3590,43 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .lp-wrap a.lp-choice-primary { color:#ffffff; }
 .lp-wrap a.lp-choice-secondary { color:#e2e8f0; }
 .lp-wrap iframe { width:100%; height:600px; border:1px solid #334155; border-radius:8px; background:#ffffff; margin-top:12px; }
+.lp-preview-fit { position:relative; overflow:hidden; background:#fff; border:1px solid #334155; border-radius:8px; margin-top:12px; }
+.lp-wrap .lp-preview-fit iframe { display:block; position:absolute; top:0; left:0; width:794px; height:2246px; margin:0; border:0; border-radius:0; transform-origin:top left; }
 .lp-footmark { height:28px; width:auto; max-width:64px; }
 @media (max-width:520px) { .lp-wrap { padding:20px 12px 4px; } .lp-card { padding:18px; } .lp-wrap iframe { height:440px; } }
+"""
+
+
+
+_LETTER_PREVIEW_FIT_SCRIPT = """
+<script>
+(() => {
+    const frame = document.getElementById('letter-preview-frame');
+    const viewport = document.getElementById('letter-preview-viewport');
+    if (!frame || !viewport) return;
+    function fitLetter() {
+        const doc = frame.contentDocument;
+        if (!doc || !doc.body || !doc.querySelector('.letter-page')) return;
+        // Scale the display frame, never the letter's HTML, CSS or print dimensions.
+        frame.style.width = '794px';
+        frame.style.height = '1px';
+        const width = Math.max(794, doc.documentElement.scrollWidth, doc.body.scrollWidth);
+        frame.style.width = width + 'px';
+        const height = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight) + 2;
+        const scale = Math.min(1, viewport.clientWidth / width);
+        frame.style.height = height + 'px';
+        frame.style.transform = 'scale(' + scale + ')';
+        viewport.style.height = (Math.ceil(height * scale) + 2) + 'px';
+        viewport.dataset.fitted = 'true';
+    }
+    frame.addEventListener('load', () => {
+        fitLetter();
+        if (frame.contentDocument.fonts) frame.contentDocument.fonts.ready.then(fitLetter);
+    });
+    new ResizeObserver(fitLetter).observe(viewport);
+    fitLetter();
+})();
+</script>
 """
 
 
@@ -4142,7 +4177,10 @@ def letter_settings_preview(request: Request, next: Optional[str] = Query(None))
         <div class="lp-card">
             {next_banner}
             <p style="font-size:13px; color:#94a3b8; margin-top:0;">This uses illustrative example lead details ({html.escape(letter_content.PREVIEW_LEAD_REFERENCE)}) so you can see the exact wording and layout -- your real letters will use the same template with each homeowner's actual details filled in.</p>
-            <iframe srcdoc="{html.escape(preview_html)}"></iframe>
+            <div id="letter-preview-viewport" class="lp-preview-fit" style="height:600px;">
+                <iframe id="letter-preview-frame" title="Your two-page letter preview" srcdoc="{html.escape(preview_html)}"></iframe>
+            </div>
+            {_LETTER_PREVIEW_FIT_SCRIPT}
             <div style="margin-top:16px;">{approve_section}</div>
         </div>
     """, max_width=760))
@@ -7362,19 +7400,26 @@ def lead_detail_view(lead_id: str, request: Request):
 
 
 @app.get("/payment/success", response_class=HTMLResponse)
-def payment_success():
-    return """
-    <html><body style="font-family:sans-serif; text-align:center; padding:60px; background:#020617;">
-        <div style="max-width:550px; margin:auto; background:#0f172a; padding:40px; border-radius:16px; border:1px solid #1e293b; box-shadow:0 4px 16px rgba(0,0,0,0.2);">
-            <h1 style="color:#34d399; margin-top:0;">Payment Successful!</h1>
-            <p style="color:#94a3b8; font-size:15px; line-height:1.5;">Thank you. Your exclusive planning intelligence stream has been activated.<br><br>Your lead dispatches will arrive by email automatically — but you can also browse and buy leads directly below.</p>
-            <div style="margin-top:25px; display:flex; flex-direction:column; gap:12px; align-items:center;">
-                <a href="/marketplace" style="background:#059669; color:white; padding:12px 28px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; width:260px; display:block;">Browse Available Leads Now</a>
-                <a href="/login" style="background:#2563eb; color:white; padding:12px 28px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; width:260px; display:block;">Log In to Your Dashboard</a>
+def payment_success(request: Request):
+    # Returning from Checkout is not proof that its payment webhook has arrived.
+    # Keep this shared single-purchase/subscription page factual until the account
+    # shows the recorded status. No payment or fulfilment logic lives here.
+    return _letter_page_html(request, "Thank you", """
+        <div class="lp-card" style="text-align:center;">
+            <h1 style="color:#34d399; margin:0 0 20px; font-size:28px; font-weight:700; line-height:1.2;">Thank you for your purchase</h1>
+            <p style="margin:14px 0; font-size:15px; line-height:1.6;">We’re confirming your payment. Your purchase status will appear in My Account;
+            it may take a moment to update.</p>
+            <p style="margin:14px 0; font-size:15px; line-height:1.6;">For an introduction purchase, printing and postage are included.
+            We’ll use your approved letter to introduce your business, and the homeowner
+            can contact you directly if interested.</p>
+            <p style="margin:14px 0; font-size:15px; line-height:1.6;">You can follow your introduction’s progress and manage any subscription
+            in My Account.</p>
+            <div style="display:grid; gap:12px; margin-top:24px;">
+                <a href="/account" class="lp-btn">View My Account</a>
+                <a href="/marketplace">Browse more opportunities &rarr;</a>
             </div>
         </div>
-    </body></html>
-    """
+    """, max_width=680)
 
 
 @app.post("/webhook")

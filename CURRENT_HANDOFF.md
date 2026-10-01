@@ -121,3 +121,26 @@ if Intelliprint's dashboard lets you download the rendered PDF for that
 job, that PDF specifically — the address-position claim above can only be
 confirmed against Intelliprint's own real output, not this project's local
 preview.
+
+
+## 1 October 2026 — Stripe sandbox verified; preview/success presentation installed
+
+- Real Stripe sandbox purchase verified at GBP 4.99: paid one-off session, actual
+  forwarded completion event answered 200, one order/allocation/letter obligation.
+  Replaying the same event and a new event ID created no duplicates. Reuse of the
+  first-offer price was refused. No live charge or provider submission occurred.
+  Obligation remains pending_approval; later worker promotion/posting was NOT tested.
+- Installed main.py presentation changes: on-screen template preview fits its frame
+  and shows both pages with page scrolling, without changing the letter renderer,
+  approval logic, print HTML or PDF route. Payment return page uses the shared site
+  styling, directs users to My Account for status, and removes old automatic emailed
+  lead/subscription-activation claims. It does not claim webhook confirmation itself.
+- Browser checks passed at 1280, 390 and 320 pixels for both pages; no horizontal
+  overflow or preview clipping, both original A4 pages retained, srcdoc matches the
+  original renderer (allowing HTML newline normalization). Source parses successfully.
+- Not committed, deployed or sent. Existing test app was stopped after checking.
+- Windows test-kit fixes (date formatting, timezone package, startup-order correction,
+  fictional privacy contact) remain ONLY in the separate kit/snapshot. They are not
+  included in this project patch. The fresh-database column-before-index issue remains
+  a separate source-code finding; do not mistake the patched local schema run for proof
+  that unmodified project startup initializes an empty production database correctly.
