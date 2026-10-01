@@ -153,6 +153,20 @@ class TestHomepageCopy(unittest.TestCase):
         self.assertLess(end_hero, src.index(h))
         self.assertLess(src.index(h), src.index('<section id="radar"'))
 
+    def test_hero_to_usp_gap_is_compact(self):
+        with open(os.path.join(_APP_DIR, "main.py"), encoding="utf-8") as fh:
+            src = fh.read()
+        a = src.index("def public_homepage"); b = src.index("\n@app.", a)
+        seg = src[a:b]
+        main_tag = seg[seg.index('<main class="relative overflow-hidden'):]
+        main_tag = main_tag[:main_tag.index(">") + 1]
+        self.assertIn('style="padding-bottom:0;"', main_tag)           # old pb-24 / lg:pb-32 spacer neutralised
+        self.assertIn("padding:22px 16px 24px;", seg)                    # compact USP section padding
+        self.assertIn(".tk-hero-feed { margin-bottom: 0 !important; }", seg.replace("{{", "{").replace("}}", "}"))
+        self.assertIn(".tk-hero-logo { margin-bottom: 0 !important; }", seg.replace("{{", "{").replace("}}", "}"))
+        for bad in ("min-height", "margin-top:-", "margin-top: -", "-mt-"):
+            self.assertNotIn(bad, seg[seg.index('<section id="usp"'):seg.index('<section id="radar"')])
+
     def test_homepage_no_longer_claims_one_job_pays_for_the_year(self):
         with open(os.path.join(_APP_DIR, "main.py"), encoding="utf-8") as fh:
             src = fh.read()

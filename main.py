@@ -1768,7 +1768,7 @@ def public_homepage(request: Request):
          and the map/radar section below. Trimmed the hero's top padding and
          the live-feed block's bottom margin; left pb/lg values alone since
          those control spacing further down the page, not this gap. -->
-    <main class="relative overflow-hidden pt-4 sm:pt-8 pb-24 lg:pt-10 lg:pb-32 bg-brand-dark bg-[radial-gradient(ellipse_at_top,rgba(5,150,105,0.10),transparent_60%)]">
+    <main class="relative overflow-hidden pt-4 sm:pt-8 pb-24 lg:pt-10 lg:pb-32 bg-brand-dark bg-[radial-gradient(ellipse_at_top,rgba(5,150,105,0.10),transparent_60%)]" style="padding-bottom:0;">
         <!-- Sep 8 2026, Nick's ask: hero background photo (real UK arborist at
              work, supplied by Nick) -- kept low-opacity with a dark gradient
              on top so the headline and CTAs stay fully legible; this is
@@ -1816,7 +1816,7 @@ def public_homepage(request: Request):
                  original ticker-first layout untouched. -->
 
             <!-- Live Console Feed: real intercepted notices, not a decorative graphic -->
-            <div class="order-2 sm:order-1 bg-[#0A1A12]/80 border border-emerald-900/50 rounded-xl overflow-hidden shadow-2xl mb-6">
+            <div class="tk-hero-feed order-2 sm:order-1 bg-[#0A1A12]/80 border border-emerald-900/50 rounded-xl overflow-hidden shadow-2xl mb-6">
                 <div class="flex items-center gap-2 px-4 py-3 border-b border-emerald-900/50">
                     <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
                     <span class="font-mono text-[11px] uppercase tracking-widest text-emerald-400">Live Feed — 360+ UK Council & National Park Portals</span>
@@ -1992,7 +1992,7 @@ def public_homepage(request: Request):
                      daylight before the live-feed table that follows right
                      underneath this on mobile (they were butted together
                      with zero gap). -->
-                <div class="mt-8 pt-6 border-t border-slate-800/50 flex flex-col items-center gap-3 mb-4">
+                <div class="tk-hero-logo mt-8 pt-6 border-t border-slate-800/50 flex flex-col items-center gap-3 mb-4">
                     <div class="flex flex-wrap justify-center items-center gap-4 opacity-70 grayscale hover:grayscale-0 transition-all duration-500">
                         <div class="flex items-center gap-1.5 text-xs font-mono text-slate-300">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500 shrink-0"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
@@ -2013,7 +2013,13 @@ def public_homepage(request: Request):
     </main>
 
     <!-- 2026-10-01: the USP, immediately below the main hero. -->
-    <section id="usp" style="background:#020617; border-top:1px solid #1e293b; border-bottom:1px solid #1e293b; padding:40px 16px;">
+    <style>
+        /* 2026-10-01: the last visible hero element must not carry a trailing margin into the USP gap:
+           on phones the live-feed box is last (it has mb-6), from 640px up the legacy-logo row is last (mb-4). */
+        @media (max-width: 639px) {{ .tk-hero-feed {{ margin-bottom: 0 !important; }} }}
+        @media (min-width: 640px) {{ .tk-hero-logo {{ margin-bottom: 0 !important; }} }}
+    </style>
+    <section id="usp" style="background:#020617; border-top:1px solid #1e293b; border-bottom:1px solid #1e293b; padding:22px 16px 24px;">
         <div style="max-width:48rem; margin:0 auto; text-align:center;">
             <h2 style="margin:0 0 12px 0; font-size:clamp(24px,4vw,34px); line-height:1.25; font-weight:800; color:#ffffff;">Your business. Your introduction. Their choice.</h2>
             <p style="margin:0; font-size:17px; line-height:1.65; color:#cbd5e1;">Choose a local tree-work opportunity. We print and post your approved introduction, and interested homeowners contact you directly. TreeKey sells each introduction to one contractor only.</p>
