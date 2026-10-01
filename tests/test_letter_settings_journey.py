@@ -396,7 +396,7 @@ class TestCompleteContractorToFakeProviderJourney(unittest.TestCase):
         # created only by the integrated signup form, never by an ordinary
         # settings save): seed that state, then exercise the edit route.
         letter_content.upsert_contractor_settings(self._cur(), letter_content.ContractorLetterSettings(
-            contractor_email=self.contractor_email, business_name="Seed Trees", phone="0000"))
+            contractor_email=self.contractor_email, business_name="Seed Trees", phone="01234 567890"))
         signed_cookie = main._sign_session_cookie(self.contractor_email)
 
         # Step 1: contractor saves their letter settings via the real HTTP
@@ -500,7 +500,7 @@ class TestCompleteContractorToFakeProviderJourney(unittest.TestCase):
         # created only by the integrated signup form, never by an ordinary
         # settings save): seed that state, then exercise the edit route.
         letter_content.upsert_contractor_settings(self._cur(), letter_content.ContractorLetterSettings(
-            contractor_email=self.contractor_email, business_name="Seed Trees", phone="0000"))
+            contractor_email=self.contractor_email, business_name="Seed Trees", phone="01234 567890"))
         signed_cookie = main._sign_session_cookie(self.contractor_email)
 
         with self._conn_patch():

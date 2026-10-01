@@ -848,6 +848,13 @@ def init_db():
             "ALTER TABLE payments ADD COLUMN IF NOT EXISTS account_email TEXT;",
             "ALTER TABLE payments ADD COLUMN IF NOT EXISTS fulfillment_outcome TEXT;",
             "ALTER TABLE payments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();",
+            # 2026-09-30, first-introduction offer: marks an order as the
+            # one-per-business £4.99 offer and records the identity keys used
+            # to stop a second redemption (see claim_first_offer_order).
+            # Nullable, additive, ordinary orders never set them.
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS offer_kind TEXT;",
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS offer_phone_key TEXT;",
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS offer_business_key TEXT;",
         ]
         failed_ddl = _run_ddl_statements_resiliently(conn, resilience_cols, phase_label="Phase1-columns")
 
@@ -3449,6 +3456,129 @@ def get_order_status(checkout_session_id: str) -> Optional[str]:
     except Exception as e:
         logger.error(f"[Order] Error reading order status for session {checkout_session_id}: {e}")
         return None
+
+
+FIRST_OFFER_KIND = "first_introduction"
+# A first-offer checkout that was started but never paid holds the offer for
+# slightly longer than the lead reservation / Stripe session can live, then
+# stops blocking (an abandoned checkout must not burn the offer forever).
+FIRST_OFFER_HOLD_MINUTES = RESERVATION_RELEASE_MINUTES + 5
+
+
+def _offer_identity_for_account(cur, account_email: str):
+    """(phone_key, business_key) from the account's saved letter settings, or
+    (None, None) when there are none. Read-only."""
+    import letter_content
+    cur.execute("SELECT business_name, phone FROM contractor_letter_settings WHERE contractor_email = %s;",
+                (account_email,))
+    row = cur.fetchone()
+    if not row:
+        return None, None
+    return (letter_content.phone_identity_key(row[1]) or None,
+            letter_content.business_identity_key(row[0]) or None)
+
+
+def _first_offer_block_reason(cur, account_email: str, phone_key, business_key):
+    """Why this account/business cannot take the first-introduction offer, or
+    None when it can. Runs inside the caller's transaction (claim_first_offer_
+    order holds advisory locks while calling it)."""
+    cur.execute("SELECT 1 FROM contractor_subscriptions WHERE customer_email = %s AND active = TRUE LIMIT 1;", (account_email,))
+    if cur.fetchone():
+        return "subscriber"
+    cur.execute("""
+        SELECT 1 FROM payments
+        WHERE account_email = %s AND status = 'paid' AND COALESCE(offer_kind, '') <> %s LIMIT 1;
+    """, (account_email, FIRST_OFFER_KIND))
+    if cur.fetchone():
+        return "prior_purchase"
+    cur.execute("""
+        SELECT status, (status = 'pending') AS pending FROM payments
+        WHERE offer_kind = %s
+          AND (account_email = %s
+               OR (%s IS NOT NULL AND offer_phone_key = %s)
+               OR (%s IS NOT NULL AND offer_business_key = %s))
+          AND (status IN ('paid', 'refund_failed')
+               OR (status = 'pending' AND created_at > NOW() - (%s * INTERVAL '1 minute')))
+        ORDER BY (status = 'pending') LIMIT 1;
+    """, (FIRST_OFFER_KIND, account_email, phone_key, phone_key, business_key, business_key, FIRST_OFFER_HOLD_MINUTES))
+    row = cur.fetchone()
+    if row:
+        return "offer_in_progress" if row[0] == "pending" else "offer_used"
+    return None
+
+
+def first_offer_status(account_email: str) -> dict:
+    """Read-only server-side eligibility for the £4.99 first introduction.
+    {"eligible": bool, "reason": None | 'no_account' | 'no_details' |
+    'subscriber' | 'prior_purchase' | 'offer_used' | 'offer_in_progress' |
+    'unavailable'}. Fails CLOSED on any error (never shows or applies the
+    offer if it cannot be checked)."""
+    email = (account_email or "").strip().lower()
+    if not SURL or not email:
+        return {"eligible": False, "reason": "no_account"}
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            phone_key, business_key = _offer_identity_for_account(cur, email)
+            if not phone_key and not business_key:
+                return {"eligible": False, "reason": "no_details"}
+            reason = _first_offer_block_reason(cur, email, phone_key, business_key)
+            return {"eligible": reason is None, "reason": reason}
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[FirstOffer] Eligibility check failed for {account_email}: {e}")
+        return {"eligible": False, "reason": "unavailable"}
+
+
+def claim_first_offer_order(checkout_session_id: str, account_email: str, amount_pence: int,
+                             lead_id: str, plan: str) -> dict:
+    """Atomically re-checks eligibility AND records the pending first-offer
+    order in one transaction, serialised per account / phone / business with
+    advisory locks, so two simultaneous checkouts (same account, or two
+    accounts for the same business) cannot both take the offer.
+    Returns {"ok": True} or {"ok": False, "reason": ...}. The order row is the
+    redemption record: 'pending' holds the offer for FIRST_OFFER_HOLD_MINUTES,
+    'paid' consumes it permanently, 'failed'/'refunded' release it."""
+    email = (account_email or "").strip().lower()
+    if not SURL or not email or not checkout_session_id:
+        return {"ok": False, "reason": "unavailable"}
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            phone_key, business_key = _offer_identity_for_account(cur, email)
+            if not phone_key and not business_key:
+                conn.rollback()
+                return {"ok": False, "reason": "no_details"}
+            lock_keys = sorted({f"fo:a:{email}"}
+                               | ({f"fo:p:{phone_key}"} if phone_key else set())
+                               | ({f"fo:b:{business_key}"} if business_key else set()))
+            for k in lock_keys:
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (k,))
+            reason = _first_offer_block_reason(cur, email, phone_key, business_key)
+            if reason:
+                conn.rollback()
+                return {"ok": False, "reason": reason}
+            cur.execute("""
+                INSERT INTO payments (stripe_session_id, plan, amount_pence, customer_email, account_email, lead_id,
+                                      status, updated_at, offer_kind, offer_phone_key, offer_business_key)
+                VALUES (%s, %s, %s, %s, %s, %s, 'pending', NOW(), %s, %s, %s);
+            """, (checkout_session_id, plan, amount_pence, email, email, lead_id,
+                  FIRST_OFFER_KIND, phone_key, business_key))
+            conn.commit()
+            return {"ok": True}
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[FirstOffer] Could not claim first-offer order for {account_email}: {e}")
+        return {"ok": False, "reason": "unavailable"}
 
 
 def get_payment_history_for_contractor(email: str, limit: int = 25) -> list:
@@ -6057,6 +6187,21 @@ def _single_lead_plan_key(is_hot: bool, value_tier: str) -> str:
 
 
 def calculate_lead_freshness(discovered_at, planning_status: str = "pending", summary: str = "", source_type: str = "council_planning", registered_date=None) -> dict:
+    """The pricing/freshness result plus `value_tier` ('standard' / 'priority'
+    / 'elite') from the SAME scanners.classify_lead_value_tier the price grid
+    uses, so callers (the GBP 4.99 first-introduction rule) can ask "is this a
+    Standard listing" without inferring it from the price. value_tier is None
+    if the classifier cannot run (callers must then treat it as not Standard)."""
+    result = _calculate_lead_freshness_core(discovered_at, planning_status, summary, source_type, registered_date)
+    try:
+        import scanners as _scanners
+        result["value_tier"] = _scanners.classify_lead_value_tier(summary).get("tier", "standard")
+    except Exception:
+        result["value_tier"] = None
+    return result
+
+
+def _calculate_lead_freshness_core(discovered_at, planning_status: str = "pending", summary: str = "", source_type: str = "council_planning", registered_date=None) -> dict:
     """
     Calculates statutory lead freshness, countdown timer, color badge, and
     dynamic decay price. Price now depends on BOTH freshness and the lead's

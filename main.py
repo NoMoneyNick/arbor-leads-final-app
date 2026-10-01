@@ -906,6 +906,74 @@ self.addEventListener('fetch', event => {
 """
     return Response(content=sw_code, media_type="application/javascript")
 
+# 2026-10-01: ONE self-contained stylesheet for the shared header and footer.
+# The header/footer used Tailwind utility classes from /static/tailwind.css,
+# which only some pages link -- My Account and My Leads did not, so they showed
+# default blue/purple links and no spacing. These rules need no other
+# stylesheet, so every page that calls _shared_nav_html()/_shared_footer_html()
+# renders the same. Fonts are the site's established stacks (Inter / JetBrains
+# Mono, falling back as the Tailwind theme does). The header's auth links are
+# also used inside the homepage's own header, which therefore includes
+# _SHARED_NAV_CSS too.
+_SHARED_NAV_CSS = """
+.tk-nav { position:sticky; top:0; z-index:50; background:rgba(2,6,23,.96); border-bottom:1px solid #052e1f; box-shadow:0 10px 30px rgba(0,0,0,.45); font-family:"Inter", ui-sans-serif, system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+.tk-nav *, .tk-footer * { box-sizing:border-box; }
+.tk-nav-inner { max-width:80rem; margin:0 auto; padding:0 16px; }
+.tk-nav-row { display:flex; justify-content:space-between; align-items:center; gap:12px; min-height:72px; }
+.tk-nav a, .tk-nav a:visited { text-decoration:none; }
+.tk-nav a:focus-visible, .tk-nav button:focus-visible { outline:2px solid #34d399; outline-offset:3px; border-radius:6px; }
+.tk-brand, .tk-brand:visited { display:flex; align-items:center; gap:12px; color:#ffffff; font-weight:700; flex-shrink:0; }
+.tk-brand-logo { width:40px; height:40px; border-radius:12px; background:linear-gradient(135deg,#059669,#064e3b); border:1px solid rgba(16,185,129,.3); display:flex; align-items:center; justify-content:center; box-shadow:0 4px 12px rgba(0,0,0,.4); flex-shrink:0; }
+.tk-brand-text { display:flex; flex-direction:column; line-height:1; }
+.tk-brand-name { font-weight:800; font-size:18px; letter-spacing:.08em; color:#ffffff; }
+.tk-brand-name span { color:#34d399; }
+.tk-brand-tag { margin-top:4px; font-family:"JetBrains Mono", ui-monospace, monospace; font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:#10b981; font-weight:600; }
+.tk-nav-right { display:flex; align-items:center; gap:12px; font-family:"JetBrains Mono", ui-monospace, monospace; font-size:13px; letter-spacing:.02em; flex-wrap:nowrap; }
+.tk-nav-links { display:none; align-items:center; gap:24px; }
+.tk-nav-links a { font-weight:700; }
+.tk-l-radar, .tk-l-radar:visited { color:#34d399; } .tk-l-market, .tk-l-market:visited { color:#38bdf8; }
+.tk-l-storm, .tk-l-storm:visited { color:#fbbf24; } .tk-l-pack, .tk-l-pack:visited { color:#fb7185; }
+.tk-l-faq, .tk-l-faq:visited { color:#a78bfa; }
+.tk-nav-links a:hover, .tk-mpanel a:hover, .tk-auth-link:hover { filter:brightness(1.25); }
+.tk-auth-link, .tk-auth-link:visited { color:#6ee7b7; font-weight:700; font-size:13px; white-space:nowrap; padding:6px 2px; }
+.tk-auth-muted, .tk-auth-muted:visited { color:#cbd5e1; font-weight:700; font-size:12px; white-space:nowrap; padding:6px 2px; }
+.tk-auth-out, .tk-auth-out:visited { color:#94a3b8; font-size:12px; text-transform:uppercase; white-space:nowrap; padding:6px 2px; }
+.tk-auth-out:hover { color:#ffffff; }
+.tk-auth-btn, .tk-auth-btn:visited { color:#6ee7b7; background:rgba(5,150,105,.2); border:1px solid rgba(16,185,129,.4); padding:7px 14px; border-radius:8px; font-weight:700; text-transform:uppercase; white-space:nowrap; transition:background .2s,color .2s; }
+.tk-auth-btn:hover { background:#059669; color:#ffffff; }
+.tk-mnav-toggle { display:inline-flex; align-items:center; background:none; border:none; color:#a7f3d0; cursor:pointer; padding:6px; }
+.tk-mnav-panel { display:none; border-top:1px solid #052e1f; padding:12px 0 16px; }
+.tk-mpanel { display:flex; flex-direction:column; gap:4px; font-family:"JetBrains Mono", ui-monospace, monospace; font-size:14px; font-weight:700; }
+.tk-mpanel a { padding:9px 0; }
+.tk-mpanel-auth { display:flex; flex-direction:column; gap:4px; margin-top:6px; padding-top:10px; border-top:1px solid #052e1f; }
+.tk-mpanel-auth a, .tk-mpanel-auth a:visited { color:#cbd5e1; }
+.tk-hide-sm { display:none !important; }
+@media (min-width:640px) { .tk-nav-inner { padding:0 24px; } .tk-nav-right { gap:16px; font-size:14px; } .tk-nav-row { min-height:80px; } .tk-hide-sm { display:inline !important; } .tk-mpanel-auth { display:none; } }
+@media (min-width:1024px) { .tk-nav-inner { padding:0 32px; } .tk-nav-links { display:flex; } .tk-mnav-toggle { display:none; } .tk-nav-right { gap:24px; } }
+@media (max-width:420px) { .tk-brand-tag { display:none; } .tk-nav-right { gap:8px; } .tk-auth-btn { padding:6px 10px; } }
+"""
+
+_SHARED_FOOTER_CSS = """
+.tk-footer { background:#020617; border-top:1px solid #1e293b; padding:40px 0 32px; margin-top:64px; font-family:"Inter", ui-sans-serif, system-ui, sans-serif; color:#64748b; font-size:12px; line-height:1.6; }
+.tk-footer-inner { max-width:80rem; margin:0 auto; padding:0 16px; display:flex; flex-direction:column; gap:28px; align-items:center; text-align:center; }
+.tk-footer-about { max-width:42rem; }
+.tk-footer-mark { display:block; height:28px; width:auto; max-width:64px; opacity:.5; margin:0 auto 8px; }
+.tk-footer-name { color:#cbd5e1; font-size:14px; font-weight:700; margin:0 0 10px; }
+.tk-footer p { margin:0 0 8px; }
+.tk-footer-uk { color:#94a3b8; margin-top:14px !important; }
+.tk-footer-contact { color:#64748b; }
+.tk-footer-links { display:flex; flex-wrap:wrap; justify-content:center; gap:4px 22px; font-family:"JetBrains Mono", ui-monospace, monospace; font-size:12px; letter-spacing:.05em; text-transform:uppercase; }
+.tk-footer-links a, .tk-footer-links a:visited { color:#94a3b8; text-decoration:none; padding:7px 0; transition:color .15s; }
+.tk-footer-links a:hover { color:#ffffff; text-decoration:underline; text-underline-offset:3px; }
+.tk-footer-links a:focus-visible { outline:2px solid #34d399; outline-offset:3px; border-radius:4px; color:#ffffff; }
+.tk-footer-links a.tk-footer-login, .tk-footer-links a.tk-footer-login:visited { color:#34d399; }
+.tk-footer-links a.tk-footer-login:hover { color:#6ee7b7; }
+@media (min-width:640px) { .tk-footer-inner { padding:0 24px; } }
+@media (min-width:768px) { .tk-footer-inner { flex-direction:row; justify-content:space-between; align-items:flex-start; text-align:left; } .tk-footer-mark { margin-left:0; margin-right:0; } .tk-footer-links { justify-content:flex-end; max-width:46rem; padding-top:6px; } }
+@media (min-width:1024px) { .tk-footer-inner { padding:0 32px; } }
+"""
+
+
 def _nav_auth_state(request: Optional[Request]) -> Optional[dict]:
     """Sep 10 2026, Nick's ask: "when you log in, it should say 'nick logged
     in' or something instead of the sign up/log in in the top right, it
@@ -965,18 +1033,31 @@ def _nav_auth_block_html(request: Optional[Request]) -> str:
     auth = _nav_auth_state(request)
     if auth:
         return f"""
-                    <a href="/account" class="hover:brightness-125 transition-all text-emerald-300 font-bold text-xs sm:text-sm">
-                        My Account
-                    </a>
-                    <a href="{auth['dashboard_url']}" class="hover:brightness-125 transition-all text-slate-300 font-bold text-xs" style="display:inline;">
-                        Dashboard
-                    </a>
-                    <a href="/logout" class="text-slate-400 hover:text-white transition-colors text-xs font-mono uppercase">Log Out</a>"""
+                    <a href="/account" class="tk-auth-link">My Account</a>
+                    <a href="{auth['dashboard_url']}" class="tk-auth-muted tk-hide-sm">Dashboard</a>
+                    <a href="/logout" class="tk-auth-out tk-hide-sm">Log Out</a>"""
     return """
-                    <a href="/free-account" class="text-emerald-300 hover:brightness-125 transition-all font-bold text-xs sm:text-sm">Create Account</a>
-                    <a href="/login" class="bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 px-3.5 py-1.5 rounded-lg font-bold uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-[0_0_15px_rgba(5,150,105,0.2)]">
-                        Log In &#10132;
-                    </a>"""
+                    <a href="/free-account" class="tk-auth-link tk-hide-sm">Create Account</a>
+                    <a href="/login" class="tk-auth-btn">Log In &#10132;</a>"""
+
+
+def _nav_auth_panel_html(request: Optional[Request]) -> str:
+    """2026-10-01: on phones the header bar only has room for ONE account
+    link (My Account, or Log In); the secondary account links
+    (Create Account / Dashboard / Log Out) are shown in the menu panel
+    instead, so nothing is lost and the bar never overflows. Hidden from
+    640px up, where the bar itself has room for them."""
+    auth = _nav_auth_state(request)
+    if auth:
+        return f"""
+                    <div class="tk-mpanel-auth">
+                        <a href="{auth['dashboard_url']}">Dashboard</a>
+                        <a href="/logout">Log Out</a>
+                    </div>"""
+    return """
+                    <div class="tk-mpanel-auth">
+                        <a href="/free-account">Create Account</a>
+                    </div>"""
 
 
 def _shared_nav_html(request: Optional[Request] = None) -> str:
@@ -1011,48 +1092,42 @@ def _shared_nav_html(request: Optional[Request] = None) -> str:
     gamble on an unverified class existing."""
     auth_block = _nav_auth_block_html(request)
     return f"""
-    <style>
-        .tk-mnav-toggle {{ display: none; background: none; border: none; color: #a7f3d0; cursor: pointer; padding: 6px; }}
-        .tk-mnav-panel {{ display: none; }}
-        @media (max-width: 1023px) {{
-            .tk-mnav-toggle {{ display: inline-flex; align-items: center; }}
-        }}
-    </style>
-    <nav class="sticky top-0 z-50 bg-slate-950/95 backdrop-blur-md border-b border-emerald-950 shadow-2xl">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between items-center h-20">
-                <a href="/" class="flex items-center gap-3 text-white font-bold text-xl tracking-tight no-underline">
-                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <style>{_SHARED_NAV_CSS}</style>
+    <nav class="tk-nav" aria-label="Main">
+        <div class="tk-nav-inner">
+            <div class="tk-nav-row">
+                <a href="/" class="tk-brand">
+                    <span class="tk-brand-logo">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"/>
                         </svg>
-                    </div>
-                    <div class="flex flex-col">
-                        <span class="font-extrabold text-lg text-white leading-none tracking-wider font-sans">TREE<span class="text-emerald-400">KEY</span></span>
-                        <span class="text-[9px] uppercase tracking-widest text-emerald-500 font-mono font-semibold">Arbor Intelligence</span>
-                    </div>
+                    </span>
+                    <span class="tk-brand-text">
+                        <span class="tk-brand-name">TREE<span>KEY</span></span>
+                        <span class="tk-brand-tag">Arbor Intelligence</span>
+                    </span>
                 </a>
-                <div class="flex items-center gap-3 md:gap-6 font-mono text-sm tracking-wide">
-                    <div class="hidden lg:flex items-center gap-6 text-slate-300">
-                        <a href="/#radar" class="hover:brightness-125 transition-all text-emerald-400 font-bold">RADAR</a>
-                        <a href="/marketplace" class="hover:brightness-125 transition-all text-sky-400 font-bold">MARKETPLACE</a>
-                        <a href="/storm-radar" class="hover:brightness-125 transition-all text-amber-400 font-bold">STORM RADAR</a>
-                        <a href="/pricing" class="hover:brightness-125 transition-all text-rose-400 font-bold">PACKAGES</a>
-                        <a href="/faq" class="hover:brightness-125 transition-all text-violet-400 font-bold">FAQ</a>
+                <div class="tk-nav-right">
+                    <div class="tk-nav-links">
+                        <a href="/#radar" class="tk-l-radar">RADAR</a>
+                        <a href="/marketplace" class="tk-l-market">MARKETPLACE</a>
+                        <a href="/storm-radar" class="tk-l-storm">STORM RADAR</a>
+                        <a href="/pricing" class="tk-l-pack">PACKAGES</a>
+                        <a href="/faq" class="tk-l-faq">FAQ</a>
                     </div>
                     {auth_block}
-                    <button type="button" class="tk-mnav-toggle" aria-label="Menu" onclick="var p=document.getElementById('tk-mnav-panel'); p.style.display = (p.style.display==='block') ? 'none' : 'block';">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    <button type="button" class="tk-mnav-toggle" aria-label="Menu" aria-controls="tk-mnav-panel" onclick="var p=document.getElementById('tk-mnav-panel'); p.style.display = (p.style.display==='block') ? 'none' : 'block';">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
                     </button>
                 </div>
             </div>
-            <div id="tk-mnav-panel" class="tk-mnav-panel" style="border-top:1px solid #052e1f; padding:14px 0;">
-                <div style="display:flex; flex-direction:column; gap:14px; font-family:monospace; font-size:14px; font-weight:bold;">
-                    <a href="/#radar" style="color:#34d399; text-decoration:none;">RADAR</a>
-                    <a href="/marketplace" style="color:#38bdf8; text-decoration:none;">MARKETPLACE</a>
-                    <a href="/storm-radar" style="color:#fbbf24; text-decoration:none;">STORM RADAR</a>
-                    <a href="/pricing" style="color:#fb7185; text-decoration:none;">PACKAGES</a>
-                    <a href="/faq" style="color:#a78bfa; text-decoration:none;">FAQ</a>
+            <div id="tk-mnav-panel" class="tk-mnav-panel">
+                <div class="tk-mpanel">
+                    <a href="/#radar" class="tk-l-radar">RADAR</a>
+                    <a href="/marketplace" class="tk-l-market">MARKETPLACE</a>
+                    <a href="/storm-radar" class="tk-l-storm">STORM RADAR</a>
+                    <a href="/pricing" class="tk-l-pack">PACKAGES</a>
+                    <a href="/faq" class="tk-l-faq">FAQ</a>{_nav_auth_panel_html(request)}
                 </div>
             </div>
         </div>
@@ -1061,44 +1136,32 @@ def _shared_nav_html(request: Optional[Request] = None) -> str:
 
 
 def _shared_footer_html() -> str:
-    """Companion to _shared_nav_html -- same reasoning, see there."""
-    return """
-    <footer class="bg-slate-950 border-t border-slate-800 pt-10 pb-8 mt-16">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-start gap-8">
-            <div class="text-slate-500 text-xs text-center md:text-left max-w-2xl">
-                <img src="/static/images/footer-mark.png" alt="" width="28" height="28" class="h-7 w-auto opacity-50 mb-2 mx-auto md:mx-0" style="height:28px;width:auto;max-width:64px;" loading="lazy">
-                <div class="mb-3">
-                    <b class="text-slate-300 text-sm">Tree Key</b><br>
-                </div>
-                <p class="mb-2">Planning information comes from public UK council planning registers.</p>
-                <p class="mb-2">&copy; 2026 Tree Key. All rights reserved.</p>
-                <p class="text-slate-400 mt-4 mb-1 flex items-center justify-center md:justify-start gap-2">
-                    Proudly engineered in the United Kingdom &#127468;&#127463;
-                </p>
-                <p class="text-slate-600">Contact: nick@treekey.co.uk</p>
+    """Companion to _shared_nav_html -- same reasoning, see there. Self-contained
+    (_SHARED_FOOTER_CSS), so it renders correctly whether or not a page links
+    /static/tailwind.css. The T/k mark stays small (28px high, 64px max wide).
+    Help is a mailto to the same contact@treekey.co.uk used across the site."""
+    return f"""
+    <style>{_SHARED_FOOTER_CSS}</style>
+    <footer class="tk-footer">
+        <div class="tk-footer-inner">
+            <div class="tk-footer-about">
+                <img src="/static/images/footer-mark.png" alt="" width="28" height="28" class="tk-footer-mark" loading="lazy">
+                <p class="tk-footer-name">Tree Key</p>
+                <p>Planning information comes from public UK council planning registers.</p>
+                <p>&copy; 2026 Tree Key. All rights reserved.</p>
+                <p class="tk-footer-uk">Proudly engineered in the United Kingdom &#127468;&#127463;</p>
+                <p class="tk-footer-contact">Contact: nick@treekey.co.uk</p>
             </div>
-            <div class="flex gap-6 text-xs font-mono uppercase tracking-wider flex-wrap justify-center md:justify-end shrink-0 pt-2">
-                <!-- Sep 9 2026, Nick's ask: "we need a way for people to
-                     contact us for help (multiple ways) ... refer them to
-                     FAQ ... we need a suggestions [link] everywhere (email,
-                     site, different screens)" -- FAQ and Suggestions already
-                     existed as real pages but weren't linked from the
-                     footer, so most pages never surfaced them. Help is a
-                     direct mailto to the same contact@treekey.co.uk address
-                     already used everywhere else on the site (ToS, Privacy,
-                     FAQ) -- this footer previously showed a different
-                     address in plain text below ("nick@treekey.co.uk"); worth
-                     confirming with Nick whether that should also change to
-                     contact@treekey.co.uk or genuinely routes differently. -->
-                <a href="mailto:contact@treekey.co.uk" class="text-slate-400 hover:text-white transition-colors">Help</a>
-                <a href="/marketplace" class="text-slate-400 hover:text-white transition-colors">Marketplace</a>
-                <a href="/pricing" class="text-slate-400 hover:text-white transition-colors">Packages</a>
-                <a href="/faq" class="text-slate-400 hover:text-white transition-colors">FAQ</a>
-                <a href="/suggestions" class="text-slate-400 hover:text-white transition-colors">Suggestions</a>
-                <a href="/privacy-policy" class="text-slate-400 hover:text-white transition-colors">Privacy</a>
-                <a href="/terms-of-service" class="text-slate-400 hover:text-white transition-colors">Terms</a>
-                <a href="/login" class="text-brand-green hover:text-emerald-400 transition-colors">Login</a>
-            </div>
+            <nav class="tk-footer-links" aria-label="Footer">
+                <a href="mailto:contact@treekey.co.uk">Help</a>
+                <a href="/marketplace">Marketplace</a>
+                <a href="/pricing">Packages</a>
+                <a href="/faq">FAQ</a>
+                <a href="/suggestions">Suggestions</a>
+                <a href="/privacy-policy">Privacy</a>
+                <a href="/terms-of-service">Terms</a>
+                <a href="/login" class="tk-footer-login">Login</a>
+            </nav>
         </div>
     </footer>
     """
@@ -1417,9 +1480,8 @@ def public_homepage(request: Request):
                         <div class="text-4xl font-extrabold text-white">&pound;{_price_gbp:.0f}</div>
                         <div class="text-lg text-slate-500 font-normal">/month</div>
                     </div>
-                    <div class="bg-emerald-500/10 border-l-2 border-emerald-500 rounded p-3 mb-6 text-xs text-emerald-200">{payments.plan_roi(_tier_key, _tier)}</div>
                     <ul class="mb-8 space-y-3 text-slate-300 text-sm font-medium">
-                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> 100% Exclusive &mdash; every lead sold once, never resold</li>
+                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Each introduction is sold to one contractor only</li>
                         <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Early-access alert the moment a matching lead is filed</li>
                     </ul>
                     <a href="#map" class="block w-full text-center {_btn_classes} rounded-lg transition-all duration-300 text-sm">
@@ -1512,13 +1574,7 @@ def public_homepage(request: Request):
          .tk-mnav-toggle/.tk-mnav-panel markup verbatim from
          _shared_nav_html() so this page gets the same tested mobile menu
          without touching anything else here. -->
-    <style>
-        .tk-mnav-toggle {{ display: none; background: none; border: none; color: #a7f3d0; cursor: pointer; padding: 6px; }}
-        .tk-mnav-panel {{ display: none; }}
-        @media (max-width: 1023px) {{
-            .tk-mnav-toggle {{ display: inline-flex; align-items: center; }}
-        }}
-    </style>
+    <style>{_SHARED_NAV_CSS}</style>
     <nav class="sticky top-0 z-50 bg-slate-950/95 backdrop-blur-md border-b border-emerald-950 shadow-2xl">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center h-20">
@@ -1594,7 +1650,7 @@ def public_homepage(request: Request):
                     <a href="/marketplace" style="color:#38bdf8; text-decoration:none;">MARKETPLACE</a>
                     <a href="/storm-radar" style="color:#fbbf24; text-decoration:none;">STORM RADAR</a>
                     <a href="/pricing" style="color:#fb7185; text-decoration:none;">PACKAGES</a>
-                    <a href="/faq" style="color:#a78bfa; text-decoration:none;">FAQ</a>
+                    <a href="/faq" style="color:#a78bfa; text-decoration:none;">FAQ</a>{_nav_auth_panel_html(request)}
                 </div>
             </div>
         </div>
@@ -1849,6 +1905,14 @@ def public_homepage(request: Request):
         </div>
     </main>
 
+    <!-- 2026-10-01: the USP, immediately below the main hero. -->
+    <section id="usp" style="background:#020617; border-top:1px solid #1e293b; border-bottom:1px solid #1e293b; padding:40px 16px;">
+        <div style="max-width:48rem; margin:0 auto; text-align:center;">
+            <h2 style="margin:0 0 12px 0; font-size:clamp(24px,4vw,34px); line-height:1.25; font-weight:800; color:#ffffff;">Your business. Your introduction. Their choice.</h2>
+            <p style="margin:0; font-size:17px; line-height:1.65; color:#cbd5e1;">Choose a local tree-work opportunity. We print and post your approved introduction, and interested homeowners contact you directly. TreeKey sells each introduction to one contractor only.</p>
+        </div>
+    </section>
+
     <!-- Radar Section (The Micro-Commitment & Zeigarnik Effect Hook) -->
     <!-- Sep 8 2026: top padding trimmed from py-24 to pt-10 pb-24 -- paired
          with the badges row's own trimmed margin above, this removes the
@@ -1953,8 +2017,8 @@ def public_homepage(request: Request):
                 <div class="h-12 w-12 rounded bg-emerald-500/10 flex items-center justify-center mb-6 border border-emerald-500/30 text-emerald-400">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
                 </div>
-                <h3 class="text-xl font-bold text-white mb-3">100% Exclusive Leads</h3>
-                <p class="text-slate-400 text-sm leading-relaxed">Most lead-gen sites sell the same job to 5 different contractors, forcing a race to the bottom on price. At TreeKey, every commercial lead you claim is <strong class="text-slate-200">never sold twice.</strong> If it hits your phone, it is exclusively yours to win.</p>
+                <h3 class="text-xl font-bold text-white mb-3">Sold to One Contractor</h3>
+                <p class="text-slate-400 text-sm leading-relaxed">Each introduction is sold to one contractor only.</p>
             </div>
 
             <!-- Pillar 2: The Network Effect -->
@@ -1983,7 +2047,7 @@ def public_homepage(request: Request):
             <div class="text-center mb-16">
                 <span class="text-emerald-500 font-mono font-bold tracking-widest text-sm uppercase">Zero Commitment. Cancel Anytime.</span>
                 <h2 class="text-4xl md:text-5xl font-extrabold text-white mt-4 uppercase">Dominate Your Area</h2>
-                <p class="text-lg text-slate-400 mt-4">The average commercial site clearance pays 2,500+. One job pays for the year.</p>
+                <p class="text-lg text-slate-400 mt-4">Pick a package, or buy a single introduction from the marketplace.</p>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
@@ -2175,51 +2239,8 @@ def public_homepage(request: Request):
         </div>
     </section>
 
-    <!-- Footer -->
-    <footer class="border-t border-slate-800 bg-[#020617] py-12">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-start gap-8">
-            <div class="text-slate-500 text-xs text-center md:text-left max-w-2xl">
-                <!-- Sep 8 2026, Nick's ask: the second supplied logo mark,
-                     small and muted into the small print rather than
-                     displayed as a real logo -- deliberately tiny given the
-                     source image's resolution. -->
-                <img src="/static/images/footer-mark.png" alt="" width="28" height="28" class="h-7 w-auto opacity-50 mb-2 mx-auto md:mx-0" style="height:28px;width:auto;max-width:64px;" loading="lazy">
-                <div class="mb-3">
-                    <b class="text-slate-300 text-sm">Tree Key</b><br>
-                </div>
-                <p class="mb-2">Planning information comes from public UK council planning registers.</p>
-                <p class="mb-2">&copy; 2026 Tree Key. All rights reserved.</p>
-                <p class="text-slate-400 mt-4 mb-1 flex items-center justify-center md:justify-start gap-2">
-                    Proudly engineered in the United Kingdom 
-                </p>
-                <p class="text-slate-600">Contact: nick@treekey.co.uk</p>
-            </div>
-            <div class="flex gap-6 text-xs font-mono uppercase tracking-wider flex-wrap justify-center md:justify-end shrink-0 pt-2">
-                <!-- Sep 9 2026, Nick's ask: "we need a way for people to
-                     contact us for help (multiple ways) ... refer them to
-                     FAQ ... we need a suggestions [link] everywhere (email,
-                     site, different screens)" -- FAQ and Suggestions already
-                     existed as real pages but weren't linked from the
-                     footer, so most pages never surfaced them. Help is a
-                     direct mailto to the same contact@treekey.co.uk address
-                     already used everywhere else on the site (ToS, Privacy,
-                     FAQ) -- this footer previously showed a different
-                     address in plain text below ("nick@treekey.co.uk"); worth
-                     confirming with Nick whether that should also change to
-                     contact@treekey.co.uk or genuinely routes differently. -->
-                <a href="mailto:contact@treekey.co.uk" class="text-slate-400 hover:text-white transition-colors">Help</a>
-                <a href="/faq" class="text-slate-400 hover:text-white transition-colors">FAQ</a>
-                <a href="/suggestions" class="text-slate-400 hover:text-white transition-colors">Suggestions</a>
-                <a href="/privacy-policy" class="text-slate-400 hover:text-white transition-colors">Privacy</a>
-                <a href="/terms-of-service" class="text-slate-400 hover:text-white transition-colors">Terms</a>
-                <!-- Sep 5 2026: Nick flagged this as "what is datahub? broken link".
-                     It was never actually broken (real 200 JSON) -- just mislabeled:
-                     it's a live-system-status pulse, not a data hub. Renamed to
-                     match what a visitor actually gets when they click it. -->
-                <a href="/login" class="text-brand-green hover:text-emerald-400 transition-colors">Login</a>
-            </div>
-        </div>
-    </footer>
+    <!-- 2026-10-01: homepage now uses the same shared footer (and stylesheet) as every other page. -->
+    {_shared_footer_html()}
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
@@ -3026,8 +3047,8 @@ def pricing(request: Request):
     if msg == "no_subscription":
         msg_banner = (
             "<div class='bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-5 text-red-200'>"
-            "<b>No active subscription found</b> for that email. Pick a tier below to activate your dashboard —"
-            " or, if you're new to TreeKey, <a href='/free-account' class='text-red-300 font-bold'>create your account first, no card needed</a>."
+            "<b>There is no active subscription on this account.</b> Pick a tier below to subscribe, or"
+            " <a href='/welcome' class='text-red-300 font-bold'>go to your account</a> to buy a single introduction without one."
             "</div>"
         )
 
@@ -3042,7 +3063,7 @@ def pricing(request: Request):
     for key, plan in plans.items():
         if plan["mode"] == "subscription":
             price_display = f"£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal; color:#94a3b8;'>/month</span>"
-            roi_box = f"<div style='background:rgba(16,185,129,0.1); border-left:3px solid #059669; padding:10px; font-size:12px; color:#a7f3d0; text-align:left; margin:14px 0; border-radius:4px;'><b>Real-World Math:</b> {payments.plan_roi(key, plan)}</div>"
+            roi_box = ""  # 2026-10-01: 'one job covers it' ROI claims removed from customer pricing
             highlight = "border:2px solid #059669; box-shadow:0 8px 24px rgba(5,150,105,0.15);" if key == "starter" else "border:1px solid #334155;"
 
             sub_cards += f"""
@@ -3083,7 +3104,7 @@ def pricing(request: Request):
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Tailored Packages & Anti-Directory Guarantee | TreeKey</title>
+        <title>Packages & Pricing | TreeKey</title>
         <link rel="icon" href="/static/icon-192.png">
         <link href="/static/tailwind.css" rel="stylesheet">
         <style>
@@ -3091,47 +3112,26 @@ def pricing(request: Request):
             .header h1 {{ font-size: 34px; font-weight: 800; color: #ffffff; margin: 0 0 10px 0; }}
             .header p {{ color: #94a3b8; font-size: 16px; margin: 0; }}
 
-            .creed-banner {{
-                background: linear-gradient(135deg, #044332 0%, #064e3b 100%);
-                color: white;
-                border-radius: 12px;
-                padding: 24px;
-                margin-bottom: 32px;
-                box-shadow: 0 8px 24px rgba(0,0,0,0.3);
-            }}
-            .creed-banner h3 {{ margin-top: 0; font-size: 20px; color: #a7f3d0; }}
-
             .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-bottom: 32px; }}
 
-            .comparison-table {{
-                width: 100%;
-                border-collapse: collapse;
-                background: #0f172a;
-                border: 1px solid #334155;
-                border-radius: 12px;
-                overflow: hidden;
-                margin-top: 24px;
-                font-size: 13px;
-            }}
-            .comparison-table th, .comparison-table td {{
-                padding: 14px 16px;
-                text-align: left;
-                border-bottom: 1px solid #334155;
-                color: #cbd5e1;
-            }}
-            .comparison-table th {{ background: #020617; color: white; font-weight: 600; }}
-            .comparison-table tr:last-child td {{ border-bottom: none; }}
         </style>
     </head>
     <body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">
     {_shared_nav_html(request)}
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
         <div class="header">
-            <h1>Fair Trade Packages & Zero-Reselling Guarantee</h1>
-            <p>Direct statutory council & National Park intelligence & photo-verified homeowner leads. 100% exclusive. No shared bidding wars.</p>
+            <h1>Packages & Pricing</h1>
+            <p>Choose a package, or buy a single introduction.</p>
         </div>
 
         {msg_banner}
+
+        <!-- 2026-10-01: the USP, above the package cards (replaces the old
+             lower-page creed/comparison content rather than duplicating it). -->
+        <div class="tk-usp-pricing" style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.35); border-radius:14px; padding:22px 24px; margin:0 0 32px 0;">
+            <h2 style="margin:0 0 8px 0; font-size:22px; line-height:1.3; color:#ffffff; font-weight:800;">Every introduction includes printing and postage.</h2>
+            <p style="margin:0; font-size:15px; line-height:1.6; color:#cbd5e1;">Your approved letter introduces your business. Interested homeowners contact you directly, and TreeKey won't sell the same introduction to another contractor.</p>
+        </div>
 
         <h2 class="text-[22px] mb-4 text-white font-bold">1. Select Your Dedicated Subscription Tier</h2>
         <div class="grid">
@@ -3144,11 +3144,14 @@ def pricing(request: Request):
         </p>
         {single_cards}
 
-        <div class="creed-banner" style="margin-top:32px;">
-            <h3>The TreeKey Creed: "Your Prosperity is Our Business"</h3>
-            <p style="font-size:14px; line-height:1.6; margin:0;">
-                We are not a faceless directory. We do NOT sell your leads to 5 competitors, we do not take a percentage of your hard-earned invoices, and we don't trap you in long contracts. Every lead on TreeKey is a <b>single-sale asset</b>—the second you buy it, it is removed from our system for good and never sold to anyone else.
-            </p>
+        <!-- 2026-10-01: the old creed banner and competitor comparison table are replaced by this plain how-it-works summary. -->
+        <div style="margin:32px 0 20px 0; border:1px solid #334155; border-radius:12px; padding:20px 24px; background:#0f172a;">
+            <h3 style="margin:0 0 10px 0; font-size:17px; color:#ffffff; font-weight:700;">How an introduction works</h3>
+            <ol style="margin:0; padding-left:22px; list-style:decimal; color:#cbd5e1; font-size:14px; line-height:1.7;">
+                <li>Choose a local tree-work opportunity.</li>
+                <li>Approve your introduction letter (saved business details plus standard or your own wording).</li>
+                <li>We print and post it. It's the homeowner's choice whether to get in touch.</li>
+            </ol>
         </div>
 
         <!-- Sep 11 2026, Nick's ask: same lead-quality promise as the
@@ -3157,44 +3160,6 @@ def pricing(request: Request):
         <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-emerald-200">
             <b>Lead-Quality Promise:</b> Every lead is filtered to confirm it's genuine tree work before it's dispatched. On the rare chance a non-tree lead slips through, screenshot it and email <a href="mailto:contact@treekey.co.uk" class="underline hover:text-emerald-100">contact@treekey.co.uk</a> &mdash; we'll swap it for a correct lead or refund it.
         </div>
-
-        <h2 class="text-[22px] mt-10 mb-4 text-white font-bold">Why TreeKey is the Opposite of Directories</h2>
-        <table class="comparison-table">
-            <thead>
-                <tr>
-                    <th>Feature / Metric</th>
-                    <th>Traditional Directories (Bark / Checkatrade / TrustATrader)</th>
-                    <th style="background:#059669;">TreeKey Operating System</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td><b class="text-white">Lead Exclusivity</b></td>
-                    <td>Sold to 3–5 competing contractors simultaneously.</td>
-                    <td style="color:#6ee7b7; font-weight:bold;">100% Single-Sale. Lead is burned once dispatched.</td>
-                </tr>
-                <tr>
-                    <td><b class="text-white">Price Competition</b></td>
-                    <td>Race to the bottom; customer compares 5 cheap quotes.</td>
-                    <td style="color:#6ee7b7; font-weight:bold;">First-Mover Advantage. Quote before competitors know.</td>
-                </tr>
-                <tr>
-                    <td><b class="text-white">Lead Source</b></td>
-                    <td>Unverified ballpark quote seekers & price checkers.</td>
-                    <td style="color:#6ee7b7; font-weight:bold;">Statutory Council & National Park Planning Notices (100% committed).</td>
-                </tr>
-                <tr>
-                    <td><b class="text-white">Trade Cost Framing</b></td>
-                    <td>Heavy fixed monthly directory listing fees (£120+/mo).</td>
-                    <td style="color:#6ee7b7; font-weight:bold;">From £39/mo (less than a tank of diesel). One job easily covers it.</td>
-                </tr>
-                <tr>
-                    <td><b class="text-white">Customer Ownership</b></td>
-                    <td>Trapped inside their app collecting reviews for them.</td>
-                    <td style="color:#6ee7b7; font-weight:bold;">You Own the Client. Quote directly under your own brand.</td>
-                </tr>
-            </tbody>
-        </table>
 
         <div class="text-center mt-10 p-5 bg-slate-800/50 rounded-xl border border-slate-700">
             <p class="mb-2.5 text-sm text-slate-400">Have an idea or want a tool built specifically for your crew?</p>
@@ -3505,6 +3470,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .lp-section { border-top:1px solid #1e293b; margin-top:24px; padding-top:8px; }
 .lp-section h2 { margin:12px 0 4px 0; font-size:17px; color:#ffffff; }
 .lp-section-note { font-size:13.5px; color:#94a3b8; margin:0 0 4px 0; }
+.lp-fielderr { display:none; font-size:12.5px; color:#fca5a5; margin-top:4px; }
+.lp-fielderr.lp-on { display:block; }
+.lp-suggest { display:none; font-size:12.5px; color:#cbd5e1; margin-top:6px; background:rgba(52,211,153,.08); border:1px solid rgba(52,211,153,.35); border-radius:6px; padding:8px 10px; }
+.lp-suggest.lp-on { display:block; }
+.lp-suggest button { background:none; border:1px solid #475569; color:#e2e8f0; border-radius:6px; padding:3px 10px; margin-left:6px; font-size:12px; cursor:pointer; }
+.lp-suggest button:hover { border-color:#34d399; }
 .lp-tag { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; padding:2px 8px; border-radius:999px; margin-left:8px; vertical-align:middle; }
 .lp-tag-req { background:rgba(52,211,153,.15); color:#6ee7b7; }
 .lp-tag-opt { background:rgba(148,163,184,.15); color:#cbd5e1; }
@@ -3602,6 +3573,62 @@ def _signup_url(next_url: Optional[str] = None) -> str:
     return "/free-account" + (f"?next={urllib.parse.quote(safe, safe='')}" if safe else "")
 
 
+# Non-blocking capitalisation hint for the Service area field only. It mirrors
+# letter_content.suggest_place_capitalisation (the tested reference): only
+# words that are entirely lower-case change, joining words stay lower-case,
+# acronyms/postcodes/anything already capitalised are untouched, and nothing is
+# ever applied unless the person presses "Use this".
+_PLACE_SUGGEST_JS = r"""
+(function () {
+  var input = document.getElementById('service_area_note');
+  var box = document.getElementById('service_area_suggest');
+  if (!input || !box) return;
+  var LOWER = %(lower)s;
+  var dismissed = '';
+  function fixWord(w) {
+    if (!/^[a-z]+$/.test(w) || LOWER.indexOf(w) !== -1) return w;
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  }
+  function fixToken(t) {
+    var m = t.match(/[.,;:]+$/);
+    if (m) return fixToken(t.slice(0, m.index)) + m[0];
+    var parts = t.split(/([-'\u2019])/), out = [];
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i];
+      if (p === '-' || p === "'" || p === '\u2019') out.push(p);
+      else if (i > 0 && (parts[i - 1] === "'" || parts[i - 1] === '\u2019')) out.push(p);
+      else out.push(fixWord(p));
+    }
+    return out.join('');
+  }
+  function suggest(v) {
+    v = (v || '').trim();
+    if (!v) return null;
+    var s = v.split(' ').map(fixToken).join(' ');
+    return s === v ? null : s;
+  }
+  function hide() { box.className = 'lp-suggest'; box.textContent = ''; }
+  function show(s) {
+    box.textContent = '';
+    box.appendChild(document.createTextNode('Suggested capitalisation: \u201c' + s + '\u201d '));
+    var use = document.createElement('button'); use.type = 'button'; use.textContent = 'Use this';
+    var keep = document.createElement('button'); keep.type = 'button'; keep.textContent = 'Keep mine';
+    use.addEventListener('click', function () { input.value = s; hide(); input.dispatchEvent(new Event('input', { bubbles: true })); input.focus(); });
+    keep.addEventListener('click', function () { dismissed = input.value; hide(); });
+    box.appendChild(use); box.appendChild(keep);
+    box.className = 'lp-suggest lp-on';
+  }
+  function evaluate() {
+    var s = suggest(input.value);
+    if (s && input.value !== dismissed) show(s); else hide();
+  }
+  input.addEventListener('change', evaluate);
+  input.addEventListener('blur', evaluate);
+  if (input.value) evaluate();
+})();
+""" % {"lower": json.dumps(sorted(letter_content._PLACE_LOWER_WORDS))}
+
+
 def _letter_optional_fields_html(settings: "letter_content.ContractorLetterSettings", *, signup: bool = False) -> str:
     """The clearly-labelled OPTIONAL letter-personalisation section, shared by
     My Account letter settings and the first-time signup form so the two
@@ -3657,6 +3684,8 @@ def _letter_optional_fields_html(settings: "letter_content.ContractorLetterSetti
                     <label for="service_area_note">Service area</label>
                     <input id="service_area_note" name="service_area_note" value="{esc(settings.service_area_note)}" placeholder="e.g. Covering Leeds and the surrounding 15 miles" maxlength="{letter_content.MAX_SERVICE_AREA_LEN}">
                     <div class="lp-hint">Tells homeowners where you work. Leave blank to leave it out.</div>
+                    <div id="service_area_suggest" class="lp-suggest" role="status"></div>
+                    <script>{_PLACE_SUGGEST_JS}</script>
 
                     <label for="insurance_note">Insurance details</label>
                     <textarea id="insurance_note" name="insurance_note" placeholder="e.g. Public liability insurance held (state your actual cover)" maxlength="{letter_content.MAX_INSURANCE_LEN}">{esc(settings.insurance_note)}</textarea>
@@ -4550,6 +4579,29 @@ def generate_street_flyer(request: Request, lead_id: str, company: str = "Your L
 
 # ── Checkout (Stripe with Single-Sale Inventory Burn) ─────────────────────────
 
+_FIRST_OFFER_REFUSAL_COPY = {
+    "not_standard": "The £4.99 first introduction applies to standard opportunities only, and this one is priced higher.",
+    "offer_used": "The first-introduction price has already been used for this account or business. Normal prices apply.",
+    "offer_in_progress": "A first-introduction checkout is already open for this account. Finish that one, or try again in about 40 minutes if you abandoned it.",
+    "prior_purchase": "The first-introduction price is for a first purchase, and this account has already bought. Normal prices apply.",
+    "subscriber": "The first-introduction price is for accounts without a subscription. Your subscription pricing applies.",
+    "no_details": "Please finish setting up your account details before using the first-introduction price.",
+    "not_signed_in": "Please sign in to use the first-introduction price.",
+}
+
+
+def _first_offer_unavailable_page(request: Request, reason: str, plan_key: str, lead_id: Optional[str]) -> HTMLResponse:
+    """Honest refusal for a requested-but-not-honoured £4.99 offer. Nothing has
+    been charged and any lead reservation was released. The normal-price link
+    is only a link: the customer sees the normal price before deciding."""
+    copy = _FIRST_OFFER_REFUSAL_COPY.get(reason, "We could not apply the first-introduction price just now, so nothing has been charged. Please try again shortly.")
+    normal_href = f"/checkout/{urllib.parse.quote(plan_key, safe='')}?lead_id={urllib.parse.quote(str(lead_id or ''), safe='')}" if lead_id else "/marketplace"
+    return _branded_message_page(
+        request, "First-introduction price not available", copy + " Nothing has been charged.",
+        cta_text="Continue at the normal price" if lead_id and reason != "offer_in_progress" else "Back to the marketplace",
+        cta_href=normal_href if lead_id and reason != "offer_in_progress" else "/marketplace", status_code=409)
+
+
 @app.get("/checkout/{plan_key}")
 def checkout(plan_key: str, request: Request):
     outcode = request.query_params.get("outcode", "")
@@ -4618,7 +4670,16 @@ def checkout(plan_key: str, request: Request):
 
     # Single lead purchase — go straight to Stripe (no area needed)
     if lead_id or plan.get("mode") == "payment":
-        url = payments.create_checkout_session(plan_key, outcode or "GB", lead_id, account_email=account_email)
+        # 2026-09-30: `first_offer=1` only REQUESTS the £4.99 first
+        # introduction. Eligibility, the standard-opportunity rule, the price
+        # and the one-per-business limit are all decided inside
+        # payments.create_checkout_session; nothing is charged if refused.
+        try:
+            url = payments.create_checkout_session(
+                plan_key, outcode or "GB", lead_id, account_email=account_email,
+                first_offer=bool(lead_id and request.query_params.get("first_offer") == "1"))
+        except payments.FirstOfferUnavailable as offer_refusal:
+            return _first_offer_unavailable_page(request, offer_refusal.reason, plan_key, lead_id)
         if not url:
             # Sep 15 2026: a lead purchase can now fail this early because
             # the exclusive-purchase reservation was refused (someone else
@@ -6500,6 +6561,35 @@ _CAT_ICONS = {
 }
 
 
+def _viewer_first_offer_eligible(viewer_email: Optional[str]) -> bool:
+    """True only when the server-side check says this signed-in account can
+    take the £4.99 first introduction. Anonymous visitors, subscribers,
+    people who already used it or bought before, and any lookup failure all
+    read False (fail closed: the normal price is shown)."""
+    if not viewer_email:
+        return False
+    try:
+        return bool(database.first_offer_status(viewer_email).get("eligible"))
+    except Exception:
+        return False
+
+
+def _listing_is_first_offer_standard(listing: dict) -> bool:
+    """True only for a Standard-value listing (existing classification) at a
+    standard single-lead price point -- never by price alone."""
+    return (listing.get("value_tier") == "standard"
+            and listing.get("plan_key") in payments.FIRST_OFFER_PLAN_KEYS
+            and bool(listing.get("price")))
+
+
+def _first_offer_price_block(normal_price, *, large: bool = False) -> str:
+    size = "text-4xl" if large else "text-2xl sm:text-3xl"
+    price = f"£{payments.FIRST_INTRO_PRICE_PENCE / 100:.2f}"
+    return (f'<div class="text-lg text-slate-500 line-through leading-none">£{normal_price}</div>'
+            f'<div class="{size} font-extrabold text-emerald-400">{price}'
+            f'<span class="text-[11px] font-bold text-emerald-400 align-top ml-1">FIRST INTRODUCTION</span></div>')
+
+
 @app.get("/marketplace", response_class=HTMLResponse)
 def marketplace_view(request: Request, tier: Optional[str] = "all", category: Optional[str] = None,
                       outcode: Optional[str] = None, radius: int = 15):
@@ -6559,6 +6649,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
     # their early-access window. Only an active subscription unlocks it.
     _viewer_sub = database.get_contractor_subscription(_viewer_email) if _viewer_email else None
     _viewer_is_subscriber = bool(_viewer_sub and _viewer_sub.get("active"))
+    _offer_eligible = (not _viewer_is_subscriber) and _viewer_first_offer_eligible(_viewer_email)
 
     resolved = None
     search_error_html = ""
@@ -6695,6 +6786,14 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
         else:
             price_block_html = f"""<div class="text-2xl sm:text-3xl font-extrabold text-emerald-400">£{unlock_fee}</div>"""
             member_link_html = f"""<a href="/login?next={urllib.parse.quote(f'/checkout/{plan_key}?lead_id={lid}')}" class="text-[11px] text-slate-400 hover:text-emerald-400 underline">Already a member? Sign in for your discount</a>"""
+        # 2026-09-30: the £4.99 first introduction, shown only to an account
+        # the server has just confirmed eligible, and only on the standard
+        # price points. The checkout re-checks everything itself.
+        offer_qs = ""
+        if _offer_eligible and unlock_fee and _listing_is_first_offer_standard(l):
+            price_block_html = _first_offer_price_block(unlock_fee)
+            member_link_html = ""
+            offer_qs = "&first_offer=1"
         badge_bg = l["badge_bg"]
         badge_color = l["badge_color"]
         badge_text = l["badge_text"]
@@ -6859,7 +6958,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
                             {days_left}
                         </div>
                     </div>
-                    <a href="/checkout/{plan_key}?lead_id={lid}" class="bg-brand-green hover:bg-emerald-500 text-white px-5 py-3 rounded-lg no-underline font-bold text-[13px] transition-all duration-300 shadow-[0_0_20px_rgba(5,150,105,0.3)] hover:shadow-[0_0_30px_rgba(5,150,105,0.5)] inline-flex items-center justify-center gap-1.5 text-center">
+                    <a href="/checkout/{plan_key}?lead_id={lid}{offer_qs}" class="bg-brand-green hover:bg-emerald-500 text-white px-5 py-3 rounded-lg no-underline font-bold text-[13px] transition-all duration-300 shadow-[0_0_20px_rgba(5,150,105,0.3)] hover:shadow-[0_0_30px_rgba(5,150,105,0.5)] inline-flex items-center justify-center gap-1.5 text-center">
                         Buy This Lead →
                     </a>
                     {member_link_html}
@@ -7031,6 +7130,12 @@ def lead_detail_view(lead_id: str, request: Request):
     else:
         price_block_html = f"""<div class="text-4xl font-extrabold text-emerald-400">£{unlock_fee}</div>"""
         member_link_html = f"""<a href="/login?next={urllib.parse.quote(f'/checkout/{plan_key}?lead_id={lid}')}" class="text-[12px] text-slate-400 hover:text-emerald-400 underline">Already a member? Sign in for your discount</a>"""
+    offer_qs = ""
+    if unlock_fee and _listing_is_first_offer_standard(l) and not _viewer_discount.get("eligible") \
+            and _viewer_first_offer_eligible(_viewer_email):
+        price_block_html = _first_offer_price_block(unlock_fee, large=True)
+        member_link_html = ""
+        offer_qs = "&first_offer=1"
 
     job_cat = l.get("job_category") or database._GENERAL_CATEGORY
     cat_color = job_cat["color"]
@@ -7138,7 +7243,7 @@ def lead_detail_view(lead_id: str, request: Request):
                     {'<div class="text-[11px] text-slate-500 mt-2">Includes 1 printed &amp; posted intro letter to the homeowner</div>' if _letter_promise_live else ''}
                     <div class="mt-1">{member_link_html}</div>
                 </div>
-                <a href="/checkout/{plan_key}?lead_id={lid}" class="shrink-0 bg-brand-green hover:bg-emerald-500 text-white px-7 py-4 rounded-lg no-underline font-bold text-sm transition-all duration-300 shadow-[0_0_20px_rgba(5,150,105,0.3)] hover:shadow-[0_0_30px_rgba(5,150,105,0.5)] inline-flex items-center justify-center gap-1.5 text-center">
+                <a href="/checkout/{plan_key}?lead_id={lid}{offer_qs}" class="shrink-0 bg-brand-green hover:bg-emerald-500 text-white px-7 py-4 rounded-lg no-underline font-bold text-sm transition-all duration-300 shadow-[0_0_20px_rgba(5,150,105,0.3)] hover:shadow-[0_0_30px_rgba(5,150,105,0.5)] inline-flex items-center justify-center gap-1.5 text-center">
                     Buy This Lead →
                 </a>
             </div>
@@ -7602,8 +7707,103 @@ def _login_session_response(verified_email: str, next_url: Optional[str] = None)
     elif database.get_limbo_account(verified_email):
         dest = "/free-dashboard"
     else:
-        dest = "/pricing?msg=no_subscription"
+        # 2026-09-30: a verified account with saved details but no
+        # subscription is a VALID customer (usually a brand-new signup), not
+        # a failure. It lands on the welcome page, never on a "no
+        # subscription found / create an account" message.
+        dest = "/welcome"
     return _session_redirect(dest)
+
+
+def _first_offer_stock_count() -> Optional[int]:
+    """How many standard opportunities are on sale right now (same source and
+    rules as the marketplace list, capped by its own page size). None when it
+    cannot be checked -- the caller then claims nothing either way."""
+    try:
+        leads = database.get_marketplace_leads_with_freshness(limit=40, subscriber_early_access=False)
+        return sum(1 for l in leads if _listing_is_first_offer_standard(l))
+    except Exception:
+        logger.error("[Welcome] Could not count standard opportunities", exc_info=True)
+        return None
+
+
+@app.get("/welcome", response_class=HTMLResponse)
+def welcome_page(request: Request):
+    """2026-09-30: where a verified account without a subscription lands
+    (usually straight after signup). Needs sign-in and saved account details
+    but NO subscription. Shows the £4.99 first introduction only when the
+    server says this account is eligible."""
+    session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not session_email:
+        return RedirectResponse(url="/login?next=%2Fwelcome", status_code=303)
+    try:
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+        try:
+            has_settings = letter_content.get_contractor_settings(cur, session_email) is not None
+        finally:
+            cur.close()
+            conn.close()
+    except Exception:
+        logger.error(f"[Welcome] Could not check account details for {session_email}", exc_info=True)
+        has_settings = True
+    if not has_settings:
+        return RedirectResponse(url=_signup_url("/welcome"), status_code=303)
+    sub = database.get_contractor_subscription(session_email)
+    if sub and sub.get("active"):
+        return RedirectResponse(url="/dashboard", status_code=303)
+
+    offer = {"eligible": False, "reason": None}
+    try:
+        offer = database.first_offer_status(session_email)
+    except Exception:
+        logger.error("[Welcome] First-offer check failed", exc_info=True)
+    price = f"£{payments.FIRST_INTRO_PRICE_PENCE / 100:.2f}"
+    approved = _letter_setup_complete(session_email)
+    letter_line = (
+        '<p style="font-size:14px; color:#94a3b8; margin:0 0 6px 0;">Your letter is approved and ready to use. '
+        '<a href="/letter-settings">Review it</a> any time.</p>' if approved else
+        '<p style="font-size:14px; color:#94a3b8; margin:0 0 6px 0;">Before your first purchase you will choose a letter style, preview your letter and approve it. '
+        '<a href="/letter-settings">Preview my letter</a> now, or we will take you there when you buy.</p>')
+
+    if offer.get("eligible"):
+        stock = _first_offer_stock_count()
+        if stock == 0:
+            offer_block = f"""<div class="lp-card" style="margin-bottom:18px;">
+                <h2 style="margin:0 0 8px 0; font-size:20px; color:#ffffff;">Try your first introduction for {price}</h2>
+                <p style="font-size:14px; color:#cbd5e1; margin:0 0 12px 0;">Choose a suitable opportunity and we'll print and post your approved letter. Printing and postage included. No subscription required.</p>
+                <p style="font-size:14px; color:#fbbf24; margin:0 0 12px 0;">There are no suitable standard opportunities on sale right now, so there is nothing to choose today and you have not been charged. Please check back soon; new opportunities are added as planning notices are published.</p>
+                <a class="lp-btn" href="/marketplace">See the marketplace</a>
+            </div>"""
+        else:
+            offer_block = f"""<div class="lp-card" style="margin-bottom:18px; border-color:#059669;">
+                <h2 style="margin:0 0 8px 0; font-size:20px; color:#ffffff;">Try your first introduction for {price}</h2>
+                <p style="font-size:14px; color:#cbd5e1; margin:0 0 14px 0;">Choose a suitable opportunity and we'll print and post your approved letter. Printing and postage included. No subscription required.</p>
+                <a class="lp-btn" href="/marketplace">Find my first introduction</a>
+                <p class="lp-hint" style="margin-top:10px;">One first-introduction price per business, on standard opportunities. Normal prices apply to later purchases.</p>
+            </div>"""
+    else:
+        reason_copy = {
+            "offer_used": "Your first-introduction price has been used. Normal prices apply to any further introductions.",
+            "offer_in_progress": "A first-introduction checkout is open for your account. Finish it, or it will free up again shortly if you abandoned it.",
+        }.get(offer.get("reason"), "")
+        offer_block = f"""<div class="lp-card" style="margin-bottom:18px;">
+                <h2 style="margin:0 0 8px 0; font-size:20px; color:#ffffff;">Find an introduction</h2>
+                <p style="font-size:14px; color:#cbd5e1; margin:0 0 {'8' if reason_copy else '14'}px 0;">Choose an opportunity and we'll print and post your approved letter. Printing and postage included. No subscription required.</p>
+                {f'<p style="font-size:13px; color:#94a3b8; margin:0 0 14px 0;">{html.escape(reason_copy)}</p>' if reason_copy else ''}
+                <a class="lp-btn" href="/marketplace">Browse the marketplace</a>
+            </div>"""
+
+    inner = f"""
+        <h1 style="margin:0 0 6px 0; font-size:26px; color:#34d399;">Welcome to TreeKey</h1>
+        <p style="font-size:14px; color:#94a3b8; margin:0 0 18px 0;">Your account is ready, signed in as {html.escape(session_email)}.</p>
+        {offer_block}
+        <div class="lp-card">
+            {letter_line}
+            <p style="font-size:14px; color:#94a3b8; margin:0;"><a href="/account">My Account</a> &middot; <a href="/pricing">Subscriptions</a></p>
+        </div>
+    """
+    return HTMLResponse(_letter_page_html(request, "Welcome to TreeKey", inner, max_width=680))
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -7931,11 +8131,26 @@ _SIGNUP_FORM_JS = r"""
   if (!f) return;
   f.noValidate = true;
   var box = document.getElementById('signup-js-errors');
+  var PHONE_MSG = %(phone_msg)s;
+  // Same structural rule as letter_content.validate_phone (7-15 digits, a
+  // leading + and spaces/brackets/dots/hyphens allowed, no letters); the
+  // server re-checks it and is authoritative.
+  function phoneOk(v) {
+    v = (v || '').trim();
+    if (v.length > 40 || !/^\+?[0-9 ()./-]+$/.test(v)) return false;
+    var d = v.replace(/\D/g, '');
+    return d.length >= 7 && d.length <= 15 && !/^(\d)\1*$/.test(d);
+  }
   function check() {
     var missing = [], first = null;
     f.querySelectorAll('[data-req]').forEach(function (el) {
       var ok = el.type === 'checkbox' ? el.checked : (el.value || '').trim() !== '';
       if (ok && el.type === 'email') ok = /^[^@\s]+@[^@\s]+$/.test(el.value.trim());
+      if (el.hasAttribute('data-phone')) {
+        var pe = document.getElementById('phone-error'), bad = (el.value || '').trim() !== '' && !phoneOk(el.value);
+        if (bad) ok = false;
+        if (pe) { pe.textContent = bad ? PHONE_MSG : ''; pe.className = 'lp-fielderr' + (bad ? ' lp-on' : ''); }
+      }
       el.setAttribute('aria-invalid', ok ? 'false' : 'true');
       if (!ok) { missing.push(el.getAttribute('data-label')); if (!first) first = el; }
     });
@@ -7955,12 +8170,13 @@ _SIGNUP_FORM_JS = r"""
   function clear() { if (box.style.display === 'block' && check().missing.length === 0) box.style.display = 'none'; }
   ['input', 'change', 'animationstart'].forEach(function (t) { f.addEventListener(t, clear, true); });
 })();
-"""
+""" % {"phone_msg": json.dumps(letter_content.PHONE_FORMAT_HINT)}
 
 
 def _first_time_signup_page_html(request: Optional[Request], *, values: Optional[dict] = None,
                                  error: Optional[str] = None, next: Optional[str] = None,
-                                 verified_email: Optional[str] = None) -> str:
+                                 verified_email: Optional[str] = None,
+                                 field_errors: Optional[dict] = None) -> str:
     """2026-09-30: THE first-time signup form -- account email, the required
     business/contact details and the existing optional letter-personalisation
     fields on one page. Nothing submitted here is saved to any account until
@@ -7985,6 +8201,7 @@ def _first_time_signup_page_html(request: Optional[Request], *, values: Optional
         offer_text=g("offer_text"), offer_code=g("offer_code"), offer_conditions=g("offer_conditions"),
     )
     e = html.escape
+    phone_err = (field_errors or {}).get("phone", "")
     if verified_email:
         email_block = f"""<label for="account_email_display">Account email</label>
                     <div id="account_email_display" class="lp-static">{e(verified_email)}</div>
@@ -8027,8 +8244,9 @@ def _first_time_signup_page_html(request: Optional[Request], *, values: Optional
                     <input id="business_name" name="business_name" value="{e(g('business_name'))}" placeholder="e.g. Ashcroft Tree Surgery" maxlength="{letter_content.MAX_BUSINESS_NAME_LEN}" required data-req data-label="your business name">
                     <div class="lp-hint">Printed on your letter so the homeowner knows who is writing.</div>
                     <label for="phone">Telephone *</label>
-                    <input id="phone" name="phone" type="tel" value="{e(g('phone'))}" placeholder="e.g. 01234 567890" maxlength="{letter_content.MAX_PHONE_LEN}" autocomplete="tel" required data-req data-label="your telephone number">
-                    <div class="lp-hint">The number homeowners call. Printed on your letter.</div>
+                    <input id="phone" name="phone" type="tel" value="{e(g('phone'))}" placeholder="e.g. 01234 567890 or +44 1234 567890" maxlength="{letter_content.MAX_PHONE_LEN}" autocomplete="tel" required data-req data-phone data-label="your telephone number"{' aria-invalid="true"' if phone_err else ''} aria-describedby="phone-error">
+                    <div id="phone-error" class="lp-fielderr{' lp-on' if phone_err else ''}" role="alert">{e(phone_err)}</div>
+                    <div class="lp-hint">The number homeowners call. Printed on your letter. UK or international numbers are fine.</div>
                 </div>
 
                 {_letter_optional_fields_html(optional_settings, signup=True)}
@@ -8077,6 +8295,13 @@ def free_account_signup_page(request: Request, error: Optional[str] = None, next
     return _first_time_signup_page_html(request, values=prefill, error=error, next=next, verified_email=session_email)
 
 
+def _signup_field_errors(values: dict) -> dict:
+    """Field-level problems shown inline under the field (server-side, so it
+    holds without JavaScript). Currently the telephone format only."""
+    ok, msg = letter_content.validate_phone(values.get("phone", ""))
+    return {} if ok else {"phone": msg}
+
+
 def _validate_signup_values(values: dict, terms_ticked: bool):
     """Shared by both signup submissions. Returns (error_message, letter_fields);
     letter_fields excludes the email and the responsible-contact name."""
@@ -8087,6 +8312,8 @@ def _validate_signup_values(values: dict, terms_ticked: bool):
         return "Please enter your full name.", None
     if len(values["responsible_name"]) > MAX_RESPONSIBLE_NAME_LEN:
         return f"Your name must be {MAX_RESPONSIBLE_NAME_LEN} characters or fewer.", None
+    if _signup_field_errors(values):
+        return "Please check the telephone number below.", None
     letter_fields = {k: values[k] for k in _SIGNUP_FIELDS if k not in ("email", "responsible_name")}
     # No template/style field at signup: the letter style keeps the module
     # default until the person chooses one in My Account / before purchase.
@@ -8119,7 +8346,8 @@ async def first_time_signup_complete(request: Request):
     error, letter_fields = _validate_signup_values(values, terms_ticked)
     if error:
         return HTMLResponse(_first_time_signup_page_html(request, values=values, error=error, next=safe_next,
-                                                         verified_email=session_email), status_code=400)
+                                                         verified_email=session_email,
+                                                         field_errors=_signup_field_errors(values)), status_code=400)
     settings = letter_content.ContractorLetterSettings(contractor_email=session_email, **letter_fields)
     conn = database.get_db_conn()
     cur = conn.cursor()
@@ -8160,7 +8388,8 @@ async def first_time_signup(request: Request):
     terms_ticked = (form.get("agree_terms") or "").strip().lower() in ("yes", "on", "true", "1")
 
     def _fail(msg: str):
-        return HTMLResponse(_first_time_signup_page_html(request, values=values, error=msg, next=safe_next), status_code=400)
+        return HTMLResponse(_first_time_signup_page_html(request, values=values, error=msg, next=safe_next,
+                                                         field_errors=_signup_field_errors(values)), status_code=400)
 
     email = values["email"]
     error, letter_fields = _validate_signup_values(values, terms_ticked)
@@ -9181,7 +9410,7 @@ def my_leads_view(request: Request):
         <title>My Leads | TreeKey</title>
         <link rel="icon" href="/static/icon-192.png">
         <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:0; line-height:1.5; }}
+            body {{ font-family: "Inter", ui-sans-serif, system-ui, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:0; line-height:1.5; }}
             .container {{ max-width: 760px; margin: auto; padding: 32px 16px; }}
         </style>
     </head>
@@ -9292,7 +9521,7 @@ def my_account_view(request: Request):
     else:
         tier_name = "Free Tier"
         status_badge = "<span style='background:#1e293b; color:#94a3b8; font-size:11px; font-weight:bold; padding:4px 10px; border-radius:12px;'>FREE TIER</span>"
-        quota_line = "<p style='font-size:14px; color:#cbd5e1; margin:0 0 4px 0;'>One free lead per account, plus occasional early-access alerts by email.</p>"
+        quota_line = "<p style='font-size:14px; color:#cbd5e1; margin:0 0 4px 0;'>No subscription. You can buy single introductions from the marketplace whenever you like.</p>"
         coverage_line = ""
         manage_block = '<a href="/pricing" style="display:inline-block; background:#059669; color:white; padding:8px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; margin-top:10px;">Upgrade to a Subscription →</a>'
 
@@ -9326,11 +9555,12 @@ def my_account_view(request: Request):
         <title>My Account | TreeKey</title>
         <link rel="icon" href="/static/icon-192.png">
         <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:0; line-height:1.5; }}
+            body {{ font-family: "Inter", ui-sans-serif, system-ui, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:0; line-height:1.5; }}
             .container {{ max-width: 760px; margin: auto; padding: 32px 16px; }}
             .card {{ background:#0f172a; border:1px solid #1e293b; border-radius:10px; padding:20px; margin-bottom:16px; }}
             .card-label {{ font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; font-weight:bold; margin-bottom:8px; }}
             .quick-grid {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-top:24px; }}
+            .quick-card, .quick-card:visited {{ color:#e2e8f0; }}
             .quick-card {{ display:block; background:#1e293b80; border:1px solid #334155; border-radius:10px; padding:14px; text-decoration:none; }}
             .quick-card:hover {{ border-color:#34d399; }}
         </style>

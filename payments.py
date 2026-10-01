@@ -236,7 +236,7 @@ PLANS = {
     # Policy) rather than conflating the two under one overclaim.
     "single_lead_small": {
         "name": "Single Lead Purchase (Entry)",
-        "description": "100% Exclusive planning lead. Once purchased, it's reserved for you and never resold to another contractor.",
+        "description": "Single-sale planning lead, sold once through TreeKey. Once purchased, it's reserved for you and never resold to another contractor.",
         "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 1900,   # £19 one-off -- Standard value, past its freshest window
         "mode": "payment",
@@ -246,7 +246,7 @@ PLANS = {
     },
     "single_lead_medium": {
         "name": "Single Lead Purchase (Standard)",
-        "description": "100% Exclusive unshared planning lead. Permanently burned from inventory upon purchase.",
+        "description": "Single-sale planning lead, sold once through TreeKey and removed from sale on purchase.",
         "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 2900,   # £29 one-off -- Standard value fresh, or Priority value past its freshest window
         "mode": "payment",
@@ -256,7 +256,7 @@ PLANS = {
     },
     "single_lead_priority": {
         "name": "Single Lead Purchase (Priority)",
-        "description": "100% Exclusive unshared planning lead with elevated statutory/legal weight or scale. Permanently burned from inventory upon purchase.",
+        "description": "Single-sale planning lead with elevated statutory/legal weight or scale, sold once through TreeKey and removed from sale on purchase.",
         "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 3900,   # £39 one-off -- Priority value fresh, or Elite value past its freshest window
         "mode": "payment",
@@ -266,7 +266,7 @@ PLANS = {
     },
     "single_lead_large": {
         "name": "Single Lead Purchase (Elite)",
-        "description": "100% Exclusive high-value planning lead -- statutory weight or genuine urgency. Burned from inventory immediately upon purchase.",
+        "description": "Single-sale high-value planning lead -- statutory weight or genuine urgency -- sold once through TreeKey and removed from sale on purchase.",
         "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 4900,   # £49 one-off -- Elite value, freshest window
         "mode": "payment",
@@ -397,6 +397,7 @@ def _resolve_live_single_lead_price(lead_id: str) -> Optional[dict]:
         return {
             "amount_pence": int(price_pounds) * 100,
             "plan_key": live_plan_key,
+            "value_tier": fresh.get("value_tier"),
             "name": live_plan["name"] if live_plan else "Single Lead Purchase",
             # Always read through plan_description() -- the one place
             # customer-facing plan text comes from -- never read
@@ -408,9 +409,32 @@ def _resolve_live_single_lead_price(lead_id: str) -> Optional[dict]:
         return None
 
 
+# 2026-09-30: the agreed first-introduction offer. The price and the rules
+# live ONLY here and in database.first_offer_status / claim_first_offer_order;
+# a customer can request the offer (first_offer=True) but never set its price
+# or decide their own eligibility. "Standard opportunity" = the listing's
+# existing value classification is 'standard' (database.calculate_lead_freshness
+# `value_tier`, from scanners.classify_lead_value_tier), and it is priced at one
+# of the two standard single-lead price points. Priority and Elite listings are
+# never offered at this price, even when their price happens to be GBP 29.
+FIRST_INTRO_PRICE_PENCE = 499
+FIRST_OFFER_PLAN_KEYS = ("single_lead_small", "single_lead_medium")
+
+
+class FirstOfferUnavailable(Exception):
+    """Raised by create_checkout_session when the first-introduction offer was
+    requested but cannot be honoured. `reason` is one of: not_signed_in,
+    not_standard, subscriber, prior_purchase, offer_used, offer_in_progress,
+    no_details, lead_unavailable, unavailable. Nothing has been charged and
+    any lead reservation taken has been released."""
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
 def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = None, radius: int = 15,
                              full_postcode: str = None, job_size: str = None,
-                             account_email: str = None) -> Optional[str]:
+                             account_email: str = None, first_offer: bool = False) -> Optional[str]:
     """
     Creates a Stripe Checkout session for the given plan or single lead purchase.
     Returns the checkout URL to redirect the customer to.
@@ -487,6 +511,22 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
             product_name = live["name"]
             product_description = live["description"]
 
+            if first_offer:
+                # Everything about the offer is decided here, server-side,
+                # from the verified account and the live lead -- the request
+                # only says "I want the offer".
+                if not account_email:
+                    raise FirstOfferUnavailable("not_signed_in")
+                # Standard = the existing value classification
+                # (scanners.classify_lead_value_tier), NOT the price: a
+                # Priority listing that has aged into the GBP 29 band is
+                # excluded. The plan-key check is a second, independent guard.
+                if live.get("value_tier") != "standard" or live.get("plan_key") not in FIRST_OFFER_PLAN_KEYS:
+                    raise FirstOfferUnavailable("not_standard")
+                offer_state = database.first_offer_status(account_email)
+                if not offer_state.get("eligible"):
+                    raise FirstOfferUnavailable(offer_state.get("reason") or "unavailable")
+
             # Atomically reserve the lead for THIS checkout attempt before
             # Stripe is ever involved -- refuse the whole checkout (same
             # pattern as the price-unavailable case above) rather than let
@@ -499,12 +539,26 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
                 logger.warning(f"[Stripe] Refusing checkout for lead_id={lead_id} -- could not reserve (already sold or reserved by another in-progress checkout).")
                 return None
 
+            if first_offer:
+                # Atomic re-check + redemption record (one per account, phone
+                # and business). The lead is released again if we lose a race.
+                claim = database.claim_first_offer_order(
+                    reservation_token, account_email, FIRST_INTRO_PRICE_PENCE, lead_id, plan_key)
+                if not claim.get("ok"):
+                    database.release_lead_reservation(lead_id, reservation_token)
+                    raise FirstOfferUnavailable(claim.get("reason") or "unavailable")
+                unit_amount = FIRST_INTRO_PRICE_PENCE
+                product_name = "Your first TreeKey introduction"
+                product_description = ("One exclusive opportunity, sold once through TreeKey, with your approved letter "
+                                       "printed and posted for you. Printing and postage included. First-introduction "
+                                       "price; normal prices apply to later purchases.")
+
             # Server-side subscriber discount -- only ever computed from an
             # already-verified account_email, never a checkout-collected
             # email. Applied to the live price before Stripe ever sees it,
             # so Stripe always charges the final, correct amount directly
             # (no promo-code layer to keep in sync).
-            if account_email:
+            if account_email and not first_offer:
                 disc = database.get_subscriber_discount(account_email)
                 if disc.get("eligible"):
                     discount_pct = disc.get("discount_pct", 0)
@@ -525,9 +579,11 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
             "mode": plan["mode"],
             "success_url": f"{PUBLIC_APP_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}",
             "cancel_url": f"{PUBLIC_APP_URL}/pricing",
-            "allow_promotion_codes": True,
+            "allow_promotion_codes": not first_offer,  # the offer price is final: no stacking
             "metadata": {"plan_key": plan_key, "tier": plan_key}
         }
+        if first_offer:
+            session_params["metadata"]["first_offer"] = "1"
 
         if plan["mode"] == "subscription":
             # Carry plan_key on the Subscription object itself (not just the Checkout
@@ -570,15 +626,18 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
             # there's a durable record even if the customer never completes
             # payment -- Nick's spec: "a record linking the buyer, lead,
             # checkout, payment, price and fulfilment outcome."
-            database.record_order(
-                reservation_token, account_email, unit_amount,
-                lead_id=lead_id, plan=plan_key, status="pending"
-            )
+            if not first_offer:  # the offer's order row was written atomically by claim_first_offer_order
+                database.record_order(
+                    reservation_token, account_email, unit_amount,
+                    lead_id=lead_id, plan=plan_key, status="pending"
+                )
 
         session = stripe.checkout.Session.create(**session_params)
         logger.info(f"[Stripe] Checkout session created for plan '{plan_key}' outcode={outcode} radius={radius}mi (lead_id={lead_id}): {session.id}")
         return session.url
 
+    except FirstOfferUnavailable:
+        raise
     except stripe.error.AuthenticationError:
         logger.error("[Stripe] Invalid API key.")
         # Sep 3 2026: found during the "predict future issues, even ones

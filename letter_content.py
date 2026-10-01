@@ -354,6 +354,104 @@ def template_choices() -> "list[tuple[str, str]]":
 # final; nothing else about this mechanism needs to change to do that.
 MAX_BUSINESS_NAME_LEN = 120
 MAX_PHONE_LEN = 40
+
+
+# 2026-09-30: telephone validation and small identity/formatting helpers.
+# No phone-validation utility existed in the codebase, and the `phonenumbers`
+# package is not a dependency (adding one is a deployment change), so this is
+# a deliberately tolerant structural check, not a country-specific one:
+# ITU E.164 allows at most 15 digits including the country code, and no real
+# number has fewer than about 7, so the accepted range is 7-15 digits. It does
+# NOT force a UK format or a fixed length -- "01234 567890", "+44 1234 567890",
+# "0044 1234 567890", "+1 (415) 555-2671" and "+353 87 123 4567" all pass.
+_PHONE_ALLOWED_CHARS = re.compile(r"^\+?[0-9 ()./-]+$")
+PHONE_FORMAT_HINT = ("Enter a valid telephone number, for example 01234 567890 or +44 1234 567890. "
+                     "Spaces, brackets, dots, hyphens and a leading + are fine.")
+
+
+def validate_phone(raw: str):
+    """Returns (ok, message). Structural check only -- it cannot know whether
+    a number is connected, and does not claim to."""
+    value = (raw or "").strip()
+    if not value:
+        return False, "Please enter a telephone number."
+    if len(value) > MAX_PHONE_LEN:
+        return False, f"Your telephone number must be {MAX_PHONE_LEN} characters or fewer."
+    if not _PHONE_ALLOWED_CHARS.match(value):
+        return False, PHONE_FORMAT_HINT
+    digits = re.sub(r"\D", "", value)
+    if len(digits) < 7 or len(digits) > 15:
+        return False, PHONE_FORMAT_HINT
+    if len(set(digits)) == 1:
+        return False, PHONE_FORMAT_HINT
+    return True, ""
+
+
+def phone_identity_key(raw: str) -> str:
+    """Stable key for "is this the same telephone number": digits only, with
+    the international prefix or national trunk zero ignored by keeping the
+    last 10 digits, so "01234 567890" and "+44 1234 567890" match. Used only
+    for one-per-business abuse control, never shown or printed."""
+    digits = re.sub(r"\D", "", raw or "")
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
+_BUSINESS_SUFFIXES = {"ltd", "limited", "llp", "plc", "uk", "the", "and", "co", "company", "services", "service"}
+
+
+def business_identity_key(name: str) -> str:
+    """Stable key for "is this the same business name": lower-case letters and
+    digits only, ignoring generic company-form words, so "Ashcroft Tree
+    Surgery Ltd" and "ashcroft tree surgery" match. Used only for
+    one-per-business abuse control."""
+    words = re.findall(r"[a-z0-9]+", (name or "").lower())
+    words = [w for w in words if w not in _BUSINESS_SUFFIXES]
+    return "".join(words)
+
+
+_PLACE_LOWER_WORDS = {"and", "of", "the", "on", "upon", "in", "le", "de", "near", "around", "within", "miles",
+                      "mile", "radius", "covering", "across", "from", "to", "by", "with", "for", "a", "an",
+                      "surrounding", "area", "areas", "km", "approx", "about", "nearby", "under", "over", "at"}
+
+
+def suggest_place_capitalisation(text: str):
+    """Non-blocking suggestion for the Service area field. Returns a suggested
+    string, or None when nothing should be suggested. Only words that are
+    ENTIRELY lower-case are ever changed (so acronyms, postcodes such as NG22,
+    "McDonald", "AONB" and anything the person capitalised deliberately are
+    left alone), joining words such as "and"/"of"/"on" stay lower-case, and
+    nothing is applied automatically. Not used for business names or letter
+    wording."""
+    value = (text or "").strip()
+    if not value:
+        return None
+
+    def fix_word(word: str) -> str:
+        if not word.isalpha() or not word.islower():
+            return word
+        if word in _PLACE_LOWER_WORDS:
+            return word
+        return word[:1].upper() + word[1:]
+
+    def fix_token(token: str) -> str:
+        trail = re.search(r"[.,;:]+$", token)
+        if trail:
+            return fix_token(token[:trail.start()]) + trail.group(0)
+        parts = re.split(r"([-'\u2019])", token)
+        out = []
+        for i, part in enumerate(parts):
+            if part in ("-", "'", "\u2019"):
+                out.append(part)
+            elif i > 0 and parts[i - 1] in ("'", "\u2019"):
+                out.append(part)  # "king's" -> "King's", never "King'S"
+            else:
+                out.append(fix_word(part))
+        return "".join(out)
+
+    suggestion = " ".join(fix_token(t) for t in value.split(" "))
+    # The very first word of a sentence-style entry ("covering leeds") is a
+    # lower-case joining word: leave it, the place names after it are what matter.
+    return suggestion if suggestion != value else None
 MAX_CONTACT_EMAIL_LEN = 254
 # 2026-09-27, contact panel redesign: a first name only, never a full name
 # or surname -- kept short deliberately (see ContractorLetterSettings.
@@ -501,6 +599,10 @@ class ContractorLetterSettings:
             problems.append("business_name is required")
         if not self.phone or not self.phone.strip():
             problems.append("phone is required")
+        else:
+            _phone_ok, _phone_msg = validate_phone(self.phone)
+            if not _phone_ok and len(self.phone) <= MAX_PHONE_LEN:
+                problems.append(f"phone: {_phone_msg}")
         if self.template_key not in TEMPLATE_REGISTRY:
             problems.append(
                 f"template_key must be one of {sorted(TEMPLATE_REGISTRY.keys())}, got {self.template_key!r}"

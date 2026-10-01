@@ -335,6 +335,7 @@ class TestMagicLinkGoesToTheRealContractorNotTestEmail(unittest.IsolatedAsyncioT
         class _FakeRequest:
             def __init__(self, contact):
                 self.client = MagicMock(host="127.0.0.1")
+                self.cookies = {}  # the shared nav (rendered in the "check your inbox" page) reads request.cookies
                 self._contact = contact
 
             async def form(self):
@@ -423,7 +424,7 @@ class TestVerifyLoginRoutesLimboAccountsToFreeDashboard(unittest.TestCase):
             response = main.verify_login(fake_request, token="tok")
         self.assertEqual(response.url, "/free-dashboard")
 
-    def test_unknown_email_still_goes_to_pricing(self):
+    def test_valid_non_subscriber_goes_to_welcome_not_pricing(self):
         with patch("database.verify_magic_auth_token", return_value="stranger@example.com"), \
              patch.object(main, "_check_rate_limit", return_value=True), \
              patch("database.get_contractor_subscription", return_value=None), \
@@ -431,7 +432,7 @@ class TestVerifyLoginRoutesLimboAccountsToFreeDashboard(unittest.TestCase):
             fake_request = MagicMock()
             fake_request.client = MagicMock(host="127.0.0.1")
             response = main.verify_login(fake_request, token="tok")
-        self.assertIn("/pricing", response.url)
+        self.assertEqual(response.url, "/welcome")
 
     def test_active_paid_subscriber_still_goes_to_full_dashboard(self):
         with patch("database.verify_magic_auth_token", return_value="paid@apex-trees.co.uk"), \
