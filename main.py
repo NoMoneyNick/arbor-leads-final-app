@@ -2122,7 +2122,7 @@ def public_homepage(request: Request):
     <section class="max-w-7xl mx-auto px-4 mt-24 mb-12 relative z-10">
         <div class="text-center mb-16">
             <h2 class="text-3xl md:text-5xl font-extrabold text-white mb-6 uppercase tracking-tight">The <span class="text-emerald-500">TreeKey</span> Advantage</h2>
-            <p class="text-lg text-slate-400 max-w-2xl mx-auto">We don't just supply leads. We engineer market dominance. Here is exactly why our contractors win.</p>
+            <p class="text-lg text-slate-400 max-w-2xl mx-auto">Find local tree-work opportunities and introduce your business with a printed and posted letter.</p>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -2149,8 +2149,8 @@ def public_homepage(request: Request):
                 <div class="h-12 w-12 rounded bg-blue-500/10 flex items-center justify-center mb-6 border border-blue-500/30 text-blue-400">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
                 </div>
-                <h3 class="text-xl font-bold text-white mb-3">Intercept Before Competitors</h3>
-                <p class="text-slate-400 text-sm leading-relaxed">Statutory tree work notices are public planning authority records the moment they're filed — most contractors never check them. We monitor the registers directly and route matching jobs to you <strong class="text-slate-200">as soon as they're published,</strong> so you can reach the homeowner before a competitor who's still waiting for the phone to ring.</p>
+                <h3 class="text-xl font-bold text-white mb-3">Find Local Planning Notices</h3>
+                <p class="text-slate-400 text-sm leading-relaxed">Browse tree-work opportunities identified from public planning notices, then choose where to send your business introduction.</p>
             </div>
         </div>
     </section>
@@ -9541,11 +9541,11 @@ def my_leads_view(request: Request):
                     {filed_row}
                 </div>"""
         if not lead_cards:
-            lead_cards = "<div style='text-align:center; padding:32px; background:#0f172a; border-radius:10px; border:1px solid #1e293b;'><p style='color:#94a3b8; margin:0;'>No leads on your account yet. Free-tier accounts get one lead automatically, or <a href=\"/marketplace\" style=\"color:#34d399; font-weight:bold;\">browse the Marketplace</a> to buy one outright.</p></div>"
+            lead_cards = "<div style='text-align:center; padding:32px; background:#0f172a; border-radius:10px; border:1px solid #1e293b;'><p style='color:#94a3b8; margin:0;'>No introductions to show yet. <a href=\"/marketplace\" style=\"color:#34d399; font-weight:bold;\">Browse the marketplace</a> to find available opportunities.</p></div>"
 
     upsell = "" if is_paid else """
         <div style="background:rgba(6,78,59,0.3); border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:20px; margin-bottom:24px;">
-            <p style="font-size:14px; color:#a7f3d0; margin:0 0 12px 0;">Free-tier accounts get one lead. Subscribe for a steady stream of exclusive leads in your area, delivered the moment they're filed.</p>
+            <p style="font-size:14px; color:#a7f3d0; margin:0 0 12px 0;">Subscribe for a steady stream of exclusive leads in your area, delivered the moment they're filed.</p>
             <a href="/pricing" style="display:inline-block; background:#059669; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">See Subscription Plans →</a>
         </div>"""
 
@@ -9988,7 +9988,7 @@ async def account_close_submit(request: Request):
                 <p>Account: {html.escape(session_email)}<br>Request: {html.escape(kinds)}<br>
                 Active subscription: {'yes' if is_paid else 'no'}<br>Request id: {html.escape(saved['id'])}</p>
                 <p>Customer note: {html.escape(note) if note else '(none)'}</p>
-                <p>Review: {html.escape(admin_url)} (open it with your admin secret).</p></div>""",
+                <p>Review: {html.escape(admin_url)}<br>Sign in with your admin username and password.</p></div>""",
                 from_label="TreeKey System <leads@mail.treekey.co.uk>")
             if not ok:
                 err = "email send failed"
@@ -10792,7 +10792,7 @@ def quote_estimator_page():
                 AI Arborist Scope Engine
             </div>
             <h1 style="margin:0 0 6px 0; color:#34d399; font-size:26px;">Instant Tree Work Estimator</h1>
-            <p style="color:#94a3b8; font-size:14px; margin:0;">Get an accurate fair-market estimate and connect directly with 1 verified local tree surgeon — no spam, no 5-way bidding wars.</p>
+            <p style="color:#94a3b8; font-size:14px; margin:0;">Get an accurate fair-market estimate and connect directly with 1 verified local tree surgeon.</p>
         </div>
 
         <form id="scopeForm" onsubmit="event.preventDefault(); calcScope();">
@@ -11347,7 +11347,7 @@ def local_seo_intake_page(location_slug: str):
         <span class="badge">Local Service Hub: {city_name} & {region_name}</span>
         <h1 class="hero-title">Verified Tree Surgeons in {city_name}</h1>
         <p style="color:#94a3b8; font-size: 16px; margin: 0 0 20px 0;">
-            Calculate your fair-market price in seconds and connect directly with <b>1 verified NPTC tree surgeon</b> in {city_name}. No directory spam. No 5-company bidding wars.
+            Calculate your fair-market price in seconds and connect directly with <b>1 verified NPTC tree surgeon</b> in {city_name}.
         </p>
 
         <div class="trust-grid">

@@ -99,7 +99,7 @@ PLANS = {
         "amount": 3900,   # £39/month
         "mode": "subscription",
         "badge": "Most Popular",
-        "real_world_roi": "Less than a tank of diesel (£39/mo). One £400 job every few months pays for the year many times over."
+        "real_world_roi": ""
     },
     "growth": {
         "name": "TreeKey Growth",
@@ -108,7 +108,7 @@ PLANS = {
         "amount": 7900,   # £79/month
         "mode": "subscription",
         "badge": "Growing Crews",
-        "real_world_roi": "One extra job a month at this volume comfortably covers the subscription."
+        "real_world_roi": ""
     },
     "arb_consultant": {
         "name": "TreeKey Consultant (Planning & Survey)",
@@ -125,7 +125,7 @@ PLANS = {
         "amount": 9900,   # £99/month (was £89)
         "mode": "subscription",
         "badge": "Planning & Surveyors",
-        "real_world_roi": "One £800 developer method statement report every 3 months gives a 3x ROI on pure desktop work."
+        "real_world_roi": ""
     },
     "commercial_forestry": {
         "name": "TreeKey Commercial & Forestry",
@@ -134,7 +134,7 @@ PLANS = {
         "amount": 15900,  # £159/month (was £139; also replaces retired commercial_pro)
         "mode": "subscription",
         "badge": "Heavy Commercial",
-        "real_world_roi": "One commercial job won per year (£3,000–£15,000) covers your subscription for 2–5 years."
+        "real_world_roi": ""
     },
     "treekey_elite": {
         "name": "TreeKey Elite (All-Access Partner)",
