@@ -231,6 +231,108 @@ class TestSharedChromeStyles(unittest.TestCase):
             self.assertNotIn("One free lead per account", page)
 
 
+class TestPackageCardsAndOfferPromo(unittest.TestCase):
+    """2026-10-01: shared package-card layout + conditional GBP 4.99 invitation."""
+
+    AGREED = {  # key: (price GBP, introductions, discount %)
+        "starter": (39, 6, 10), "growth": (79, 10, 15), "arb_consultant": (99, 8, 15),
+        "commercial_forestry": (159, 14, 20), "treekey_elite": (249, 20, 25),
+    }
+
+    def test_card_facts_match_the_enforced_entitlements_and_agreed_prices(self):
+        import re
+        with open(os.path.join(_APP_DIR, "database.py"), encoding="utf-8") as fh:
+            dbsrc = fh.read()
+        with open(os.path.join(_APP_DIR, "payments.py"), encoding="utf-8") as fh:
+            paysrc = fh.read()
+        quotas = dict(re.findall(r'"(\w+)": (\d+),', dbsrc[dbsrc.index("TIER_QUOTAS = {"):dbsrc.index("}", dbsrc.index("TIER_QUOTAS = {"))]))
+        disc = dict(re.findall(r'"(\w+)": (\d+),', dbsrc[dbsrc.index("TIER_DISCOUNT_PCT = {"):dbsrc.index("}", dbsrc.index("TIER_DISCOUNT_PCT = {"))]))
+        for key, (price, intros, pct) in self.AGREED.items():
+            f = main._PACKAGE_FACTS[key]
+            self.assertEqual((f["intros"], f["discount"]), (intros, pct), key)
+            self.assertEqual((int(quotas[key]), int(disc[key])), (intros, pct), key)
+            block = paysrc[paysrc.index(f'"{key}": {{'):]
+            self.assertIn(f'"amount": {price}00,', block[:3500], key)
+
+    def test_card_structure_and_no_unsupported_wording(self):
+        plan = {"name": "TreeKey Starter", "amount": 3900, "mode": "subscription", "badge": "Most Popular"}
+        card = main._package_card_html("starter", plan, cta_href="/checkout/starter")
+        for needle in ("TreeKey Starter", "&pound;39", "<b>6</b> introductions included each month",
+                       "Printing and postage included", "10% off additional marketplace introductions",
+                       "Alerts when matching opportunities are found.", 'href="/checkout/starter"', "Choose Starter"):
+            self.assertIn(needle, card)
+        for banned in ("Most Popular", "Claim Tailored", "Secure Priority", "See This Tier",
+                       "matching lead is filed", "Real-World Math"):
+            self.assertNotIn(banned, card)
+        self.assertEqual(main._package_card_html("unknown_plan", plan, cta_href="/x"), "")
+
+    def _promo(self, *, cookie, sub=None, offer=None, boom=False):
+        r = MagicMock(); r.cookies = {"treekey_contractor_session": _cookie()} if cookie else {}
+        fo = MagicMock(side_effect=RuntimeError("x")) if boom else MagicMock(return_value=offer or {"eligible": False})
+        with patch.object(main.database, "get_contractor_subscription", return_value=sub, create=True), \
+             patch.object(main.database, "first_offer_status", fo, create=True), \
+             patch.object(main.payments, "FIRST_INTRO_PRICE_PENCE", 499, create=True):
+            return main._first_offer_promo_html(r)
+
+    def test_visitor_sees_the_conditional_offer_with_agreed_copy(self):
+        out = self._promo(cookie=False)
+        self.assertIn("New to TreeKey? Try your first eligible introduction for &pound;4.99.", out)
+        self.assertIn("Printing and postage included. No subscription required. One per eligible business, on selected Standard opportunities.", out)
+        self.assertIn("Find my first introduction", out)
+        self.assertIn('href="/login?next=%2Fwelcome"', out)
+
+    def test_eligible_signed_in_account_gets_the_existing_offer_destination(self):
+        out = self._promo(cookie=True, offer={"eligible": True, "reason": None})
+        self.assertIn('href="/marketplace"', out)
+        self.assertIn("Find my first introduction", out)
+
+    def test_ineligible_accounts_are_never_told_they_qualify(self):
+        for kw in (dict(offer={"eligible": False, "reason": "offer_used"}),
+                   dict(offer={"eligible": False, "reason": "offer_in_progress"}),
+                   dict(sub={"active": True}, offer={"eligible": True}),   # subscriber, even if the check said yes
+                   dict(boom=True)):                                         # lookup failure fails closed
+            self.assertEqual(self._promo(cookie=True, **kw), "", kw)
+
+    def test_pricing_page_shows_all_five_cards_and_offer_above_them(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("realpay_cards", os.path.join(_APP_DIR, "payments.py"))
+        rp = importlib.util.module_from_spec(spec); spec.loader.exec_module(rp)
+        r = MagicMock(); r.query_params = {}; r.cookies = {}
+        with patch("main.HTMLResponse", side_effect=lambda content=None, *a, **k: content), \
+             patch.object(main.payments, "PLANS", rp.PLANS, create=True), \
+             patch.object(main.payments, "plan_description", rp.plan_description, create=True), \
+             patch.object(main.payments, "FIRST_INTRO_PRICE_PENCE", 499, create=True):
+            page = main.pricing(r)
+        self.assertEqual(page.count('class="tk-pkg"'), 5)
+        for key, (price, intros, pct) in self.AGREED.items():
+            self.assertIn(f"&pound;{price}<span>/month</span>", page)
+            self.assertIn(f"<b>{intros}</b> introductions included each month", page)
+            self.assertIn(f"{pct}% off additional marketplace introductions", page)
+            self.assertIn(f'href="/checkout/{key}"', page)
+        self.assertLess(page.index("Find my first introduction"), page.index('class="tk-pkgs"'))
+        self.assertNotIn("Most Popular", page)
+        self.assertIn("Single Lead Purchase (Entry)", page)  # ordinary single-purchase prices still listed
+
+    def test_homepage_source_has_featured_packages_compare_link_and_no_stale_copy(self):
+        with open(os.path.join(_APP_DIR, "main.py"), encoding="utf-8") as fh:
+            src = fh.read()
+        a = src.index("def public_homepage"); b = src.index("\n@app.", a)
+        seg = src[a:b]
+        self.assertIn("Featured packages", seg)
+        self.assertIn("Compare all five packages", seg)
+        self.assertIn('["starter", "commercial_forestry", "treekey_elite"]', seg)
+        self.assertIn("{_homepage_offer_promo}", seg)
+        # buttons use the same plan-specific destination as the pricing page
+        self.assertIn('cta_href=f"/checkout/{_tier_key}"', seg)
+        self.assertNotIn('cta_href="#map"', seg)
+        self.assertIn("Choose how you get introductions", seg)
+        self.assertIn("Pick a monthly package, or buy individual introductions without a subscription.", seg)
+        self.assertNotIn("Zero Commitment. Cancel Anytime.", seg)
+        self.assertNotIn("Dominate Your Area", seg)
+        for gone in ("Early-access alert the moment a matching lead is filed", "Secure Priority Access", "See This Tier"):
+            self.assertNotIn(gone, seg)
+
+
 class TestWelcomePage(unittest.TestCase):
 
     def _get(self, *, cookie=True, has_settings=True, sub=None, offer=None, stock=3, approved=False):

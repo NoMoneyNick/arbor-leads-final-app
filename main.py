@@ -973,6 +973,113 @@ _SHARED_FOOTER_CSS = """
 @media (min-width:1024px) { .tk-footer-inner { padding:0 32px; } }
 """
 
+# 2026-10-01: ONE package-card layout used by the homepage (3 featured plans)
+# and /pricing (all 5), so both pages read the same. Figures are the agreed,
+# enforced entitlements (database.TIER_QUOTAS / TIER_DISCOUNT_PCT; a test
+# keeps this table and payments.PLANS in step). The discount applies to
+# ADDITIONAL marketplace introductions, never to the subscription price.
+_PACKAGE_FACTS = {
+    "starter": {"badge": "Getting started", "short": "Starter", "intros": 6, "discount": 10,
+                "suits": "For 1\u20132 van operators: domestic and small commercial jobs, every job type."},
+    "growth": {"badge": "Growing Crews", "short": "Growth", "intros": 10, "discount": 15,
+               "suits": "For established crews wanting more volume across a bigger area."},
+    "arb_consultant": {"badge": "Planning & Surveyors", "short": "Consultant", "intros": 8, "discount": 15,
+                       "suits": "For qualified arborists (TechArb/MICFor): developer condition 7 discharges and BS5837 impact assessments."},
+    "commercial_forestry": {"badge": "Heavy Commercial", "short": "Commercial & Forestry", "intros": 14, "discount": 20,
+                            "suits": "For heavy-machinery and commercial outfits: multi-tree clearances (3+), Ash Dieback blocks and B2B tenders."},
+    "treekey_elite": {"badge": "VIP All-Access", "short": "Elite", "intros": 20, "discount": 25,
+                      "suits": "All categories across 45 miles, with top-priority dispatch and first look at Elite-value opportunities."},
+}
+
+_PACKAGE_CARD_CSS = """
+.tk-pkgs { display:grid; grid-template-columns:1fr; gap:16px; margin-bottom:32px; font-family:"Inter", ui-sans-serif, system-ui, sans-serif; }
+@media (min-width:640px) { .tk-pkgs { grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); } }
+@media (min-width:768px) { .tk-pkgs.tk-pkgs-3 { grid-template-columns:repeat(3, 1fr); gap:24px; } }
+.tk-pkg { display:flex; flex-direction:column; background:#0f172a; border:1px solid #334155; border-radius:16px; padding:24px; color:#cbd5e1; font-family:"Inter", ui-sans-serif, system-ui, sans-serif; text-align:left; }
+.tk-pkg-badge { align-self:flex-start; font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#6ee7b7; background:rgba(16,185,129,.15); padding:4px 10px; border-radius:999px; }
+.tk-pkg-name { margin:12px 0 6px 0; font-size:20px; font-weight:700; line-height:1.25; color:#ffffff; }
+.tk-pkg-suits { margin:0 0 16px 0; font-size:14px; line-height:1.5; color:#94a3b8; flex:1 1 auto; }
+.tk-pkg-price { margin:0 0 12px 0; font-size:34px; font-weight:800; line-height:1; color:#34d399; }
+.tk-pkg-price span { font-size:15px; font-weight:500; color:#94a3b8; }
+.tk-pkg-intros { margin:0 0 14px 0; padding:10px 12px; background:rgba(16,185,129,.1); border-left:3px solid #059669; border-radius:6px; font-size:15px; color:#e2e8f0; }
+.tk-pkg-intros b { font-size:22px; color:#ffffff; margin-right:2px; }
+.tk-pkg-list { list-style:none; margin:0 0 20px 0; padding:0; display:flex; flex-direction:column; gap:8px; font-size:14px; line-height:1.45; color:#cbd5e1; }
+.tk-pkg-list li { position:relative; padding-left:22px; }
+.tk-pkg-list li::before { content:"\\2713"; position:absolute; left:0; top:0; color:#34d399; font-weight:700; }
+.tk-pkg-btn, .tk-pkg-btn:visited { display:block; box-sizing:border-box; text-align:center; background:#059669; color:#ffffff; font-weight:700; font-size:15px; padding:12px 14px; border-radius:8px; text-decoration:none; margin-top:auto; transition:background .15s; }
+.tk-pkg-btn:hover { background:#10b981; }
+.tk-pkg-btn:focus-visible, .tk-offer-btn:focus-visible { outline:2px solid #34d399; outline-offset:3px; }
+.tk-offer { display:flex; flex-direction:column; gap:14px; background:rgba(16,185,129,.08); border:1px solid rgba(16,185,129,.4); border-radius:14px; padding:20px 22px; margin:0 0 28px 0; font-family:"Inter", ui-sans-serif, system-ui, sans-serif; text-align:left; }
+.tk-offer h3 { margin:0 0 6px 0; font-size:19px; line-height:1.3; font-weight:800; color:#ffffff; }
+.tk-offer p { margin:0; font-size:14px; line-height:1.55; color:#cbd5e1; }
+.tk-offer-btn, .tk-offer-btn:visited { display:inline-block; box-sizing:border-box; text-align:center; background:#059669; color:#ffffff; font-weight:700; font-size:15px; padding:12px 20px; border-radius:8px; text-decoration:none; white-space:nowrap; }
+.tk-offer-btn:hover { background:#10b981; }
+@media (min-width:768px) { .tk-offer { flex-direction:row; align-items:center; justify-content:space-between; gap:24px; } }
+"""
+
+
+def _package_card_html(key: str, plan: dict, *, cta_href: str) -> str:
+    """One subscription package card: name, who it suits, monthly price, the
+    included introductions (prominent), printing and postage, the discount on
+    ADDITIONAL marketplace introductions, and a plan-specific action button.
+    Returns "" for a plan with no agreed facts (so nothing unverified shows)."""
+    f = _PACKAGE_FACTS.get(key)
+    if not f:
+        return ""
+    price = plan["amount"] / 100
+    return f"""
+            <div class="tk-pkg">
+                <span class="tk-pkg-badge">{html.escape(f['badge'])}</span>
+                <h3 class="tk-pkg-name">{html.escape(str(plan['name']))}</h3>
+                <p class="tk-pkg-suits">{html.escape(f['suits'])}</p>
+                <div class="tk-pkg-price">&pound;{price:.0f}<span>/month</span></div>
+                <div class="tk-pkg-intros"><b>{f['intros']}</b> introductions included each month</div>
+                <ul class="tk-pkg-list">
+                    <li>Printing and postage included</li>
+                    <li>{f['discount']}% off additional marketplace introductions</li>
+                    <li>Alerts when matching opportunities are found.</li>
+                </ul>
+                <a href="{cta_href}" class="tk-pkg-btn">Choose {html.escape(f['short'])}</a>
+            </div>"""
+
+
+def _first_offer_promo_html(request: Optional[Request]) -> str:
+    """The conditional GBP 4.99 first-introduction invitation shown on the
+    homepage and /pricing. Visitors see it (the copy says it is conditional);
+    a signed-in account sees it ONLY if the server-side check says it is
+    eligible, and is then sent to the same destination as /welcome. Signed-in
+    accounts that are not eligible (subscribers, offer already used or in
+    progress, any lookup failure) see nothing, so they are never told they
+    qualify. This only links; eligibility, price, letter approval and payment
+    are still enforced at checkout."""
+    email = None
+    try:
+        email = _verify_session_cookie(request.cookies.get("treekey_contractor_session")) if request is not None else None
+    except Exception:
+        email = None
+    if email:
+        try:
+            sub = database.get_contractor_subscription(email)
+            if sub and sub.get("active"):
+                return ""
+        except Exception:
+            return ""
+        if not _viewer_first_offer_eligible(email):
+            return ""
+        href = "/marketplace"
+    else:
+        href = "/login?next=%2Fwelcome"
+    pence = getattr(payments, "FIRST_INTRO_PRICE_PENCE", 499)
+    price = f"&pound;{pence / 100:.2f}" if isinstance(pence, int) else "&pound;4.99"
+    return f"""
+            <div class="tk-offer">
+                <div>
+                    <h3>New to TreeKey? Try your first eligible introduction for {price}.</h3>
+                    <p>Printing and postage included. No subscription required. One per eligible business, on selected Standard opportunities.</p>
+                </div>
+                <a href="{href}" class="tk-offer-btn">Find my first introduction</a>
+            </div>"""
+
 
 def _nav_auth_state(request: Optional[Request]) -> Optional[dict]:
     """Sep 10 2026, Nick's ask: "when you log in, it should say 'nick logged
@@ -1453,41 +1560,12 @@ def public_homepage(request: Request):
     _homepage_tier_keys = ["starter", "commercial_forestry", "treekey_elite"]
     _homepage_tier_cards = ""
     for _tier_key in _homepage_tier_keys:
-        _tier = payments.PLANS[_tier_key]
-        _is_hero = (_tier["badge"] == "Most Popular")
-        _card_style = (
-            "bg-gradient-to-b from-[#064e3b] to-[#022c22] border-2 border-emerald-500 rounded-2xl p-8 relative transform md:-translate-y-4 shadow-[0_0_40px_rgba(16,185,129,0.15)]"
-            if _is_hero else
-            "bg-[#0f172a] border border-slate-800 rounded-2xl p-8 relative hover:border-slate-600 transition-colors"
-        )
-        _ribbon = (
-            f'<div class="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2">'
-            f'<span class="bg-emerald-500 text-white text-xs font-bold uppercase tracking-widest py-1 px-3 rounded-full">{_tier["badge"]}</span></div>'
-        ) if _is_hero else ""
-        _price_gbp = _tier["amount"] / 100
-        _btn_classes = (
-            "bg-emerald-500 hover:bg-emerald-400 text-white font-extrabold py-5 shadow-[0_4px_14px_0_rgba(16,185,129,0.39)] uppercase tracking-widest"
-            if _is_hero else
-            "border border-slate-700 hover:border-slate-500 text-white font-bold py-4 uppercase tracking-wider"
-        )
-        _btn_label = "Secure Priority Access" if _is_hero else "See This Tier"
-        _homepage_tier_cards += f"""
-                <div class="{_card_style}">
-                    {_ribbon}
-                    <h3 class="text-2xl font-bold text-white mb-2">{_tier['name']}</h3>
-                    <p class="text-slate-400 mb-6 text-sm">{payments.plan_description(_tier_key, _tier)}</p>
-                    <div class="flex items-baseline gap-2 mb-6">
-                        <div class="text-4xl font-extrabold text-white">&pound;{_price_gbp:.0f}</div>
-                        <div class="text-lg text-slate-500 font-normal">/month</div>
-                    </div>
-                    <ul class="mb-8 space-y-3 text-slate-300 text-sm font-medium">
-                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Each introduction is sold to one contractor only</li>
-                        <li class="flex items-start gap-3"><svg width="20" class="text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg> Early-access alert the moment a matching lead is filed</li>
-                    </ul>
-                    <a href="#map" class="block w-full text-center {_btn_classes} rounded-lg transition-all duration-300 text-sm">
-                        {_btn_label}
-                    </a>
-                </div>"""
+        # 2026-10-01: same card layout as /pricing (_package_card_html), and
+        # the same plan-specific destination as that page's button. The
+        # checkout route itself still asks for the postcode/area first and
+        # applies its own login, setup and letter-approval gates.
+        _homepage_tier_cards += _package_card_html(_tier_key, payments.PLANS[_tier_key], cta_href=f"/checkout/{_tier_key}")
+    _homepage_offer_promo = _first_offer_promo_html(request)
 
     return f"""<!DOCTYPE html>
 <html lang="en-GB" class="scroll-smooth">
@@ -2045,14 +2123,18 @@ def public_homepage(request: Request):
     <section id="pricing" class="relative z-10 py-24 bg-brand-dark/50 border-t border-slate-800/50">
         <div class="max-w-7xl mx-auto px-4">
             <div class="text-center mb-16">
-                <span class="text-emerald-500 font-mono font-bold tracking-widest text-sm uppercase">Zero Commitment. Cancel Anytime.</span>
-                <h2 class="text-4xl md:text-5xl font-extrabold text-white mt-4 uppercase">Dominate Your Area</h2>
-                <p class="text-lg text-slate-400 mt-4">Pick a package, or buy a single introduction from the marketplace.</p>
+                <h2 class="text-4xl md:text-5xl font-extrabold text-white mt-4">Choose how you get introductions</h2>
+                <p class="text-lg text-slate-400 mt-4">Pick a monthly package, or buy individual introductions without a subscription.</p>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
+            <style>{_PACKAGE_CARD_CSS}</style>
+            <h3 class="text-center text-white font-bold text-xl mb-6" style="font-family:'Inter', ui-sans-serif, system-ui, sans-serif;">Featured packages</h3>
+            <div class="tk-pkgs tk-pkgs-3">
                 {_homepage_tier_cards}
             </div>
+            <p class="text-center -mt-4 mb-8"><a href="/pricing" class="text-emerald-400 hover:text-emerald-300 font-bold underline" style="font-family:'Inter', ui-sans-serif, system-ui, sans-serif;">Compare all five packages &rarr;</a></p>
+
+            {_homepage_offer_promo}
 
             <!-- Sep 9 2026, Nick's ask: "under the 3 price groups I want a
                  section saying ... buy your leads one at a time ... with
@@ -2078,7 +2160,6 @@ def public_homepage(request: Request):
                     <p class="text-white font-bold text-sm">Not ready for a subscription? Buy leads one at a time instead.</p>
                     <p class="text-slate-400 text-sm mt-1">
                         From <span class="text-emerald-400 font-bold">£19</span> · <span class="text-slate-300 font-bold">£29</span> · <span class="text-slate-300 font-bold">£39</span> · <span class="text-slate-300 font-bold">£49</span> depending on freshness and value — no commitment, browse and buy only the ones you want.
-                        These aren't your only options either — <a href="/pricing" class="text-slate-300 hover:text-white underline">see the full range of packages</a> tailored to your trade.
                     </p>
                 </div>
                 <a href="/marketplace" class="shrink-0 inline-block text-center bg-sky-500 hover:bg-sky-400 text-white font-extrabold py-3 px-6 rounded-lg transition-all duration-300 uppercase tracking-wider text-sm">
@@ -3059,28 +3140,13 @@ def pricing(request: Request):
     # classes) but recoloured every value in it for a dark background.
     sub_cards = ""
     single_cards = ""
+    first_offer_promo = _first_offer_promo_html(request)
 
     for key, plan in plans.items():
         if plan["mode"] == "subscription":
-            price_display = f"£{plan['amount'] / 100:.0f}<span style='font-size:16px; font-weight:normal; color:#94a3b8;'>/month</span>"
-            roi_box = ""  # 2026-10-01: 'one job covers it' ROI claims removed from customer pricing
-            highlight = "border:2px solid #059669; box-shadow:0 8px 24px rgba(5,150,105,0.15);" if key == "starter" else "border:1px solid #334155;"
-
-            sub_cards += f"""
-            <div style="{highlight} border-radius:16px; padding:24px; background:#0f172a; display:flex; flex-direction:column; justify-content:space-between; margin-bottom:16px;">
-                <div>
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                        <span style="font-size:11px; background:rgba(16,185,129,0.15); color:#6ee7b7; font-weight:bold; padding:4px 10px; border-radius:20px; text-transform:uppercase;">{plan['badge']}</span>
-                    </div>
-                    <h3 style="margin:0 0 6px 0; font-size:19px; color:#ffffff;">{plan['name']}</h3>
-                    <p style="color:#94a3b8; font-size:13px; line-height:1.5; margin:0 0 12px 0;">{payments.plan_description(key, plan)}</p>
-                    <div style="font-size:28px; font-weight:800; color:#34d399; margin:10px 0;">{price_display}</div>
-                    {roi_box}
-                </div>
-                <a href="/checkout/{key}" style="background:#059669; color:white; padding:12px; border-radius:8px; text-decoration:none; text-align:center; font-weight:bold; font-size:14px; margin-top:10px; display:block;">
-                   Claim Tailored Tier →
-                </a>
-            </div>"""
+            # 2026-10-01: shared card layout (see _package_card_html); the
+            # button keeps its existing destination, /checkout/<plan>.
+            sub_cards += _package_card_html(key, plan, cta_href=f"/checkout/{key}")
         else:
             price_display = f"£{plan['amount'] / 100:.0f}<span style='font-size:14px; font-weight:normal; color:#94a3b8;'> one-off</span>"
             single_cards += f"""
@@ -3113,6 +3179,7 @@ def pricing(request: Request):
             .header p {{ color: #94a3b8; font-size: 16px; margin: 0; }}
 
             .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-bottom: 32px; }}
+            {_PACKAGE_CARD_CSS}
 
         </style>
     </head>
@@ -3133,8 +3200,10 @@ def pricing(request: Request):
             <p style="margin:0; font-size:15px; line-height:1.6; color:#cbd5e1;">Your approved letter introduces your business. Interested homeowners contact you directly, and TreeKey won't sell the same introduction to another contractor.</p>
         </div>
 
+        {first_offer_promo}
+
         <h2 class="text-[22px] mb-4 text-white font-bold">1. Select Your Dedicated Subscription Tier</h2>
-        <div class="grid">
+        <div class="tk-pkgs">
             {sub_cards}
         </div>
 
