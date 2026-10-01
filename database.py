@@ -650,6 +650,9 @@ def init_db():
             # the 72-hour post-dispatch personal-data purge. See that
             # module's own docstring.
             _retention_dispatch_purge.init_dispatch_purge_schema(cur)
+            # 1 Oct 2026: account-closure / data-deletion REQUESTS (a durable
+            # queue for the operator; nothing is deleted or cancelled by it).
+            init_account_request_schema(cur)
             conn.commit()
             cur.close()
         except Exception as e:
@@ -3579,6 +3582,200 @@ def claim_first_offer_order(checkout_session_id: str, account_email: str, amount
     except Exception as e:
         logger.error(f"[FirstOffer] Could not claim first-offer order for {account_email}: {e}")
         return {"ok": False, "reason": "unavailable"}
+
+
+ACCOUNT_REQUEST_NOTE_MAX = 1000
+
+
+def init_account_request_schema(cur) -> None:
+    """Idempotent. One row per account closure / data-deletion REQUEST. A request
+    is only a record for the operator to review: creating one never deletes data,
+    cancels a subscription or touches payments. The partial unique index allows a
+    single OPEN request per account, which is what makes a double submission
+    (double click, refresh, replay) a no-op instead of a second request."""
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS account_closure_requests (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            account_email TEXT NOT NULL,
+            request_close BOOLEAN NOT NULL DEFAULT FALSE,
+            request_delete BOOLEAN NOT NULL DEFAULT FALSE,
+            note TEXT,
+            status TEXT NOT NULL DEFAULT 'open',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            operator_notified_at TIMESTAMPTZ,
+            notify_attempts INT NOT NULL DEFAULT 0,
+            notify_error TEXT,
+            resolved_at TIMESTAMPTZ,
+            resolution_note TEXT,
+            amended_at TIMESTAMPTZ,
+            CONSTRAINT account_closure_requests_choice CHECK (request_close OR request_delete)
+        );
+        ALTER TABLE account_closure_requests ADD COLUMN IF NOT EXISTS amended_at TIMESTAMPTZ;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_account_closure_one_open
+            ON account_closure_requests (lower(account_email)) WHERE status = 'open';
+    """)
+
+
+def create_account_request(account_email: str, request_close: bool, request_delete: bool, note: str = "") -> dict:
+    """Durably saves a request for an already-authenticated account.
+
+    Returns {"ok": False} on ANY failure (never a false success), else
+    {"ok": True, "id", "duplicate": bool, "added": [..], "close": bool, "delete": bool, "created_at"}.
+    * No open request: a new row is saved (duplicate False).
+    * An open request exists and nothing new is asked for: nothing is written (duplicate True, added []).
+    * An open request exists but this submission ASKS FOR MORE (e.g. the open one is close-only and
+      deletion is now requested): the SAME row is widened to the union of both intentions, the extra
+      note is appended, amended_at is stamped and the operator-email state is reset so the queue shows
+      it as needing (re)notification. Nothing the customer asked for earlier is ever dropped."""
+    email = (account_email or "").strip().lower()
+    if not SURL or not email or not (request_close or request_delete):
+        return {"ok": False}
+    note = (note or "").strip()[:ACCOUNT_REQUEST_NOTE_MAX]
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                INSERT INTO account_closure_requests (account_email, request_close, request_delete, note)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (lower(account_email)) WHERE status = 'open' DO NOTHING
+                RETURNING id::text, created_at;
+            """, (email, bool(request_close), bool(request_delete), note or None))
+            row = cur.fetchone()
+            if row is not None:
+                conn.commit()
+                return {"ok": True, "id": row[0], "duplicate": False, "added": [], "created_at": str(row[1]),
+                        "close": bool(request_close), "delete": bool(request_delete)}
+            cur.execute("""SELECT id::text, created_at, request_close, request_delete, note
+                           FROM account_closure_requests
+                           WHERE lower(account_email) = %s AND status = 'open' LIMIT 1 FOR UPDATE;""", (email,))
+            ex = cur.fetchone()
+            if not ex:
+                conn.rollback()
+                return {"ok": False}
+            rid, created, ex_close, ex_delete, ex_note = ex[0], ex[1], _pgbool(ex[2]), _pgbool(ex[3]), ex[4]
+            added = [name for name, want, have in (("close", request_close, ex_close), ("delete", request_delete, ex_delete))
+                     if want and not have]
+            if added:
+                merged_note = ((ex_note or "") + ("\n" if ex_note and note else "") +
+                               (f"[added: {', '.join(added)}] {note}" if note else f"[added: {', '.join(added)}]")).strip()
+                cur.execute("""UPDATE account_closure_requests
+                               SET request_close = request_close OR %s, request_delete = request_delete OR %s,
+                                   note = %s, amended_at = NOW(), operator_notified_at = NULL, notify_error = NULL
+                               WHERE id::text = %s;""",
+                            (bool(request_close), bool(request_delete), merged_note[:ACCOUNT_REQUEST_NOTE_MAX * 2], rid))
+            conn.commit()
+            return {"ok": True, "id": rid, "duplicate": True, "added": added, "created_at": str(created),
+                    "close": ex_close or bool(request_close), "delete": ex_delete or bool(request_delete)}
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[AccountRequest] Could not save request for {email}: {e}")
+        return {"ok": False}
+
+
+def _pgbool(v) -> bool:
+    return v is True or str(v).lower() in ("t", "true", "1")
+
+
+def get_open_account_request(account_email: str) -> Optional[dict]:
+    """The account's open request, or None (also None on a lookup error)."""
+    email = (account_email or "").strip().lower()
+    if not SURL or not email:
+        return None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""SELECT id::text, request_close, request_delete, created_at
+                           FROM account_closure_requests
+                           WHERE lower(account_email) = %s AND status = 'open' LIMIT 1;""", (email,))
+            r = cur.fetchone()
+            return ({"id": r[0], "request_close": r[1], "request_delete": r[2], "created_at": str(r[3])}
+                    if r else None)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[AccountRequest] Lookup failed for {email}: {e}")
+        return None
+
+
+def record_account_request_notification(request_id: str, error: Optional[str] = None) -> bool:
+    """Best-effort bookkeeping after the operator email was attempted. The
+    request itself is already saved; a failure here never affects it."""
+    if not SURL or not request_id:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            if error is None:
+                cur.execute("""UPDATE account_closure_requests
+                               SET operator_notified_at = NOW(), notify_attempts = notify_attempts + 1, notify_error = NULL
+                               WHERE id::text = %s;""", (request_id,))
+            else:
+                cur.execute("""UPDATE account_closure_requests
+                               SET notify_attempts = notify_attempts + 1, notify_error = %s
+                               WHERE id::text = %s;""", ((error or "")[:300], request_id))
+            conn.commit()
+            return True
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[AccountRequest] Could not record notification result for {request_id}: {e}")
+        return False
+
+
+def list_account_requests(status: Optional[str] = None, limit: int = 200) -> list:
+    """Operator view, newest first. status None = all, else 'open' / 'resolved'."""
+    if not SURL:
+        return []
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""SELECT id::text, account_email, request_close, request_delete, note, status, created_at,
+                                  operator_notified_at, notify_attempts, notify_error, resolved_at, resolution_note
+                           FROM account_closure_requests
+                           WHERE (%s IS NULL OR status = %s)
+                           ORDER BY created_at DESC LIMIT %s;""", (status, status, int(limit)))
+            keys = ["id", "account_email", "request_close", "request_delete", "note", "status", "created_at",
+                    "operator_notified_at", "notify_attempts", "notify_error", "resolved_at", "resolution_note"]
+            return [dict(zip(keys, r)) for r in cur.fetchall()]
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[AccountRequest] Could not list requests: {e}")
+        return []
+
+
+def resolve_account_request(request_id: str, resolution_note: str = "") -> bool:
+    """Operator marks a request handled (this does NOT delete or cancel anything;
+    it only closes the record so the account can file a new request later)."""
+    if not SURL or not request_id:
+        return False
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("""UPDATE account_closure_requests SET status = 'resolved', resolved_at = NOW(), resolution_note = %s
+                           WHERE id::text = %s AND status = 'open';""", ((resolution_note or "")[:500] or None, request_id))
+            done = cur.rowcount == 1
+            conn.commit()
+            return done
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"[AccountRequest] Could not resolve {request_id}: {e}")
+        return False
 
 
 def get_payment_history_for_contractor(email: str, limit: int = 25) -> list:

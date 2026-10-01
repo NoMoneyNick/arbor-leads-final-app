@@ -79,6 +79,11 @@ class PsqlCursor:
             return self.rows[self.i - 1]
         return None
 
+    def fetchall(self):
+        rest = self.rows[self.i:]
+        self.i = len(self.rows)
+        return rest
+
     def close(self):
         pass
 

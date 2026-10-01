@@ -9791,6 +9791,9 @@ def my_account_view(request: Request):
                 <div style="color:#94a3b8; font-size:12px;">Buy leads outright</div>
             </a>
         </div>
+        <p style="text-align:center; margin:30px 0 4px 0; font-size:13px;">
+            <a href="/account/close" style="color:#94a3b8; text-decoration:underline;">Close account / request data deletion</a>
+        </p>
     </div>
     {_shared_footer_html()}
     </body>
@@ -9798,6 +9801,279 @@ def my_account_view(request: Request):
     """)
 
 
+# ── Account closure / data-deletion REQUEST (1 Oct 2026) ──────────────────────
+# Submitting only records a request and tells the operator. It never deletes
+# data, cancels a subscription, refunds or touches payments or letters: every
+# request is reviewed by hand (outstanding purchases and records that must be
+# kept need a human decision). Inline styles only (static/tailwind.css is a
+# pre-built file); same look as My Account.
+_ACCOUNT_REQUEST_OPERATOR_EMAIL = "nick@treekey.uk"
+_ACCOUNT_REQUEST_CSRF_MAX_AGE = 2 * 3600
+
+
+def _account_request_csrf_token(email: str) -> str:
+    """Signed, short-lived, bound to the signed-in account (HMAC with the session
+    secret). A page on another site cannot read it, so cannot forge the POST."""
+    ts = str(int(time.time()))
+    sig = _hmac.new(_SESSION_SECRET, f"acct-request:{email.strip().lower()}:{ts}".encode(), _hashlib.sha256).hexdigest()
+    return f"{ts}.{sig}"
+
+
+def _account_request_csrf_ok(email: str, token: Optional[str]) -> bool:
+    try:
+        ts, sig = (token or "").split(".", 1)
+        age = time.time() - int(ts)
+        if age < 0 or age > _ACCOUNT_REQUEST_CSRF_MAX_AGE:
+            return False
+        good = _hmac.new(_SESSION_SECRET, f"acct-request:{email.strip().lower()}:{ts}".encode(), _hashlib.sha256).hexdigest()
+        return secrets.compare_digest(sig.encode(), good.encode())
+    except Exception:
+        return False
+
+
+def _account_request_page(request: Request, inner_html: str, status_code: int = 200) -> HTMLResponse:
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Close account / request data deletion | TreeKey</title>
+    <link rel="icon" href="/static/icon-192.png">
+    <style>
+        body {{ font-family: "Inter", ui-sans-serif, system-ui, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:0; line-height:1.5; }}
+        .container {{ max-width: 760px; margin: auto; padding: 32px 16px; }}
+        .card {{ background:#0f172a; border:1px solid #1e293b; border-radius:10px; padding:20px; margin-bottom:16px; }}
+        .card-label {{ font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; font-weight:bold; margin-bottom:8px; }}
+        .card p, .card li {{ font-size:14px; color:#cbd5e1; }}
+        .card ul {{ margin:8px 0 0 0; padding-left:20px; }}
+        .card li {{ margin-bottom:6px; }}
+        .acct-check {{ display:flex; align-items:flex-start; gap:10px; padding:12px; border:1px solid #334155; border-radius:8px; margin-bottom:10px; cursor:pointer; background:#1e293b80; }}
+        .acct-check input {{ margin-top:3px; width:18px; height:18px; flex:none; accent-color:#10b981; }}
+        .acct-check span {{ font-size:14px; color:#e2e8f0; }}
+        .acct-note {{ width:100%; box-sizing:border-box; background:#020617; color:#e2e8f0; border:1px solid #334155; border-radius:8px; padding:10px 12px; font:inherit; font-size:16px; min-height:90px; }}
+        .acct-btn {{ display:inline-block; background:#1e293b; color:#e2e8f0; border:1px solid #475569; padding:12px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; cursor:pointer; font-family:inherit; }}
+        .acct-btn:hover {{ border-color:#34d399; }}
+        .acct-err {{ background:rgba(248,113,113,0.1); border:1px solid #f87171; color:#fecaca; border-radius:8px; padding:10px 14px; font-size:14px; margin-bottom:14px; }}
+        a {{ color:#34d399; }}
+    </style>
+</head>
+<body>
+{_shared_nav_html(request)}
+<div class="container">
+{inner_html}
+</div>
+{_shared_footer_html()}
+</body>
+</html>""", status_code=status_code)
+
+
+def _account_request_form_html(session_email: str, is_paid: bool, error: str = "",
+                               checked_close: bool = False, checked_delete: bool = False, note: str = "",
+                               existing: Optional[dict] = None) -> str:
+    sub_html = ""
+    if is_paid:
+        sub_html = ('<li>You have an active subscription. <b>This request does not cancel it.</b> '
+                    'Manage your subscription from the Subscription section of '
+                    '<a href="/account">My Account</a> (<a href="/pricing">Manage subscription</a>).</li>')
+    err_html = f'<div class="acct-err">{html.escape(error)}</div>' if error else ""
+    existing_html = ""
+    if existing:
+        have = " and ".join(x for x, on in (("close your account", existing.get("request_close")),
+                                             ("delete your personal data", existing.get("request_delete"))) if on)
+        existing_html = (f'<p style="font-size:14px; color:#fde68a; margin:0 0 12px 0;">We already have your request to {have} '
+                         f'(received {html.escape(str(existing.get("created_at", ""))[:10])}). It is waiting for review. '
+                         f'You can add the other option below; your earlier request is kept.</p>')
+    return f"""
+    <h2 style="color:white; font-size:24px; font-weight:800; margin:0 0 6px 0;">Close account / request data deletion</h2>
+    <p style="color:#94a3b8; font-size:13px; margin:0 0 20px 0;">Signed in as {html.escape(session_email)}</p>
+
+    <div class="card">
+        <div class="card-label">What this does</div>
+        <p style="margin:0;">This form <b>submits a request</b> to TreeKey. It does not delete your records or close your account straight away. We review each request by hand and reply to the email address on your account <b>without undue delay and within one month of receiving it</b>. For a complex request, or several requests, the law allows up to two more months; if we need that, we will tell you within the first month. Replying means telling you what we have done or will do; it can take longer to finish.</p>
+        <ul>
+            {sub_html}
+            <li>Purchases that are outstanding, and any letter already queued or posted for you, need review before anything is removed.</li>
+            <li>Some records may have to be kept (for example payment and accounting records), so a deletion request may be only partly carried out. We will tell you what we did.</li>
+        </ul>
+    </div>
+
+    <form method="POST" action="/account/close" class="card" id="acct-request-form">
+        <div class="card-label">Your request</div>
+        {err_html}
+        <input type="hidden" name="csrf" value="{html.escape(_account_request_csrf_token(session_email))}">
+        {existing_html}
+        <label class="acct-check"><input type="checkbox" name="close" value="1"{' checked disabled' if (existing or {}).get('request_close') else (' checked' if checked_close else '')}><span><b>Close my account</b> &mdash; stop my account being used.{' <i>(already requested)</i>' if (existing or {}).get('request_close') else ''}</span></label>
+        <label class="acct-check"><input type="checkbox" name="delete" value="1"{' checked disabled' if (existing or {}).get('request_delete') else (' checked' if checked_delete else '')}><span><b>Delete my personal data</b> &mdash; remove what we are allowed to remove.{' <i>(already requested)</i>' if (existing or {}).get('request_delete') else ''}</span></label>
+        <p style="font-size:12px; color:#94a3b8; margin:0 0 14px 0;">{'Tick the option you want to add.' if existing else 'Tick one or both.'}</p>
+        <label for="acct-note" style="display:block; font-size:13px; font-weight:600; color:#cbd5e1; margin-bottom:6px;">Anything we should know (optional)</label>
+        <textarea id="acct-note" name="note" class="acct-note" maxlength="{database.ACCOUNT_REQUEST_NOTE_MAX}">{html.escape(note)}</textarea>
+        <label class="acct-check" style="margin-top:14px;"><input type="checkbox" name="confirm" value="1" required><span>I understand this submits a request for review. It does not immediately delete anything or cancel my subscription.</span></label>
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:6px;">
+            <button type="submit" class="acct-btn" id="acct-submit">Submit request</button>
+            <a href="/account" class="acct-btn" style="background:transparent;">Back to My Account</a>
+        </div>
+    </form>
+    <script>
+        document.getElementById('acct-request-form').addEventListener('submit', function () {{
+            var b = document.getElementById('acct-submit'); b.disabled = true; b.textContent = 'Submitting...';
+        }});
+    </script>"""
+
+
+@app.get("/account/close", response_class=HTMLResponse)
+def account_close_form(request: Request):
+    session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not session_email:
+        return RedirectResponse(url="/login?next=%2Faccount%2Fclose", status_code=303)
+    existing = database.get_open_account_request(session_email)
+    if existing and existing["request_close"] and existing["request_delete"]:
+        what = " and ".join(x for x, on in (("close your account", existing["request_close"]),
+                                             ("delete your personal data", existing["request_delete"])) if on)
+        return _account_request_page(request, f"""
+    <h2 style="color:white; font-size:24px; font-weight:800; margin:0 0 22px 0;">Request already received</h2>
+    <div class="card"><p style="margin:0;">We already have your request to {what}, received {html.escape(existing["created_at"][:10])}. It is waiting for review &mdash; nothing has been deleted or cancelled yet. We will reply to the email address on your account within one month of receiving it.</p>
+    <p style="margin:12px 0 0 0;"><a href="/account">Back to My Account</a></p></div>""")
+    active_sub = database.get_contractor_subscription(session_email)
+    return _account_request_page(request, _account_request_form_html(
+        session_email, bool(active_sub and active_sub.get("active")), existing=existing))
+
+
+@app.post("/account/close", response_class=HTMLResponse)
+async def account_close_submit(request: Request):
+    session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
+    if not session_email:
+        return RedirectResponse(url="/login?next=%2Faccount%2Fclose", status_code=303)
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        return _account_request_page(request, '<div class="card"><p style="margin:0;">Too many attempts. Nothing has been submitted. Please wait a minute and try again.</p></div>', 429)
+    form = await request.form()
+    if not _account_request_csrf_ok(session_email, form.get("csrf")):
+        return _account_request_page(request, '<div class="card"><p style="margin:0;">This form has expired or could not be checked, so nothing has been submitted. <a href="/account/close">Open the form again</a>.</p></div>', 403)
+    want_close = form.get("close") == "1"
+    want_delete = form.get("delete") == "1"
+    note = (form.get("note") or "")[:database.ACCOUNT_REQUEST_NOTE_MAX]
+    active_sub = database.get_contractor_subscription(session_email)
+    is_paid = bool(active_sub and active_sub.get("active"))
+    prior = database.get_open_account_request(session_email)
+    if not (want_close or want_delete):
+        return _account_request_page(request, _account_request_form_html(
+            session_email, is_paid, "Please tick at least one option.", want_close, want_delete, note, existing=prior), 400)
+    if form.get("confirm") != "1":
+        return _account_request_page(request, _account_request_form_html(
+            session_email, is_paid, "Please tick the box confirming you understand this is a request.", want_close, want_delete, note, existing=prior), 400)
+
+    saved = database.create_account_request(session_email, want_close, want_delete, note)
+    if not saved.get("ok"):
+        # Nothing was recorded: say so plainly, never report success.
+        return _account_request_page(request, f"""
+    <h2 style="color:white; font-size:24px; font-weight:800; margin:0 0 22px 0;">We couldn't record your request</h2>
+    <div class="card"><p style="margin:0;"><b>Nothing has been submitted.</b> Please try again in a few minutes, or email contact@treekey.co.uk from the address on your account.</p>
+    <p style="margin:12px 0 0 0;"><a href="/account/close">Try again</a> &middot; <a href="/account">Back to My Account</a></p></div>""", 503)
+
+    amended = bool(saved["duplicate"] and saved.get("added"))
+    if not saved["duplicate"] or amended:
+        # The request is already saved. Telling the operator is best-effort: a
+        # failure here is recorded against the request and never hides it. An
+        # AMENDED request (a further option added to an open one) is re-notified.
+        err = None
+        try:
+            import notifications
+            kinds = " + ".join(x for x, on in (("Close account", saved["close"]), ("Delete personal data", saved["delete"])) if on)
+            admin_url = f"{payments.PUBLIC_APP_URL}/admin/account-requests"
+            ok = notifications.send_transactional_email(
+                _ACCOUNT_REQUEST_OPERATOR_EMAIL,
+                f"TreeKey account request{' UPDATED' if amended else ''}: {kinds} - {session_email}",
+                f"""<div style="font-family:Arial,sans-serif;font-size:14px;color:#111;">
+                <p><b>{'UPDATED account request (added: ' + html.escape(', '.join(saved['added'])) + ')' if amended else 'New account request'}</b> (nothing has been deleted or cancelled).</p>
+                <p>Account: {html.escape(session_email)}<br>Request: {html.escape(kinds)}<br>
+                Active subscription: {'yes' if is_paid else 'no'}<br>Request id: {html.escape(saved['id'])}</p>
+                <p>Customer note: {html.escape(note) if note else '(none)'}</p>
+                <p>Review: {html.escape(admin_url)} (open it with your admin secret).</p></div>""",
+                from_label="TreeKey System <leads@mail.treekey.co.uk>")
+            if not ok:
+                err = "email send failed"
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+            logger.error(f"[AccountRequest] Operator notification crashed for {saved['id']}: {e}")
+        try:
+            database.record_account_request_notification(saved["id"], err)
+        except Exception:
+            pass
+
+    if amended:
+        msg = "We have added your extra option to your existing request."
+    elif saved["duplicate"]:
+        msg = "We already had your request, so nothing new was submitted."
+    else:
+        msg = "Your request has been submitted."
+    return _account_request_page(request, f"""
+    <h2 style="color:white; font-size:24px; font-weight:800; margin:0 0 22px 0;">Request received</h2>
+    <div class="card">
+        <p style="margin:0 0 10px 0;"><b>{msg}</b> Reference: {html.escape(saved['id'][:8])}</p>
+        <p style="margin:0 0 10px 0;">This is a request only. <b>Nothing has been deleted and no subscription has been cancelled.</b> We will review it, including any outstanding purchases and records we must keep, and reply to the email address on your account without undue delay and within one month of receiving it (up to two more months for a complex request, in which case we will tell you within the first month).</p>
+        <p style="margin:0;"><a href="/account">Back to My Account</a></p>
+    </div>""")
+
+
+def _admin_csrf_token() -> str:
+    """Short-lived token for the operator's state-changing forms. Needed because Basic Auth
+    credentials are sent automatically by the browser, so authentication alone would not stop
+    another site from submitting the form on the operator's behalf."""
+    ts = str(int(time.time()))
+    return f"{ts}." + _hmac.new(_SESSION_SECRET, f"admin-account-requests:{ts}".encode(), _hashlib.sha256).hexdigest()
+
+
+def _admin_csrf_ok(token: Optional[str]) -> bool:
+    try:
+        ts, sig = (token or "").split(".", 1)
+        if not 0 <= time.time() - int(ts) <= 4 * 3600:
+            return False
+        good = _hmac.new(_SESSION_SECRET, f"admin-account-requests:{ts}".encode(), _hashlib.sha256).hexdigest()
+        return secrets.compare_digest(sig.encode(), good.encode())
+    except Exception:
+        return False
+
+
+@app.get("/admin/account-requests", response_class=HTMLResponse)
+def admin_account_requests(request: Request, secret: Optional[str] = Query(None), status: Optional[str] = Query(None)):
+    """Operator queue of every account closure / deletion request, including ones whose
+    notification email failed (Operator email column says NOT SENT). Needs the admin login
+    (Basic Auth) or ?secret=; "Mark handled" works under either and is CSRF-protected."""
+    verify_admin_or_secret(request, secret)
+    rows = database.list_account_requests(status if status in ("open", "resolved") else None)
+    csrf = _admin_csrf_token()
+    body = ""
+    for r in rows:
+        kinds = " + ".join(x for x, on in (("close", r["request_close"]), ("delete data", r["request_delete"])) if on)
+        mail = ("sent " + str(r["operator_notified_at"])[:16]) if r["operator_notified_at"] else \
+            f"NOT SENT ({r['notify_attempts']} tries{': ' + html.escape(r['notify_error']) if r['notify_error'] else ''})"
+        action = r["status"]
+        if r["status"] == "open":
+            action = (f'<form method="POST" action="/admin/account-requests/resolve" style="margin:0;">'
+                      f'<input type="hidden" name="csrf" value="{csrf}">'
+                      + (f'<input type="hidden" name="secret" value="{html.escape(secret)}">' if secret else '') +
+                      f'<input type="hidden" name="request_id" value="{html.escape(r["id"])}">'
+                      f'<input name="note" placeholder="what was done" style="width:140px;">'
+                      f'<button type="submit">Mark handled</button></form>')
+        body += (f"<tr><td>{str(r['created_at'])[:16]}</td><td>{html.escape(r['account_email'])}</td><td>{kinds}</td>"
+                 f"<td>{html.escape(r['note'] or '')}</td><td>{mail}</td><td>{action}</td></tr>")
+    return HTMLResponse(f"""<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Account requests</title>
+<style>body{{font-family:Arial,sans-serif;font-size:13px;margin:16px}}td,th{{border:1px solid #ccc;padding:6px;vertical-align:top}}table{{border-collapse:collapse}}</style></head><body>
+<h2>Account closure / data deletion requests</h2>
+<p>Requests only. Nothing here deletes data or cancels a subscription; do that by hand, then mark the request handled. \"NOT SENT\" means the notification email did not go: the request is still here and still needs action.</p>
+<table><tr><th>Received</th><th>Account</th><th>Request</th><th>Note</th><th>Operator email</th><th>Status / action</th></tr>{body or '<tr><td colspan=6>No requests.</td></tr>'}</table></body></html>""")
+
+
+@app.post("/admin/account-requests/resolve")
+async def admin_account_requests_resolve(request: Request):
+    form = await request.form()
+    secret = form.get("secret") or None
+    verify_admin_or_secret(request, secret)          # admin Basic Auth, or the existing secret
+    if not _admin_csrf_ok(form.get("csrf")):
+        raise HTTPException(status_code=403, detail="Form expired or invalid. Reload the list and try again.")
+    database.resolve_account_request(form.get("request_id") or "", form.get("note") or "")
+    return RedirectResponse(url="/admin/account-requests" + (("?secret=" + urllib.parse.quote(secret)) if secret else ""),
+                            status_code=303)
 
 
 # ── 5. Free Woodchip & Timber Drop-Spotter Hub ─────────────────────────────────
@@ -13526,7 +13802,8 @@ async def privacy_policy(request: Request = None):
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">8. Your Rights</h2>
         <p class="mb-2">Both customers and individuals named in Lead data have the right, under UK GDPR, to: request access to the personal data we hold about them; request correction of inaccurate data; request erasure ("right to be forgotten"), subject to our legal bases for retaining it; object to processing based on legitimate interests (Section 3); request restriction of processing in certain circumstances; and lodge a complaint with the Information Commissioner's Office (ico.org.uk).</p>
-        <p class="mb-4">To exercise any of these rights, contact <strong>contact@treekey.co.uk</strong>.</p>
+        <p class="mb-2">To exercise any of these rights, email <strong>nick@treekey.uk</strong>. If you have a TreeKey account, you can also sign in and use the request form at the bottom of <a href="/account" class="text-emerald-400 underline">My Account</a> (&ldquo;Close account / request data deletion&rdquo;). The form only submits a request: it does not delete anything or cancel a subscription by itself, and we review every request by hand.</p>
+        <p class="mb-4">We will respond to a rights request without undue delay and at the latest within one month of receiving it (counted from when we have any information we reasonably need to confirm who you are). If a request is complex, or you make several, we may extend that by up to two further months, and we will tell you within the first month if we do. Responding means telling you what we have done, or will do, and why if we cannot do something; some records (for example payment and accounting records, and suppression records that stop us contacting someone again) may have to be kept. You can complain to the Information Commissioner&rsquo;s Office (ico.org.uk).</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">9. Data Retention</h2>
         <p class="mb-2">Lead data for a planning application that is never purchased is permanently deleted after 60 days.</p>
@@ -13547,7 +13824,7 @@ async def privacy_policy(request: Request = None):
         <p class="mb-4">We may update this policy from time to time; material changes will be reflected by an updated "last updated" date, and significant changes affecting Lead data subjects' rights will be communicated where practical.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">14. Contact</h2>
-        <p class="mb-6">Questions or requests regarding this policy: <strong>contact@treekey.co.uk</strong>.</p>
+        <p class="mb-6">Privacy questions or requests regarding this policy: <strong>nick@treekey.uk</strong>.</p>
 
         <a href="/" class="text-emerald-500 hover:text-emerald-400 mt-4 inline-block font-bold">&larr; Back to Home</a>
     </div>
