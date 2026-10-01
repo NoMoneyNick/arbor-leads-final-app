@@ -41,11 +41,11 @@ This file is not a legal opinion, a deployment record or proof of launch readine
 
 - **Installed in the project files (30 Sep 2026), not committed or deployed:** banner/contact-panel design, letter number, optional contractor offer, and contact first name, with their tests, migration entries and a preview. 318 focused tests passed in the sandbox before install. Sandbox code check of the three personalisation opportunities found no gap. **Live behaviour is unverified**; deployment and the schema initialisation on first start have not happened.
 - **Intelliprint test-mode results** are supplied evidence only. They do not show physical delivery, print accuracy on real stock or launch readiness.
-- **£4.99 offer and package pricing** are agreed, but checkout configuration has not been verified against them.
+- **£4.99 offer and package pricing** are agreed. **Sandbox verified (1 Oct 2026, per CURRENT_HANDOFF.md):** a Stripe test-mode purchase at GBP 4.99 created one paid session, the forwarded completion event was answered 200 with one order, allocation and letter obligation (left pending_approval); replaying the event and a new event ID created no duplicates; reuse of the first-offer price was refused; no live charge or provider submission occurred. **Not verified:** live-mode checkout or a real charge on the deployed site, package-price checkout, worker promotion and posting, and the cost and abuse checks below.
 - **Reapproval of material letter changes** and the **30-day shortage review** are agreed rules; their implementation is not verified.
 - **Retention timings** are agreed; their full implementation and scheduled checks have not been verified here.
 - **Future work, not built:** contractor business-link with automatic QR (reserved area) and contractor logo/advertising upload (reserved area). Both areas stay blank.
-- **Instantly:** no emails have been loaded. Emails 2 and 3 (A/B) are approved copy; the Email 1 pair still needs confirming before the campaign is created.
+- **Instantly:** no emails have been loaded. Email 1 (single version, TREEKEY_EMAIL_1.md, approved 1 Oct 2026) and Emails 2 and 3 (A/B) are approved copy; none is configured or sent.
 - **Application-generated emails:** `send_cold_email_1` in `notifications.py` references the superseded old sequence. Its behaviour and whether it is enabled have not been audited.
 
 ## C. Unresolved decisions and external confirmations

@@ -10792,7 +10792,7 @@ def quote_estimator_page():
                 AI Arborist Scope Engine
             </div>
             <h1 style="margin:0 0 6px 0; color:#34d399; font-size:26px;">Instant Tree Work Estimator</h1>
-            <p style="color:#94a3b8; font-size:14px; margin:0;">Get an accurate fair-market estimate and connect directly with 1 verified local tree surgeon.</p>
+            <p style="color:#94a3b8; font-size:14px; margin:0;">Get an accurate fair-market estimate and connect directly with 1 local tree surgeon.</p>
         </div>
 
         <form id="scopeForm" onsubmit="event.preventDefault(); calcScope();">
@@ -10863,9 +10863,9 @@ def quote_estimator_page():
             </div>
 
             <div style="background:#0f172a; border-radius:8px; padding:14px; margin-top:16px; border:1px solid rgba(16,185,129,0.3);">
-                <h4 style="margin:0 0 6px 0; color:#34d399; font-size:14px;">Connect Directly with 1 Local Senior Tree Surgeon:</h4>
+                <h4 style="margin:0 0 6px 0; color:#34d399; font-size:14px;">Connect Directly with 1 Local Tree Surgeon:</h4>
                 <p style="margin:0 0 12px 0; font-size:12px; color:#94a3b8;">
-                    We never share your contact with 5 competing companies. Your job is dispatched 1-to-1 exclusively to the #1 verified arborist in your postcode.
+                    We never share your contact with 5 competing companies. Your job is dispatched 1-to-1 exclusively to the local tree surgeon in your postcode.
                 </p>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
                     <input type="text" id="custName" placeholder="Your Name" style="margin:0; padding:10px;" required>
@@ -10931,7 +10931,7 @@ def quote_estimator_page():
             }
 
             statusEl.style.color = '#34d399';
-            statusEl.innerText = 'Connecting with verified senior contractor...';
+            statusEl.innerText = 'Connecting with a contractor...';
 
             try {
                 const res = await fetch('/api/submit-homeowner-quote', {
@@ -10942,14 +10942,14 @@ def quote_estimator_page():
                 const data = await res.json();
                 if (data.status === 'success') {
                     statusEl.style.color = '#059669';
-                    statusEl.innerText = 'Quote Request Dispatched! The local verified contractor will contact you within 2 business hours.';
+                    statusEl.innerText = 'Quote Request Dispatched! The local contractor will contact you within 2 business hours.';
                 } else {
                     statusEl.style.color = '#dc2626';
                     statusEl.innerText = 'Submission error: ' + (data.message || 'Please try again.');
                 }
             } catch(e) {
                 statusEl.style.color = '#059669';
-                statusEl.innerText = 'Quote Request Dispatched! The local verified contractor will contact you directly.';
+                statusEl.innerText = 'Quote Request Dispatched! The local contractor will contact you directly.';
             }
         }
     </script>
@@ -11309,7 +11309,7 @@ def local_seo_intake_page(location_slug: str):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Verified Tree Surgeons in {city_name} ({region_name}) | Free AI Quote Estimator | TreeKey</title>
+    <title>Tree Surgeons in {city_name} ({region_name}) | Free AI Quote Estimator | TreeKey</title>
     <meta name="description" content="Looking for trusted tree surgeons in {city_name}? Get an instant fair-market AI estimate for tree felling, pruning, and stump removal. 1-to-1 contractor matching with zero spam.">
     
     <!-- JSON-LD LocalBusiness Schema for Google Rich Snippets -->
@@ -11317,8 +11317,8 @@ def local_seo_intake_page(location_slug: str):
     {{
       "@context": "https://schema.org",
       "@type": "LocalBusiness",
-      "name": "TreeKey Verified Arborists & Tree Surgery ({city_name})",
-      "description": "NPTC-certified tree surgery and stump grinding services across {city_name} and {region_name}.",
+      "name": "TreeKey Arborists & Tree Surgery ({city_name})",
+      "description": "Tree surgery and stump grinding services across {city_name} and {region_name}.",
       "areaServed": {{
         "@type": "AdministrativeArea",
         "name": "{city_name}, {region_name}"
@@ -11345,15 +11345,15 @@ def local_seo_intake_page(location_slug: str):
 <div class="container">
     <div class="card">
         <span class="badge">Local Service Hub: {city_name} & {region_name}</span>
-        <h1 class="hero-title">Verified Tree Surgeons in {city_name}</h1>
+        <h1 class="hero-title">Tree Surgeons in {city_name}</h1>
         <p style="color:#94a3b8; font-size: 16px; margin: 0 0 20px 0;">
-            Calculate your fair-market price in seconds and connect directly with <b>1 verified NPTC tree surgeon</b> in {city_name}.
+            Calculate your fair-market price in seconds and connect directly with <b>1 tree surgeon</b> in {city_name}.
         </p>
 
         <div class="trust-grid">
             <div class="trust-item">
                 <div style="font-weight:bold; color:#34d399; margin-bottom:4px;">1-to-1 Dispatch Guarantee</div>
-                <div style="font-size:12px; color:#94a3b8;">We NEVER sell your details to 5 different companies. Only 1 verified local contractor receives your job.</div>
+                <div style="font-size:12px; color:#94a3b8;">We NEVER sell your details to 5 different companies. Only 1 local contractor receives your job.</div>
             </div>
             <div class="trust-item">
                 <div style="font-weight:bold; color:#34d399; margin-bottom:4px;">{council_name} Compliance</div>
@@ -11435,9 +11435,9 @@ def local_seo_intake_page(location_slug: str):
             </div>
 
             <div style="background:#0f172a; border-radius:8px; padding:18px; border:1px solid rgba(16,185,129,0.3);">
-                <h4 style="margin:0 0 6px 0; color:#34d399; font-size:15px;">Dispatch Directly to the Verified Senior Tree Surgeon in {city_name}:</h4>
+                <h4 style="margin:0 0 6px 0; color:#34d399; font-size:15px;">Dispatch Directly to the Tree Surgeon in {city_name}:</h4>
                 <p style="margin:0 0 12px 0; font-size:12px; color:#94a3b8;">
-                    We never sell your details to 5 different companies. Your job is dispatched 1-to-1 exclusively to the #1 verified arborist in your {city_name} postcode.
+                    We never sell your details to 5 different companies. Your job is dispatched 1-to-1 exclusively to the local tree surgeon in your {city_name} postcode.
                 </p>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
                     <input type="text" id="custName" placeholder="Your Name" style="margin:0; padding:10px;" required>
@@ -11504,7 +11504,7 @@ def local_seo_intake_page(location_slug: str):
         }}
 
         statusEl.style.color = '#34d399';
-        statusEl.innerText = 'Connecting with verified senior contractor in ' + cityName + '...';
+        statusEl.innerText = 'Connecting with a contractor in ' + cityName + '...';
 
         try {{
             const res = await fetch('/api/submit-homeowner-quote', {{
@@ -11515,14 +11515,14 @@ def local_seo_intake_page(location_slug: str):
             const data = await res.json();
             if (data.status === 'success') {{
                 statusEl.style.color = '#059669';
-                statusEl.innerText = 'Quote Request Dispatched! The local verified contractor in ' + cityName + ' will contact you within 2 business hours.';
+                statusEl.innerText = 'Quote Request Dispatched! The local contractor in ' + cityName + ' will contact you within 2 business hours.';
             }} else {{
                 statusEl.style.color = '#dc2626';
                 statusEl.innerText = 'Submission error: ' + (data.message || 'Please try again.');
             }}
         }} catch(e) {{
             statusEl.style.color = '#059669';
-            statusEl.innerText = 'Quote Request Dispatched! The local verified contractor will contact you directly.';
+            statusEl.innerText = 'Quote Request Dispatched! The local contractor will contact you directly.';
         }}
     }}
 </script>
