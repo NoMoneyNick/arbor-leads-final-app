@@ -97,6 +97,34 @@ class ReservationDecision:
     reserved_pence: int = 0
 
 
+@dataclass
+class CostSettlement:
+    """Result of FundingGate.settle_actual(). `status` is what was durably
+    recorded on letter_obligations.cost_status:
+      confirmed                    actual cost recorded and fully covered
+      shortfall                    actual cost recorded; more was spent than the
+                                   confirmed budget covered (see shortfall_pence)
+      unresolved_missing / _invalid / _no_reservation / _accounting_error
+                                   no valid cost (or no reservation / a failed
+                                   accounting step): the reservation is left
+                                   HELD at the estimate, nothing is treated as
+                                   confirmed spend
+      already_recorded             a repeat/overlapping call: nothing changed"""
+    status: str
+    estimated_pence: int = 0
+    actual_pence: Optional[int] = None
+    released_pence: int = 0
+    shortfall_pence: int = 0
+
+
+def valid_cost_pence(value) -> Optional[int]:
+    """A provider-reported VAT-inclusive cost in whole pence is usable only if
+    it is a real positive integer (bool, float, str, zero, negative -> None)."""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
 class FundingGate:
     """One instance per process/request is fine -- it does not cache
     anything that changes mid-process; every check re-reads the DB (or the
@@ -282,12 +310,27 @@ class FundingGate:
             return ReservationDecision(ok=True, reason="Already reserved for this obligation (idempotent retry).",
                                         reserved_pence=already_reserved)
 
+        # All active rows (not only those with positive headroom) so that an
+        # outstanding SHORTFALL (a row whose spent_pence exceeds its amount,
+        # recorded by settle_actual when a provider charge exceeded the
+        # confirmed budget) is netted off: while the net available is below
+        # the request, nothing new may be reserved, even if another budget
+        # row still shows headroom.
         cur.execute("""
             SELECT id, amount_pence, spent_pence, reserved_pence FROM mailing_budget_confirmations
-            WHERE active = TRUE AND (amount_pence - spent_pence - reserved_pence) > 0
+            WHERE active = TRUE
             ORDER BY created_at ASC FOR UPDATE;
         """)
         rows = cur.fetchall()
+        net_available = sum(int(amt) - int(spent) - int(reserved) for _b, amt, spent, reserved in rows)
+        if any(int(amt) - int(spent) - int(reserved) < 0 for _b, amt, spent, reserved in rows) \
+                and net_available < amount_pence:
+            return ReservationDecision(
+                ok=False,
+                reason=f"Outstanding budget shortfall: net available is £{net_available/100:.2f}; "
+                       f"confirm more budget before reserving.",
+                reserved_pence=0,
+            )
         remaining = amount_pence
         splits = []
         for budget_id, amt, spent, reserved in rows:
@@ -385,3 +428,161 @@ class FundingGate:
         if total:
             logger.info(f"[Funding] Settled £{total/100:.2f} reserved for obligation {obligation_id} as spent.")
         return total
+
+    # -----------------------------------------------------------------
+    # Actual-cost accounting (2 Oct 2026). reserve() holds an ESTIMATE
+    # before sending; once a provider has CONFIRMED acceptance AND reported
+    # a valid VAT-inclusive cost, settle_actual() records that actual cost
+    # once, on the caller's cursor/transaction (so it commits or rolls back
+    # together with the order's status update).
+    # -----------------------------------------------------------------
+
+    def outstanding_shortfall_pence(self, cur) -> int:
+        """Total pence by which confirmed budget rows are overspent (0 if none)."""
+        cur.execute("SELECT COALESCE(SUM(spent_pence + reserved_pence - amount_pence), 0) "
+                    "FROM mailing_budget_confirmations WHERE active = TRUE AND spent_pence + reserved_pence > amount_pence;")
+        return int(cur.fetchone()[0] or 0)
+
+    def _record_cost(self, cur, obligation_id: str, *, estimated, actual, status: str, shortfall: int = 0) -> None:
+        cur.execute("""
+            UPDATE letter_obligations
+            SET estimated_cost_pence = %s, provider_cost_pence = %s, cost_status = %s,
+                cost_shortfall_pence = %s, updated_at = NOW()
+            WHERE id = %s AND (cost_status IS NULL OR cost_status LIKE 'unresolved%%');
+        """, (estimated, actual, status, shortfall, obligation_id))
+
+    def record_unresolved_cost(self, cur, obligation_id: str, status: str, actual_pence=None) -> None:
+        """Marks an accepted order's cost as explicitly unresolved (reservation untouched)."""
+        self._record_cost(cur, obligation_id, estimated=None, actual=valid_cost_pence(actual_pence), status=status)
+
+    def settle_actual(self, cur, obligation_id: str, actual_pence) -> "CostSettlement":
+        """Settles the obligation's reservation against the provider's CONFIRMED
+        actual cost, exactly once. Call ONLY after confirmed acceptance/dispatch.
+
+          - actual == estimate: reservation becomes spent.
+          - actual <  estimate: `actual` becomes spent; the unused part is
+            released back to available budget (recorded as a 'released' row).
+          - actual >  estimate: the estimate is spent, then the extra is taken
+            from remaining headroom (FIFO, as extra 'settled' rows). If headroom
+            is insufficient, the uncovered remainder is STILL recorded as spent
+            (the money has left) against the budget row of the reservation, which
+            drives it negative: cost_status='shortfall' with cost_shortfall_pence,
+            and reserve() then refuses new spending until net budget is restored.
+            The order is never failed or resent because of this.
+          - missing/invalid cost (or no reservation): nothing is settled; the
+            reservation stays HELD and cost_status is 'unresolved_*'. The estimate
+            is never silently treated as confirmed spend.
+          - repeat/overlapping call after a confirmed/shortfall record: no-op.
+        Everything happens on `cur`; the caller commits or rolls back."""
+        cur.execute("SELECT cost_status FROM letter_obligations WHERE id = %s FOR UPDATE;", (obligation_id,))
+        existing = cur.fetchone()
+        if existing and existing[0] in ("confirmed", "shortfall"):
+            return CostSettlement(status="already_recorded")
+
+        if actual_pence is None:
+            bad = "unresolved_missing"
+        elif valid_cost_pence(actual_pence) is None:
+            bad = "unresolved_invalid"
+        else:
+            bad = None
+        actual = valid_cost_pence(actual_pence)
+
+        if self.mode != "hold":
+            # No budget ledger outside hold mode: record the evidence only.
+            self._record_cost(cur, obligation_id, estimated=None, actual=actual,
+                              status=bad or "confirmed")
+            return CostSettlement(status=bad or "confirmed", actual_pence=actual)
+
+        cur.execute("""
+            SELECT id, budget_confirmation_id, amount_pence FROM funding_reservations
+            WHERE obligation_id = %s AND status = 'reserved'
+            ORDER BY created_at ASC, id ASC FOR UPDATE;
+        """, (obligation_id,))
+        res_rows = cur.fetchall()
+        estimated = sum(int(a) for _i, _b, a in res_rows)
+
+        if bad or not res_rows:
+            status = bad or "unresolved_no_reservation"
+            self._record_cost(cur, obligation_id, estimated=estimated or None, actual=actual, status=status)
+            logger.warning(f"[Funding] Obligation {obligation_id}: cost not settled ({status}); "
+                           f"reservation of {estimated}p left held for review.")
+            return CostSettlement(status=status, estimated_pence=estimated, actual_pence=actual)
+
+        # Lock every budget row in reserve()'s order (created_at) before any
+        # update, so concurrent settles/reserves cannot deadlock each other.
+        cur.execute("SELECT id, amount_pence, spent_pence, reserved_pence, active FROM mailing_budget_confirmations "
+                    "ORDER BY created_at ASC, id ASC FOR UPDATE;")
+        budget_rows = cur.fetchall()
+        budgets = {b: [int(a), int(sp), int(rv)] for b, a, sp, rv, _act in budget_rows}
+        # Only ACTIVE budgets may fund an above-estimate extra; the reservation's
+        # own budget row is settled/released regardless of its active flag.
+        active_ids = {b for b, _a, _sp, _rv, act in budget_rows if act in (True, "t", "true", 1)}
+
+        remaining = actual
+        released = 0
+        for res_id, budget_id, amount in res_rows:
+            amount = int(amount)
+            settled_part = min(amount, remaining)
+            unused = amount - settled_part
+            remaining -= settled_part
+            cur.execute("""
+                UPDATE mailing_budget_confirmations
+                SET reserved_pence = reserved_pence - %s, spent_pence = spent_pence + %s
+                WHERE id = %s;
+            """, (amount, settled_part, budget_id))
+            budgets[budget_id][1] += settled_part
+            budgets[budget_id][2] -= amount
+            if settled_part == 0:
+                cur.execute("UPDATE funding_reservations SET status = 'released', resolved_at = NOW() WHERE id = %s;", (res_id,))
+            elif unused == 0:
+                cur.execute("UPDATE funding_reservations SET status = 'settled', resolved_at = NOW() WHERE id = %s;", (res_id,))
+            else:
+                cur.execute("UPDATE funding_reservations SET status = 'settled', amount_pence = %s, resolved_at = NOW() WHERE id = %s;",
+                            (settled_part, res_id))
+                cur.execute("""
+                    INSERT INTO funding_reservations (obligation_id, budget_confirmation_id, amount_pence, status, resolved_at)
+                    VALUES (%s, %s, %s, 'released', NOW());
+                """, (obligation_id, budget_id, unused))
+            released += unused
+
+        shortfall = 0
+        if remaining > 0:
+            # Actual cost exceeded the estimate: take the extra from headroom, FIFO.
+            for budget_id, (amt, spent, reserved) in budgets.items():
+                if remaining <= 0:
+                    break
+                if budget_id not in active_ids:
+                    continue
+                headroom = amt - spent - reserved
+                take = min(headroom, remaining)
+                if take <= 0:
+                    continue
+                cur.execute("UPDATE mailing_budget_confirmations SET spent_pence = spent_pence + %s WHERE id = %s;",
+                            (take, budget_id))
+                cur.execute("""
+                    INSERT INTO funding_reservations (obligation_id, budget_confirmation_id, amount_pence, status, resolved_at)
+                    VALUES (%s, %s, %s, 'settled', NOW());
+                """, (obligation_id, budget_id, take))
+                budgets[budget_id][1] += take
+                remaining -= take
+            if remaining > 0:
+                # Not enough confirmed budget: the money has still been charged, so record
+                # it honestly (budget row goes negative) and flag it; never fail/resend.
+                shortfall = remaining
+                target = res_rows[0][1]
+                cur.execute("UPDATE mailing_budget_confirmations SET spent_pence = spent_pence + %s WHERE id = %s;",
+                            (shortfall, target))
+                cur.execute("""
+                    INSERT INTO funding_reservations (obligation_id, budget_confirmation_id, amount_pence, status, resolved_at)
+                    VALUES (%s, %s, %s, 'settled', NOW());
+                """, (obligation_id, target, shortfall))
+                logger.error(f"[Funding] SHORTFALL: obligation {obligation_id} cost {actual}p but only "
+                             f"{actual - shortfall}p of confirmed budget was available; {shortfall}p uncovered. "
+                             f"Order kept as accepted; new reservations blocked until budget is confirmed.")
+
+        status = "shortfall" if shortfall else "confirmed"
+        self._record_cost(cur, obligation_id, estimated=estimated, actual=actual, status=status, shortfall=shortfall)
+        logger.info(f"[Funding] Obligation {obligation_id}: estimate {estimated}p, actual {actual}p -> "
+                    f"{status}; released {released}p.")
+        return CostSettlement(status=status, estimated_pence=estimated, actual_pence=actual,
+                              released_pence=released, shortfall_pence=shortfall)

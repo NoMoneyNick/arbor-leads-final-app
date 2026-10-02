@@ -188,6 +188,30 @@ def build_registry_from_env() -> ProviderRegistry:
     return ProviderRegistry(slots)
 
 
+def _settle_actual_cost(cur, gate, obligation_id: str, cost_pence) -> str:
+    """Records the provider's confirmed cost against the reservation, in the
+    SAME transaction as the order's accepted status -- but inside a savepoint,
+    so that if the accounting step itself raises, only the accounting is rolled
+    back: the accepted order and its evidence are kept (a letter the provider
+    accepted is never failed, re-queued or resent because bookkeeping failed),
+    the reservation stays held, and the order is flagged
+    cost_status='unresolved_accounting_error' for reconciliation."""
+    cur.execute("SAVEPOINT cost_settlement;")
+    try:
+        settlement = gate.settle_actual(cur, obligation_id, cost_pence)
+        cur.execute("RELEASE SAVEPOINT cost_settlement;")
+        return f" | cost: {settlement.status}"
+    except Exception as exc:
+        logger.error(f"[Registry] Obligation {obligation_id}: cost accounting failed after provider acceptance "
+                      f"({type(exc).__name__}: {exc}); order kept as accepted, reservation held for review.")
+        cur.execute("ROLLBACK TO SAVEPOINT cost_settlement;")
+        try:
+            gate.record_unresolved_cost(cur, obligation_id, "unresolved_accounting_error", cost_pence)
+        except Exception as exc2:
+            logger.error(f"[Registry] Obligation {obligation_id}: could not even flag the accounting error: {exc2}")
+        return " | cost: unresolved_accounting_error"
+
+
 @dataclass
 class SendOutcome:
     obligation_id: str
@@ -305,11 +329,12 @@ def attempt_send(cur, registry: ProviderRegistry, obligation_id: str, *, worker_
                                              provider_name=result.provider_name,
                                              provider_reference=result.provider_reference,
                                              content_fingerprint=fingerprint)
+            cost_note = ""
             if gate is not None and estimated_cost_pence is not None:
-                gate.settle(cur, obligation_id)
+                cost_note = _settle_actual_cost(cur, gate, obligation_id, result.cost_pence)
             return SendOutcome(obligation_id=obligation_id, final_status=outcome_key,
                                 provider_name=result.provider_name, attempts_made=attempts,
-                                note=result.message)
+                                note=result.message + cost_note)
 
         if result.outcome == OUTCOME_UNKNOWN:
             # Reservation left untouched -- see this function's own

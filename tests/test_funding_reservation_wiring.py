@@ -77,16 +77,20 @@ class TestAcceptedSettlesTheReservation(unittest.TestCase):
             ],
             fetchall_results=[
                 [("budget-1", 1000, 0, 0)],  # reserve(): candidate budget rows
-                [("res-1", "budget-1", 95)],  # settle(): reservations to settle
+                [("res-1", "budget-1", 95)],  # settle_actual(): reservations to settle
+                [("budget-1", 1000, 0, 95, True)],  # settle_actual(): all budget rows (locked)
             ],
         )
         gate = funding.FundingGate(mode="hold")
-        adapter = FakeLetterProvider(force_outcome="accepted")
+        adapter = FakeLetterProvider(force_outcome="accepted")   # reports cost 45p vs 95p estimate
         registry = ProviderRegistry([ProviderSlot(adapter=adapter)])
 
         outcome = attempt_send(cur, registry, "ob-1", gate=gate, **_send_kwargs())
 
         self.assertEqual(outcome.final_status, "accepted")
+        # 2 Oct 2026: settles the provider's ACTUAL cost (45p), not the 95p estimate;
+        # the savepoint fallback must not have been needed.
+        self.assertIn("cost: confirmed", outcome.note)
         settle_calls = [e for e in cur.executed if "spent_pence = spent_pence" in e[0]]
         release_calls = [e for e in cur.executed if e[0].startswith("UPDATE mailing_budget_confirmations SET reserved_pence = reserved_pence -")]
         self.assertEqual(len(settle_calls), 1)

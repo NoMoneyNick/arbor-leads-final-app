@@ -373,6 +373,19 @@ def init_fulfilment_schema(cur) -> None:
         ALTER SEQUENCE letter_obligations_letter_number_seq OWNED BY letter_obligations.letter_number;
         CREATE UNIQUE INDEX IF NOT EXISTS idx_letter_obligations_letter_number ON letter_obligations(letter_number);
 
+        -- 2 Oct 2026, actual-cost postage accounting (funding.FundingGate.settle_actual):
+        -- durable estimate-versus-actual evidence per order. All nullable/additive,
+        -- re-runnable; also in migrations/0005_actual_cost_accounting.sql.
+        --   estimated_cost_pence  what was reserved before sending
+        --   provider_cost_pence   the provider's confirmed VAT-inclusive cost, in pence
+        --   cost_status           confirmed | shortfall | unresolved_missing | unresolved_invalid |
+        --                         unresolved_no_reservation | unresolved_accounting_error
+        --   cost_shortfall_pence  part of the charge not covered by confirmed budget
+        ALTER TABLE letter_obligations ADD COLUMN IF NOT EXISTS estimated_cost_pence INT;
+        ALTER TABLE letter_obligations ADD COLUMN IF NOT EXISTS provider_cost_pence INT;
+        ALTER TABLE letter_obligations ADD COLUMN IF NOT EXISTS cost_status TEXT;
+        ALTER TABLE letter_obligations ADD COLUMN IF NOT EXISTS cost_shortfall_pence INT;
+
         CREATE TABLE IF NOT EXISTS payment_allocation_reconciliation (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             stripe_event_id TEXT,

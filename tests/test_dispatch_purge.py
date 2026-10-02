@@ -444,6 +444,7 @@ class TestUnknownOutcomesAreNeverSweptOrAutoResent(unittest.TestCase):
 
         conn, cur = _conn_with_cursor()
         cur.fetchall.return_value = [("ob-unknown-1", fake.name, accepted_result.provider_reference)]
+        cur.fetchone.return_value = ("unknown",)  # the under-lock status re-check (2 Oct 2026 reconcile fix)
         mark_calls = []
 
         def _fake_mark_provider_result(cur_, obligation_id, **kwargs):
@@ -456,6 +457,7 @@ class TestUnknownOutcomesAreNeverSweptOrAutoResent(unittest.TestCase):
 
         with patch.object(purge.database, "get_db_conn", return_value=conn), \
              patch("letter_providers.registry.build_registry_from_env", return_value=fake_registry), \
+             patch("funding.FundingGate", return_value=MagicMock()), \
              patch.object(fulfilment, "mark_provider_result", side_effect=_fake_mark_provider_result):
             result = purge.reconcile_unknown_outcome_obligations()
 

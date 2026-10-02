@@ -301,11 +301,12 @@ import base64
 import json
 import os
 import urllib.error
+from dataclasses import replace as _dc_replace
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from letter_providers.base import (
-    LetterProviderAdapter, LetterRequest, ProviderResult, ProviderCapabilities,
+    LetterProviderAdapter, LetterRequest, ProviderResult, ProviderCapabilities, ReferenceLookup,
     OUTCOME_ACCEPTED, OUTCOME_DISPATCHED, OUTCOME_REJECTED, OUTCOME_UNKNOWN,
 )
 
@@ -540,17 +541,76 @@ def _render_html_to_pdf_bytes(html: str) -> bytes:
 
 
 def _cost_pence(data: dict) -> "int | None":
-    cost = data.get("cost") or {}
-    after_tax = cost.get("after_tax")
-    if after_tax is None:
+    """The job's confirmed VAT-INCLUSIVE cost in whole pence, or None if the
+    response does not carry a valid one.
+
+    Units (Intelliprint docs): "All costs amounts need to be divided by 10^8
+    to get the real GBP price", so 1 pence = 10^6 units. `cost.after_tax` is the
+    VAT-inclusive figure (verified against the real test job: 90p + 20% VAT =
+    108p = 108,000,000 units). Whole units are first normalised (so float noise
+    below one unit cannot move the result), then rounded UP to the next whole
+    penny -- if a charge ever has a fractional penny, the ledger records the
+    larger figure rather than under-recording spend (an exact figure like
+    108,000,000 is unaffected).
+    Anything that is not a finite positive number (missing, null, string, bool,
+    NaN/inf, zero, negative) returns None: callers must treat that as an
+    UNRESOLVED cost, never as zero or as the estimate."""
+    import math
+    cost = data.get("cost") if isinstance(data, dict) else None
+    if not isinstance(cost, dict):
         return None
-    # Intelliprint's own docs: "All costs amounts need to be divided by
-    # 10^8 to get the real GBP price." -> pence = after_tax / 10**8 * 100
-    return round(after_tax / 1_000_000)
+    after_tax = cost.get("after_tax")
+    if isinstance(after_tax, bool) or not isinstance(after_tax, (int, float)):
+        return None
+    if isinstance(after_tax, float) and not math.isfinite(after_tax):
+        return None
+    units = int(round(after_tax))
+    if units <= 0:
+        return None
+    return -(-units // 1_000_000)
+
+
+def submission_reference(idempotency_key: str) -> str:
+    """The exact `reference` value send() submits for an obligation. ONE
+    definition, used by send() and by find_by_reference(), so the recovery
+    search can never drift from what was originally submitted."""
+    return f"treekey_{idempotency_key[:48]}"
+
+
+def submitted_mode_marker(test_mode: bool) -> str:
+    """Appended to every UNKNOWN send() message so the mode the submission
+    was actually made in is recorded with the obligation (letter_obligations.
+    last_error). Read back by retention_dispatch_purge to search the SAME
+    mode. Absent marker -> recovery refuses to guess and holds for review."""
+    return f"[submitted_testmode={'true' if test_mode else 'false'}]"
+
+
+# Recovery search paging: documented list parameters are limit/skip, with
+# response has_more and total_available (reference/prints/list). The limit's
+# maximum is not documented, so stay modest; the page cap bounds the work.
+_LOOKUP_PAGE_SIZE = 50
+_LOOKUP_MAX_PAGES = 10
+
+
+def _result_from_print(provider_name: str, data: dict, fallback_reference: str) -> ProviderResult:
+    """Shared by check_status() and find_by_reference(): turns one Intelliprint
+    print object into a ProviderResult (status mapping unchanged)."""
+    letters = data.get("letters") or []
+    status = (letters[0].get("status") if letters and isinstance(letters[0], dict) else None) or data.get("status")
+    pdf_url = _pdf_preview_url(data)
+    pdf_note = f" PDF preview (signed URL expires in 1 hour): {pdf_url}" if pdf_url else ""
+    pages_sheets_note = _pages_sheets_note(data)
+    return ProviderResult(
+        outcome=_map_status(status or ""), provider_name=provider_name,
+        provider_reference=str(data.get("id", fallback_reference)),
+        cost_pence=_cost_pence(data),
+        message=f"Reconciled via check_status: status={status!r}.{pdf_note}{pages_sheets_note}",
+    )
 
 
 class IntelliprintProvider(LetterProviderAdapter):
     name = "intelliprint"
+    supports_reference_lookup = True
     capabilities = ProviderCapabilities(max_pages=2, countries=("GB",))
 
     def __init__(self):
@@ -582,6 +642,15 @@ class IntelliprintProvider(LetterProviderAdapter):
         }
 
     def send(self, request: LetterRequest) -> ProviderResult:
+        result = self._send_once(request)
+        if result.outcome == OUTCOME_UNKNOWN:
+            # Record which mode this (ambiguous) submission was made in, so
+            # a later reference search can use the same mode (see
+            # submitted_mode_marker).
+            result = _dc_replace(result, message=f"{result.message} {submitted_mode_marker(self.test_mode)}".strip())
+        return result
+
+    def _send_once(self, request: LetterRequest) -> ProviderResult:
         if not self.is_configured():
             # Should never be reached -- the registry checks is_configured()
             # first -- but fail safe (unknown, not accepted) if it is.
@@ -627,7 +696,7 @@ class IntelliprintProvider(LetterProviderAdapter):
             # form-urlencoded like every other field here).
             "file[content]": base64.b64encode(pdf_bytes).decode("ascii"),
             "file[name]": f"treekey_{request.idempotency_key[:40]}.pdf",
-            "reference": f"treekey_{request.idempotency_key[:48]}",
+            "reference": submission_reference(request.idempotency_key),
             "testmode": "true" if self.test_mode else "false",
             "confirmed": "true",
             # 2026-09-26, fourth fix -- both previously left unset, so
@@ -720,14 +789,67 @@ class IntelliprintProvider(LetterProviderAdapter):
         if not isinstance(data, dict) or "error" in data:
             return None
 
-        letters = data.get("letters") or []
-        status = (letters[0].get("status") if letters and isinstance(letters[0], dict) else None) or data.get("status")
-        pdf_url = _pdf_preview_url(data)
-        pdf_note = f" PDF preview (signed URL expires in 1 hour): {pdf_url}" if pdf_url else ""
-        pages_sheets_note = _pages_sheets_note(data)
-        return ProviderResult(
-            outcome=_map_status(status or ""), provider_name=self.name,
-            provider_reference=str(data.get("id", provider_reference)),
-            cost_pence=_cost_pence(data),
-            message=f"Reconciled via check_status: status={status!r}.{pdf_note}{pages_sheets_note}",
-        )
+        return _result_from_print(self.name, data, provider_reference)
+
+    def find_by_reference(self, idempotency_key: str, *, testmode: bool) -> "ReferenceLookup | None":
+        """Read-only recovery search (GET /v1/prints?reference=...&testmode=...)
+        for jobs submitted under the exact reference send() uses, in the given
+        mode. Documented semantics (reference/prints/list): `reference` is an
+        exact, case-sensitive filter; paging is limit/skip; the response has
+        has_more and total_available; the default (no testmode) lists LIVE
+        jobs only, so testmode is always passed explicitly. `reference` is NOT
+        unique and there is no idempotency: callers must treat anything other
+        than exactly one complete, valid match as unresolved -- and never read
+        "no match" as permission to resend.
+
+        complete=True only when every page was read, has_more ended, and the
+        number collected equals total_available. Any error, malformed page,
+        missing paging fields or an unconfirmed matching job returns
+        complete=False with a reason."""
+        if not self.is_configured():
+            return ReferenceLookup(False, (), "Intelliprint is not configured here (no API key).")
+        reference = submission_reference(idempotency_key)
+        collected, skip, total = [], 0, None
+        for _ in range(_LOOKUP_MAX_PAGES):
+            query = urlencode({"reference": reference, "testmode": "true" if testmode else "false",
+                               "limit": _LOOKUP_PAGE_SIZE, "skip": skip})
+            http_request = Request(f"{API_BASE}/prints?{query}", headers=self._headers(), method="GET")
+            try:
+                with build_opener(_NoRedirects()).open(http_request, timeout=30) as response:
+                    page = json.loads(response.read(2_000_000).decode())
+            except Exception as exc:
+                return ReferenceLookup(False, (), f"Lookup failed ({type(exc).__name__}); result set not read.")
+            if not isinstance(page, dict) or "error" in page or not isinstance(page.get("data"), list) \
+                    or not isinstance(page.get("has_more"), bool) or not isinstance(page.get("total_available"), int):
+                return ReferenceLookup(False, (), "Lookup response missing the documented list/paging fields.")
+            items = page["data"]
+            if any(not isinstance(i, dict) for i in items):
+                return ReferenceLookup(False, (), "Lookup response contained a non-object item.")
+            collected.extend(items)
+            skip += len(items)
+            total = page["total_available"]
+            if not page["has_more"]:
+                break
+            if not items:
+                return ReferenceLookup(False, (), "Lookup reported more results but returned an empty page.")
+        else:
+            return ReferenceLookup(False, (), f"Lookup still had more results after {_LOOKUP_MAX_PAGES} pages.")
+        ids = [i.get("id") for i in collected if i.get("id")]
+        if len(ids) != len(set(ids)):
+            return ReferenceLookup(False, (), "Paging returned the same job more than once; result set not reliable.")
+        if len(collected) != total:
+            return ReferenceLookup(False, (), f"Read {len(collected)} job(s) but provider reports {total} available.")
+
+        # Defence in depth: keep only exact-reference jobs of the requested mode.
+        matches = []
+        for item in collected:
+            if item.get("reference") != reference:
+                continue
+            if "testmode" in item and bool(item.get("testmode")) != testmode:
+                continue
+            if not item.get("id"):
+                return ReferenceLookup(False, (), "A matching job had no id.")
+            if item.get("confirmed") is False:
+                return ReferenceLookup(False, (), "A matching job exists but is not confirmed; manual review.")
+            matches.append(_result_from_print(self.name, item, str(item["id"])))
+        return ReferenceLookup(True, tuple(matches), "")

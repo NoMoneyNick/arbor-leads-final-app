@@ -146,6 +146,7 @@ against a real database, which this sandbox never does.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 
 import database
@@ -438,36 +439,108 @@ def purge_dispatched_personal_data() -> dict:
 # ---------------------------------------------------------------------------
 # Restricted reconciliation for 'unknown' outcomes.
 
+_SUBMITTED_MODE_RE = re.compile(r"\[submitted_testmode=(true|false)\]")
+_RECOVERY_TAG = " || RECOVERY:"
+
+
+def _submitted_testmode(last_error):
+    """The test/live mode an ambiguous submission was made in, read from the
+    marker the Intelliprint adapter records on every UNKNOWN send result.
+    Returns True/False only when exactly one distinct mode is recorded;
+    otherwise None (not established reliably -> caller holds for review)."""
+    modes = set(_SUBMITTED_MODE_RE.findall(last_error or ""))
+    if len(modes) != 1:
+        return None
+    return modes.pop() == "true"
+
+
+def _classify_result(result) -> str:
+    """What a provider-reported result means for the order and its budget.
+    'settle' (accepted/dispatched), 'release' (rejected AND adapter proves no
+    charge), 'charge_unproven' (rejection-type status, charge not proven
+    absent), 'unresolved' (unknown outcome)."""
+    if result.outcome in ("accepted", "dispatched"):
+        return "settle"
+    if result.outcome == "rejected":
+        return "release" if getattr(result, "confirmed_uncharged", False) else "charge_unproven"
+    return "unresolved"
+
+
+def _apply_resolution(fulfilment, gate, cur, obligation_id, result, kind) -> None:
+    """Status change + budget change on the caller's cursor/transaction (the
+    caller commits). settle()/release() only act on still-'reserved' rows."""
+    if kind == "settle":
+        fulfilment.mark_provider_result(
+            cur, obligation_id, outcome=result.outcome, is_dry_run=False,
+            provider_name=result.provider_name, provider_reference=result.provider_reference,
+            error=result.message or None)
+        # Records the provider's confirmed actual cost (see
+        # funding.FundingGate.settle_actual). Raises on a DB error, which rolls
+        # the whole order back (it stays 'unknown' and is retried later).
+        gate.settle_actual(cur, obligation_id, result.cost_pence)
+    else:  # 'release': rejected AND confirmed_uncharged
+        fulfilment.mark_provider_result(
+            cur, obligation_id, outcome="failed", is_dry_run=False,
+            provider_name=result.provider_name, provider_reference=result.provider_reference,
+            error=result.message or None)
+        gate.release(cur, obligation_id)
+
+
+def _record_review_reason(cur, obligation_id, reason, save_reference=None) -> None:
+    """Keeps an order at 'unknown' and records WHY it needs a human, appended
+    to last_error after a fixed tag (replaced, not accumulated, on repeat runs;
+    the original submission text and mode marker are preserved). Optionally
+    saves a recovered provider id so later runs use check_status directly.
+    Guarded: only ever touches a row still 'unknown'."""
+    cur.execute(
+        "UPDATE letter_obligations SET "
+        "last_error = split_part(COALESCE(last_error, ''), %s, 1) || %s || %s, "
+        "provider_reference = COALESCE(provider_reference, %s), updated_at = NOW() "
+        "WHERE id = %s AND status = 'unknown';",
+        (_RECOVERY_TAG, _RECOVERY_TAG + " ", reason, save_reference, obligation_id))
+
+
 def reconcile_unknown_outcome_obligations(limit: int = 50) -> dict:
     """The ONLY path that can move a letter_obligations row out of
     status='unknown'. Restricted, deliberately, in every direction:
-      - never resends (only ever calls check_status, the adapter's
-        "best-effort reconciliation lookup for a previously-submitted
-        reference", never .send());
-      - never upgrades a row to anything other than what the SAME
-        provider that produced the ambiguous result now reports, via
-        fulfilment.mark_provider_result (the existing, sole writer of
-        provider_accepted_at/dispatched_at/failed_at -- reused unchanged);
-      - never guesses when the adapter has no status-lookup capability at
-        all (check_status returns None, the base class's own documented
-        default) -- the row stays 'unknown', counted by count_unknown_
-        outcome_obligations_awaiting_reconciliation for a human to look
-        at, not silently retried forever;
-      - `limit` bounds one call to a small batch (never "reconcile
-        everything unbounded"), so a mis-configured/mis-behaving provider
-        can't turn this into an unbounded scan every time it's invoked.
+      - never resends (only ever calls check_status / find_by_reference, both
+        read-only; never .send()), never switches provider, and never sets a
+        row back to 'ready';
+      - only ever asks the SAME provider that produced the ambiguous result;
+      - never guesses: an unresolved status, an unproven rejection, a failed
+        or incomplete lookup, zero or several matches all leave the row AND
+        its funding reservation exactly as they were (a review reason is
+        recorded for the recovery-search cases);
+      - `limit` bounds one call to a small batch.
 
-    Uses letter_providers.registry.build_registry_from_env() -- the exact
-    same provider construction worker.py's send path already uses -- to
-    find the adapter matching each obligation's OWN provider_name (the
-    provider that actually produced the unknown result), never a
-    different/default provider. An obligation with no provider_name on
-    record yet (should not happen for a genuinely 'unknown' row -- see
-    mark_provider_result, which always records provider_name alongside
-    outcome) or whose provider_name doesn't match any currently configured
-    slot is skipped, not guessed at."""
+    Orders WITH a provider_reference (fix A, 2 Oct 2026) -- check_status():
+      - accepted / dispatched -> status set AND FundingGate.settle() once;
+      - rejected AND result.confirmed_uncharged -> status 'failed' AND
+        FundingGate.release() once;
+      - rejected without proof of no charge (e.g. Intelliprint 'returned' /
+        'cancelled': a returned letter was posted and paid for) -> held,
+        counted `held_charge_unproven`;
+      - unknown / no answer / lookup raised -> unchanged (`still_unknown`).
+
+    Orders WITHOUT a provider_reference (no-reference recovery) -- only for
+    adapters with supports_reference_lookup (Intelliprint), via
+    find_by_reference() using the exact reference the submission used and the
+    mode recorded at submission (absent/ambiguous mode -> hold):
+      - exactly ONE valid match from a COMPLETE result set -> its provider id
+        is saved and the result goes through the same logic as above;
+      - zero matches, several matches, an incomplete/failed lookup -> held
+        with a recorded reason (`recovery_held`). "No match" is NOT proof the
+        letter was not submitted (the provider documents no idempotency and
+        no guarantee), so it never authorises a resend.
+
+    Every write happens in ONE transaction per order after re-checking the
+    row under a lock (still 'unknown', and for recovery still no
+    provider_reference), so a repeated or overlapping run cannot overwrite a
+    resolved order or settle/release twice. Spend is still recorded at the
+    reserved ESTIMATE, not the provider-reported cost (known open issue)."""
     import letter_providers.registry as provider_registry
     import fulfilment
+    import funding
 
     conn = database.get_db_conn()
     cur = conn.cursor()
@@ -477,43 +550,130 @@ def reconcile_unknown_outcome_obligations(limit: int = 50) -> dict:
             WHERE status = 'unknown' ORDER BY updated_at ASC LIMIT %s;
         """, (limit,))
         rows = cur.fetchall()
+        conn.commit()  # end the read-only transaction; no locks held across provider calls
 
         registry = provider_registry.build_registry_from_env()
         adapters_by_name = {slot.adapter.name: slot.adapter for slot in registry.slots}
+        gate = funding.FundingGate()
 
-        resolved = 0
-        still_unknown = 0
-        skipped_no_adapter = 0
+        summary = {"resolved": 0, "still_unknown": 0, "skipped_no_adapter": 0,
+                   "held_charge_unproven": 0, "errors": 0,
+                   "references_recovered": 0, "recovery_held": 0, "review": []}
 
         for obligation_id, provider_name, provider_reference in rows:
             adapter = adapters_by_name.get(provider_name) if provider_name else None
-            if adapter is None or not provider_reference:
-                skipped_no_adapter += 1
+            if adapter is None:
+                summary["skipped_no_adapter"] += 1
                 continue
-            try:
-                result = adapter.check_status(provider_reference)
-            except Exception as e:
-                logger.warning(f"[Dispatch Purge] check_status raised for obligation {obligation_id} "
-                                f"via provider {provider_name!r}: {e} -- leaving as 'unknown'.")
-                still_unknown += 1
-                continue
-            if result is None:
-                still_unknown += 1
-                continue
-            fulfilment.mark_provider_result(
-                cur, obligation_id, outcome=result.outcome, is_dry_run=False,
-                provider_name=result.provider_name, provider_reference=result.provider_reference,
-                error=result.message or None,
-            )
-            resolved += 1
 
-        conn.commit()
-        result_summary = {
-            "resolved": resolved, "still_unknown": still_unknown, "skipped_no_adapter": skipped_no_adapter,
-        }
-        if resolved:
-            logger.info(f"[Dispatch Purge] Reconciliation: {result_summary}")
-        return result_summary
+            recovered_via_search = False
+            try:
+                if provider_reference:
+                    result = adapter.check_status(provider_reference)
+                else:
+                    if not getattr(adapter, "supports_reference_lookup", False):
+                        summary["skipped_no_adapter"] += 1
+                        continue
+                    cur.execute("SELECT idempotency_key, last_error FROM letter_obligations WHERE id = %s;",
+                                (obligation_id,))
+                    meta = cur.fetchone()
+                    conn.commit()
+                    testmode = _submitted_testmode(meta[1] if meta else None)
+                    reason = None
+                    if not meta or not meta[0]:
+                        reason = "No idempotency key on record; cannot rebuild the submitted reference."
+                    elif testmode is None:
+                        reason = ("The test/live mode of the original submission is not recorded reliably; "
+                                  "search not attempted. Check the Intelliprint dashboard.")
+                    else:
+                        lookup = adapter.find_by_reference(meta[0], testmode=testmode)
+                        if lookup is None:
+                            reason = "Provider has no reference search."
+                        elif not lookup.complete:
+                            reason = f"Reference search incomplete: {lookup.reason}"
+                        elif len(lookup.matches) == 0:
+                            reason = ("No job found under the submitted reference. This does NOT prove it was "
+                                      "not submitted - check the Intelliprint dashboard before any resend.")
+                        elif len(lookup.matches) > 1:
+                            reason = (f"{len(lookup.matches)} jobs share the submitted reference; "
+                                      f"manual review needed.")
+                    if reason is not None:
+                        cur.execute("SELECT status FROM letter_obligations WHERE id = %s FOR UPDATE;", (obligation_id,))
+                        cur_state = cur.fetchone()
+                        if cur_state and cur_state[0] == "unknown":
+                            _record_review_reason(cur, obligation_id, reason)
+                        conn.commit()
+                        summary["recovery_held"] += 1
+                        summary["review"].append((obligation_id, reason))
+                        logger.warning(f"[Dispatch Purge] Recovery held for obligation {obligation_id}: {reason}")
+                        continue
+                    result = lookup.matches[0]
+                    recovered_via_search = True
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                logger.warning(f"[Dispatch Purge] Status/recovery lookup raised for obligation {obligation_id} "
+                                f"via provider {provider_name!r}: {e} -- leaving as 'unknown'.")
+                summary["still_unknown"] += 1
+                continue
+
+            if result is None:
+                summary["still_unknown"] += 1
+                continue
+            kind = _classify_result(result)
+
+            try:
+                # Re-check under a row lock: another reconciliation (or any
+                # other writer) may have changed this row since we listed it.
+                cur.execute("SELECT status, provider_reference FROM letter_obligations WHERE id = %s FOR UPDATE;",
+                            (obligation_id,))
+                current = cur.fetchone()
+                if not current or current[0] != "unknown" or (recovered_via_search and current[1]):
+                    conn.rollback()
+                    continue
+
+                if kind in ("settle", "release"):
+                    _apply_resolution(fulfilment, gate, cur, obligation_id, result, kind)
+                    conn.commit()
+                    summary["resolved"] += 1
+                    if recovered_via_search:
+                        summary["references_recovered"] += 1
+                elif recovered_via_search:
+                    # One valid match found but its status does not resolve the
+                    # order: save the provider id (so later runs use check_status)
+                    # and record why it is still held.
+                    why = ("Matching job found and its id saved, but its status does not prove acceptance"
+                           if kind == "unresolved" else
+                           "Matching job found and its id saved, but its rejection-type status does not prove "
+                           "nothing was charged")
+                    _record_review_reason(cur, obligation_id, why, save_reference=result.provider_reference)
+                    conn.commit()
+                    summary["references_recovered"] += 1
+                    summary["recovery_held"] += 1
+                    summary["review"].append((obligation_id, why))
+                else:
+                    conn.rollback()
+                    if kind == "charge_unproven":
+                        logger.warning(f"[Dispatch Purge] Obligation {obligation_id}: provider reports a "
+                                        f"rejection-type status but that does not prove nothing was charged -- "
+                                        f"leaving as 'unknown' with its funding reservation held; manual review needed.")
+                        summary["held_charge_unproven"] += 1
+                    else:
+                        summary["still_unknown"] += 1
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                logger.error(f"[Dispatch Purge] Reconciling obligation {obligation_id} failed and was rolled "
+                              f"back (status and budget unchanged): {e}")
+                summary["errors"] += 1
+
+        if summary["resolved"] or summary["references_recovered"]:
+            logger.info(f"[Dispatch Purge] Reconciliation: { {k: v for k, v in summary.items() if k != 'review'} }")
+        return summary
     except Exception as e:
         try:
             conn.rollback()

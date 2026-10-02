@@ -1934,3 +1934,312 @@ rather than implying one exists.
 Full regression suite: 580/580 passing (up from 568 -- new coverage, no
 regressions). Nothing deployed, charged, sent, or configured live; live
 sending remains disabled throughout.
+
+---
+
+## 27. Postage launch procedure (minimum, 2 Oct 2026)
+
+**Status: DOCUMENTATION ONLY. Nothing here has been run against production, and
+the actual-cost code described below is cloud-tested and installed in the local
+project folder but NOT DEPLOYED.** This section supersedes the older wording in
+section 2 that says a successful send calls `gate.settle()`: the live send path
+now calls `gate.settle_actual()` (spend = the provider's confirmed VAT-inclusive
+cost, not the estimate). Live sending stays disabled until the launch blockers
+at the end of this section are cleared.
+
+Where this guide says **NO COMMAND/PROCEDURE YET**, nothing usable exists: do
+not improvise one. Where it shows a Python snippet, the function is real and
+tested, but it is run by hand in a Python shell on a machine that has the real
+`SUPABASE_DB_URL` set (`database.get_db_conn()` reads it). There is no admin
+button for any of it.
+
+**Rounding, stated plainly.** TreeKey stores whole pence only. Intelliprint
+reports cost in units of 10^-8 GBP (1 penny = 1,000,000 units) and
+`intelliprint_provider._cost_pence` rounds any fractional penny UP. This is
+**conservative accounting, not an exact provider match.** The exact provider
+amount is not stored, and no live charge has yet been compared with a recorded
+figure (see step 4). The only real figure seen so far is a test-mode job whose
+reported cost was 108,000,000 units = 108p; test-mode jobs are not charged.
+
+### 27.1 Set the 108p estimate and record a confirmed budget
+
+1. **Estimate.** Set `ESTIMATED_LETTER_COST_PENCE=108` in the environment of
+   every process that runs the worker (the Render web service for the
+   `/trigger-letter-fulfilment-worker` route, and any machine running
+   `python3 worker_runner.py`). The default is 95 (a placeholder). It is read
+   fresh on each pass (`worker.estimated_letter_cost_pence()`), so a restart
+   or redeploy of the service is the only step needed. 108 is the VAT-inclusive
+   price quoted for 2 pages, double-sided, second class, C5, black-and-white
+   off; a different letter shape needs a different estimate.
+   **No command checks the value a deployed service is actually using. NO
+   COMMAND/PROCEDURE YET** (check the Render environment page by eye).
+2. **Funding mode.** Leave `FUNDING_MODE` unset or `hold`. Never use
+   `working_capital` for launch.
+3. **Look at the real Intelliprint balance** in the Intelliprint dashboard.
+   Decide a budget no larger than that balance (it may be smaller). Do **not**
+   write the real balance in `PRE_LAUNCH_CHECKLIST.md`.
+4. **Record the budget** (one row per top-up; amounts are in pence):
+
+   ```python
+   from database import get_db_conn
+   from funding import FundingGate
+   conn = get_db_conn(); cur = conn.cursor()
+   gate = FundingGate(mode="hold")
+   print(gate.confirm_budget(cur, amount_pence=1000, confirmed_by="nick",
+                             note="Balance checked in Intelliprint dashboard <date>"))
+   conn.commit(); conn.close()
+   ```
+
+   `confirm_budget` does not commit by itself and does not check identity, so
+   the `conn.commit()` is required and `confirmed_by` is just the name you
+   type. Nothing checks the amount against Intelliprint; **the link between
+   the budget and the real balance is your own check.** If the funding tables
+   do not exist yet the call errors; they are created by the app's schema
+   start-up (`funding.init_funding_schema`).
+5. **Read the budget back** (a plain query, not a tool; read-only):
+
+   ```sql
+   SELECT id, amount_pence, spent_pence, reserved_pence, active, confirmed_by, created_at
+   FROM mailing_budget_confirmations ORDER BY created_at;
+   ```
+
+### 27.2 Accepted orders with unresolved accounting: complete without resending
+
+**When it happens.** Provider accepted the letter, but the cost was missing or
+invalid, or the accounting step raised an error. The order stays accepted (it is
+never failed or resent) and its reservation stays held. The money is not
+treated as spent.
+
+1. **Find them** (a query, NOT a packaged tool; read-only). Run it after every
+   live send until an automatic check exists:
+
+   ```sql
+   SELECT id, status, provider_name, provider_reference, estimated_cost_pence,
+          provider_cost_pence, cost_status, updated_at
+   FROM letter_obligations
+   WHERE cost_status LIKE 'unresolved%'
+   ORDER BY updated_at;
+   ```
+
+   `cost_status` meanings: `unresolved_missing` (provider gave no cost),
+   `unresolved_invalid` (zero, negative or unusable), `unresolved_no_reservation`
+   (nothing was reserved), `unresolved_accounting_error` (accounting raised;
+   `provider_cost_pence` holds the cost if it was valid). `confirmed` and
+   `shortfall` are finished and are never re-processed. Orders still in
+   `unknown` are a different case: handle them through section 4 /
+   `/admin/dispatch-reconciliation` first.
+2. **Get the true figure.** If `provider_cost_pence` is filled, use it. If it
+   is empty, read the VAT-inclusive cost for that job in the Intelliprint
+   dashboard (match on `provider_reference`) and convert to whole pence, rounding
+   a fractional penny up. **No command fetches this for you. NO
+   COMMAND/PROCEDURE YET.**
+3. **Settle it once** (no provider call, no resend; commit only after the
+   result looks right):
+
+   ```python
+   from database import get_db_conn
+   from funding import FundingGate
+   conn = get_db_conn(); cur = conn.cursor()
+   gate = FundingGate(mode="hold")
+   res = gate.settle_actual(cur, "<letter_obligations.id>", 108)   # whole pence
+   print(res)          # status: confirmed | shortfall | unresolved_*
+   conn.commit(); conn.close()
+   ```
+
+   Safe to repeat: after `confirmed` or `shortfall` a second call changes nothing
+   (`already_recorded`). If the status printed is still `unresolved_*`, nothing
+   was settled; fix the figure and call again. Only call it for an order whose
+   `status` is `provider_accepted` or `dispatched`.
+4. **No automatic follow-up exists.** Nothing alerts you, retries or re-runs
+   this for such orders. **NO COMMAND/PROCEDURE YET** beyond the query above.
+
+### 27.3 Shortfalls and overspent budget rows
+
+- A **shortfall** means the real charge was higher than the estimate and the
+  remaining budget could not cover the difference. The money has gone, so it is
+  still recorded as spent; the budget row goes negative; the order shows
+  `cost_status='shortfall'` and `cost_shortfall_pence`; new reservations are
+  refused ("Outstanding budget shortfall...") until net budget is restored.
+- **Keep overspent rows `active = TRUE`. Never set `active = FALSE` on a row
+  that is overspent.** Only active rows are counted when checking whether new
+  spending is allowed, so deactivating one would silently drop its deficit and
+  re-open spending.
+- **To recover:** top up with a new `confirm_budget(...)` (27.1 step 4), sized
+  to cover the deficit plus new letters, and backed by a real Intelliprint
+  top-up or balance. New reservations resume only when the net available
+  amount across all active rows covers the request.
+- `cost_shortfall_pence` on the order is a **historical record** of that one
+  letter's gap; it is not reduced when you top up. To see the current deficit
+  use:
+
+  ```sql
+  SELECT id, amount_pence, spent_pence, reserved_pence,
+         amount_pence - spent_pence - reserved_pence AS net_pence, active
+  FROM mailing_budget_confirmations ORDER BY created_at;
+  ```
+
+  A negative `net_pence` is a current deficit. (`FundingGate.outstanding_shortfall_pence(cur)`
+  returns the total in pence, but is also hand-run only.)
+- **No admin display of shortfalls or unresolved costs. NO COMMAND/PROCEDURE
+  YET.** The reconciliation page also does not show the new counts.
+- Letters refused for lack of budget are marked `failed` without calling the
+  provider; section 2 describes re-attempting them once budget is restored.
+
+### 27.4 Compare ONE authorised live sample's debit with TreeKey's record
+
+**Not permitted until Nick explicitly authorises one live sample.** It would be
+the first real charge. Two points must be settled first: whether a live
+(non-test) send needs `recipients[]`, which is unconfirmed, and the live-sending
+switches in section 8 (they are deliberately off).
+
+Manual comparison (no tool exists for it: **NO COMMAND/PROCEDURE YET**):
+
+1. Before the send: note the Intelliprint dashboard balance and run the budget
+   query in 27.1 step 5.
+2. Send the one authorised sample.
+3. Run the 27.2 query, and the order's `estimated_cost_pence`,
+   `provider_cost_pence`, `cost_status`.
+4. After the send: note the new Intelliprint balance. Debit = old minus new.
+5. Compare the debit with `provider_cost_pence` and with the budget row's
+   `spent_pence` change. Expected for the 2-page, second-class, C5 letter:
+   108p. A match to the penny supports, but does not prove, that the rounding
+   rule is right; any difference (including a fractional-penny one) must be
+   written up and understood before a second live send. TreeKey does not store
+   the exact provider amount, so the dashboard is the only source for that
+   comparison.
+
+### 27.5 Remaining gaps: launch blockers or can wait
+
+| Gap | Class | Reason |
+|---|---|---|
+| Code and the four new `letter_obligations` columns not deployed | **Launch blocker** | The running service still uses the old estimate-only settlement; the columns are added on the next app start. |
+| `ESTIMATED_LETTER_COST_PENCE=108` and a first confirmed budget not set in production | **Launch blocker** | Default estimate is 95p, and `hold` mode blocks every send without a budget. |
+| No live sample compared against a real debit | **Launch blocker** | Real charging, rounding and the `recipients[]` question are unproven. |
+| Live (non-test) acceptance and `recipients[]` unconfirmed | **Launch blocker** | Cannot be known without the one authorised sample. |
+| No automatic follow-up or alert for orders with unresolved cost | Can wait at first (becomes a blocker at volume) | Safe while volume is a handful of letters and the 27.2 query is run after each send. |
+| No admin UI for `confirm_budget`, `settle_actual`, shortfall or unresolved-cost display | Can wait | Hand-run Python/SQL is workable for launch volume; the procedure above is the stop-gap. |
+| Reconciliation page omits recovery-held / review counts | Can wait | The data is in `last_error`; check by query. |
+| No Intelliprint status sets `confirmed_uncharged`, so rejection-type statuses never auto-release | Can wait | Fails safe: reservations stay held for manual review. |
+| Exact provider amount not stored (whole pence, rounded up) | Can wait | Conservative accounting; the dashboard remains the source of truth. |
+| A deactivated overspent budget row drops its deficit | Can wait | Avoided by the rule in 27.3 (never deactivate overspent rows). |
+| Letter footer/privacy URL print `treekey.co.uk`; live site is `treekey.uk` | Not a blocker (decision 2 Oct 2026) | Left unchanged: a different live URL alone does not show the printed links are wrong. Revisit only if the physical sample shows the printed link does not work. |
+
+---
+
+## 28. Deployment and rollback plan: postage code + four nullable columns (2 Oct 2026)
+
+**Status: PLAN ONLY. NOT DEPLOYED. Needs Nick's explicit go-ahead.** Scope is
+the tested postage code (actual-cost accounting, reconciliation fix A,
+no-reference recovery) and the four nullable `letter_obligations` columns. It
+adds no feature, switches nothing on, and does not plan or authorise the live
+sample (that is separate; see section 27.4 and the checklist).
+
+**Do not use `deploy.bat` or `UPDATE_WEBSITE.bat` for this.** Both run
+`git add .`, which would also push every other edit sitting in the project
+folder (several earlier changes are recorded as "installed locally, not
+deployed" in `CURRENT_HANDOFF.md`). Use the selective commit below.
+
+### 28.1 Why all letter sending stays off during deploy and restart
+
+**Production condition (Nick, 2 Oct 2026): none of the letter settings exist in
+Render.** That is the safe condition; do NOT add any of them. Checked by running
+the code to be deployed with every `LETTER_*`, `INTELLIPRINT_*`, `FUNDING_*`,
+`ESTIMATED_*` and `TRIGGER_*` variable removed from the environment:
+
+| Check (all variables unset) | Result |
+|---|---|
+| `LETTER_DISPATCH_PIPELINE` | `legacy` (default) |
+| New worker pass (`worker.run_one_pass`, even asked to send live) | refuses; `pipeline_active` False; 0 database statements |
+| `letter_sending_live()` (public posting promise) | False |
+| Real provider slots (`LETTER_PROVIDER_PRIMARY/BACKUP_*`) | 0 usable: nothing exists to call |
+| `FundingGate` mode | `hold` (nothing leaves `pending_funding` without a confirmed budget) |
+| Old pipeline provider (`LETTER_PROVIDER`) | `ConsoleLetterProvider`: logs only, dry-run, no real send |
+| Intelliprint adapter | test mode by default, and not configured (no key) |
+| `ESTIMATED_LETTER_COST_PENCE` | 95 default, unused while the worker refuses |
+
+So both pipelines are off: the new one refuses to run and has no provider; the
+old one can only dry-run. Every setting is read at call time, so the restart
+that follows a deploy cannot switch anything on. The in-app scheduler thread
+(started on every boot) only runs the old dry-run dispatch and the retention
+purge; it never calls the new worker. `/trigger-letter-fulfilment-worker`
+returns "noop" while the pipeline is `legacy`, whatever `?live=` says, and
+`/admin/run-letter-fulfilment-worker` is always dry-run. This deploy adds no
+setting, route or scheduler.
+
+Evidence: the check script run above plus 252 existing focused unit tests (funding,
+reservation wiring, dispatch purge, reconciliation, providers, provider registry,
+promise gate, worker, worker runner, worker trigger routes, fulfilment, purge
+scheduling, migration consistency) passed with the letter variables unset, on
+the exact deploy file combination (section 28.2 note). It shows the code's
+defaults; it does not read Render itself, so the statement above relies on
+Nick's report that none of those settings exist.
+
+### 28.2 Deployment steps (Nick runs these; Command Prompt in the project folder)
+
+**Validated deploy set.** Local `main` and `origin/main` were both at commit
+`8954a2a880f5101538c0817fa3bbb5b77ba317f3` ("Website update 01/10/2026
+13:07:13.02", pushed 1 Oct): the currently deployed code. Compared against that
+commit's index, every tracked code file other than the postage files is
+unchanged since that push (including `main.py`, `database.py`, `worker.py`,
+`payments.py`, `letter_content.py`), so the selective push produces the same
+code the focused tests ran against. The tracked files that differ are only
+the 9 below plus six handoff/notes documents (`AGENTS.md`, `CURRENT_HANDOFF.md`,
+`PROJECT_STATE.md`, `START_HERE.md`, `TREE_LAUNCH_CHECKLIST.md/.txt`); those
+documents are deliberately left out and stay as local edits.
+
+1. Rollback point: the commit above (confirm with `git log -1 --format=%H`
+   before you start), plus the current "Live" deploy on Render's Deploys tab.
+2. `git status --short`. Expect the 13 files below plus the unrelated local edits
+   named above and some untracked helper files. Send me the list if anything
+   else looks code-related.
+3. Stage only the postage files (9 modified, 4 new):
+
+   ```
+   git add funding.py fulfilment.py retention_dispatch_purge.py letter_providers/base.py letter_providers/intelliprint_provider.py letter_providers/registry.py migrations/0005_actual_cost_accounting.sql tests/test_funding_reservation_wiring.py tests/test_dispatch_purge.py tests/postgres_concurrency/run_reconciliation_real_db_test.py tests/postgres_concurrency/run_actual_cost_real_db_test.py docs/operator_guide.md PRE_LAUNCH_CHECKLIST.md
+   ```
+
+   Git may print "LF will be replaced by CRLF" warnings; that is normal on
+   this machine.
+4. `git diff --cached --stat` must list exactly those 13 files. If any other file
+   appears (especially `main.py`, `database.py`, `worker.py`, `payments.py`),
+   STOP and send me the output; do not commit.
+5. `git commit -m "Postage: actual-cost accounting, reconciliation recovery, 4 nullable columns (sending stays off)"`
+6. `git pull`, then `git push`. Render deploys automatically.
+7. Watch Render: the deploy reaches "Live" and the log shows no traceback at
+   start-up. https://treekey.uk/health responds.
+8. Verify the four columns (the app adds them at start-up; no manual migration is
+   needed, and `migrations/0005_actual_cost_accounting.sql` holds the same four
+   statements for review). In the Supabase SQL editor (read-only):
+
+   ```sql
+   SELECT column_name, data_type FROM information_schema.columns
+   WHERE table_name = 'letter_obligations'
+     AND column_name IN ('estimated_cost_pence','provider_cost_pence','cost_status','cost_shortfall_pence');
+   ```
+
+   Expect 4 rows. If empty, check the Render log for a schema warning and tell
+   me; do not retry blindly (this schema step is designed not to block the core
+   app).
+9. Confirm nothing was added to Render's environment and no letter activity
+   appears in the log.
+
+### 28.3 Rollback
+
+- **Code (fast):** Render dashboard, this service, Deploys tab, choose the
+  previous Live deploy (commit `8954a2a`, noted in step 1), "Rollback". Then, so GitHub matches what
+  is running, `git revert <the deploy commit>` and `git push`.
+- **Columns: leave them.** They are nullable, unused by the old code, and no
+  query selects all columns of `letter_obligations`, so old code runs unchanged
+  with them present. Dropping them is NOT part of rollback (it would destroy
+  cost evidence once any exists) and needs separate approval.
+- **Data:** the deploy changes no rows, so nothing needs restoring.
+- **Emergency stop for sending:** nothing to switch off, because nothing is
+  switched on. If a letter setting is ever found in Render, remove it. Do not add
+  settings as a precaution.
+
+### 28.4 Not part of this plan
+
+Setting `ESTIMATED_LETTER_COST_PENCE=108`, confirming a budget, configuring
+Intelliprint credentials or provider slots, switching any live flag, and the live
+sample are all later, separately approved steps. None of them should happen
+during or just after this deploy.

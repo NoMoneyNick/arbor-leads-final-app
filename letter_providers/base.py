@@ -48,10 +48,31 @@ class ProviderResult:
     provider_reference: Optional[str] = None
     cost_pence: Optional[int] = None
     message: str = ""
+    # Set True ONLY by an adapter that can PROVE this rejection did not
+    # charge/consume anything (so a reserved budget may be released when it
+    # is learned later via check_status). Default False = "rejected, but
+    # charge not proven absent" -- reconciliation then holds the reservation
+    # for manual review instead of releasing it. No real adapter sets this
+    # today (Intelliprint statuses such as 'returned'/'cancelled' do not
+    # prove "uncharged").
+    confirmed_uncharged: bool = False
 
     def __post_init__(self):
         if self.outcome not in VALID_OUTCOMES:
             raise ValueError(f"Invalid outcome {self.outcome!r}, must be one of {VALID_OUTCOMES}")
+
+
+@dataclass(frozen=True)
+class ReferenceLookup:
+    """Result of LetterProviderAdapter.find_by_reference(): the provider's
+    jobs carrying exactly our submission reference.
+    complete=True ONLY when the provider's own paging/count semantics show
+    the WHOLE result set was read; otherwise complete=False and `reason` says
+    why (matches is then not to be trusted, and an empty `matches` must NOT be
+    read as "nothing was submitted")."""
+    complete: bool
+    matches: tuple = ()          # tuple of ProviderResult, one per matching provider job
+    reason: str = ""
 
 
 def fingerprint_content(content_html: str) -> str:
@@ -82,6 +103,16 @@ class LetterProviderAdapter:
 
     name = "base"
     capabilities = ProviderCapabilities()
+    # True only for an adapter that implements find_by_reference() against a
+    # provider that documents a search by our own reference.
+    supports_reference_lookup = False
+
+    def find_by_reference(self, idempotency_key: str, *, testmode: bool) -> Optional["ReferenceLookup"]:
+        """Read-only search for jobs already submitted under the reference
+        derived from `idempotency_key`, in the given test/live mode. Used only
+        to recover an 'unknown' obligation that has no saved provider
+        reference. Never sends. Returns None if unsupported."""
+        return None
 
     def is_configured(self) -> bool:
         raise NotImplementedError
