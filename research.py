@@ -924,6 +924,12 @@ def get_google_places_info(company_name: str, city_or_addr: str = ""):
 # for any counting slop, so the out-of-the-box behaviour costs
 # approximately nothing unless Nick explicitly raises this number here.
 GOOGLE_PLACES_MONTHLY_PAID_CALL_CAP = 900
+
+# MASTER SWITCH (3 Oct 2026): paid Google Places calls are OFF by default.
+# Nothing is deleted -- to turn Places back on, set the environment variable
+# GOOGLE_PLACES_ENABLED=1 on the host. While off, company lookups use the
+# free DuckDuckGo scrape and Sole Trader Discovery is skipped.
+GOOGLE_PLACES_ENABLED = os.environ.get("GOOGLE_PLACES_ENABLED", "").strip().lower() in ("1", "true", "yes")
 _GOOGLE_PLACES_CAP_WARNING_LAST_LOGGED = [0.0]
 
 
@@ -944,6 +950,8 @@ def _google_places_paid_call_budget_available() -> bool:
     guardrail, wrongly skipping a paid call costs nothing, while wrongly
     allowing one when the count can't even be verified is the exact
     mistake this fix exists to prevent."""
+    if not GOOGLE_PLACES_ENABLED:
+        return False
     try:
         current_month = datetime.datetime.utcnow().strftime("%Y-%m")
         stored_month = database.get_system_state("google_places_paid_calls_month")
