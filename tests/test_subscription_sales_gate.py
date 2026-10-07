@@ -421,6 +421,42 @@ class TestPortableDateFormats(unittest.TestCase):
         self.assertEqual(fmt(None), "")
 
 
+class TestLegalOperatorIdentity(unittest.TestCase):
+    """7 Oct 2026, Nick's confirmed identity: the legal operator and data controller is Nicholas Michael Secular,
+    a sole trader trading as TreeKey. Vector Data Labs is not a legal entity and must not appear in the Terms or
+    privacy page; the supplied PO Box is described as a correspondence address, not as a place of establishment."""
+
+    _OPERATOR = "Nicholas Michael Secular, a sole trader"
+    _ADDRESS = "Nicholas Secular / TreeKey, Unit 173384, PO Box 7169, Poole, BH15 9EL"
+
+    def _terms(self):
+        req = MagicMock(); req.cookies = {}; req.query_params = {}; req.headers = {}
+        with patch("main.HTMLResponse", side_effect=lambda content=None, *a, **k: content):
+            page = _run(main.terms_of_service(req))
+        return page if isinstance(page, str) else page.decode()
+
+    def _privacy(self):
+        page = _run(main.privacy_policy())
+        return page if isinstance(page, str) else page.decode()
+
+    def test_terms_and_privacy_name_the_sole_trader_operator_and_not_vector_data_labs(self):
+        for name, page in (("terms", self._terms()), ("privacy", self._privacy())):
+            self.assertNotIn("Vector Data Labs", page, name)
+            self.assertIn("TreeKey is a trading name of " + self._OPERATOR, page, name)
+            self.assertIn("(a PO Box)", page, name)
+            self.assertIn(self._ADDRESS, page, name)
+            self.assertIn("correspondence address", page, name)
+            self.assertNotIn("registered office", page.lower(), name)
+
+    def test_terms_operator_sentence_and_privacy_controller_sentence(self):
+        self.assertIn('operated by Nicholas Michael Secular, a sole trader trading as TreeKey ("we", "us", "our")', self._terms())
+        priv = self._privacy()
+        self.assertIn("who is the data controller for the personal data described below", priv)
+        self.assertIn("For privacy matters, contact <strong>nick@treekey.uk</strong>.", priv)
+
+    def test_general_support_contact_in_terms_is_unchanged(self):
+        self.assertIn("Questions about these Terms can be sent to <strong>contact@treekey.co.uk</strong>.", self._terms())
+
 
 if __name__ == "__main__":
     unittest.main()

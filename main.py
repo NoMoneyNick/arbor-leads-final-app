@@ -13941,10 +13941,10 @@ async def privacy_policy(request: Request = None):
 """ + nav_html + """
     <div class="max-w-3xl mx-auto bg-slate-800 p-8 rounded-lg shadow-xl border border-slate-700">
         <h1 class="text-3xl font-bold text-white mb-2">Privacy Policy</h1>
-        <p class="mb-6 text-sm text-slate-500">Last updated: September 2026 &middot; Tree Key is a trading name of Vector Data Labs</p>
+        <p class="mb-6 text-sm text-slate-500">Last updated: October 2026 &middot; TreeKey is a trading name of Nicholas Michael Secular, a sole trader</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">1. Who We Are</h2>
-        <p class="mb-4">Tree Key ("we", "us", "our") operates the website treekey.co.uk and the lead-generation service described in our <a href="/terms-of-service" class="text-emerald-400 underline">Terms of Service</a>. Tree Key is a trading name of Vector Data Labs, which is the data controller for the personal data described below. For privacy matters, contact <strong>contact@treekey.co.uk</strong>.</p>
+        <p class="mb-4">TreeKey ("we", "us", "our") operates the website treekey.co.uk and the lead-generation service described in our <a href="/terms-of-service" class="text-emerald-400 underline">Terms of Service</a>. TreeKey is a trading name of Nicholas Michael Secular, a sole trader, who is the data controller for the personal data described below. Our correspondence address (a PO Box) is Nicholas Secular / TreeKey, Unit 173384, PO Box 7169, Poole, BH15 9EL. For privacy matters, contact <strong>nick@treekey.uk</strong>.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">2. The Two Kinds of Personal Data We Handle</h2>
         <p class="mb-2"><strong class="text-white">2.1 Customer data</strong> &mdash; information about you, our paying customer: name, business name, email, phone number, billing details (processed by Stripe), and your usage of the Service.</p>
@@ -14049,10 +14049,10 @@ async def terms_of_service(request: Request = None):
 """ + nav_html + """
     <div class="max-w-3xl mx-auto bg-slate-800 p-8 rounded-lg shadow-xl border border-slate-700">
         <h1 class="text-3xl font-bold text-white mb-2">Terms of Service</h1>
-        <p class="mb-6 text-sm text-slate-500">Last updated: September 2026 &middot; Tree Key is a trading name of Vector Data Labs</p>
+        <p class="mb-6 text-sm text-slate-500">Last updated: October 2026 &middot; TreeKey is a trading name of Nicholas Michael Secular, a sole trader</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">1. Introduction and Acceptance</h2>
-        <p class="mb-2">These Terms and Conditions ("Terms") govern access to and use of the Tree Key website (treekey.co.uk) and the lead-generation service provided through it (the "Service"), operated by Vector Data Labs, trading as Tree Key ("we", "us", "our").</p>
+        <p class="mb-2">These Terms and Conditions ("Terms") govern access to and use of the TreeKey website (treekey.co.uk) and the lead-generation service provided through it (the "Service"), operated by Nicholas Michael Secular, a sole trader trading as TreeKey ("we", "us", "our"). Our correspondence address (a PO Box) is Nicholas Secular / TreeKey, Unit 173384, PO Box 7169, Poole, BH15 9EL.</p>
         <p class="mb-2">By creating an account, making a purchase, or otherwise using the Service, you ("you", "the Customer") agree to be bound by these Terms. If you do not agree, do not use the Service.</p>
         <p class="mb-4">The Service is intended for business use by tree surgery, arboricultural, and related trade businesses. It is not intended for consumers acting outside a trade, business, or profession.</p>
 
