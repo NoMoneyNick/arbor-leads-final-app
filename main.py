@@ -978,6 +978,64 @@ _SHARED_FOOTER_CSS = """
 # enforced entitlements (database.TIER_QUOTAS / TIER_DISCOUNT_PCT; a test
 # keeps this table and payments.PLANS in step). The discount applies to
 # ADDITIONAL marketplace introductions, never to the subscription price.
+def _subs_open() -> bool:
+    """6 Oct 2026, Nick's decision for the INITIAL LAUNCH: sell only the
+    one-off offers (GBP 4.99 first introduction and single-lead purchases).
+    NEW subscription sales are OFF unless SUBSCRIPTION_SALES_ENABLED is set
+    (see payments.subscription_sales_enabled). Subscriptions are DEFERRED,
+    not removed: plans, webhook handling and subscriber records are kept;
+    this only hides the offers and blocks new subscription checkouts."""
+    return bool(payments.subscription_sales_enabled())
+
+
+def _subs_unavailable_redirect():
+    return RedirectResponse(url="/pricing?msg=packages_coming_soon", status_code=303)
+
+
+def _faq_pricing_intro_entries() -> list:
+    """First three entries of the FAQ's "Pricing & Plans" group. Subscription
+    wording only while subscription sales are on (6 Oct 2026, initial launch
+    is one-off offers only); otherwise one-off wording. The refund entry that
+    follows is NOT touched here: the refund entry below was reworded on 6 Oct 2026 for one-off purchases only (the existing-subscriber wording was removed from the customer-facing text at Nick's instruction; the policy is kept internally) and is pending legal review."""
+    if _subs_open():
+        return [
+            ("What are my options if I'm not ready to pay?",
+             "You can create an account with no card required and set up your business and letter details. When you're ready, choose a subscription tier, or buy individual opportunities from the Marketplace."),
+            ("What's the difference between a subscription and the Marketplace?",
+             "A subscription includes a set number of opportunities each month (6 to 20, depending on tier), matched to your job types and radius and dispatched to you automatically &mdash; each one already includes a printed &amp; posted introduction letter to the homeowner, at no extra charge. Want more than your monthly amount? Buy additional opportunities from the Marketplace any time at a member discount (10&ndash;25% off, depending on tier). Anyone without an active subscription can still buy individual opportunities from the Marketplace at the standard price &mdash; useful for topping up, or for trying Tree Key out before subscribing."),
+            ("Am I tied into a long contract?",
+             "No. Subscriptions are a rolling monthly agreement &mdash; cancel any time from your account settings with zero penalty and no further charges from the next billing date."),
+        ]
+    return [
+            ("What are my options if I'm not ready to pay?",
+             "You can create an account with no card required and set up your business and letter details. When you're ready, buy individual opportunities from the Marketplace."),
+            ("How does pricing work?",
+             "Each opportunity is bought individually, and each one already includes a printed &amp; posted introduction letter to the homeowner. Where it is available, your first introduction may be offered at a special first-introduction price, shown on the pricing page."),
+            ("Am I tied into a long contract?",
+             "No. There is no subscription or contract. You pay for each introduction you choose."),
+        ]
+
+
+def _free_list_upsell_html() -> str:
+    """Upsell box on the free dashboard (subscription wording only while
+    subscription sales are on)."""
+    if _subs_open():
+        return '''<div class="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-5 mb-8">
+            <p class="m-0 mb-3.5 text-sm text-emerald-200 leading-relaxed">
+                You're on our free list — expect a couple of local jobs a week by email (address blurred until you buy or subscribe).
+                Subscribe any time for early access to every matching job the moment it's filed, instead of occasional free teasers.
+            </p>
+            <a href="/pricing" class="inline-block bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg no-underline font-bold text-sm transition-colors">See Subscription Plans →</a>
+        </div>'''
+    return '''<div class="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-5 mb-8">
+            <p class="m-0 mb-3.5 text-sm text-emerald-200 leading-relaxed">
+                You're on our free list — expect a couple of local jobs a week by email (address blurred until you buy).
+                You can buy any introduction one at a time from the marketplace.
+            </p>
+            <a href="/marketplace" class="inline-block bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg no-underline font-bold text-sm transition-colors">Browse the Marketplace →</a>
+        </div>'''
+
+
 _PACKAGE_FACTS = {
     "starter": {"badge": "Getting started", "short": "Starter", "intros": 6, "discount": 10,
                 "suits": "For 1\u20132 van operators: domestic and small commercial jobs, every job type."},
@@ -1486,7 +1544,9 @@ def public_homepage(request: Request):
         _now_uk = datetime.datetime.now(ZoneInfo("Europe/London"))
     except Exception:
         _now_uk = datetime.datetime.utcnow()
-    _as_of_date = _now_uk.strftime("%-d %b")
+    # Windows rejects strftime's unpadded-day flag (ValueError), so build the unpadded day by hand;
+    # the displayed text is identical (e.g. "7 Oct").
+    _as_of_date = f"{_now_uk.day} {_now_uk.strftime('%b')}"
     _as_of_time = _now_uk.strftime("%H:%M")
 
     # Sep 8 2026: Nick flagged that the public homepage's "Intercepted
@@ -1595,6 +1655,14 @@ def public_homepage(request: Request):
         # applies its own login, setup and letter-approval gates.
         _homepage_tier_cards += _package_card_html(_tier_key, payments.PLANS[_tier_key], cta_href=f"/checkout/{_tier_key}")
     _homepage_offer_promo = _first_offer_promo_html(request, hero=True)
+    if _subs_open():
+        _home_pricing_intro = "Pick a monthly package, or buy individual introductions without a subscription."
+        _home_market_lead = "Not ready for a subscription? Buy leads one at a time instead."
+        _home_faq_contract = "No. Subscriptions are a rolling monthly agreement — cancel instantly at any time with zero penalty. If you'd rather not subscribe at all, you can buy leads one-by-one via the Marketplace instead."
+    else:
+        _home_pricing_intro = "Buy one introduction at a time. Printing and postage are included in the price."
+        _home_market_lead = "Buy introductions one at a time."
+        _home_faq_contract = "No. There is no subscription or contract. You pay for each introduction you choose."
 
     return f"""<!DOCTYPE html>
 <html lang="en-GB" class="scroll-smooth">
@@ -2160,15 +2228,15 @@ def public_homepage(request: Request):
         <div class="max-w-7xl mx-auto px-4">
             <div class="text-center mb-16">
                 <h2 class="text-4xl md:text-5xl font-extrabold text-white mt-4">Choose how you get introductions</h2>
-                <p class="text-lg text-slate-400 mt-4">Pick a monthly package, or buy individual introductions without a subscription.</p>
+                <p class="text-lg text-slate-400 mt-4">{_home_pricing_intro}</p>
             </div>
 
-            <style>{_PACKAGE_CARD_CSS}</style>
+            {"" if not _subs_open() else f'''<style>{_PACKAGE_CARD_CSS}</style>
             <h3 class="text-center text-white font-bold text-xl mb-6" style="font-family:'Inter', ui-sans-serif, system-ui, sans-serif;">Featured packages</h3>
             <div class="tk-pkgs tk-pkgs-3">
                 {_homepage_tier_cards}
             </div>
-            <p class="text-center -mt-4 mb-8"><a href="/pricing" class="text-emerald-400 hover:text-emerald-300 font-bold underline" style="font-family:'Inter', ui-sans-serif, system-ui, sans-serif;">Compare all five packages &rarr;</a></p>
+            <p class="text-center -mt-4 mb-8"><a href="/pricing" class="text-emerald-400 hover:text-emerald-300 font-bold underline" style="font-family:'Inter', ui-sans-serif, system-ui, sans-serif;">Compare all five packages &rarr;</a></p>'''}
 
             <!-- Sep 9 2026, Nick's ask: "under the 3 price groups I want a
                  section saying ... buy your leads one at a time ... with
@@ -2191,7 +2259,7 @@ def public_homepage(request: Request):
                  elsewhere (see PROJECT_STATE.md items 11-13). -->
             <div class="mt-8 bg-slate-900/60 border border-slate-700 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-5">
                 <div class="text-center md:text-left">
-                    <p class="text-white font-bold text-sm">Not ready for a subscription? Buy leads one at a time instead.</p>
+                    <p class="text-white font-bold text-sm">{_home_market_lead}</p>
                     <p class="text-slate-400 text-sm mt-1">
                         From <span class="text-emerald-400 font-bold">£19</span> · <span class="text-slate-300 font-bold">£29</span> · <span class="text-slate-300 font-bold">£39</span> · <span class="text-slate-300 font-bold">£49</span> depending on freshness and value — no commitment, browse and buy only the ones you want.
                     </p>
@@ -2348,7 +2416,7 @@ def public_homepage(request: Request):
                 
                 <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
                     <h3 class="text-lg font-bold text-white mb-2">Am I tied into a long contract?</h3>
-                    <p class="text-slate-400 leading-relaxed">No. Subscriptions are a rolling monthly agreement — cancel instantly at any time with zero penalty. If you'd rather not subscribe at all, you can buy leads one-by-one via the Marketplace instead.</p>
+                    <p class="text-slate-400 leading-relaxed">{_home_faq_contract}</p>
                 </div>
             </div>
         </div>
@@ -3172,6 +3240,20 @@ def pricing(request: Request):
     # <style> block for .header/.grid/.comparison-table/.creed-banner
     # (simpler than converting a whole comparison table to Tailwind utility
     # classes) but recoloured every value in it for a dark background.
+    if not _subs_open():
+        if msg == "no_subscription":
+            msg_banner = (
+                "<div class='bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-5 text-red-200'>"
+                "<b>There is no active subscription on this account.</b> Monthly packages aren't available at the moment."
+                " You can still buy a single introduction below, or <a href='/welcome' class='text-red-300 font-bold'>go to your account</a>."
+                "</div>"
+            )
+        elif msg == "packages_coming_soon":
+            msg_banner = (
+                "<div class='bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-5 text-amber-200'>"
+                "Monthly packages aren't available at the moment. You can buy a single introduction below."
+                "</div>"
+            )
     sub_cards = ""
     single_cards = ""
     first_offer_promo = _first_offer_promo_html(request)
@@ -3198,13 +3280,35 @@ def pricing(request: Request):
                 </div>
             </div>"""
 
+    if _subs_open():
+        _pricing_title = "Packages & Pricing"
+        _pricing_lead = "Choose a package, or buy a single introduction."
+        _pricing_sections_html = f'''        <h2 class="text-[22px] mb-4 text-white font-bold">1. Select Your Dedicated Subscription Tier</h2>
+        <div class="tk-pkgs">
+            {sub_cards}
+        </div>
+
+        <h2 class="text-[22px] mt-8 mb-4 text-white font-bold">2. Or Buy As You Go (Single-Lead Marketplace)</h2>
+        <p class="text-slate-400 text-[13px] -mt-2 mb-4">
+            Active subscribers get an early-access alert the moment a matching lead is found, before it appears here. Once any lead is bought — by a subscriber or through this Marketplace — it's burned and never resold.
+        </p>
+        {single_cards}'''
+    else:
+        _pricing_title = "Pricing"
+        _pricing_lead = "Buy a single introduction. Printing and postage are included."
+        _pricing_sections_html = f'''<h2 class="text-[22px] mb-4 text-white font-bold">Buy one introduction at a time</h2>
+        <p class="text-slate-400 text-[13px] -mt-2 mb-4">
+            Choose an opportunity, approve your letter, and we print and post it. Once any lead is bought it's removed and never resold.
+        </p>
+        {single_cards}'''
+
     return f"""
     <!DOCTYPE html>
     <html lang="en-GB">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Packages & Pricing | TreeKey</title>
+        <title>{_pricing_title} | TreeKey</title>
         <link rel="icon" href="/static/icon-192.png">
         <link href="/static/tailwind.css" rel="stylesheet">
         <style>
@@ -3221,8 +3325,8 @@ def pricing(request: Request):
     {_shared_nav_html(request)}
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
         <div class="header">
-            <h1>Packages & Pricing</h1>
-            <p>Choose a package, or buy a single introduction.</p>
+            <h1>{_pricing_title}</h1>
+            <p>{_pricing_lead}</p>
         </div>
 
         {msg_banner}
@@ -3236,16 +3340,7 @@ def pricing(request: Request):
 
         {first_offer_promo}
 
-        <h2 class="text-[22px] mb-4 text-white font-bold">1. Select Your Dedicated Subscription Tier</h2>
-        <div class="tk-pkgs">
-            {sub_cards}
-        </div>
-
-        <h2 class="text-[22px] mt-8 mb-4 text-white font-bold">2. Or Buy As You Go (Single-Lead Marketplace)</h2>
-        <p class="text-slate-400 text-[13px] -mt-2 mb-4">
-            Active subscribers get an early-access alert the moment a matching lead is found, before it appears here. Once any lead is bought — by a subscriber or through this Marketplace — it's burned and never resold.
-        </p>
-        {single_cards}
+        {_pricing_sections_html}
 
         <!-- 2026-10-01: the old creed banner and competitor comparison table are replaced by this plain how-it-works summary. -->
         <div style="margin:32px 0 20px 0; border:1px solid #334155; border-radius:12px; padding:20px 24px; background:#0f172a;">
@@ -3261,7 +3356,7 @@ def pricing(request: Request):
              marketplace page, so it's visible wherever a customer is deciding
              to pay, not just at the point of picking an individual lead. -->
         <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-emerald-200">
-            <b>Lead-Quality Promise:</b> Every lead is filtered to confirm it's genuine tree work before it's dispatched. On the rare chance a non-tree lead slips through, screenshot it and email <a href="mailto:contact@treekey.co.uk" class="underline hover:text-emerald-100">contact@treekey.co.uk</a> &mdash; we'll swap it for a correct lead or refund it.
+            <b>Lead-Quality Promise:</b> Every opportunity is filtered to check it is genuine tree work before it is offered to you. On the rare chance one is not, email <a href="mailto:nick@treekey.uk" class="underline hover:text-emerald-100">nick@treekey.uk</a> telling us which purchase it concerns &mdash; we will give you a replacement introduction of equivalent value or a refund, at your choice.
         </div>
 
         <div class="text-center mt-10 p-5 bg-slate-800/50 rounded-xl border border-slate-700">
@@ -4752,6 +4847,12 @@ def checkout(plan_key: str, request: Request):
     if not plan:
         return _branded_message_page(request, "Invalid Plan", "That package doesn't exist or may have been renamed.", cta_text="View Packages", cta_href="/pricing", status_code=404)
 
+    # 6 Oct 2026: new subscription sales are off for the initial launch
+    # (see _subs_open). Checked BEFORE any sign-in / letter-setup detour so
+    # nobody is sent through setup for something that cannot be bought.
+    if plan.get("mode") == "subscription" and not _subs_open():
+        return _subs_unavailable_redirect()
+
     # Sep 15 2026: server-side subscriber discount, from the signed
     # session cookie ONLY -- never a query param or anything else a
     # visitor could set themselves.
@@ -4976,6 +5077,11 @@ async def checkout_post(plan_key: str, request: Request, outcode: str = Form(...
     plan = payments.PLANS.get(plan_key)
     if not plan:
         return _branded_message_page(request, "Invalid Plan", "That package doesn't exist or may have been renamed.", cta_text="View Packages", cta_href="/pricing", status_code=404)
+
+    # 6 Oct 2026: same subscription gate as the GET route -- a direct or
+    # replayed POST must not be able to start a subscription checkout.
+    if plan.get("mode") == "subscription" and not _subs_open():
+        return _subs_unavailable_redirect()
 
     # 2026-09-23, Request E (revised same day, see checkout()'s own
     # comment): defense-in-depth copy of the same two-step gate checkout()
@@ -6923,7 +7029,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
             # subscriber) so a logged-in non-subscriber gets an accurate
             # "subscribe" prompt instead of a "sign in" one.
             price_block_html = f"""<div class="text-2xl sm:text-3xl font-extrabold text-emerald-400">£{unlock_fee}</div>"""
-            member_link_html = f"""<a href="/pricing" class="text-[11px] text-slate-400 hover:text-emerald-400 underline">Subscribe for member pricing</a>"""
+            member_link_html = f"""<a href="/pricing" class="text-[11px] text-slate-400 hover:text-emerald-400 underline">Subscribe for member pricing</a>""" if _subs_open() else ""
         else:
             price_block_html = f"""<div class="text-2xl sm:text-3xl font-extrabold text-emerald-400">£{unlock_fee}</div>"""
             member_link_html = f"""<a href="/login?next={urllib.parse.quote(f'/checkout/{plan_key}?lead_id={lid}')}" class="text-[11px] text-slate-400 hover:text-emerald-400 underline">Already a member? Sign in for your discount</a>"""
@@ -7159,7 +7265,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
             <b>How this works:</b> Buying a lead below reserves that opportunity for you and sends a printed introduction to the homeowner on your behalf, using your saved business details and letter template -- we do not hand you the homeowner's address or contact details. It's the homeowner's choice whether to get in touch; a reply or job isn't guaranteed. Every lead purchased is immediately removed from the marketplace and never resold -- you are the only contractor TreeKey will introduce to this homeowner.
         </div>
 
-        {"" if _viewer_is_subscriber else f'''<div class="bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-amber-200">
+        {"" if (_viewer_is_subscriber or not _subs_open()) else f'''<div class="bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-amber-200">
             <b>Subscriber Early Access:</b> Active subscribers see every new matching lead the moment it's found and get first crack at buying it. Brand-new leads open up here to everyone {database.EARLY_ACCESS_WINDOW_MINUTES} minutes later. <a href="/pricing" class="underline hover:text-amber-100 font-bold">See subscription tiers →</a>
         </div>'''}
 
@@ -7167,7 +7273,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
              case a non-tree lead slips past our filters, so it's clear this
              gets made right rather than customers having to guess/argue. -->
         <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-emerald-200">
-            <b>Lead-Quality Promise:</b> Every lead is filtered to confirm it's genuine tree work before it's listed. On the rare chance a non-tree lead slips through, screenshot it and email <a href="mailto:contact@treekey.co.uk" class="underline hover:text-emerald-100">contact@treekey.co.uk</a> &mdash; we'll swap it for a correct lead or refund it.
+            <b>Lead-Quality Promise:</b> Every opportunity is filtered to check it is genuine tree work before it is offered to you. On the rare chance one is not, email <a href="mailto:nick@treekey.uk" class="underline hover:text-emerald-100">nick@treekey.uk</a> telling us which purchase it concerns &mdash; we will give you a replacement introduction of equivalent value or a refund, at your choice.
         </div>
 
         {search_html}
@@ -7267,7 +7373,7 @@ def lead_detail_view(lead_id: str, request: Request):
         member_link_html = ""
     elif _viewer_email:
         price_block_html = f"""<div class="text-4xl font-extrabold text-emerald-400">£{unlock_fee}</div>"""
-        member_link_html = f"""<a href="/pricing" class="text-[12px] text-slate-400 hover:text-emerald-400 underline">Subscribe for member pricing</a>"""
+        member_link_html = f"""<a href="/pricing" class="text-[12px] text-slate-400 hover:text-emerald-400 underline">Subscribe for member pricing</a>""" if _subs_open() else ""
     else:
         price_block_html = f"""<div class="text-4xl font-extrabold text-emerald-400">£{unlock_fee}</div>"""
         member_link_html = f"""<a href="/login?next={urllib.parse.quote(f'/checkout/{plan_key}?lead_id={lid}')}" class="text-[12px] text-slate-400 hover:text-emerald-400 underline">Already a member? Sign in for your discount</a>"""
@@ -8884,13 +8990,7 @@ def free_dashboard(request: Request):
         <div class="mb-5">
             {lead_html}
         </div>
-        <div class="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-5 mb-8">
-            <p class="m-0 mb-3.5 text-sm text-emerald-200 leading-relaxed">
-                You're on our free list — expect a couple of local jobs a week by email (address blurred until you buy or subscribe).
-                Subscribe any time for early access to every matching job the moment it's filed, instead of occasional free teasers.
-            </p>
-            <a href="/pricing" class="inline-block bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg no-underline font-bold text-sm transition-colors">See Subscription Plans →</a>
-        </div>
+        {_free_list_upsell_html()}
 
         <h3 class="text-slate-400 text-xs font-bold uppercase tracking-wider mb-3">Quick Links</h3>
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -9543,7 +9643,7 @@ def my_leads_view(request: Request):
         if not lead_cards:
             lead_cards = "<div style='text-align:center; padding:32px; background:#0f172a; border-radius:10px; border:1px solid #1e293b;'><p style='color:#94a3b8; margin:0;'>No introductions to show yet. <a href=\"/marketplace\" style=\"color:#34d399; font-weight:bold;\">Browse the marketplace</a> to find available opportunities.</p></div>"
 
-    upsell = "" if is_paid else """
+    upsell = "" if (is_paid or not _subs_open()) else """
         <div style="background:rgba(6,78,59,0.3); border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:20px; margin-bottom:24px;">
             <p style="font-size:14px; color:#a7f3d0; margin:0 0 12px 0;">Subscribe for a steady stream of exclusive leads in your area, delivered the moment they're filed.</p>
             <a href="/pricing" style="display:inline-block; background:#059669; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px;">See Subscription Plans →</a>
@@ -9666,12 +9766,19 @@ def my_account_view(request: Request):
         quota_line = f"<p style='font-size:14px; color:#cbd5e1; margin:0 0 4px 0;'>Monthly allocation: <b>{delivered} / {quota}</b> leads used this month</p>"
         coverage_line = f"<p style='font-size:14px; color:#cbd5e1; margin:0;'>Coverage: <b>{html.escape(str(outcode))}</b> — {radius}-mile radius</p>"
         manage_block = '<a href="/pricing" style="display:inline-block; background:#1e293b; color:#e2e8f0; padding:8px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; margin-top:10px;">Change Plan →</a>'
+        if not _subs_open():
+            # New subscription sales are off: /pricing no longer offers plans, so do not send an
+            # existing subscriber there. Plans and rights are unchanged; changes go by email.
+            manage_block = ('<p style="font-size:13px; color:#94a3b8; margin:10px 0 0 0;">Your plan is unchanged. '
+                            'To change or cancel it, email <a href="mailto:contact@treekey.co.uk" style="color:#34d399;">contact@treekey.co.uk</a>.</p>')
     else:
         tier_name = "Free Tier"
         status_badge = "<span style='background:#1e293b; color:#94a3b8; font-size:11px; font-weight:bold; padding:4px 10px; border-radius:12px;'>FREE TIER</span>"
         quota_line = "<p style='font-size:14px; color:#cbd5e1; margin:0 0 4px 0;'>No subscription. You can buy single introductions from the marketplace whenever you like.</p>"
         coverage_line = ""
         manage_block = '<a href="/pricing" style="display:inline-block; background:#059669; color:white; padding:8px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; margin-top:10px;">Upgrade to a Subscription →</a>'
+        if not _subs_open():
+            manage_block = '<a href="/marketplace" style="display:inline-block; background:#059669; color:white; padding:8px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; margin-top:10px;">Browse the Marketplace →</a>'
 
     pref = settings.get("notification_preference", "email")
     pref_label = {"email": "Email", "whatsapp": "WhatsApp", "both": "Email + WhatsApp"}.get(pref, "Email")
@@ -9873,8 +9980,8 @@ def _account_request_form_html(session_email: str, is_paid: bool, error: str = "
     sub_html = ""
     if is_paid:
         sub_html = ('<li>You have an active subscription. <b>This request does not cancel it.</b> '
-                    'Manage your subscription from the Subscription section of '
-                    '<a href="/account">My Account</a> (<a href="/pricing">Manage subscription</a>).</li>')
+                    'To change or cancel it, email '
+                    '<a href="mailto:contact@treekey.co.uk">contact@treekey.co.uk</a>.</li>')
     err_html = f'<div class="acct-err">{html.escape(error)}</div>' if error else ""
     existing_html = ""
     if existing:
@@ -13946,7 +14053,7 @@ async def terms_of_service(request: Request = None):
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">1. Introduction and Acceptance</h2>
         <p class="mb-2">These Terms and Conditions ("Terms") govern access to and use of the Tree Key website (treekey.co.uk) and the lead-generation service provided through it (the "Service"), operated by Vector Data Labs, trading as Tree Key ("we", "us", "our").</p>
-        <p class="mb-2">By creating an account, purchasing a subscription, or otherwise using the Service, you ("you", "the Customer") agree to be bound by these Terms. If you do not agree, do not use the Service.</p>
+        <p class="mb-2">By creating an account, making a purchase, or otherwise using the Service, you ("you", "the Customer") agree to be bound by these Terms. If you do not agree, do not use the Service.</p>
         <p class="mb-4">The Service is intended for business use by tree surgery, arboricultural, and related trade businesses. It is not intended for consumers acting outside a trade, business, or profession.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">2. Description of the Service</h2>
@@ -13958,11 +14065,13 @@ async def terms_of_service(request: Request = None):
         <p class="mb-2">You must provide accurate registration information and keep it up to date. You are responsible for all activity under your account.</p>
         <p class="mb-4">We may suspend or terminate an account where we reasonably believe these Terms have been breached, or where required by law.</p>
 
-        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">4. Subscriptions, Pricing, and Payment</h2>
-        <p class="mb-2">Access to Leads is provided on the subscription plans, credit packages, and pricing displayed on the Service at the time of purchase. Prices and plan structures may change; changes will not affect a billing period already paid for.</p>
-        <p class="mb-2">Payments are processed by Stripe. By subscribing, you authorize recurring charges for the plan you select until you cancel. Subscriptions may be cancelled via your account settings, or by emailing contact@treekey.co.uk, effective at the end of the current billing period.</p>
-        <p class="mb-4 border-l-4 border-amber-500 pl-4 bg-amber-500/10 py-3 text-slate-200"><strong>Refunds.</strong> Because you are granted immediate access to proprietary Lead data the moment you subscribe or purchase a single lead, all payments &mdash; subscription and one-off purchases alike &mdash; are non-refundable, including for unused portions of a billing cycle, save for the Lead-Quality Promise below. Nothing in this clause affects any statutory right you may have that cannot lawfully be excluded.</p>
-        <p class="mb-4 border-l-4 border-emerald-500 pl-4 bg-emerald-500/10 py-3 text-slate-200"><strong>Lead-Quality Promise.</strong> Every Lead is automatically filtered to confirm it describes genuine tree work before it is listed or dispatched. On the rare occasion a Lead that is not genuine tree work reaches you despite this, notify us at <strong>contact@treekey.co.uk</strong> with a screenshot of the Lead, and we will, at your choice, issue a replacement Lead of equivalent value or a refund for that Lead.</p>
+        <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">4. Purchases, Pricing, and Payment</h2>
+        <p class="mb-2"><strong>What you buy.</strong> TreeKey sells a printed and posted introduction. You choose an opportunity in your area and approve the wording of your letter; we print the letter and post it, postage included, to the homeowner at the property concerned, introducing your business. You do not receive the homeowner's name, address or contact details, and there is no step that unlocks them: the homeowner contacts you directly if they choose to. An opportunity you buy is reserved to you and withdrawn from sale to other contractors by TreeKey; this does not stop other businesses finding the same public planning information or contacting the homeowner themselves. We do not guarantee that a homeowner will reply or that you will win any work.</p>
+        <p class="mb-2">Prices are those displayed on the Service when you buy, and include printing and postage of your letter. Prices may change; changes will not affect a purchase already paid for. Where a first-introduction price is shown on the pricing page, it applies once per business. New subscription plans are not currently offered.</p>
+        <p class="mb-2">Payments are processed by Stripe. A one-off purchase is a single payment: it does not start a subscription and you will not be charged again for it.</p>
+        <p class="mb-4 border-l-4 border-amber-500 pl-4 bg-amber-500/10 py-3 text-slate-200"><strong>Refunds.</strong> You may cancel a purchase by emailing <strong>nick@treekey.uk</strong>. If our cancellation process confirms that your letter was stopped before it was submitted to our printing provider, we will refund the full amount you paid. If submission has already begun, we will investigate whether the letter can be stopped and tell you the outcome; we cannot promise that it can be stopped. If your letter is not sent, we will send it or, at your choice, refund the amount you paid for it. Once your letter has been sent, refunds remain available under the Lead-Quality Promise and your statutory rights. Total refunds for a purchase never exceed the amount you paid, taking account of any earlier refunds.</p>
+        <p class="mb-4 border-l-4 border-emerald-500 pl-4 bg-emerald-500/10 py-3 text-slate-200"><strong>Lead-Quality Promise.</strong> Every opportunity is automatically filtered to check that it describes genuine tree work before it is offered to you. On the rare occasion that an opportunity you have bought turns out not to be genuine tree work despite this, email <strong>nick@treekey.uk</strong> telling us which purchase it concerns, and we will, at your choice, give you a replacement introduction of equivalent value or a refund for that purchase.</p>
+        <p class="mb-4"><strong>Your statutory rights.</strong> Nothing in these Terms, including this section and our refund policy, affects any statutory rights you have that cannot lawfully be excluded.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">5. Lead Accuracy &mdash; No Warranty</h2>
         <p class="mb-2">Lead information reflects data available to Tree Key at the time of discovery or last check and is not guaranteed to be current, complete, or accurate. In particular, we do not guarantee that: the underlying planning application remains active or undetermined; no contractor has since been engaged by the applicant, whether or not this is reflected in the public record; contact or applicant details are current or correct; or that use of a Lead will result in a successful quote, contract, or completed job.</p>
@@ -13990,7 +14099,7 @@ async def terms_of_service(request: Request = None):
         <p class="mb-4">You agree to indemnify Tree Key against any claim, loss, or expense arising from your breach of Section 6 (Acceptable Use) or your misuse of personal data obtained through the Service, to the extent permitted by law.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">11. Suspension and Termination</h2>
-        <p class="mb-4">Either party may terminate a subscription in accordance with Section 4. Tree Key may suspend or terminate access immediately for a material breach of these Terms, illegal use of the Service, or non-payment. Sections 5, 7, 8, 9, and 10 survive termination.</p>
+        <p class="mb-4">Tree Key may suspend or terminate access immediately for a material breach of these Terms, illegal use of the Service, or non-payment. Sections 5, 7, 8, 9, and 10 survive termination.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">12. Changes to These Terms</h2>
         <p class="mb-4">We may update these Terms from time to time. Material changes will be notified via the Service or by email before they take effect. Continued use after changes take effect constitutes acceptance.</p>
@@ -14037,16 +14146,11 @@ async def faq_page(request: Request = None):
              "Not a separate app to download &mdash; the whole site, including your dashboard, is built to work properly on your phone's browser. Save it to your home screen and it behaves like one."),
         ]),
         ("Pricing & Plans", [
-            ("What are my options if I'm not ready to pay?",
-             "You can create an account with no card required and set up your business and letter details. When you're ready, choose a subscription tier, or buy individual opportunities from the Marketplace."),
-            ("What's the difference between a subscription and the Marketplace?",
-             "A subscription includes a set number of opportunities each month (6 to 20, depending on tier), matched to your job types and radius and dispatched to you automatically &mdash; each one already includes a printed &amp; posted introduction letter to the homeowner, at no extra charge. Want more than your monthly amount? Buy additional opportunities from the Marketplace any time at a member discount (10&ndash;25% off, depending on tier). Anyone without an active subscription can still buy individual opportunities from the Marketplace at the standard price &mdash; useful for topping up, or for trying Tree Key out before subscribing."),
-            ("Am I tied into a long contract?",
-             "No. Subscriptions are a rolling monthly agreement &mdash; cancel any time from your account settings with zero penalty and no further charges from the next billing date."),
+            *_faq_pricing_intro_entries(),
             ("Can I get a refund?",
-             "Because a Lead is reserved and permanently removed from resale to any other contractor the moment you subscribe or buy it, payments are non-refundable &mdash; the same policy that applies to unused portions of a billing cycle. See <strong>\"What if a lead turns out not to be tree work at all?\"</strong> below for the one exception, and full detail in our <a href=\"/terms-of-service\" class=\"text-emerald-400 underline\">Terms of Service</a>."),
-            ("What if a lead turns out not to be tree work at all?",
-             "Every lead is filtered to confirm it's genuine tree work before it's listed or dispatched, so this is rare &mdash; but if one slips through, screenshot it and email <strong>contact@treekey.co.uk</strong>. We'll issue you a correct replacement lead or a refund for that lead."),
+             "You may cancel a purchase by emailing <strong>nick@treekey.uk</strong>. If our cancellation process confirms that your letter was stopped before it was submitted to our printing provider, we will refund the full amount you paid. If submission has already begun, we will investigate whether the letter can be stopped and tell you the outcome; we cannot promise that it can be stopped. If your letter is not sent, we will send it or, at your choice, refund the amount you paid for it. Once your letter has been sent, refunds remain available under the Lead-Quality Promise and your statutory rights. Total refunds for a purchase never exceed the amount you paid, taking account of any earlier refunds."),
+            ("What if an opportunity turns out not to be tree work at all?",
+             "Every opportunity is automatically filtered to check that it describes genuine tree work before it is offered to you. On the rare occasion that an opportunity you have bought turns out not to be genuine tree work despite this, email <strong>nick@treekey.uk</strong> telling us which purchase it concerns, and we will, at your choice, give you a replacement introduction of equivalent value or a refund for that purchase."),
         ]),
         ("How Matching Works", [
             ("How do you decide which leads I get?",

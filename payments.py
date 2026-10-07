@@ -10,6 +10,23 @@ load_dotenv()
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "").strip()
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
 PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
+
+
+def subscription_sales_enabled() -> bool:
+    """6 Oct 2026, Nick's decision for the INITIAL LAUNCH: sell only the
+    one-off offers (the GBP 4.99 first introduction and single-lead
+    purchases). NEW subscription sales are OFF unless the environment
+    variable SUBSCRIPTION_SALES_ENABLED is set to 1/true/yes.
+
+    Subscriptions are DEFERRED, not removed: every subscription plan, the
+    webhook handling for existing subscribers and all stored subscriber
+    records are untouched. This switch only stops NEW subscription checkouts
+    (here, in create_checkout_session, and in main.py's pricing, homepage and
+    /checkout routes). Included monthly introductions have no working
+    fulfilment route yet (see PRE_LAUNCH_CHECKLIST.md item 3), so do not
+    turn this on until that is built and approved."""
+    return os.getenv("SUBSCRIPTION_SALES_ENABLED", "").strip().lower() in ("1", "true", "yes")
+
 logger = logging.getLogger("vector-data-labs")
 
 # Best-effort in-process dedup for retried Stripe webhooks (Stripe redelivers the same
@@ -482,6 +499,13 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
     plan = PLANS.get(plan_key)
     if not plan:
         logger.error(f"[Stripe] Unknown plan: {plan_key}")
+        return None
+
+    # Server-side hard stop (6 Oct 2026): no new subscription checkout can be
+    # created while subscription sales are off, whatever the UI or a replayed
+    # request does. See subscription_sales_enabled().
+    if plan.get("mode") == "subscription" and not subscription_sales_enabled():
+        logger.warning(f"[Stripe] Refusing new subscription checkout for plan '{plan_key}': subscription sales are disabled.")
         return None
 
     import uuid

@@ -10,6 +10,38 @@ load_dotenv()
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
 TEST_EMAIL     = os.getenv("TEST_EMAIL", "").strip()
 PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
+
+
+def _subscription_sales_open() -> bool:
+    """Same switch as payments.subscription_sales_enabled() (6 Oct 2026):
+    the SUBSCRIPTION_SALES_ENABLED environment variable. Read directly here
+    so notifications.py does not need to import payments."""
+    return os.getenv("SUBSCRIPTION_SALES_ENABLED", "").strip().lower() in ("1", "true", "yes")
+
+
+def _teaser_pricing_note_html() -> str:
+    """Closing note on the teaser lead email. Subscription wording only while
+    subscription sales are on; otherwise points at the one-off marketplace."""
+    if _subscription_sales_open():
+        return f'''<p style="font-size:13px; color:#64748b; border-top:1px solid #e5e7eb; padding-top:14px; margin-top:4px;">
+            Jobs like this land in our system daily. <a href="{PUBLIC_APP_URL}/pricing" style="color:#059669; font-weight:bold;">Subscribe from £29/mo</a> and get matching leads sent to you automatically, instead of waiting or paying one at a time.
+        </p>'''
+    return f'''<p style="font-size:13px; color:#64748b; border-top:1px solid #e5e7eb; padding-top:14px; margin-top:4px;">
+            Jobs like this land in our system daily. <a href="{PUBLIC_APP_URL}/marketplace" style="color:#059669; font-weight:bold;">Browse the marketplace</a> to see current opportunities.
+        </p>'''
+
+
+def _teaser_plans_note_html() -> str:
+    """Closing note on the free-list teaser email (same switch as above)."""
+    if _subscription_sales_open():
+        return '''<p style="font-size: 13px; color: #64748b;">
+            Subscribe to get jobs like this the moment they're filed, not after we've teased it to you:
+            <a href="https://treekey.co.uk/pricing" style="color:#059669; font-weight:bold;">See plans →</a>
+        </p>'''
+    return '''<p style="font-size: 13px; color: #64748b;">
+            Want to see more jobs like this?
+            <a href="https://treekey.co.uk/marketplace" style="color:#059669; font-weight:bold;">Browse the marketplace →</a>
+        </p>'''
 ALERT_BATCH_THRESHOLD = 5
 
 SCORE_TAG = {"small": "Small", "medium": "Medium", "large": "Large"}
@@ -218,7 +250,8 @@ def _format_filed_date(registered_date) -> str:
     if not registered_date:
         return ""
     try:
-        return registered_date.strftime("%-d %B %Y")
+        # No unpadded-day strftime flag here: Windows rejects it. Same text as before (e.g. "7 October 2026").
+        return f"{registered_date.day} {registered_date.strftime('%B %Y')}"
     except AttributeError:
         return str(registered_date)
 
@@ -260,9 +293,7 @@ def _free_tools_and_subscribe_html(reference: str, address_release_allowed: bool
                 {tools_html}
             </p>
         </div>
-        <p style="font-size:13px; color:#64748b; border-top:1px solid #e5e7eb; padding-top:14px; margin-top:4px;">
-            Jobs like this land in our system daily. <a href="{PUBLIC_APP_URL}/pricing" style="color:#059669; font-weight:bold;">Subscribe from £29/mo</a> and get matching leads sent to you automatically, instead of waiting or paying one at a time.
-        </p>
+        {_teaser_pricing_note_html()}
     """
 
 
@@ -928,10 +959,7 @@ def send_teaser_lead_email(email: str, lead_data: dict, unsubscribe_url: str = "
                <span style="color: #475569; font-size: 14px;">{_redacted_summary(lead_data.get('summary'))}</span>
             </p>
         </div>
-        <p style="font-size: 13px; color: #64748b;">
-            Subscribe to get jobs like this the moment they're filed, not after we've teased it to you:
-            <a href="https://treekey.co.uk/pricing" style="color:#059669; font-weight:bold;">See plans →</a>
-        </p>
+        {_teaser_plans_note_html()}
         {unsub_html}
     </div>
     """

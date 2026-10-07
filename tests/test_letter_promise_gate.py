@@ -282,16 +282,27 @@ class TestCheckoutSessionProductDescriptionAlwaysHasTheLetterCopy(_EnvIsolation)
         return payments.create_checkout_session(plan_key)
 
     def test_subscription_checkout_has_letter_copy_regardless_of_flag(self):
+        # 6 Oct 2026: new subscription sales are off by default (initial launch is
+        # one-off offers only). This test is about the deferred subscription code
+        # path's letter copy, so it turns the sales switch on for its own duration.
         self.assertEqual(payments.PLANS["starter"].get("mode"), "subscription")
-        for flag_state in (None, "false", "true"):
-            if flag_state is None:
-                _clear_flag()
+        _prev_switch = os.environ.get("SUBSCRIPTION_SALES_ENABLED")
+        os.environ["SUBSCRIPTION_SALES_ENABLED"] = "1"
+        try:
+            for flag_state in (None, "false", "true"):
+                if flag_state is None:
+                    _clear_flag()
+                else:
+                    _set_flag(flag_state)
+                self._run_checkout("starter")
+                _, kwargs = _fake_stripe.checkout.Session.create.call_args
+                description = kwargs["line_items"][0]["price_data"]["product_data"]["description"]
+                self.assertIn("introduction letter", description, f"flag_state={flag_state!r}")
+        finally:
+            if _prev_switch is None:
+                os.environ.pop("SUBSCRIPTION_SALES_ENABLED", None)
             else:
-                _set_flag(flag_state)
-            self._run_checkout("starter")
-            _, kwargs = _fake_stripe.checkout.Session.create.call_args
-            description = kwargs["line_items"][0]["price_data"]["product_data"]["description"]
-            self.assertIn("introduction letter", description, f"flag_state={flag_state!r}")
+                os.environ["SUBSCRIPTION_SALES_ENABLED"] = _prev_switch
 
 
 class TestLetterSendingLiveItselfRemainsCorrectlyGated(_EnvIsolation):
