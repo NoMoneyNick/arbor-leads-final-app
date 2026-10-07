@@ -1188,10 +1188,11 @@ def _nav_auth_state(request: Optional[Request]) -> Optional[dict]:
     active_sub = database.get_contractor_subscription(session_email)
     if active_sub and active_sub.get("active"):
         dashboard_url = "/dashboard"
-    elif database.get_limbo_account(session_email):
-        dashboard_url = "/free-dashboard"
     else:
-        dashboard_url = "/pricing"
+        # 8 Oct 2026: a signed-in account without a subscription (a one-off buyer, or an older
+        # free account) goes to My Leads, where purchases and letter status are shown. It used
+        # to go to the old free dashboard, or to /pricing, which no longer offers plans.
+        dashboard_url = "/my-leads"
     display_name = (session_email.split("@")[0] or session_email).replace(".", " ").replace("_", " ").replace("+", " ").strip().title() or session_email
     return {"email": session_email, "display_name": display_name, "dashboard_url": dashboard_url}
 
@@ -7032,7 +7033,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
             member_link_html = f"""<a href="/pricing" class="text-[11px] text-slate-400 hover:text-emerald-400 underline">Subscribe for member pricing</a>""" if _subs_open() else ""
         else:
             price_block_html = f"""<div class="text-2xl sm:text-3xl font-extrabold text-emerald-400">£{unlock_fee}</div>"""
-            member_link_html = f"""<a href="/login?next={urllib.parse.quote(f'/checkout/{plan_key}?lead_id={lid}')}" class="text-[11px] text-slate-400 hover:text-emerald-400 underline">Already a member? Sign in for your discount</a>"""
+            member_link_html = f"""<a href="/login?next={urllib.parse.quote(f'/checkout/{plan_key}?lead_id={lid}')}" class="text-[11px] text-slate-400 hover:text-emerald-400 underline">{'Already a member? Sign in for your discount' if _subs_open() else 'Already have an account? Sign in to buy'}</a>"""
         # 2026-09-30: the £4.99 first introduction, shown only to an account
         # the server has just confirmed eligible, and only on the standard
         # price points. The checkout re-checks everything itself.
@@ -7376,7 +7377,7 @@ def lead_detail_view(lead_id: str, request: Request):
         member_link_html = f"""<a href="/pricing" class="text-[12px] text-slate-400 hover:text-emerald-400 underline">Subscribe for member pricing</a>""" if _subs_open() else ""
     else:
         price_block_html = f"""<div class="text-4xl font-extrabold text-emerald-400">£{unlock_fee}</div>"""
-        member_link_html = f"""<a href="/login?next={urllib.parse.quote(f'/checkout/{plan_key}?lead_id={lid}')}" class="text-[12px] text-slate-400 hover:text-emerald-400 underline">Already a member? Sign in for your discount</a>"""
+        member_link_html = f"""<a href="/login?next={urllib.parse.quote(f'/checkout/{plan_key}?lead_id={lid}')}" class="text-[12px] text-slate-400 hover:text-emerald-400 underline">{'Already a member? Sign in for your discount' if _subs_open() else 'Already have an account? Sign in to buy'}</a>"""
     offer_qs = ""
     if unlock_fee and _listing_is_first_offer_standard(l) and not _viewer_discount.get("eligible") \
             and _viewer_first_offer_eligible(_viewer_email):
@@ -7510,18 +7511,18 @@ def payment_success(request: Request):
     # Returning from Checkout is not proof that its payment webhook has arrived.
     # Keep this shared single-purchase/subscription page factual until the account
     # shows the recorded status. No payment or fulfilment logic lives here.
-    return _letter_page_html(request, "Thank you", """
+    _manage_note = " and manage your subscription in My Account" if _subs_open() else ""
+    return _letter_page_html(request, "Thank you", f"""
         <div class="lp-card" style="text-align:center;">
             <h1 style="color:#34d399; margin:0 0 20px; font-size:28px; font-weight:700; line-height:1.2;">Thank you for your purchase</h1>
-            <p style="margin:14px 0; font-size:15px; line-height:1.6;">We’re confirming your payment. Your purchase status will appear in My Account;
+            <p style="margin:14px 0; font-size:15px; line-height:1.6;">We’re confirming your payment. Your purchase will appear in My Leads;
             it may take a moment to update.</p>
             <p style="margin:14px 0; font-size:15px; line-height:1.6;">For an introduction purchase, printing and postage are included.
             We’ll use your approved letter to introduce your business, and the homeowner
             can contact you directly if interested.</p>
-            <p style="margin:14px 0; font-size:15px; line-height:1.6;">You can follow your introduction’s progress and manage any subscription
-            in My Account.</p>
+            <p style="margin:14px 0; font-size:15px; line-height:1.6;">You can follow your introduction’s progress in My Leads{_manage_note}.</p>
             <div style="display:grid; gap:12px; margin-top:24px;">
-                <a href="/account" class="lp-btn">View My Account</a>
+                <a href="/my-leads" class="lp-btn">View My Leads</a>
                 <a href="/marketplace">Browse more opportunities &rarr;</a>
             </div>
         </div>
@@ -8054,7 +8055,7 @@ def welcome_page(request: Request):
         {offer_block}
         <div class="lp-card">
             {letter_line}
-            <p style="font-size:14px; color:#94a3b8; margin:0;"><a href="/account">My Account</a> &middot; <a href="/pricing">Subscriptions</a></p>
+            <p style="font-size:14px; color:#94a3b8; margin:0;"><a href="/my-leads">My Leads</a> &middot; <a href="/account">My Account</a>{' &middot; <a href="/pricing">Subscriptions</a>' if _subs_open() else ''}</p>
         </div>
     """
     return HTMLResponse(_letter_page_html(request, "Welcome to TreeKey", inner, max_width=680))
@@ -8075,7 +8076,7 @@ def login_page(request: Request, error: Optional[str] = None, next: Optional[str
     # they were buying instead of the normal dashboard routing.
     safe_next = _safe_next_url(next)
     next_field_html = f"""<input type="hidden" name="next" value="{html.escape(safe_next)}">""" if safe_next else ""
-    next_note_html = """<p class="text-emerald-400 text-[13px] font-bold text-center m-0 mb-4">Sign in to see your member discount on that lead →</p>""" if safe_next else ""
+    next_note_html = f"""<p class="text-emerald-400 text-[13px] font-bold text-center m-0 mb-4">{'Sign in to see your member discount on that lead' if _subs_open() else 'Sign in to continue to checkout'} →</p>""" if safe_next else ""
     # 2026-09-30: first-time signup has ONE entry form (/free-account); the
     # link to it keeps any checkout `next` so the destination survives signup.
     signup_next_q = f"?next={urllib.parse.quote(safe_next, safe='')}" if safe_next else ""
@@ -8849,34 +8850,12 @@ def free_dashboard(request: Request):
     if not account:
         return RedirectResponse(url="/free-account", status_code=303)
 
-    # Sep 10 2026, Nick's ask, production incident: he logged into an
-    # account signed up before the Sep 9 database.py fix (find_unclaimed_lead's
-    # recency-capped candidate pool, see database.py) and this page just kept
-    # showing the SAME stale "no jobs" failure from his original signup
-    # attempt forever -- the grant was only ever attempted once, at
-    # /api/free-signup, with no retry path afterward. Any account whose
-    # first attempt happened to fail (unlucky timing before the fix landed,
-    # a genuine empty pool that moment, a transient DB error) was stuck
-    # showing a false "no jobs" message permanently, even once real nearby
-    # leads existed. Self-heal here instead: if this account still has no
-    # free_lead_ref, retry the grant on this very page load before falling
-    # back to the "no jobs" copy -- same logic as free_signup's own grant
-    # block, just re-runnable rather than one-shot.
+    # 8 Oct 2026: the free-lead offer is retired, so this page no longer picks, reserves or
+    # grants a lead, and sends no email. (It used to retry a grant on every visit.) An older
+    # account that was already given a lead still sees that lead below, unchanged. Any other
+    # account goes to the welcome page, where the current one-off offer is explained.
     if not account.get("free_lead_ref"):
-        candidate = database.find_nearest_unclaimed_lead(account["lat"], account["lon"], max_miles=None)
-        if candidate:
-            burned = database.burn_lead_inventory(candidate["reference"], email)
-            if burned:
-                database.record_free_lead_grant(email, burned["reference"])
-                account["free_lead_ref"] = burned["reference"]
-                # Sep 10 2026, same fix as the main redemption branch above:
-                # this self-heal path also hands someone a genuinely-owned
-                # lead, so it should get the same full-details email.
-                try:
-                    import notifications
-                    notifications.send_free_lead_granted_email(email, burned, unsubscribe_url=_make_unsubscribe_url(email))
-                except Exception as e:
-                    logger.error(f"[Free Dashboard] send_free_lead_granted_email failed for {email}: {e}")
+        return RedirectResponse(url="/welcome", status_code=303)
 
     if account.get("free_lead_ref"):
         lead = database.get_lead_by_reference(account["free_lead_ref"])
@@ -9423,9 +9402,13 @@ def my_leads_view(request: Request):
     total = 0
     import notifications
 
-    if is_paid:
-        data = database.get_contractor_dashboard_data(session_email)
-        leads = data["dispatched_leads"]
+    # 8 Oct 2026: one-off purchases are listed for every signed-in account, not only
+    # subscribers. The query is keyed on the signed-in email alone, so an account only ever
+    # sees its own purchases (and any dispatches made to it before the one-off model).
+    data = database.get_contractor_dashboard_data(session_email)
+    leads = data.get("dispatched_leads") or []
+
+    if is_paid or leads:
         total = len(leads)
         for l in leads:
             ref = l.get("ref", "") or ""
@@ -9444,6 +9427,7 @@ def my_leads_view(request: Request):
             # identical comment above; reused here.
             summary = address_release.guarded_summary_for_lead_reference(ref, l.get("summary", "") or "")
             dispatched_at = str(l.get("dispatched_at", "") or "")[:16]
+            received_label = "Purchased" if l.get("dispatch_type") == "purchased" else "Received"
             filed_date = notifications._format_filed_date(l.get("registered_date"))
             filed_line = f"<br><span style='color:#94a3b8; font-size:11px;'>Filed: {filed_date}</span>" if filed_date else ""
             applicant_name = address_release.guarded_applicant_name_for_lead_reference(ref, l.get("applicant_name"))
@@ -9467,6 +9451,12 @@ def my_leads_view(request: Request):
             # No extra DB call needed -- this IS is_historical_purchase's
             # own outcome, already paid for.
             is_historical = addr != address_release.REDACTED_ADDRESS_PLACEHOLDER
+            # 8 Oct 2026: Street View needs the homeowner's address, which is only ever released
+            # for a historical purchase; for a restricted lead it is not offered at all.
+            street_view_button = (
+                f'<a href="{gmap_url}" target="_blank" style="background:#334155; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street View</a>'
+                if is_historical else ""
+            )
             if is_historical:
                 letter_flyer_buttons = (
                     f'<a href="/generate-letter/{urllib.parse.quote(buyer_ref)}" target="_blank" style="background:#059669; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Letter</a>'
@@ -9605,11 +9595,11 @@ def my_leads_view(request: Request):
                         <span style="font-size:10px; background:#1e293b; color:#94a3b8; padding:2px 6px; border-radius:4px; font-weight:bold;">REF: {html.escape(buyer_ref)}</span>
                         {agent_badge}
                         <h4 style="color:#f1f5f9; font-size:15px; font-weight:bold; margin:4px 0 2px 0;">{html.escape(addr)}</h4>
-                        <span style="color:#94a3b8; font-size:12px;">Received: {dispatched_at}</span>{filed_line}{applicant_line}
+                        <span style="color:#94a3b8; font-size:12px;">{received_label}: {dispatched_at}</span>{filed_line}{applicant_line}
                     </div>
                     <div style="display:flex; gap:6px; flex-wrap:wrap;">
                         {letter_flyer_buttons}
-                        <a href="{gmap_url}" target="_blank" style="background:#334155; color:white; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold;">Street View</a>
+                        {street_view_button}
                     </div>
                 </div>
                 {mailing_status_line}
@@ -9778,6 +9768,8 @@ def my_account_view(request: Request):
         coverage_line = ""
         manage_block = '<a href="/pricing" style="display:inline-block; background:#059669; color:white; padding:8px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; margin-top:10px;">Upgrade to a Subscription →</a>'
         if not _subs_open():
+            tier_name = "Pay per introduction"
+            status_badge = "<span style='background:#1e293b; color:#94a3b8; font-size:11px; font-weight:bold; padding:4px 10px; border-radius:12px;'>NO SUBSCRIPTION</span>"
             manage_block = '<a href="/marketplace" style="display:inline-block; background:#059669; color:white; padding:8px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; margin-top:10px;">Browse the Marketplace →</a>'
 
     pref = settings.get("notification_preference", "email")
@@ -9790,6 +9782,15 @@ def my_account_view(request: Request):
         status_raw = (h.get("status") or "pending").lower()
         status_color = {"paid": "#34d399", "refunded": "#fbbf24", "pending": "#94a3b8"}.get(status_raw, "#94a3b8")
         desc_raw = str(h.get("lead_address") or (h.get("plan") or "Subscription").replace("_", " ").title())
+        # 8 Oct 2026: a purchase row carries the lead's real address. Show it only where the
+        # existing address-release rule allows it; otherwise show the buyer-facing reference.
+        if h.get("lead_reference") and h.get("lead_address"):
+            _billed_ref = h["lead_reference"]
+            _billed_addr = address_release.guarded_address_for_lead_reference(_billed_ref, h["lead_address"])
+            if _billed_addr == address_release.REDACTED_ADDRESS_PLACEHOLDER:
+                desc_raw = "Introduction " + address_release.buyer_facing_reference_standalone(_billed_ref)
+            else:
+                desc_raw = str(_billed_addr)
         desc = html.escape(desc_raw[:60]) + ("..." if len(desc_raw) > 60 else "")
         history_rows += f"""
         <tr style="border-bottom:1px solid #1e293b;">
@@ -9840,7 +9841,7 @@ def my_account_view(request: Request):
         </div>
 
         <div class="card">
-            <div class="card-label">Subscription</div>
+            <div class="card-label">{'Subscription' if (is_paid or _subs_open()) else 'Plan'}</div>
             <p style="font-size:14px; color:#cbd5e1; margin:0 0 4px 0;">Plan: <b style="color:white;">{html.escape(tier_name)}</b></p>
             {quota_line}
             {coverage_line}
@@ -9887,11 +9888,11 @@ def my_account_view(request: Request):
         <div class="quick-grid">
             <a href="/my-leads" class="quick-card">
                 <div style="color:white; font-weight:bold; font-size:14px; margin-bottom:2px;">My Leads</div>
-                <div style="color:#94a3b8; font-size:12px;">View everything you've received</div>
+                <div style="color:#94a3b8; font-size:12px;">Your introductions and letter status</div>
             </a>
-            <a href="{'/dashboard' if is_paid else '/free-dashboard'}" class="quick-card">
-                <div style="color:white; font-weight:bold; font-size:14px; margin-bottom:2px;">Dashboard</div>
-                <div style="color:#94a3b8; font-size:12px;">Your command center</div>
+            <a href="{'/dashboard' if is_paid else '/welcome'}" class="quick-card">
+                <div style="color:white; font-weight:bold; font-size:14px; margin-bottom:2px;">{'Dashboard' if is_paid else 'Get started'}</div>
+                <div style="color:#94a3b8; font-size:12px;">{'Your command center' if is_paid else 'Your offer and letter setup'}</div>
             </a>
             <a href="/marketplace" class="quick-card">
                 <div style="color:white; font-weight:bold; font-size:14px; margin-bottom:2px;">Marketplace</div>

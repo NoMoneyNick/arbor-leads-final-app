@@ -239,8 +239,15 @@ class TestCheckoutPostGatesAsDefenseInDepth(_SessionTestBase):
     is ever bypassed (a direct/replayed POST)."""
 
     def _run(self, coro):
+        # A private loop per call. asyncio.get_event_loop() raises "There is no current event loop"
+        # when the thread has none (the default on Python 3.14, and after any earlier asyncio.run()).
+        # Same pattern as the sibling test files; it never changes the thread's current loop.
         import asyncio
-        return asyncio.get_event_loop().run_until_complete(coro)
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
 
     def test_logged_in_incomplete_post_is_redirected_and_never_reaches_stripe(self):
         request = _mock_request(cookie_value=self._signed_cookie("contractor@example.com"), path="/checkout/starter")
@@ -287,8 +294,15 @@ class TestApproveLetterSettingsReturnsToCheckout(_SessionTestBase):
     validator) rather than trusting the query string directly."""
 
     def _run(self, coro):
+        # A private loop per call. asyncio.get_event_loop() raises "There is no current event loop"
+        # when the thread has none (the default on Python 3.14, and after any earlier asyncio.run()).
+        # Same pattern as the sibling test files; it never changes the thread's current loop.
         import asyncio
-        return asyncio.get_event_loop().run_until_complete(coro)
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
 
     def _approved_settings(self):
         s = letter_content.ContractorLetterSettings(
