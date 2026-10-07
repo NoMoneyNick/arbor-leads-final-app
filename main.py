@@ -12346,22 +12346,13 @@ def _autonomous_scheduler_loop():
             # tick never stops every later tick's checks from running.
             logger.error(f"[AUTO] Post-dispatch personal-data purge error: {e}")
         try:
-            last_started_iso = database.get_system_state("last_autonomous_cycle_started_at")
-            last_finished_iso = database.get_system_state("last_autonomous_cycle_at")
-            most_recent_iso = max(
-                [iso for iso in (last_started_iso, last_finished_iso) if iso]
-            ) if (last_started_iso or last_finished_iso) else None
-            should_run = True
-            if most_recent_iso:
-                try:
-                    last_run = datetime.datetime.fromisoformat(most_recent_iso.replace("Z", "+00:00"))
-                    hours_since = (datetime.datetime.now(datetime.timezone.utc) - last_run).total_seconds() / 3600
-                    should_run = hours_since >= 20
-                except Exception:
-                    should_run = True
-            if should_run and not _pipeline_state.get("running"):
-                logger.info("[AUTO] Kicking off autonomous daily cycle.")
-                _dispatch_locked_scan(run_full_autonomous_cycle, "autonomous_daily_cycle")
+            # Shared 20-hour cooldown rule (_autonomous_cycle_cooldown_block): this is only a cheap early
+            # exit -- start_autonomous_cycle_if_due() repeats the same check INSIDE the pipeline lock, which is
+            # the one that decides, and it is the same function /trigger-autonomous-cycle uses.
+            if _autonomous_cycle_cooldown_block() is None and not _pipeline_state.get("running"):
+                result = start_autonomous_cycle_if_due()
+                if result.get("status") == "started":
+                    logger.info("[AUTO] Kicking off autonomous daily cycle.")
         except Exception as e:
             logger.error(f"[AUTO] Scheduler check error: {e}")
         time.sleep(20 * 60)
@@ -12373,7 +12364,7 @@ def _start_autonomous_scheduler():
     logger.info("[AUTO] Autonomous scheduler thread started -- no manual scanning/enriching needed going forward.")
 
 
-def _dispatch_locked_scan(target_fn, action_name: str) -> dict:
+def _dispatch_locked_scan(target_fn, action_name: str, precheck=None) -> dict:
     """Shared concurrency guard for every 'scan everything' trigger endpoint.
 
     Aug 30 2026: confirmed live that /trigger-daily-pipeline was fired while
@@ -12390,6 +12381,13 @@ def _dispatch_locked_scan(target_fn, action_name: str) -> dict:
     exactly like what a rate limiter is designed to block). All four now
     share this one lock, so only one full scan can run at a time no matter
     which endpoint kicks it off.
+
+    `precheck` (optional, used only by the autonomous cycle): a callable run AFTER the lock is
+    taken and BEFORE anything is marked running or recorded. It returns None to proceed, or a
+    dict (status "skipped_cooldown") to stop; the lock is released either way if it stops, and
+    also if it raises (the exception then propagates). Doing the cooldown check inside the lock
+    is what stops two callers both passing it, and a caller arriving just after a cycle ends
+    from starting a second one. Every other caller passes nothing and behaves as before.
     """
     if not _PIPELINE_LOCK.acquire(blocking=False):
         return {
@@ -12398,6 +12396,15 @@ def _dispatch_locked_scan(target_fn, action_name: str) -> dict:
             "started_at": _pipeline_state.get("started_at"),
             "message": "A scan is already in progress -- this trigger shares a lock with /trigger-daily-pipeline, /scan-nationwide, /api/scan-nationwide-all-uk, and /api/run-domestic-scan-now, since they all hit the same council portals. Wait for it to finish, then trigger again."
         }
+    if precheck is not None:
+        try:
+            blocked = precheck()
+        except BaseException:
+            _PIPELINE_LOCK.release()
+            raise
+        if blocked:
+            _PIPELINE_LOCK.release()
+            return {"action": action_name, **blocked}
     _pipeline_state["running"] = True
     _pipeline_state["started_at"] = datetime.datetime.utcnow().isoformat() + "Z"
 
@@ -12437,7 +12444,13 @@ def _dispatch_locked_scan(target_fn, action_name: str) -> dict:
                         "the completion timestamp was never updated, so the admin dashboard's "
                         "'next cycle due' countdown will look healthy even though nothing finished."
                     ),
-                    action_required="Check Render runtime logs for the traceback, fix the underlying issue, then hit /trigger-autonomous-cycle (or /trigger-daily-pipeline) to retry manually.",
+                    action_required=(
+                        "Check Render runtime logs for the traceback and fix the underlying issue, then retry manually: "
+                        "/trigger-autonomous-cycle?force=true (plus the usual secret parameter) re-runs the full cycle "
+                        "even though the 20-hour cooldown is still running after a crashed cycle; force skips only the "
+                        "cooldown and still refuses while another cycle is running. /trigger-daily-pipeline re-runs the "
+                        "scan pipeline only (no maintenance stages)."
+                    ),
                     severity="CRITICAL",
                     throttle_hours=6.0,
                 )
@@ -12461,15 +12474,72 @@ def trigger_daily_pipeline(secret: Optional[str] = Query(None)):
     return _dispatch_locked_scan(run_master_daily_pipeline, "master_daily_pipeline")
 
 
+AUTONOMOUS_CYCLE_COOLDOWN_HOURS = 20
+
+
+def _autonomous_cycle_cooldown_block():
+    """The single 20-hour cooldown rule for the autonomous cycle, shared by the built-in
+    scheduler and /trigger-autonomous-cycle. Returns None when a cycle is due (no stamp at all,
+    an unreadable stamp, or the more recent of last_autonomous_cycle_started_at /
+    last_autonomous_cycle_at is at least 20 hours old), otherwise a dict describing the skip.
+    Keys off the MORE RECENT of started/finished so a cycle that started and never finished
+    still holds the cooldown (see _autonomous_scheduler_loop's history). A database error
+    propagates (callers fail closed)."""
+    last_started_iso = database.get_system_state("last_autonomous_cycle_started_at")
+    last_finished_iso = database.get_system_state("last_autonomous_cycle_at")
+    most_recent_iso = max(
+        [iso for iso in (last_started_iso, last_finished_iso) if iso]
+    ) if (last_started_iso or last_finished_iso) else None
+    if not most_recent_iso:
+        return None
+    try:
+        last_run = datetime.datetime.fromisoformat(most_recent_iso.replace("Z", "+00:00"))
+        hours_since = (datetime.datetime.now(datetime.timezone.utc) - last_run).total_seconds() / 3600
+    except Exception:
+        return None
+    if hours_since >= AUTONOMOUS_CYCLE_COOLDOWN_HOURS:
+        return None
+    return {
+        "status": "skipped_cooldown",
+        "last_cycle_at": most_recent_iso,
+        "hours_since": round(hours_since, 2),
+        "eligible_in_hours": round(AUTONOMOUS_CYCLE_COOLDOWN_HOURS - hours_since, 2),
+        "message": f"The last autonomous cycle started or finished less than {AUTONOMOUS_CYCLE_COOLDOWN_HOURS} hours ago, so nothing was started. After a crashed cycle only, /trigger-autonomous-cycle?force=true skips this cooldown (it still refuses while a cycle is running).",
+    }
+
+
+def start_autonomous_cycle_if_due(force: bool = False) -> dict:
+    """The one way to start the full autonomous cycle (used by the built-in scheduler and
+    /trigger-autonomous-cycle). Takes the shared pipeline lock, THEN checks the 20-hour cooldown
+    inside it, THEN starts; run_full_autonomous_cycle records the new start stamp as its first
+    step while the lock is still held, so check, claim and record cannot interleave with
+    another caller. `force` skips ONLY the cooldown: the lock is always taken, so a cycle that
+    is already running is never started a second time. Only the authenticated route can pass
+    force=True; the scheduler never does."""
+    force = bool(force)
+    result = _dispatch_locked_scan(
+        run_full_autonomous_cycle, "autonomous_daily_cycle",
+        precheck=None if force else _autonomous_cycle_cooldown_block,
+    )
+    if force and result.get("status") == "started":
+        logger.warning("[AUTO] Autonomous cycle started with force=true (20-hour cooldown bypassed by an authenticated manual call).")
+        result = {**result, "forced": True}
+    return result
+
+
 @app.get("/trigger-autonomous-cycle")
-def trigger_autonomous_cycle(secret: Optional[str] = Query(None)):
-    """Sep 2 2026: manual override for run_full_autonomous_cycle (the same
-    thing the scheduler fires automatically once a day) -- for forcing a
-    full run right now rather than waiting for the next scheduled check,
-    e.g. right after a redeploy that changed the tagging/enrichment logic.
-    Also resets the 'last run' timer, same as a scheduled firing would."""
+def trigger_autonomous_cycle(secret: Optional[str] = Query(None), force: bool = Query(False)):
+    """Sep 2 2026: manual trigger for run_full_autonomous_cycle (the same
+    thing the scheduler fires automatically).
+
+    Oct 2026: now shares the scheduler's 20-hour cooldown, checked inside the pipeline lock
+    (see start_autonomous_cycle_if_due), so a cron job pointed here and the built-in scheduler
+    cannot both start a cycle. Inside the cooldown it returns status 'skipped_cooldown'; while
+    a cycle is running it returns 'already_running'. `force=true` (default false, this route
+    only) skips ONLY the cooldown, e.g. to retry after a crashed cycle; it never bypasses the
+    secret or the lock. A started cycle records its start stamp, restarting the cooldown."""
     verify_cron_secret(secret)
-    return _dispatch_locked_scan(run_full_autonomous_cycle, "autonomous_daily_cycle")
+    return start_autonomous_cycle_if_due(force=bool(force))
 
 
 @app.get("/pipeline-status")
