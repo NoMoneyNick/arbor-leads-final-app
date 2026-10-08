@@ -12416,6 +12416,16 @@ def _autonomous_scheduler_loop():
         except Exception as e:
             logger.error(f"[AUTO] Expired lead-reservation sweep error: {e}")
         try:
+            # Accepted-letter status check: read-only provider status lookups for LIVE letters the provider has
+            # accepted. `sent` means handed to Royal Mail (provider's written confirmation, 8 Oct 2026), so a `sent`
+            # report moves the order to 'dispatched' and starts the 72-hour purge clock. Isolated in its own
+            # try/except and run BEFORE the purge so a failure here can never stop the purge or the rest of this
+            # tick. It never sends and never moves money. Returns at once when there is nothing to check.
+            import accepted_dispatch_check
+            accepted_dispatch_check.check_accepted_orders()
+        except Exception as e:
+            logger.error(f"[AUTO] Accepted-letter status check error: {e}")
+        try:
             # 2026-09-23, Request F ("ensure the purge schedule matches the
             # published 72-hour commitment -- a daily sweep of records
             # already 72 hours old is insufficient"): this was previously
@@ -13971,6 +13981,8 @@ async def privacy_policy(request: Request = None):
         <ul class="list-disc list-inside mb-4 space-y-1">
             <li><strong class="text-white">Stripe</strong> (payment processing) &mdash; customer payment and billing data.</li>
             <li><strong class="text-white">Render</strong> (hosting) &mdash; the application and database run on Render's infrastructure.</li>
+            <li><strong class="text-white">Intelliprint</strong> (printing and posting) &mdash; the homeowner's name and postal address and the content of the letter, so that the letter can be printed and handed to Royal Mail for delivery.</li>
+            <li><strong class="text-white">Royal Mail</strong> (delivery) &mdash; the postal address on the letter.</li>
             <li><strong class="text-white">Our customers</strong> &mdash; Lead data is disclosed to subscribing customers as the core of the Service.</li>
         </ul>
         <p class="mb-4">We do not sell personal data to data brokers or advertisers. We do commercially license access to Lead data as the Service itself &mdash; stated plainly here, not denied.</p>
@@ -13985,8 +13997,9 @@ async def privacy_policy(request: Request = None):
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">9. Data Retention</h2>
         <p class="mb-2">Lead data for a planning application that is never purchased is permanently deleted after 60 days.</p>
-        <p class="mb-2">Once a Lead is purchased and a physical letter to the homeowner is dispatched, the homeowner's name, home address, and the personalised letter content are permanently deleted from our live application database once 72 hours have passed since dispatch was confirmed by our mailing provider. This is carried out by an automated process that checks for newly-eligible records approximately every 20 minutes, so in normal operation deletion happens within minutes of the 72-hour mark, not after a further delay. If our systems are briefly unavailable (for example during a deployment or an outage), the check resumes as soon as service is restored and deletes anything that became eligible in the meantime -- so we do not guarantee deletion at the exact 72-hour mark in every circumstance, only that it is not left to a manual or indefinite process. A minimal record of the transaction (payment reference, dispatch confirmation, and any postal-suppression request) is kept for accounting, complaint-handling, and legal purposes; we have not yet set a fixed expiry for that minimal record.</p>
-        <p class="mb-4">This deletion applies to our own live application database. It does not, and cannot, reach: routine backups of that database, which persist on their own separate schedule until they age out or are overwritten; records our mailing provider keeps of a letter it has already printed and posted; or the physical letter itself once it has reached the homeowner's postal address. We do not control those systems and do not claim to delete data from them.</p>
+        <p class="mb-2">Once a Lead is purchased and a physical letter to the homeowner is dispatched, the homeowner's name, home address, and the personalised letter content are permanently deleted from our live application database once 72 hours have passed since our mailing provider confirmed that the letter had been handed to Royal Mail for delivery (our system records the time at which it sees that confirmation). This is carried out by an automated process that checks for newly-eligible records approximately every 20 minutes, so in normal operation deletion happens within minutes of the 72-hour mark, not after a further delay. If our systems are briefly unavailable (for example during a deployment or an outage), the check resumes as soon as service is restored and deletes anything that became eligible in the meantime -- so we do not guarantee deletion at the exact 72-hour mark in every circumstance, only that it is not left to a manual or indefinite process. A minimal record of the transaction (payment reference, dispatch confirmation, and any postal-suppression request) is kept for accounting, complaint-handling, and legal purposes; we have not yet set a fixed expiry for that minimal record.</p>
+        <p class="mb-4">This deletion applies to our own live application database. It does not, and cannot, reach: routine backups of that database, which persist on their own separate schedule until they age out or are overwritten; records our mailing provider keeps of a letter it has already printed and posted (see the next paragraph); or the physical letter itself once it has reached the homeowner's postal address. We do not control those systems and do not claim to delete data from them.</p>
+        <p class="mb-4">Our mailing provider, Intelliprint, has told us in writing that it keeps the PDF of each letter for 90 days from the date the print job is confirmed, and that its separate recipient and letter records have no automatic deletion period. It has told us those records can be deleted on request, subject to legal requirements. We have not been given a provider deletion guarantee beyond that. If you want your information deleted from those provider records, email <strong>nick@treekey.uk</strong> and we will ask the provider to delete it, subject to those legal requirements.</p>
         <p class="mb-4">Customer account data is retained for the life of the account. We do not currently operate an automated deletion process for billing records or for data belonging to a closed account.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">10. Security</h2>

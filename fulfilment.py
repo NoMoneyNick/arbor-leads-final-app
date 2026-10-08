@@ -260,7 +260,7 @@ LETTER_STATUSES = (
     "ready",                  # eligible for submission, not yet attempted
     "submitting",             # a worker has claimed it and is calling a provider now
     "provider_accepted",      # provider confirmed acceptance (not yet "dispatched")
-    "dispatched",             # provider confirmed the physical item left their system
+    "dispatched",             # provider confirmed the physical item was handed to Royal Mail
     "delivered",              # only ever set if a provider gives delivery evidence
     "failed",                 # confirmed rejection/non-acceptance by the provider
     "unknown",                # ambiguous outcome (timeout/crash/malformed response) -- needs reconciliation, NOT auto-retry
@@ -760,6 +760,33 @@ def mark_provider_result(cur, obligation_id: str, *, outcome: str, is_dry_run: b
     cur.execute(sql, params)
 
 
+DISPATCH_CHECK_TAG = " || DISPATCH-CHECK:"
+
+
+def mark_dispatch_observed(cur, obligation_id: str, observed_note: str) -> bool:
+    """provider_accepted -> dispatched, for a LIVE (non-dry-run) order that was ACCEPTED earlier and
+    whose provider-reported status later supports dispatch (see accepted_dispatch_check, which owns
+    the decision and the gate). Kept here because this module is the only writer of dispatched_at.
+
+    Deliberately NOT mark_provider_result: this changes ONLY status, dispatched_at, updated_at and
+    last_error. attempts, provider_name/provider_reference, provider_accepted_at, costs and every funding
+    record are left exactly as they are, and no budget is settled or released (the charge was settled
+    once at acceptance).
+
+    dispatched_at records WHEN TREEKEY OBSERVED the confirmed provider status, not the provider's own
+    dispatch time. Guarded: acts only on a row still 'provider_accepted' with no dispatched_at, so a
+    repeated or overlapping run changes nothing. Returns True only if this call made the change.
+    last_error keeps its earlier text; only the text after DISPATCH_CHECK_TAG is replaced."""
+    cur.execute("""
+        UPDATE letter_obligations
+        SET status = 'dispatched', dispatched_at = NOW(), updated_at = NOW(),
+            last_error = split_part(COALESCE(last_error, ''), %s, 1) || %s || %s
+        WHERE id = %s AND status = 'provider_accepted' AND is_dry_run = FALSE AND dispatched_at IS NULL
+        RETURNING id;
+    """, (DISPATCH_CHECK_TAG, DISPATCH_CHECK_TAG + " ", observed_note, obligation_id))
+    return cur.fetchone() is not None
+
+
 def mark_suppressed(cur, obligation_id: str, reason: str) -> None:
     cur.execute("""
         UPDATE letter_obligations
@@ -901,13 +928,13 @@ STAGE_MAP = {
     ),
     "provider_accepted": (
         "submitted", "Submitted to postal provider",
-        "Our mailing provider has accepted this for printing and posting. It has not left their system yet, "
+        "Our mailing provider has accepted this for printing and posting. It has not yet been handed to Royal Mail, "
         "so this is acceptance, not dispatch.",
     ),
     "dispatched": (
         "dispatched", "Dispatch confirmed",
-        "Our mailing provider has confirmed this has left their system for posting. We have no way to confirm "
-        "actual delivery to the homeowner -- Royal Mail and other postal networks don't report that back to us. "
+        "Our mailing provider has confirmed this has been handed to Royal Mail for delivery. We have no way to "
+        "confirm actual delivery to the homeowner -- untracked post is not reported back to us. "
         "If the homeowner calls, ask for the letter number to match their enquiry to this introduction.",
     ),
     "failed": (

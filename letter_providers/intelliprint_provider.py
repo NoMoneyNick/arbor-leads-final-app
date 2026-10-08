@@ -51,7 +51,8 @@ not include the exact request/response field names below):
     Mapped to this codebase's outcome vocabulary (letter_providers/base.py):
       draft/waiting_to_print/printing/enclosing/shipping -> ACCEPTED
         (provider has taken this job into its pipeline and not rejected it)
-      sent -> DISPATCHED (confirmed left Intelliprint's system)
+      sent -> DISPATCHED (Intelliprint confirmed in writing, 8 Oct 2026 as reported by Nick, that `sent`
+        means handed over to Royal Mail; handover, not delivery)
       returned/cancelled/invalid_address -> REJECTED (confirmed non-send)
       anything else / missing -> UNKNOWN (never guess)
     A parseable {"error": {...}} response (documented error types:

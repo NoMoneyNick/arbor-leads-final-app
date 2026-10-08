@@ -21,7 +21,7 @@ from typing import Optional
 # small and shared across every adapter so letter_providers.registry can
 # reason about them uniformly.
 OUTCOME_ACCEPTED = "accepted"     # provider confirmed it will print/post this
-OUTCOME_DISPATCHED = "dispatched" # provider confirmed the item has left their system
+OUTCOME_DISPATCHED = "dispatched" # provider confirmed the item was handed to the postal carrier (Royal Mail)
 OUTCOME_REJECTED = "rejected"     # provider confirmed it will NOT send this (bad address, account issue, etc.)
 OUTCOME_UNKNOWN = "unknown"       # timeout / malformed response / crash -- do not resend automatically
 VALID_OUTCOMES = (OUTCOME_ACCEPTED, OUTCOME_DISPATCHED, OUTCOME_REJECTED, OUTCOME_UNKNOWN)

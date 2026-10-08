@@ -181,6 +181,14 @@ def _correspondence_address_clause() -> str:
     return f", at {html.escape(val)}" if val else ""
 
 
+def _correspondence_address_text() -> str:
+    """The escaped correspondence address from TREEKEY_CORRESPONDENCE_ADDRESS,
+    or '' when it is not set (never invented, never a placeholder). Used by the
+    reverse-page "Who is responsible?" and "Stop further marketing" notices,
+    which offer a postal route only when an address is actually configured."""
+    return html.escape(os.getenv(CORRESPONDENCE_ADDRESS_ENV, "").strip())
+
+
 def _letter_date_today() -> str:
     """Europe/London calendar date, formatted for a printed letter (e.g.
     '24 September 2026'). Same zoneinfo("Europe/London") convention already
@@ -948,6 +956,33 @@ def _privacy_policy_url() -> str:
     return os.getenv(PRIVACY_POLICY_URL_ENV, "").strip() or "treekey.co.uk/privacy-policy"
 
 
+def format_address_lines(address: str) -> list:
+    """Display-only: the lines the recipient address block prints, one per line.
+
+    2 Oct 2026 layout fix: the address used to print as ONE wrapped run of text
+    ("124 Coulsdon Road, Old / Coulsdon, CR5 2LE"), breaking mid-name. Royal
+    Mail's layout is one part per line with the postcode last, and Intelliprint
+    reads the address off the page.
+
+    Strictly line breaks, never content:
+      - If the stored address already contains line breaks, those lines are used
+        exactly as stored (commas inside them are NOT split).
+      - Otherwise it is split ONLY at the commas that are already there.
+      - Nothing is added, removed, reordered, re-cased or "corrected": no postcode
+        is split off a line that has no comma, and no post town is guessed.
+      - Only leading/trailing blanks around each part and empty parts are dropped.
+    The stored address (database, frozen letter content, provider request) is not
+    changed by this; only how the page prints it.
+    """
+    text = (address or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if "\n" in text:
+        parts = text.split("\n")
+    else:
+        parts = text.split(",")
+    lines = [p.strip() for p in parts if p.strip()]
+    return lines or ([text] if text else [])
+
+
 def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, address: str,
                    summary: str, council: str, letter_number: Optional[int] = None) -> str:
     """Pure function of its settings/lead inputs for fingerprinting purposes
@@ -1001,7 +1036,13 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
     contact_email_footer = html.escape(_privacy_contact_email())
     policy_url = html.escape(_privacy_policy_url())
     letter_date = _letter_date_today()
-    correspondence_clause = _correspondence_address_clause()
+    correspondence_text = _correspondence_address_text()
+    # Release wording (7 Oct 2026, approved): the postal route is offered only when an address
+    # is configured; the e-mail route is always offered.
+    write_or_email = (f"You can write to {correspondence_text} or email <b>{contact_email_footer}</b>."
+                      if correspondence_text else f"You can email <b>{contact_email_footer}</b>.")
+    objection_route = (f"Email <b>{contact_email_footer}</b> or write to the address above"
+                       if correspondence_text else f"Email <b>{contact_email_footer}</b>")
 
     template = TEMPLATE_REGISTRY.get(settings.template_key) or TEMPLATE_REGISTRY[DEFAULT_TEMPLATE_KEY]
 
@@ -1016,7 +1057,7 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
     business_intro = esc(settings.business_intro)
     services_note = esc(settings.services_note)
     lead_reference_e = esc(lead_reference)
-    address_e = esc(address)
+    address_e = "\n".join(html.escape(line) for line in format_address_lines(address))
     summary_e = esc(summary)
     council_e = esc(council)
 
@@ -1137,6 +1178,11 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
   {_brand_footer_html(tk_mark_uri, page_number=1)}
 </div>"""
 
+    # Retention notice (8 Oct 2026): TreeKey's own deletion (72 hours, verified in code and tests) is kept
+    # separate from the print provider's retention, which is only what Intelliprint confirmed in writing
+    # (PDF kept 90 days from job confirmation; separate recipient and letter records have no automatic
+    # deletion period and can be deleted on request, subject to legal requirements). No provider deletion
+    # guarantee is claimed.
     reverse_page = f"""<div class="letter-page">
   <div class="reverse-header">
     <img class="reverse-header-mark" src="{icon_badge_uri}" alt="TreeKey">
@@ -1146,8 +1192,8 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
 
   <div class="notice-section">
     <div class="notice-heading">Who is responsible?</div>
-    <p class="notice-body">TreeKey is operated by Vector Data Labs, trading as TreeKey{correspondence_clause}.
-    Contact: <b>{contact_email_footer}</b>.</p>
+    <p class="notice-body">TreeKey is the trading name of Nicholas Michael Secular, a sole trader, who is
+    responsible for your information. {write_or_email}</p>
   </div>
 
   <div class="notice-section">
@@ -1173,19 +1219,21 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
 
   <div class="notice-section">
     <div class="notice-heading">How long is it kept?</div>
-    <p class="notice-body">Once this letter has been dispatched, we delete your name, address and this
-    letter's content from our live systems within 72 hours. A minimal record of the transaction (needed
-    for accounting and to handle any complaint) is kept for longer; we have not yet set a fixed expiry
-    for that minimal record.</p>
+    <p class="notice-body">About 72 hours after we record that this letter has been handed to Royal Mail,
+    we delete your name, address and this letter's content from our own live systems. Our printing
+    provider keeps a PDF of the letter for 90 days from when the print job is confirmed, and its separate
+    recipient and letter records have no automatic deletion period; you can ask us to request their
+    deletion, subject to legal requirements. A minimal record of the transaction (needed for accounting
+    and to handle any complaint) is kept for longer; we have not yet set a fixed expiry for that minimal
+    record.</p>
   </div>
 
   <div class="notice-section">
     <div class="notice-heading">Stop further marketing</div>
-    <p class="notice-body">You can object to this or any future TreeKey marketing at any time. Email
-    <b>{contact_email_footer}</b> with your address and reference <b>{lead_reference_e}</b>; no
-    explanation is required. TreeKey will not send another marketing letter about this application.
-    Objecting does not retract this letter or affect this contractor's ability to assist with your
-    project if you choose to contact them directly.</p>
+    <p class="notice-body">You have the right to object, at any time and without giving a reason, to TreeKey
+    using your information for marketing. {objection_route}, and include the letter reference
+    <b>{lead_reference_e}</b> if you have it (it is not required). We will stop using your information for
+    TreeKey marketing and record your request. If a letter is already in production, it may still reach you.</p>
   </div>
 
   <div class="notice-section">

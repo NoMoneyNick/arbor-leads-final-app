@@ -281,7 +281,10 @@ class TestAddressClearZoneMatchesIntelliprintTemplate(unittest.TestCase):
         # somewhere else on the page.
         zone_html = html[zone_start:header_start]
         self.assertIn("recipient-address", zone_html)
-        self.assertIn(letter_content.PREVIEW_ADDRESS.splitlines()[0], zone_html)
+        # 2 Oct 2026 layout fix: the address prints one part per line (split only at
+        # the commas already present), so each part must be in the block.
+        for part in letter_content.PREVIEW_ADDRESS.split(","):
+            self.assertIn(part.strip(), zone_html)
 
     def test_old_front_top_row_and_recipient_block_structure_is_gone(self):
         # Superseded by .address-clear-zone -- these classes must not
@@ -904,6 +907,59 @@ class TestLetterDateIsPlatformIndependent(unittest.TestCase):
             mock_datetime.now.return_value = fixed
             result = letter_content._letter_date_today()
         self.assertEqual(result, "24 September 2026")
+
+
+
+class TestRecipientAddressLayout(unittest.TestCase):
+    """2 Oct 2026: the recipient address printed as ONE wrapped run ("124 Coulsdon Road, Old /
+    Coulsdon, CR5 2LE"). It now prints one part per line, changing LINE BREAKS ONLY."""
+
+    def setUp(self):
+        os.environ[letter_content.PRIVACY_CONTACT_EMAIL_ENV] = "privacy@treekey.co.uk"
+
+    def _block(self, address):
+        html = letter_content.render_letter(_settings(), lead_reference="REF-1", address=address,
+                                            summary="s", council="c")
+        start = html.index('<div class="recipient-address">') + len('<div class="recipient-address">')
+        return html[start:html.index("</div>", start)]
+
+    def test_commas_become_line_breaks_text_unchanged(self):
+        lines = letter_content.format_address_lines("124 Coulsdon Road, Old Coulsdon, CR5 2LE")
+        self.assertEqual(lines, ["124 Coulsdon Road", "Old Coulsdon", "CR5 2LE"])
+        self.assertEqual(", ".join(lines), "124 Coulsdon Road, Old Coulsdon, CR5 2LE")
+
+    def test_existing_line_breaks_are_kept_exactly_and_commas_inside_are_not_split(self):
+        lines = letter_content.format_address_lines("Flat 1, Oak House\r\n12 High Street\nTown\nAB1 2CD")
+        self.assertEqual(lines, ["Flat 1, Oak House", "12 High Street", "Town", "AB1 2CD"])
+
+    def test_nothing_is_guessed_or_split_without_a_comma(self):
+        # a postcode with no comma before it is NOT split off, a town is not invented
+        self.assertEqual(letter_content.format_address_lines("12 Meadow Lane Old Coulsdon CR5 2LE"),
+                         ["12 Meadow Lane Old Coulsdon CR5 2LE"])
+        self.assertEqual(letter_content.format_address_lines("cr5 2le"), ["cr5 2le"])  # case untouched
+
+    def test_blank_parts_and_surrounding_spaces_are_dropped_only(self):
+        self.assertEqual(letter_content.format_address_lines("  1 A Road ,, Town ,  AB1 2CD , "),
+                         ["1 A Road", "Town", "AB1 2CD"])
+        self.assertEqual(letter_content.format_address_lines(""), [])
+        self.assertEqual(letter_content.format_address_lines(None), [])
+
+    def test_rendered_block_has_one_part_per_line_in_order(self):
+        self.assertEqual(self._block("124 Coulsdon Road, Old Coulsdon, CR5 2LE").split("\n"),
+                         ["124 Coulsdon Road", "Old Coulsdon", "CR5 2LE"])
+
+    def test_html_in_an_address_is_still_escaped(self):
+        block = self._block("1 <b>Road</b>, A & B, AB1 2CD")
+        self.assertNotIn("<b>", block)
+        self.assertIn("&lt;b&gt;Road&lt;/b&gt;", block)
+        self.assertIn("A &amp; B", block)
+
+    def test_block_still_prints_in_the_pre_line_style_and_inside_the_clear_zone(self):
+        html = letter_content.render_letter(_settings(), lead_reference="REF-1", address="1 A Road, Town, AB1 2CD",
+                                            summary="s", council="c")
+        self.assertIn(".recipient-address { font-size: 12.5px; font-weight: bold; white-space: pre-line; }", html)
+        self.assertLess(html.index('<div class="address-clear-zone">'), html.index('class="recipient-address"'))
+        self.assertLess(html.index('class="recipient-address"'), html.index('class="brand-header"'))
 
 
 if __name__ == "__main__":

@@ -156,5 +156,43 @@ class TestPrivacyPolicyDistinguishesDeletionFromSystemsWeDoNotControl(unittest.T
         self.assertIn("We do not control those systems and do not claim to delete data from them", html)
 
 
+class TestPrivacyPolicyStatesTheConfirmedProviderFacts(unittest.TestCase):
+    """8 Oct 2026: Intelliprint's written reply (as reported by Nick) supplies two retention facts and one
+    handover meaning. The page must state exactly those, keep them apart from TreeKey's own verified
+    72-hour deletion, and invent neither a provider deletion guarantee nor a DPA / subprocessor / location
+    claim (the DPA is still awaiting the provider's DPO referral; a full subprocessor list is not known)."""
+
+    def _html(self):
+        import asyncio
+        return asyncio.run(main.privacy_policy())
+
+    def test_states_the_90_day_pdf_retention_and_no_automatic_deletion_for_records(self):
+        html = self._html()
+        self.assertIn("keeps the PDF of each letter for 90 days from the date the print job is confirmed", html)
+        self.assertIn("separate recipient and letter records have no automatic deletion period", html)
+        self.assertIn("can be deleted on request, subject to legal requirements", html)
+
+    def test_dispatch_means_handed_to_royal_mail_and_is_the_observation_time(self):
+        html = self._html()
+        self.assertIn("handed to Royal Mail for delivery (our system records the time at which it sees that confirmation)", html)
+
+    def test_provider_and_royal_mail_are_listed_as_recipients(self):
+        html = self._html()
+        self.assertIn("<strong class=\"text-white\">Intelliprint</strong> (printing and posting)", html)
+        self.assertIn("<strong class=\"text-white\">Royal Mail</strong> (delivery)", html)
+
+    def test_no_provider_deletion_guarantee_dpa_or_location_claim(self):
+        html = self._html()
+        self.assertIn("We have not been given a provider deletion guarantee beyond that", html)
+        low = html.lower()
+        for invented in ("data processing agreement", "subprocessor", "sub-processor", "within the uk", "uk and eu servers"):
+            self.assertNotIn(invented, low)
+
+    def test_own_72_hour_deletion_is_still_scoped_to_our_own_live_database(self):
+        html = self._html()
+        self.assertIn("permanently deleted from our live application database", html)
+        self.assertIn("We do not control those systems and do not claim to delete data from them", html)
+
+
 if __name__ == "__main__":
     unittest.main()
