@@ -103,7 +103,7 @@ def main() -> int:
                 applicant_name TEXT, agent_name TEXT, agent_company TEXT, has_agent BOOLEAN, registered_date DATE,
                 status TEXT DEFAULT 'new', reserved_by_email TEXT, reserved_session_id TEXT, reserved_at TIMESTAMPTZ,
                 planning_status TEXT DEFAULT 'pending', lead_source_type TEXT DEFAULT 'council_planning',
-                discovered_at TIMESTAMPTZ DEFAULT NOW());
+                discovered_at TIMESTAMPTZ DEFAULT NOW(), tags TEXT[] DEFAULT '{}');
             CREATE TABLE payments (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), stripe_session_id TEXT UNIQUE,
                 plan TEXT, amount_pence INT, customer_email TEXT, status TEXT DEFAULT 'pending',
                 created_at TIMESTAMPTZ DEFAULT NOW(), lead_id TEXT, account_email TEXT, fulfillment_outcome TEXT,

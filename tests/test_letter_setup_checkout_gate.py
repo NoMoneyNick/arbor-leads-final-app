@@ -449,5 +449,36 @@ class TestAccountPageLetterTemplateIntegration(_SessionTestBase):
         self.assertIn("Finish your letter template", html_out)
 
 
+class TestBuyerRestrictionUsesTheAuthenticatedAccount(_SessionTestBase):
+    """8 Oct 2026: a lead restricted to one buyer is reserved only for the AUTHENTICATED account. The identity that
+    reaches the reservation is the signed session cookie's, never an email a browser puts in the URL or form."""
+
+    OWNER = "owner@example.com"
+
+    def test_the_route_passes_the_cookie_identity_and_ignores_browser_supplied_emails(self):
+        request = _mock_request(cookie_value=self._signed_cookie(self.OWNER),
+                                 query_params={"lead_id": "LEAD-1", "email": "attacker@example.com",
+                                               "account_email": "attacker@example.com",
+                                               "customer_email": "attacker@example.com",
+                                               "buyer": "attacker@example.com"})
+        with patch.object(main.payments, "PLANS", _PAYMENT_PLAN), \
+             patch("main._letter_setup_complete", return_value=True), \
+             patch.object(main.payments, "create_checkout_session", return_value="https://stripe.example/s") as mock_create:
+            main.checkout("single_lead_small", request)
+        mock_create.assert_called_once()
+        args, kwargs = mock_create.call_args
+        self.assertEqual(kwargs.get("account_email"), self.OWNER)
+        self.assertNotIn("attacker@example.com", repr(args) + repr(kwargs))
+
+    def test_a_browser_supplied_email_without_a_session_never_reaches_the_reservation(self):
+        request = _mock_request(cookie_value=None, query_params={"lead_id": "LEAD-1", "email": self.OWNER,
+                                                                  "account_email": self.OWNER})
+        with patch.object(main.payments, "PLANS", _PAYMENT_PLAN), \
+             patch.object(main.payments, "create_checkout_session") as mock_create:
+            result = main.checkout("single_lead_small", request)
+        mock_create.assert_not_called()
+        self.assertIn("/login", result.url)
+
+
 if __name__ == "__main__":
     unittest.main()

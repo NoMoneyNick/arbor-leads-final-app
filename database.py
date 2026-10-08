@@ -3115,6 +3115,24 @@ def burn_lead_inventory(lead_id: str, buyer_email: str) -> dict:
 STRIPE_CHECKOUT_EXPIRY_MINUTES = 30
 RESERVATION_RELEASE_MINUTES = 35
 
+# A lead can be restricted to ONE buyer account with a tag 'only_buyer:<sha256 of that account's lower-cased
+# email>'. The restriction is enforced inside the reservation UPDATE itself (reserve_lead_for_checkout), so there
+# is no check-then-reserve gap. Fail-closed: any tag that merely CONTAINS 'only_buyer' but is not exactly the
+# calling account's own tag (malformed, upper-case, truncated, a different account's, two conflicting tags) makes
+# the lead unreservable for that caller. An unidentified caller can never reserve a restricted lead. A lead with no
+# such tag behaves exactly as before.
+BUYER_RESTRICTION_MARKER = "only_buyer"
+
+
+def buyer_restriction_tag(account_email) -> Optional[str]:
+    """The exact tag that lets this account reserve a restricted lead, or None for a caller with no usable
+    identity (nothing, 'anonymous', not an email) - None can never match a restricted lead."""
+    import hashlib
+    email = (account_email or "").strip().lower()
+    if not email or "@" not in email:
+        return None
+    return f"{BUYER_RESTRICTION_MARKER}:" + hashlib.sha256(email.encode("utf-8")).hexdigest()
+
 
 def reserve_lead_for_checkout(lead_id: str, account_email: str, checkout_session_id: str) -> bool:
     """Atomically reserves a lead for exactly one in-progress checkout.
@@ -3125,7 +3143,12 @@ def reserve_lead_for_checkout(lead_id: str, account_email: str, checkout_session
     (returns False) if the lead is already sold, or actively reserved by a
     still-live checkout -- the caller (create_checkout_session) must refuse
     the whole checkout rather than proceed, exactly like the existing
-    expired/sold-lead refusal it already does."""
+    expired/sold-lead refusal it already does.
+
+    Buyer-restricted leads (see BUYER_RESTRICTION_MARKER): `account_email` must be the AUTHENTICATED account
+    (payments.create_checkout_session passes the verified session identity, never a browser-supplied value);
+    a restricted lead can only be reserved by the account it names, at any time - on sale, during that
+    account's checkout, and after a lapsed reservation."""
     if not SURL or not lead_id or not checkout_session_id:
         return False
     try:
@@ -3141,8 +3164,14 @@ def reserve_lead_for_checkout(lead_id: str, account_email: str, checkout_session
                     status = 'new' OR status IS NULL
                     OR (status = 'reserved' AND reserved_at < NOW() - (%s * INTERVAL '1 minute'))
                   )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM unnest(COALESCE(tags, ARRAY[]::text[])) AS t
+                    WHERE position('only_buyer' in lower(t)) > 0
+                      AND t IS DISTINCT FROM %s
+                  )
                 RETURNING id;
-            """, (account_email, checkout_session_id, lead_id, lead_id, RESERVATION_RELEASE_MINUTES))
+            """, (account_email, checkout_session_id, lead_id, lead_id, RESERVATION_RELEASE_MINUTES,
+                  buyer_restriction_tag(account_email)))
             row = cur.fetchone()
             conn.commit()
             return bool(row)
