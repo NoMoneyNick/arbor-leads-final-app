@@ -465,6 +465,61 @@ class TestNavigationAndSubscriptionsOffWording(_Base):
         for page in self._signed_out_marketplace(True):
             self.assertIn("Already a member? Sign in for your discount", page)
 
+    def test_marketplace_header_button_follows_the_subscription_switch(self):
+        # The "View Monthly Subscriptions" button (links to /pricing) must not
+        # appear while subscription sales are off, and is unchanged when on.
+        off_list, _ = self._signed_out_marketplace(False)
+        on_list, _ = self._signed_out_marketplace(True)
+        self.assertNotIn("View Monthly Subscriptions", off_list)
+        self.assertIn("Statutory Planning Marketplace", off_list)
+        self.assertIn("/checkout/", off_list)
+        self.assertIn('<a href="/pricing" class="bg-emerald-600', on_list)
+        self.assertIn("View Monthly Subscriptions", on_list)
+
+    def test_marketplace_buy_panel_stacks_so_the_button_is_not_squeezed_on_a_phone(self):
+        # The price panel used to sit side by side (price | button) below the sm breakpoint, which squeezed
+        # "Buy This Lead" into a tall narrow sliver at ~375px. It now stacks at every width.
+        page, _ = self._signed_out_marketplace(False)
+        self.assertIn("rounded-xl p-4 flex flex-col gap-3 text-center", page)
+        self.assertNotIn("flex sm:flex-col items-center sm:items-stretch", page)
+        self.assertIn("Buy This Lead", page)
+
+    def _marketplace_for(self, email=None, eligible=False, subscriber=False):
+        request = MagicMock(); request.cookies = {}; request.query_params = {}; request.headers = {}
+        sub = {"active": True} if subscriber else None
+        with patch("main.database.get_marketplace_leads_with_freshness", return_value=[self._lead_row()], create=True), \
+             patch("main.database.get_subscriber_discount", return_value={"eligible": False, "discount_pct": 0}, create=True), \
+             patch("main.database.get_contractor_subscription", return_value=sub, create=True), \
+             patch("main.database.get_area_capacity_status", return_value={"status": "unknown"}, create=True), \
+             patch("main.database.release_expired_reservations", create=True), \
+             patch("main.database.JOB_CATEGORIES", __import__("test_marketplace_privacy_review")._real_database.JOB_CATEGORIES, create=True), \
+             patch("main.database.EARLY_ACCESS_WINDOW_MINUTES", 15, create=True), \
+             patch("main._verify_session_cookie", return_value=email), \
+             patch("main._viewer_first_offer_eligible", return_value=eligible), \
+             patch("main.HTMLResponse", _Body), \
+             patch("main.payments.subscription_sales_enabled", return_value=False, create=True):
+            return _text(main.marketplace_view(request))
+
+    def test_marketplace_explains_the_first_introduction_offer_and_its_limits(self):
+        # Polish pass, 8 Oct 2026 (defect 4): same wording and limits as the homepage / Pricing promo.
+        for page in (self._marketplace_for(None), self._marketplace_for("a@b.test", eligible=True)):
+            self.assertIn("New to TreeKey?", page)
+            self.assertIn("Your first introduction can be &pound;4.99.", page)
+            self.assertIn("Printing and postage included. No subscription required.", page)
+            self.assertIn("One per eligible business, on selected Standard opportunities.", page)
+            self.assertIn('href="/pricing" class="underline font-bold"', page)
+
+    def test_marketplace_offer_line_is_not_shown_to_accounts_that_cannot_use_it(self):
+        self.assertNotIn("New to TreeKey?", self._marketplace_for("a@b.test", eligible=False))
+        self.assertNotIn("New to TreeKey?", self._marketplace_for("a@b.test", eligible=True, subscriber=True))
+
+    def test_the_address_placeholder_no_longer_promises_a_future_release(self):
+        text = address_release.REDACTED_ADDRESS_PLACEHOLDER
+        for gone in ("release pending", "legal review", "finalising", "before exact addresses are shown"):
+            self.assertNotIn(gone, text)
+        self.assertIn("Exact address kept confidential", text)
+        self.assertEqual(text, "Exact address kept confidential. TreeKey posts your introduction without sharing the homeowner's address with you.")
+
     def _login(self, subs_open):
         request = MagicMock(); request.cookies = {}; request.query_params = {}; request.headers = {}
         with patch("main.payments.subscription_sales_enabled", return_value=subs_open, create=True):

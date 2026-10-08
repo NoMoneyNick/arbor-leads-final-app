@@ -174,9 +174,8 @@ _TRUTHY_ENV_VALUES = ("1", "true", "yes", "on")
 # require_lead_ownership already uses, applied here to content instead of
 # access).
 REDACTED_ADDRESS_PLACEHOLDER = (
-    "Address release pending. TreeKey is finalising the legal review "
-    "required before exact addresses are shown -- contact support if you "
-    "believe this is blocking a job you've already paid for."
+    "Exact address kept confidential. TreeKey posts your introduction "
+    "without sharing the homeowner's address with you."
 )
 
 

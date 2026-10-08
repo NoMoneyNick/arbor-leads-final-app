@@ -299,7 +299,7 @@ class TestGenerateHomeownerLetterRoute(_RouteTestBase):
         body = response if isinstance(response, str) else getattr(response, "body", str(response))
         self.assertNotIn("1 Real Street", body)
         self.assertNotIn("LS1 1AA", body)
-        self.assertIn("Address release pending", body)
+        self.assertIn("Exact address kept confidential", body)
 
     @patch("main.database.get_db_conn")
     def test_enabled_but_new_allocation_still_shows_placeholder(self, mock_get_conn):
@@ -319,7 +319,7 @@ class TestGenerateHomeownerLetterRoute(_RouteTestBase):
         response = main.generate_homeowner_letter(self._admin_request(), "PLANIT-001")
         body = response if isinstance(response, str) else getattr(response, "body", str(response))
         self.assertNotIn("1 Real Street", body)
-        self.assertIn("Address release pending", body)
+        self.assertIn("Exact address kept confidential", body)
 
     @patch("main.database.get_db_conn")
     def test_historical_claim_shows_the_real_address_regardless_of_the_flag(self, mock_get_conn):
@@ -547,7 +547,7 @@ class TestPurchasedLeadEmailAddressGate(_EnvIsolation):
             notifications._send_purchased_lead_email_inner("buyer@example.com", self._lead_data())
         sent_html = mock_post.call_args.kwargs["json"]["html"]
         self.assertNotIn("1 Real Street", sent_html)
-        self.assertIn("Address release pending", sent_html)
+        self.assertIn("Exact address kept confidential", sent_html)
 
     def test_enabled_but_new_allocation_email_still_has_no_real_address(self):
         """2026-09-22 handoff regression guard: guarded_address_for_lead_
@@ -560,7 +560,7 @@ class TestPurchasedLeadEmailAddressGate(_EnvIsolation):
             notifications._send_purchased_lead_email_inner("buyer@example.com", self._lead_data())
         sent_html = mock_post.call_args.kwargs["json"]["html"]
         self.assertNotIn("1 Real Street", sent_html)
-        self.assertIn("Address release pending", sent_html)
+        self.assertIn("Exact address kept confidential", sent_html)
 
     def test_historical_claim_email_has_the_real_address(self):
         self._clear()
@@ -600,7 +600,7 @@ class TestFreeLeadGrantedEmailAddressGate(_EnvIsolation):
             notifications._send_free_lead_granted_email_inner("winner@example.com", self._lead_data())
         sent_html = mock_send.call_args.kwargs.get("html_body") or mock_send.call_args.args[2]
         self.assertNotIn("2 Real Street", sent_html)
-        self.assertIn("Address release pending", sent_html)
+        self.assertIn("Exact address kept confidential", sent_html)
 
     def test_enabled_but_new_allocation_email_still_has_no_real_address(self):
         """See TestPurchasedLeadEmailAddressGate's equivalent test for the
@@ -610,7 +610,7 @@ class TestFreeLeadGrantedEmailAddressGate(_EnvIsolation):
             notifications._send_free_lead_granted_email_inner("winner@example.com", self._lead_data())
         sent_html = mock_send.call_args.kwargs.get("html_body") or mock_send.call_args.args[2]
         self.assertNotIn("2 Real Street", sent_html)
-        self.assertIn("Address release pending", sent_html)
+        self.assertIn("Exact address kept confidential", sent_html)
 
     def test_historical_claim_email_has_the_real_address(self):
         self._clear()

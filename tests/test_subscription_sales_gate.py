@@ -225,6 +225,26 @@ class TestHomepage(unittest.TestCase):
                      "Compare all five packages"):
             self.assertIn(kept, page, kept)
 
+    def test_off_removes_subscription_alert_and_upgrade_wording(self):
+        # Polish pass, 8 Oct 2026 (defect 5): no "upgrade", alert-to-inbox or subscriber-slot wording while off.
+        page = self._page(False)
+        for gone in ("Upgrade For Full Commercial Intel", "subscription alerts", "alert is dispatched directly to your inbox",
+                     "it's in your inbox", "How fast do I get notified?"):
+            self.assertNotIn(gone, page, gone)
+        self.assertIn("See Pricing", page)
+        self.assertIn("That applies to every Marketplace purchase.", page)
+        self.assertIn("How fast do new opportunities appear?", page)
+        self.assertIn("Our system checks UK planning sources regularly. New tree-related", page)
+        self.assertIn("are listed in the Marketplace as they are processed", page)
+        self.assertIn("if (!false) return '';", page)  # the "Open for new subscribers" radar badge is not rendered
+
+    def test_on_keeps_the_subscription_wording_for_these_spots(self):
+        page = self._page(True)
+        for kept in ("Upgrade For Full Commercial Intel", "That applies to both subscription alerts and one-off Marketplace purchases.",
+                     "How fast do I get notified?", "alert is dispatched directly to your inbox", "it's in your inbox"):
+            self.assertIn(kept, page, kept)
+        self.assertIn("if (!true) return '';", page)
+
 
 class TestFaq(unittest.TestCase):
     def _page(self, enabled):
@@ -244,6 +264,32 @@ class TestFaq(unittest.TestCase):
         page = self._page(True)
         self.assertIn("A subscription includes a set number of opportunities", page)
         self.assertIn("choose a subscription tier", page)
+
+    def test_off_has_no_subscription_only_wording_and_keeps_refund_and_promise(self):
+        # Polish pass, 8 Oct 2026 (defect 6).
+        page = self._page(False)
+        for gone in ("dispatched to a subscriber", "depending on tier", "each subscription can be set",
+                     "Tools Included With Your Subscription", "once you're a subscriber", "any subscriber can turn on"):
+            self.assertNotIn(gone, page, gone)
+        self.assertIn("the moment it's bought from the Marketplace, it's removed from our system and never sold to anyone else.", page)
+        self.assertIn("Enter your postcode and a distance in the Marketplace search", page)
+        self.assertIn("Each opportunity shows its job size (small, medium or large) before you buy", page)
+        self.assertIn(">Tools<", page)
+        self.assertIn("Find it in your account once you're signed in.", page)
+        self.assertIn("The Chip-Drop directory gives you a direct WhatsApp link", page)
+        # approved refund answer and Lead-Quality Promise answer are untouched
+        for kept in ("You may cancel a purchase by emailing <strong>nick@treekey.uk</strong>.",
+                     "Total refunds for a purchase never exceed the amount you paid, taking account of any earlier refunds.",
+                     "we will, at your choice, give you a replacement introduction of equivalent value or a refund for that purchase."):
+            self.assertIn(kept, page, kept)
+
+    def test_on_keeps_the_original_subscription_wording(self):
+        page = self._page(True)
+        for kept in ("dispatched to a subscriber (or bought from the Marketplace)", "up to 50 miles depending on tier",
+                     "each subscription can be set to small, medium, large, or all job sizes",
+                     "Tools Included With Your Subscription", "Find it in your dashboard once you're a subscriber.",
+                     "any subscriber can turn on a one-tap 'Forward on WhatsApp'"):
+            self.assertIn(kept, page, kept)
 
 
 class TestEmailNotes(unittest.TestCase):

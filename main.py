@@ -1605,10 +1605,10 @@ def public_homepage(request: Request):
     # job size... the code can go on phone for this table") and showing the
     # job description in its place so job type is actually visible.
     ticker_rows = "".join([
-        f"""<div class='hidden sm:grid grid-cols-[56px_48px_84px_1fr_80px_28px] gap-3 items-center px-4 py-2.5 border-b border-emerald-900/40 text-xs font-mono'>
+        f"""<div class='hidden sm:grid grid-cols-[56px_48px_84px_1fr_80px_28px] gap-3 items-center px-4 py-2.5 border-b border-emerald-900/40 text-xs font-mono' style='grid-template-columns:56px 48px 132px 1fr 80px 28px;'>
             <span class='text-emerald-700'>{(_to_uk_display_time(l['discovered_at']).strftime('%d %b') if l['discovered_at'] else '--')}</span>
             <span class='text-emerald-600'>{(_to_uk_display_time(l['discovered_at']).strftime('%H:%M') if l['discovered_at'] else '--:--')}</span>
-            <span class='text-emerald-600 truncate'>{(database.classify_job_category(l['summary'])['label'])[:12]}</span>
+            <span class='text-emerald-600 truncate'>{(database.classify_job_category(l['summary'])['label'])}</span>
             <span class='text-slate-300 truncate'>{l['area_label']}</span>
             <span class='text-right'>
                 <span class='text-amber-400 font-bold text-[10px] uppercase tracking-wide'>{l['lead_score']} job</span>
@@ -1660,10 +1660,22 @@ def public_homepage(request: Request):
         _home_pricing_intro = "Pick a monthly package, or buy individual introductions without a subscription."
         _home_market_lead = "Not ready for a subscription? Buy leads one at a time instead."
         _home_faq_contract = "No. Subscriptions are a rolling monthly agreement — cancel instantly at any time with zero penalty. If you'd rather not subscribe at all, you can buy leads one-by-one via the Marketplace instead."
+        _home_feed_cta = "Upgrade For Full Commercial Intel"
+        _home_exclusive_tail = "That applies to both subscription alerts and one-off Marketplace purchases."
+        _home_notify_q = "How fast do I get notified?"
+        _home_notify_a = "Instantly. Our system scrapes UK planning portals continuously. The moment a new tree-related planning application or TPO/S211 notice is published in your radius, an alert is dispatched directly to your inbox so you can quote the homeowner before your competitors even know the job exists."
+        _home_tools_text = "No app to check between jobs, no portals to refresh. The moment a real notice lands in your patch, it's in your inbox — chainsaw still in the van."
+        _home_capacity_js = "true"
     else:
         _home_pricing_intro = "Buy one introduction at a time. Printing and postage are included in the price."
         _home_market_lead = "Buy introductions one at a time."
         _home_faq_contract = "No. There is no subscription or contract. You pay for each introduction you choose."
+        _home_feed_cta = "See Pricing"
+        _home_exclusive_tail = "That applies to every Marketplace purchase."
+        _home_notify_q = "How fast do new opportunities appear?"
+        _home_notify_a = "Our system checks UK planning sources regularly. New tree-related planning applications and TPO/S211 notices are listed in the Marketplace as they are processed, so you can choose which opportunities to pursue."
+        _home_tools_text = "No portals to refresh. New notices in your patch are listed in the Marketplace as they are processed — chainsaw still in the van."
+        _home_capacity_js = "false"
 
     return f"""<!DOCTYPE html>
 <html lang="en-GB" class="scroll-smooth">
@@ -2178,7 +2190,7 @@ def public_homepage(request: Request):
                     </div>
                     <div class="p-4 bg-slate-800 border-t border-slate-700 text-center">
                         <a href="#pricing" class="text-emerald-400 font-mono text-sm hover:brightness-125 transition-colors flex items-center justify-center gap-2">
-                            Upgrade For Full Commercial Intel <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                            {_home_feed_cta} <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
                         </a>
                     </div>
                 </div>
@@ -2386,7 +2398,7 @@ def public_homepage(request: Request):
             <div class="max-w-md">
                 <p class="text-[11px] font-mono uppercase tracking-widest text-emerald-400 font-bold mb-3">While You're On The Tools</p>
                 <h2 class="text-2xl md:text-3xl font-extrabold text-white leading-tight mb-4">We watch the portals. You keep the chainsaw running.</h2>
-                <p class="text-slate-300 text-sm leading-relaxed">No app to check between jobs, no portals to refresh. The moment a real notice lands in your patch, it's in your inbox — chainsaw still in the van.</p>
+                <p class="text-slate-300 text-sm leading-relaxed">{_home_tools_text}</p>
             </div>
         </div>
     </section>
@@ -2407,12 +2419,12 @@ def public_homepage(request: Request):
                          actually built/live. This now describes what's genuinely true
                          today: atomic claim-and-burn dispatch (record_lead_dispatch_and_burn
                          in database.py) means a lead only ever reaches one contractor. -->
-                    <p class="text-slate-400 leading-relaxed">Yes. Every lead is sent to exactly one contractor and then permanently removed from the system — it's never shown to, or sold to, anyone else. That applies to both subscription alerts and one-off Marketplace purchases.</p>
+                    <p class="text-slate-400 leading-relaxed">Yes. Every lead is sent to exactly one contractor and then permanently removed from the system — it's never shown to, or sold to, anyone else. {_home_exclusive_tail}</p>
                 </div>
                 
                 <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
-                    <h3 class="text-lg font-bold text-white mb-2">How fast do I get notified?</h3>
-                    <p class="text-slate-400 leading-relaxed">Instantly. Our system scrapes UK planning portals continuously. The moment a new tree-related planning application or TPO/S211 notice is published in your radius, an alert is dispatched directly to your inbox so you can quote the homeowner before your competitors even know the job exists.</p>
+                    <h3 class="text-lg font-bold text-white mb-2">{_home_notify_q}</h3>
+                    <p class="text-slate-400 leading-relaxed">{_home_notify_a}</p>
                 </div>
                 
                 <div class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
@@ -2493,6 +2505,7 @@ def public_homepage(request: Request):
         // decorative, it reflects actual committed subscriber quota vs
         // real recent lead volume for the area.
         function capacityBadgeHtml(status) {{
+            if (!{_home_capacity_js}) return '';
             const map = {{
                 open:    {{ dot: 'bg-emerald-500', text: 'text-emerald-400', label: 'Open for new subscribers' }},
                 limited: {{ dot: 'bg-amber-500',   text: 'text-amber-400',   label: 'Limited slots left' }},
@@ -6822,6 +6835,28 @@ def _viewer_first_offer_eligible(viewer_email: Optional[str]) -> bool:
         return False
 
 
+def _first_offer_marketplace_note_html(viewer_email: Optional[str], is_subscriber: bool, offer_eligible: bool) -> str:
+    """One explanatory line on the Marketplace for the existing GBP 4.99
+    first-introduction offer, using the same wording and eligibility limits
+    as the homepage and /pricing (_first_offer_promo_html). Shown to
+    signed-out visitors and to a signed-in account only when the server-side
+    check already says it is eligible; never to subscribers or to an account
+    that has used or cannot take the offer. Text only: eligibility, price and
+    payment are still enforced at checkout."""
+    if is_subscriber or (viewer_email and not offer_eligible):
+        return ""
+    pence = getattr(payments, "FIRST_INTRO_PRICE_PENCE", 499)
+    price = f"&pound;{pence / 100:.2f}" if isinstance(pence, int) else "&pound;4.99"
+    return (
+        '<div class="bg-sky-500/10 border border-sky-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-sky-200">'
+        f"<b>New to TreeKey?</b> Your first introduction can be {price}. Printing and postage included. "
+        "No subscription required. One per eligible business, on selected Standard opportunities. "
+        f"Qualifying opportunities show the {price} price once you are signed in and eligible. "
+        '<a href="/pricing" class="underline font-bold">See the offer on the Pricing page &rarr;</a>'
+        "</div>"
+    )
+
+
 def _listing_is_first_offer_standard(listing: dict) -> bool:
     """True only for a Standard-value listing (existing classification) at a
     standard single-lead price point -- never by price alone."""
@@ -7189,7 +7224,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
                     <a href="/marketplace/lead/{lid}" class="inline-block mt-2 text-emerald-400 hover:text-emerald-300 text-[12px] font-bold no-underline">View Full Job Details →</a>
                 </div>
 
-                <div class="sm:w-[210px] shrink-0 bg-slate-900/60 border border-emerald-900/50 rounded-xl p-4 flex sm:flex-col items-center sm:items-stretch justify-between sm:justify-start gap-3 text-center">
+                <div class="sm:w-[210px] shrink-0 bg-slate-900/60 border border-emerald-900/50 rounded-xl p-4 flex flex-col gap-3 text-center">
                     <div>
                         {price_block_html}
                         <!-- Sep 16 2026, Nick's ask: "the leads need to state
@@ -7254,7 +7289,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
                 <h1 class="m-0 text-[28px] font-extrabold text-white">Statutory Planning Marketplace</h1>
                 <p class="mt-1 mb-0 text-slate-400 text-sm">Real-time council and National Park planning notices with statutory freshness countdowns.</p>
             </div>
-            <a href="/pricing" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg no-underline font-bold text-[13px] transition-colors">View Monthly Subscriptions</a>
+            {'<a href="/pricing" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg no-underline font-bold text-[13px] transition-colors">View Monthly Subscriptions</a>' if _subs_open() else ''}
         </div>
 
         <!-- 2026-09-24, launch-experience rewrite (Nick's ask: "make clear
@@ -7265,6 +7300,8 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
         <div class="bg-sky-500/10 border border-sky-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-sky-200">
             <b>How this works:</b> Buying a lead below reserves that opportunity for you and sends a printed introduction to the homeowner on your behalf, using your saved business details and letter template -- we do not hand you the homeowner's address or contact details. It's the homeowner's choice whether to get in touch; a reply or job isn't guaranteed. Every lead purchased is immediately removed from the marketplace and never resold -- you are the only contractor TreeKey will introduce to this homeowner.
         </div>
+
+        {_first_offer_marketplace_note_html(_viewer_email, _viewer_is_subscriber, _offer_eligible)}
 
         {"" if (_viewer_is_subscriber or not _subs_open()) else f'''<div class="bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-amber-200">
             <b>Subscriber Early Access:</b> Active subscribers see every new matching lead the moment it's found and get first crack at buying it. Brand-new leads open up here to everyone {database.EARLY_ACCESS_WINDOW_MINUTES} minutes later. <a href="/pricing" class="underline hover:text-amber-100 font-bold">See subscription tiers →</a>
@@ -14148,12 +14185,28 @@ async def faq_page(request: Request = None):
     rather than invented), covering the things Nick specifically flagged as
     confusing when testing the site himself: what Ledger and Chip-Drop are,
     whether there's an app, WhatsApp, cancellation, and the free-account path."""
+    # One-off wording while subscription sales are off (6 Oct 2026 launch decision); the
+    # subscription wording below is unchanged for when they are switched back on.
+    _faq_subs = _subs_open()
+    _faq_single_sale = ("the moment it's dispatched to a subscriber (or bought from the Marketplace), it's removed from our system and never sold to anyone else."
+                        if _faq_subs else "the moment it's bought from the Marketplace, it's removed from our system and never sold to anyone else.")
+    _faq_matching = ("You set a home postcode and a radius (up to 50 miles depending on tier). We match leads to you by exact area first, then by distance within your radius, then by wider regional area as a fallback &mdash; so you get the closest, most relevant work first. Enter your full postcode rather than just the outward code (e.g. \"NG22 8AA\" instead of just \"NG22\") for the most accurate distance matching."
+                     if _faq_subs else
+                     "You choose. Enter your postcode and a distance in the Marketplace search and it shows the opportunities within that distance. Enter your full postcode rather than just the outward code (e.g. \"NG22 8AA\" instead of just \"NG22\") for the most accurate distance matching.")
+    _faq_job_size = ("Yes &mdash; each subscription can be set to small, medium, large, or all job sizes, so a one-van operator isn't drowned in commercial clearance leads meant for a multi-crew outfit, or vice versa."
+                     if _faq_subs else
+                     "Each opportunity shows its job size (small, medium or large) before you buy, so you can choose the ones that suit your crew.")
+    _faq_tools_title = "Tools Included With Your Subscription" if _faq_subs else "Tools"
+    _faq_ledger_tail = "Find it in your dashboard once you're a subscriber." if _faq_subs else "Find it in your account once you're signed in."
+    _faq_whatsapp = ("Two places: in Settings, any subscriber can turn on a one-tap 'Forward on WhatsApp' button next to each lead email, so you can send it straight to your crew. The Chip-Drop directory also gives you a direct WhatsApp link to message a drop site's contact. There isn't yet a general WhatsApp support line &mdash; for anything else, email is the way to reach us."
+                     if _faq_subs else
+                     "The Chip-Drop directory gives you a direct WhatsApp link to message a drop site's contact. There isn't yet a general WhatsApp support line &mdash; for anything else, email is the way to reach us.")
     faq_groups = [
         ("About Tree Key", [
             ("What is Tree Key?",
              "Tree Key finds new tree work before your competitors do, and introduces you to it. We continuously monitor UK local council planning portals, the GLA Planning Datahub, and other statutory public sources for tree-related applications &mdash; TPO (Tree Preservation Order) consents, Section 211 notices, felling and pruning applications &mdash; and turn each one into an opportunity you can choose to pursue. When you choose one, we print and post a personalised introduction to the homeowner on your behalf, using your saved business details and letter template. We don't hand you the homeowner's address or contact details &mdash; it's their choice whether to get in touch, and a reply or job isn't guaranteed."),
             ("How is this different from a directory like Checkatrade or Bark?",
-             "Directories sell the same lead to several competing contractors at once and take a cut of what you earn. Every opportunity on Tree Key is single-sale: the moment it's dispatched to a subscriber (or bought from the Marketplace), it's removed from our system and never sold to anyone else. Your introduction goes out under your own brand, with no ongoing commission &mdash; and because it's the homeowner who decides whether to make contact, we never promise a guaranteed reply or job."),
+             "Directories sell the same lead to several competing contractors at once and take a cut of what you earn. Every opportunity on Tree Key is single-sale: " + _faq_single_sale + " Your introduction goes out under your own brand, with no ongoing commission &mdash; and because it's the homeowner who decides whether to make contact, we never promise a guaranteed reply or job."),
             ("Where does the data come from, and is it legal?",
              "Entirely from public statutory sources: council planning registers and Companies House, both publicly accessible under the Open Government Licence. We don't buy data from private brokers or scrape anything that isn't otherwise publicly available. Full detail on how we're allowed to process it is in our <a href=\"/privacy-policy\" class=\"text-emerald-400 underline\">Privacy Policy</a>."),
             ("Is there a mobile app?",
@@ -14168,15 +14221,15 @@ async def faq_page(request: Request = None):
         ]),
         ("How Matching Works", [
             ("How do you decide which leads I get?",
-             "You set a home postcode and a radius (up to 50 miles depending on tier). We match leads to you by exact area first, then by distance within your radius, then by wider regional area as a fallback &mdash; so you get the closest, most relevant work first. Enter your full postcode rather than just the outward code (e.g. \"NG22 8AA\" instead of just \"NG22\") for the most accurate distance matching."),
+             _faq_matching),
             ("Can I filter by job size?",
-             "Yes &mdash; each subscription can be set to small, medium, large, or all job sizes, so a one-van operator isn't drowned in commercial clearance leads meant for a multi-crew outfit, or vice versa."),
+             _faq_job_size),
             ("What if no leads come through for a while?",
              "Lead volume depends entirely on how much planning activity is happening in your area &mdash; we don't manufacture leads. If a source genuinely goes quiet for an unusual length of time, that's exactly the kind of thing our internal monitoring is built to catch and flag automatically, and we treat it as something to actively fix, not something to leave unexplained."),
         ]),
-        ("Tools Included With Your Subscription", [
+        (_faq_tools_title, [
             ("What is TreeKey Ledger?",
-             "A financial dashboard built specifically for tree surgeons: it tracks your rolling 12-month turnover against the £90,000 UK VAT registration threshold so you're never caught out, holds a running CIS developer-tax tracker, and includes a van/crew-day cost calculator so you can quote profitably. Find it in your dashboard once you're a subscriber."),
+             "A financial dashboard built specifically for tree surgeons: it tracks your rolling 12-month turnover against the £90,000 UK VAT registration threshold so you're never caught out, holds a running CIS developer-tax tracker, and includes a van/crew-day cost calculator so you can quote profitably. " + _faq_ledger_tail),
             ("What is the Chip-Drop Network?",
              "A directory of local allotments, farms, stables and gardens who want your arborist woodchip or logs for free. Instead of paying £60&ndash;£120 in commercial tipping fees and losing 45 minutes each way, you drop your waste at a nearby registered site instead. Landowners register their own site through the site; the directory only ever shows real, self-registered listings."),
         ]),
@@ -14193,7 +14246,7 @@ async def faq_page(request: Request = None):
              # subscriber can turn it on from Settings, not just Elite), not
              # real-time push delivery. Reworded to describe exactly what
              # it is.
-             "Two places: in Settings, any subscriber can turn on a one-tap 'Forward on WhatsApp' button next to each lead email, so you can send it straight to your crew. The Chip-Drop directory also gives you a direct WhatsApp link to message a drop site's contact. There isn't yet a general WhatsApp support line &mdash; for anything else, email is the way to reach us."),
+             _faq_whatsapp),
             ("Do you have testimonials from other contractors?",
              "Not yet &mdash; we're a young platform and would rather wait for genuine results than publish anything that isn't real. That'll change as more contractors come through the platform."),
         ]),
