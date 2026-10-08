@@ -231,6 +231,24 @@ class TestMarkProviderResult(unittest.TestCase):
         self.assertIn("provider_accepted_at = NOW()", sql)
         self.assertIn("status = 'provider_accepted'", sql)
 
+    def test_a_real_result_clears_the_dry_run_flag_and_a_dry_run_keeps_it(self):
+        """is_dry_run defaults to TRUE when an order is created. Every REAL provider result (accepted, dispatched,
+        failed, unknown) must clear it, or the accepted-letter dispatch check can never select the order. A real
+        dry run must keep it TRUE and never clear it."""
+        for outcome in ("accepted", "dispatched", "failed", "unknown"):
+            cur = FakeCursor()
+            fulfilment.mark_provider_result(cur, "obligation-uuid-1", outcome=outcome, is_dry_run=False,
+                                             provider_name="fake_test")
+            sql, _params = cur.executed[0]
+            self.assertIn("is_dry_run = FALSE", sql, outcome)
+            self.assertNotIn("is_dry_run = TRUE", sql, outcome)
+        cur = FakeCursor()
+        fulfilment.mark_provider_result(cur, "obligation-uuid-1", outcome="accepted", is_dry_run=True,
+                                         provider_name="dry_run")
+        sql, _params = cur.executed[0]
+        self.assertIn("is_dry_run = TRUE", sql)
+        self.assertNotIn("is_dry_run = FALSE", sql)
+
     def test_unknown_outcome_does_not_reset_to_ready(self):
         """This is what makes 'never auto-resend an ambiguous outcome' true
         at the data layer: 'unknown' must never be spelled in a way that a

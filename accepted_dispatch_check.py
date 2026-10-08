@@ -114,8 +114,9 @@ def check_accepted_orders(limit: int = BATCH_LIMIT, registry=None) -> dict:
             try:
                 adapter = adapters.get(provider_name) if provider_name else None
                 if adapter is None:
+                    # Not refreshed: this host cannot check the order, and refreshing updated_at here
+                    # would use up the one-hour window for the host that can (e.g. a PC with the adapter).
                     summary["skipped_no_adapter"] += 1
-                    _touch(cur, oid); conn.commit()
                     continue
                 if not recorded_live_submission(last_error) or getattr(adapter, "test_mode", None) is not False:
                     summary["skipped_not_live"] += 1

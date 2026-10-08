@@ -95,6 +95,19 @@ def _run_check(outcome, ref="REF-1"):
     return summary, cur, adapter
 
 
+class TestHostWithoutTheAdapterLeavesTheOrderAlone(unittest.TestCase):
+    def test_a_host_that_cannot_check_the_order_does_not_refresh_it(self):
+        """Render has no Intelliprint adapter. If it refreshed updated_at on an order it cannot check, it would use
+        up the one-hour window every time, and a host that CAN check (the PC) would never be due."""
+        cur = _Cur([("oid-1", "intelliprint", "REF-1", LIVE_MSG)])
+        registry = types.SimpleNamespace(slots=[types.SimpleNamespace(adapter=_Adapter(None))])   # name 'fake_test'
+        with patch.object(adc.database, "get_db_conn", create=True, return_value=_Conn(cur)):
+            summary = adc.check_accepted_orders(registry=registry)
+        self.assertEqual(summary["skipped_no_adapter"], 1)
+        self.assertEqual(summary["checked"], 0)
+        self.assertFalse([sql for sql, _p in cur.executed if sql.startswith("UPDATE")], cur.executed)
+
+
 class TestOneMeaningOfSent(unittest.TestCase):
     def test_the_handover_switch_is_on(self):
         self.assertIs(adc.SENT_MEANS_POSTAL_HANDOVER_VERIFIED, True)

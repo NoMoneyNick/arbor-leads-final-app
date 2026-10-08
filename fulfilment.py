@@ -740,6 +740,12 @@ def mark_provider_result(cur, obligation_id: str, *, outcome: str, is_dry_run: b
         sets.append("content_fingerprint = %s")
         params.append(content_fingerprint)
 
+    if not is_dry_run:
+        # A real provider result means the order is no longer a dry run. The column defaults to
+        # TRUE at creation, so without this a genuinely accepted letter stayed flagged as a dry run
+        # for ever and the accepted-letter dispatch check could never select it.
+        sets.append("is_dry_run = FALSE")
+
     if is_dry_run:
         sets.append("status = 'dry_run'")
         sets.append("is_dry_run = TRUE")

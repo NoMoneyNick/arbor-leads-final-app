@@ -325,9 +325,15 @@ def attempt_send(cur, registry: ProviderRegistry, obligation_id: str, *, worker_
 
         if result.outcome in (OUTCOME_ACCEPTED, OUTCOME_DISPATCHED):
             outcome_key = "accepted" if result.outcome == OUTCOME_ACCEPTED else "dispatched"
+            # Record WHICH mode the provider accepted this in (same marker the unknown path stores),
+            # so the accepted-letter dispatch check can tell a live submission from a test-mode one.
+            # Only the marker is stored: never result.message (it can carry a signed PDF link).
+            mode = getattr(slot.adapter, "test_mode", None)
+            mode_note = f"[submitted_testmode={'true' if mode else 'false'}]" if isinstance(mode, bool) else None
             fulfilment.mark_provider_result(cur, obligation_id, outcome=outcome_key, is_dry_run=False,
                                              provider_name=result.provider_name,
                                              provider_reference=result.provider_reference,
+                                             error=mode_note,
                                              content_fingerprint=fingerprint)
             cost_note = ""
             if gate is not None and estimated_cost_pence is not None:
