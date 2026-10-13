@@ -827,6 +827,11 @@ def init_db():
             # transaction that consumes the record; also cleared when the
             # record expires. See create_magic_auth_token / verify_magic_auth_token.
             "ALTER TABLE contractor_auth_tokens ADD COLUMN IF NOT EXISTS pending_signup TEXT;",
+            # 13 Oct 2026: persistent login-link limits (login_link_limits.py). Salted visitor-address hash, never the raw address.
+            "ALTER TABLE contractor_auth_tokens ADD COLUMN IF NOT EXISTS requester_ip_hash TEXT;",
+            "CREATE INDEX IF NOT EXISTS idx_auth_email_created ON contractor_auth_tokens(customer_email, created_at);",
+            "CREATE INDEX IF NOT EXISTS idx_auth_ip_created ON contractor_auth_tokens(requester_ip_hash, created_at);",
+            "CREATE INDEX IF NOT EXISTS idx_auth_created ON contractor_auth_tokens(created_at);",
             # Sep 12 2026, Nick's ask ("give me a system that ... must be
             # logically sound" -> the exclusive-purchase reservation flow):
             # leads previously only had a 2-state status (new/claimed) with
@@ -7494,7 +7499,8 @@ def email_has_existing_account(email: str) -> bool:
         return True
 
 
-def create_magic_auth_token(email: str, pending_signup: Optional[dict] = None) -> Optional[dict]:
+def create_magic_auth_token(email: str, pending_signup: Optional[dict] = None,
+                             requester_ip: Optional[str] = None, enforce_limits: bool = False) -> Optional[dict]:
     """
     Generates a cryptographically secure 1-tap Magic Token and 6-digit OTP code.
     Valid for 15 minutes.
@@ -7502,6 +7508,14 @@ def create_magic_auth_token(email: str, pending_signup: Optional[dict] = None) -
     pending_signup: optional first-time-signup details (a JSON-able dict).
     Stored on this exact record only; nothing is saved to any account until
     the record is verified. Never returned to the caller.
+
+    enforce_limits (13 Oct 2026): the record is created ONLY if per-address, per-visitor and site-wide limits
+    (login_link_limits.py) all have room. The check and the insert are ONE statement taken under a Postgres
+    advisory lock, so simultaneous requests cannot slip past by each counting before either inserts.
+    Returns {"throttled": "<limit>", "email": ...} (no token) when a limit is full, and
+    {"unavailable": "limiter_error", "email": ...} (no token) if the limiter itself fails for ANY reason
+    (e.g. the requester_ip_hash column is missing): fail CLOSED, there is no unprotected fallback.
+    The caller must send no email in either case.
     """
     import secrets
     import random
@@ -7520,6 +7534,30 @@ def create_magic_auth_token(email: str, pending_signup: Optional[dict] = None) -
                 UPDATE contractor_auth_tokens SET pending_signup = NULL
                 WHERE pending_signup IS NOT NULL AND (used = TRUE OR expires_at <= NOW());
             """)
+            if enforce_limits:
+                import login_link_limits
+                email_norm = email.strip().lower()
+                try:
+                    limits = login_link_limits.get_limits()
+                    ip_hash = login_link_limits.hash_ip(requester_ip)
+                    cur.execute(login_link_limits.LOCK_SQL)
+                    cur.execute(login_link_limits.INSERT_IF_ALLOWED_SQL, login_link_limits.insert_params(
+                        email_norm, token, otp, json.dumps(pending_signup) if pending_signup else None, ip_hash, limits))
+                    row = cur.fetchone()
+                    if row is None:
+                        reason = login_link_limits.explain(cur, email_norm, ip_hash, limits)
+                        conn.commit()
+                        logger.warning(f"[Auth] Login link throttled ({reason}); no record created, no email sent.")
+                        return {"throttled": reason, "email": email_norm}
+                    conn.commit()
+                    return {"token": row[0], "otp": row[1], "email": email_norm}
+                except Exception as e:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    logger.error(f"[Auth] Login-link limiter failed ({type(e).__name__}: {e}); failing closed, no record created, no email sent.")
+                    return {"unavailable": "limiter_error", "email": email_norm}
             cur.execute("""
                 INSERT INTO contractor_auth_tokens (customer_email, token, otp_code, pending_signup)
                 VALUES (%s, %s, %s, %s)

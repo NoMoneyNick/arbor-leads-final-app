@@ -11,6 +11,7 @@ import datetime
 import time
 import threading
 import database
+import login_link_limits
 import scanners
 import research
 import payments
@@ -8184,6 +8185,7 @@ def login_page(request: Request, error: Optional[str] = None, next: Optional[str
 # and /api/signup from creating a login record or sending any email; both answer HTTP 503. Existing links and
 # codes already issued can still be used (verification routes are untouched). Unset or "false" = normal.
 _AUTH_PAUSED_MESSAGE = "Sign-in and sign-up emails are temporarily unavailable. Please try again later."
+_LOGIN_LINK_BUSY_MESSAGE = "We're receiving a lot of requests right now. Please wait a few minutes and try again."
 
 
 def _auth_emails_paused() -> bool:
@@ -8229,14 +8231,25 @@ async def request_magic_link(request: Request):
             err_redirect += f"&next={urllib.parse.quote(safe_next)}"
         return RedirectResponse(url=err_redirect, status_code=303)
 
-    # Generate cryptographic token & OTP
-    auth_data = database.create_magic_auth_token(contact)
+    # Generate cryptographic token & OTP. 13 Oct 2026: persistent per-address / per-visitor / site-wide limits are
+    # enforced inside this call (login_link_limits.py); it fails CLOSED if the limiter cannot run.
+    auth_data = database.create_magic_auth_token(contact, requester_ip=client_ip, enforce_limits=True)
     if not auth_data:
         err_redirect = "/login?error=Could+not+generate+login+link.+Please+try+again."
         if safe_next:
             err_redirect += f"&next={urllib.parse.quote(safe_next)}"
         return RedirectResponse(url=err_redirect, status_code=303)
 
+    if auth_data.get("unavailable"):
+        return _auth_paused_response(request)           # 503, nothing created, nothing sent
+    if auth_data.get("throttled") and login_link_limits.throttle_kind(auth_data["throttled"]) == "busy":
+        err_redirect = "/login?error=" + urllib.parse.quote_plus(_LOGIN_LINK_BUSY_MESSAGE)
+        if safe_next:
+            err_redirect += f"&next={urllib.parse.quote(safe_next)}"
+        return RedirectResponse(url=err_redirect, status_code=303)
+
+    # A per-address throttle falls through: _deliver_login_link shows the normal "Check Your Inbox" page without
+    # sending, so the response is the same for every address (no account-existence leak).
     return _deliver_login_link(request, contact, auth_data, safe_next)
 
 
@@ -8270,10 +8283,13 @@ def _deliver_login_link(request: Request, contact: str, auth_data: dict, safe_ne
     # below -- both require genuine access to the `contact` inbox.
     if _auth_emails_paused():           # belt and braces: this is the only place the login email is sent
         return _auth_paused_response(request)
-    magic_url = f"{payments.PUBLIC_APP_URL}/verify-login?token={auth_data['token']}"
+    # 13 Oct 2026: auth_data["throttled"] = a send limit was full: no record exists and no email is sent, but the page
+    # below is identical so nobody can probe which addresses have accounts.
+    throttled = bool(auth_data.get("throttled"))
+    magic_url = f"{payments.PUBLIC_APP_URL}/verify-login?token={auth_data.get('token', '')}"
     if safe_next:
         magic_url += f"&next={urllib.parse.quote(safe_next)}"
-    otp_code = auth_data["otp"]
+    otp_code = auth_data.get("otp", "")
 
     # Send Magic Link via Resend Email
     import notifications
@@ -8301,7 +8317,8 @@ def _deliver_login_link(request: Request, contact: str, auth_data: dict, safe_ne
     # than whoever's email happens to be TEST_EMAIL ever actually received
     # their login link. The whole login flow was silently broken for every
     # real contractor. Now sends directly to the contractor's own address.
-    notifications.send_transactional_email(to_email=contact, subject="Your TreeKey 1-Tap Login Link", html_body=email_body)
+    if not throttled:
+        notifications.send_transactional_email(to_email=contact, subject="Your TreeKey 1-Tap Login Link", html_body=email_body)
 
     # Sep 8 2026 SECURITY FIX: the OTP used to be echoed right back onto
     # this confirmation page -- meaning anyone with access to this browser
@@ -8374,7 +8391,7 @@ def _deliver_login_link(request: Request, contact: str, auth_data: dict, safe_ne
     # non-empty string here (create_magic_auth_token already returned
     # early above if it failed), so this can never false-negative on an
     # empty/falsy token.
-    assert auth_data["token"] not in page_html, "magic-link token must never appear in the HTTP response"
+    assert throttled or auth_data["token"] not in page_html, "magic-link token must never appear in the HTTP response"
     return HTMLResponse(page_html)
 
 
@@ -8733,9 +8750,13 @@ async def first_time_signup(request: Request):
             "terms_accepted_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "letter": letter_fields,
         }
-    auth_data = database.create_magic_auth_token(email, pending_signup=pending)
+    auth_data = database.create_magic_auth_token(email, pending_signup=pending, requester_ip=client_ip, enforce_limits=True)
     if not auth_data:
         return _fail("We could not send your confirmation link. Please try again.")
+    if auth_data.get("unavailable"):
+        return _auth_paused_response(request)
+    if auth_data.get("throttled") and login_link_limits.throttle_kind(auth_data["throttled"]) == "busy":
+        return _fail(_LOGIN_LINK_BUSY_MESSAGE)
     return _deliver_login_link(request, email, auth_data, safe_next)
 
 
