@@ -8105,6 +8105,8 @@ def login_page(request: Request, error: Optional[str] = None, next: Optional[str
     # emojis" -- brought onto the same dark Tailwind design system as the
     # homepage/marketplace (shared nav/footer, dark input styling, SVG
     # brand mark instead of the emoji, SVG lock instead of ).
+    if _auth_emails_paused() and not error:
+        error = html.escape(_AUTH_PAUSED_MESSAGE)
     err_html = f"""<div class="bg-red-950/40 border border-red-500/40 text-red-300 px-3.5 py-2.5 rounded-lg mb-4 text-sm">{error}</div>""" if error else ""
     # Sep 15 2026: carries a validated `next` target (e.g. a lead checkout
     # URL, from the marketplace's "Already a member? Sign in for your
@@ -8177,8 +8179,38 @@ def login_page(request: Request, error: Optional[str] = None, next: Optional[str
     """
 
 
+# 13 Oct 2026: EMERGENCY PAUSE for emailed sign-in / sign-up links. Set AUTH_EMAILS_PAUSED=true in Render
+# (read on every request, no redeploy of code needed beyond Render's own restart) to stop /api/request-magic-link
+# and /api/signup from creating a login record or sending any email; both answer HTTP 503. Existing links and
+# codes already issued can still be used (verification routes are untouched). Unset or "false" = normal.
+_AUTH_PAUSED_MESSAGE = "Sign-in and sign-up emails are temporarily unavailable. Please try again later."
+
+
+def _auth_emails_paused() -> bool:
+    return os.getenv("AUTH_EMAILS_PAUSED", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _auth_paused_response(request: Request):
+    page = (
+        '<!DOCTYPE html><html lang="en-GB"><head><meta charset="UTF-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+        '<title>Temporarily unavailable | TreeKey</title>'
+        '<link rel="icon" href="/static/icon-192.png"><link href="/static/tailwind.css" rel="stylesheet"></head>'
+        '<body class="bg-brand-dark text-slate-300 font-sans antialiased min-h-screen">'
+        + _shared_nav_html(request) +
+        '<div class="px-4 py-10 sm:py-16"><div class="max-w-[440px] mx-auto bg-slate-900 border border-slate-800 '
+        'rounded-2xl p-8 shadow-2xl text-center"><h2 class="text-white text-xl font-bold m-0 mb-1.5">'
+        'Temporarily unavailable</h2><p class="text-slate-400 text-sm leading-relaxed">'
+        + html.escape(_AUTH_PAUSED_MESSAGE) +
+        '</p></div></div>' + _shared_footer_html() + '</body></html>'
+    )
+    return HTMLResponse(page, status_code=503, headers={"Retry-After": "900"})
+
+
 @app.post("/api/request-magic-link")
 async def request_magic_link(request: Request):
+    if _auth_emails_paused():
+        return _auth_paused_response(request)
     client_ip = request.client.host if request.client else "unknown"
     if not _check_rate_limit(client_ip):
         return RedirectResponse(url="/login?error=Too+many+attempts.+Please+wait+a+minute+and+try+again.", status_code=303)
@@ -8236,6 +8268,8 @@ def _deliver_login_link(request: Request, contact: str, auth_data: dict, safe_ne
     # the ONLY ways to complete login are (a) actually opening the emailed
     # link, or (b) typing the OTP code from that same email into the form
     # below -- both require genuine access to the `contact` inbox.
+    if _auth_emails_paused():           # belt and braces: this is the only place the login email is sent
+        return _auth_paused_response(request)
     magic_url = f"{payments.PUBLIC_APP_URL}/verify-login?token={auth_data['token']}"
     if safe_next:
         magic_url += f"&next={urllib.parse.quote(safe_next)}"
@@ -8569,6 +8603,8 @@ def free_account_signup_page(request: Request, error: Optional[str] = None, next
     to sign up for and they simply continue."""
     session_email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
     if not session_email:
+        if _auth_emails_paused() and not error:
+            error = _AUTH_PAUSED_MESSAGE
         return _first_time_signup_page_html(request, error=error, next=next)
     try:
         conn = database.get_db_conn()
@@ -8669,6 +8705,8 @@ async def first_time_signup(request: Request):
     already has an account gets an ordinary login link and its details are
     never touched; the response is identical either way, so this form does
     not reveal whether an address is registered."""
+    if _auth_emails_paused():
+        return _auth_paused_response(request)
     client_ip = request.client.host if request.client else "unknown"
     if not _check_rate_limit(client_ip):
         return HTMLResponse(_first_time_signup_page_html(request, error="Too many attempts. Please wait a minute and try again."), status_code=429)
