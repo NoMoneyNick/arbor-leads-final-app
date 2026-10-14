@@ -101,32 +101,41 @@ def _record_email_attempt(success: bool, error: Optional[str]):
         pass
 
 
-def send_resend_email(subject: str, html_body: str) -> bool:
+def send_resend_email(subject: str, html_body: str, attachments=None, idempotency_key: Optional[str] = None) -> bool:
     """Sends an email alert via the Resend API. Returns True only on a
     confirmed successful send -- callers (notably send_system_incident_alert's
     throttle and its own "Sent" log line) previously assumed this always
     succeeded, which meant a real failure (e.g. today's unverified-domain
     403s) was logged as "Sent" and silently started the alert's throttle
     window anyway, delaying the NEXT attempt by hours even though nothing
-    had actually gone out."""
+    had actually gone out.
+
+    14 Oct 2026: attachments / idempotency_key are optional and used only by the daily internal digests
+    (internal_digest.py); every other caller is unchanged."""
     if not RESEND_API_KEY or not TEST_EMAIL:
         logging.warning("[Email] RESEND_API_KEY or TEST_EMAIL not set — skipping.")
         _record_email_attempt(False, "RESEND_API_KEY or TEST_EMAIL not configured")
         return False
     try:
+        _headers = {
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        if idempotency_key:
+            _headers["Idempotency-Key"] = idempotency_key
+        _payload = {
+            "from": "TreeKey Intelligence <leads@mail.treekey.co.uk>",
+            "to": [TEST_EMAIL],
+            "subject": subject,
+            "html": html_body
+        }
+        if attachments:
+            _payload["attachments"] = attachments
         res = requests.post(
             "https://api.resend.com/emails",
-            headers={
-                "Authorization": f"Bearer {RESEND_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "from": "TreeKey Intelligence <leads@mail.treekey.co.uk>",
-                "to": [TEST_EMAIL],
-                "subject": subject,
-                "html": html_body
-            },
-            timeout=10
+            headers=_headers,
+            json=_payload,
+            timeout=20 if attachments else 10
         )
         if res.status_code not in (200, 201):
             logging.error(f"[Email] Resend returned {res.status_code}: {res.text[:200]}")
@@ -1038,7 +1047,8 @@ def dispatch_lead_alerts(city: str, leads: list):
     shows only the same redacted area-level info the Marketplace's own
     pre-purchase cards show.
 
-    Also still sends the admin master digest for a big batch, unchanged.
+    14 Oct 2026: the admin notification to Nick is no longer sent here. Every new lead is queued once for the ONE daily
+    new-leads digest (internal_digest.py, 08:00 UK). Subscriber (customer) alerts above are unchanged.
     """
     if not leads:
         return
@@ -1277,54 +1287,23 @@ def dispatch_lead_alerts(city: str, leads: list):
             except Exception as e:
                 logging.error(f"[Purchase Alert] Failed to alert {email}: {e}")
 
-    # 2. Master Digest for Admin
-    if len(leads) > ALERT_BATCH_THRESHOLD:
-        rows = "".join([
-            f"<tr>"
-            f"<td style='padding:6px;'>{SCORE_TAG.get(l.get('lead_score','small'), '')}</td>"
-            f"<td style='padding:6px;'><b>{l['addr']}</b></td>"
-            f"<td style='padding:6px;'>{l['summary'][:80]}...</td>"
-            f"<td style='padding:6px; font-weight:bold;'>£{l.get('lead_price', 25)}</td>"
-            f"</tr>"
-            for l in leads[:15]
-        ])
-        body = f"""
-            <h2>{city} Admin Lead Digest — {len(leads)} New Leads</h2>
-            <p>Total leads routed to customers this cycle: {sum(len(v) for v in customer_leads.values())}</p>
-            <table border='1' cellspacing='0' style='border-collapse:collapse; width:100%;'>
-                <tr style='background:#f4f4f9;'>
-                    <th style='padding:6px;'>Grade</th>
-                    <th style='padding:6px;'>Location</th>
-                    <th style='padding:6px;'>Description</th>
-                    <th style='padding:6px;'>Value</th>
-                </tr>
-                {rows}
-            </table>
-        """
-        send_resend_email(f"ADMIN: {city} Digest: {len(leads)} New Tree Surgery Leads", body)
-    else:
-        # Individual emails per lead
+    # 2. Admin notification: queued for the ONE daily new-leads digest (internal_digest.py, 08:00 UK).
+    # 14 Oct 2026: this used to email Nick once per city batch, or once PER LEAD, which used up the Resend free quota.
+    # Customer emails above are untouched. Each lead ref is queued once, ever.
+    try:
+        import internal_digest
+        _rows = []
         for lead in leads:
-            score = lead.get("lead_score", "small")
-            price = lead.get("lead_price", 25)
-            wa = create_whatsapp_link(
-                lead["ref"], city, lead["addr"], lead["summary"], score, price
-            )
-            body = f"""
-                <h3>New Tree Surgery Lead — {lead['addr']}</h3>
-                <p><b>City:</b> {city}</p>
-                <p><b>Ref:</b> {lead['ref']}</p>
-                <p><b>Description:</b> {lead['summary']}</p>
-                <p><b>Grade:</b> {SCORE_LABEL.get(score, 'Small')} &nbsp; <b>Value: £{price}</b></p>
-                <p><b>Agent/contractor on record:</b> {_agent_status_badge(lead)}</p>
-                <p><a href='{wa}' style='background:#25D366; color:white; padding:10px 20px;
-                   border-radius:8px; text-decoration:none;'>Forward on WhatsApp</a></p>
-                <p><a href='{PUBLIC_APP_URL or "#"}'>Open Dashboard →</a></p>
-            """
-            send_resend_email(
-                f"New {score.title()} Lead: {lead['addr']} (£{price})",
-                body
-            )
+            try:
+                _wa = create_whatsapp_link(lead["ref"], city, lead["addr"], lead["summary"], lead.get("lead_score", "small"), lead.get("lead_price", 25))
+            except Exception:
+                _wa = ""
+            _rows.append({"ref": lead.get("ref"), "city": city, "addr": lead.get("addr", ""), "summary": lead.get("summary", ""),
+                          "score": SCORE_TAG.get(lead.get("lead_score", "small"), "Small"), "price": lead.get("lead_price", 25), "link": _wa})
+        if not internal_digest.enqueue_leads(_rows):
+            logging.error(f"[Lead Alerts] {city}: could not queue {len(leads)} lead(s) for the daily digest -- they remain in the dashboard.")
+    except Exception as e:
+        logging.error(f"[Lead Alerts] {city}: internal digest queueing error: {e}")
 
 
 def send_api_quota_warning_email(
@@ -1338,6 +1317,24 @@ def send_api_quota_warning_email(
     Dispatches an ultra-bold, high-visibility warning email in ALL CAPS
     when API usage pace is calculated to breach the 500-request limit.
     """
+    try:
+        import internal_digest
+        if internal_digest.enqueue_issue(
+                "SCANNER", "API QUOTA", f"{api_name.upper()} NEARING MONTHLY CAP", description=f"{current_calls}/{cap} calls used; projected {projected_monthly} this month. {reason}",
+                impact="Planning-lead scanning stops when the monthly cap is reached.", action="Upgrade the plan or reduce prefixes queried before the cap is hit.",
+                severity="CRITICAL", source=api_name.upper(), metrics={"Used": current_calls, "Cap": cap, "Projected": projected_monthly}):
+            logging.warning(f"[QUOTA WARNING] Queued for the daily scanner digest: {api_name} ({current_calls}/{cap}).")
+            return
+    except Exception as _e:
+        logging.error(f"[QUOTA WARNING] Could not queue ({_e}); sending immediately instead.")
+    try:
+        import internal_digest
+        _fb_ok = internal_digest.fallback_allowed("QUOTA:" + api_name)
+    except Exception:
+        _fb_ok = False                      # fail closed: no durable limit, no fallback email
+    if not _fb_ok:
+        logging.warning(f"[QUOTA WARNING] queue unavailable and no fallback email allowed for {api_name} (cap reached or limit cannot be checked).")
+        return
     pct = round((current_calls / max(cap, 1)) * 100, 1)
     subject = f"[CRITICAL WARNING] UPGRADE REQUIRED: {api_name.upper()} REACHING 500 CAP ({current_calls}/{cap} USED) "
     html_body = f"""
@@ -1414,6 +1411,30 @@ def send_api_quota_warning_email(
 import time
 _ALERT_THROTTLE_CACHE = {}
 
+
+def _alert_state_key(cache_key: str) -> str:
+    import hashlib
+    return "alert_sent:" + hashlib.sha1(cache_key.encode()).hexdigest()[:20]
+
+
+def _persisted_alert_ts(cache_key: str) -> float:
+    """14 Oct 2026: the throttle above is in-memory, so every redeploy/restart re-sent the same immediate alert. The last-sent
+    time is now also kept in system_state (survives restarts). Any problem reading it -> 0 (never blocks an alert)."""
+    try:
+        import database
+        v = database.get_system_state(_alert_state_key(cache_key))
+        return float(v) if isinstance(v, str) else 0.0
+    except Exception:
+        return 0.0
+
+
+def _persist_alert_ts(cache_key: str, ts: float) -> None:
+    try:
+        import database
+        database.set_system_state(_alert_state_key(cache_key), repr(float(ts)))
+    except Exception:
+        pass
+
 def send_system_incident_alert(
     category: str,
     title: str,
@@ -1474,7 +1495,27 @@ def send_system_incident_alert(
         logging.info(f"[SYSTEM WARNING LOGGED] {cache_key} logged (see send_daily_warning_digest for emailing).")
         return
 
-    last_sent = _ALERT_THROTTLE_CACHE.get(cache_key, 0)
+    # 14 Oct 2026: routine scanner/search failures are queued for the ONE daily scanner digest (internal_digest.py).
+    # Security, database, payment/billing and unrecognised CRITICAL alerts stay immediate (below). If queueing fails
+    # the alert is still sent immediately, so nothing is lost.
+    try:
+        import internal_digest
+        _topic = internal_digest.digest_topic_for_critical(category)
+        if _topic and internal_digest.enqueue_issue(_topic, category, title, description=description, impact=impact, action=action_required,
+                                                    severity=severity, metrics=metric_details):
+            logging.info(f"[ALERT QUEUED] {cache_key} added to the daily {_topic} digest.")
+            return
+        if _topic:
+            # The queue itself is unavailable (e.g. database outage). The item is held in memory for the next digest; an
+            # immediate email is allowed only within a tight cap stored in the database (3/hour, 6/day, each alert once per 24h); if
+            # that limit cannot be checked (database down) NO fallback email is sent.
+            if not internal_digest.fallback_allowed(cache_key):
+                logging.warning(f"[ALERT HELD] {cache_key}: queue unavailable and fallback email cap reached; kept for the next digest.")
+                return
+    except Exception as _e:
+        logging.error(f"[ALERT] digest routing error for {cache_key}: {_e}")
+
+    last_sent = max(_ALERT_THROTTLE_CACHE.get(cache_key, 0), _persisted_alert_ts(cache_key))
     if (now_ts - last_sent) < (throttle_hours * 3600):
         logging.info(f"[ALERT THROTTLED] Suppressed duplicate alert for {cache_key} (sent {round((now_ts - last_sent)/60)}m ago).")
         return
@@ -1545,6 +1586,7 @@ def send_system_incident_alert(
     sent_ok = send_resend_email(subject, html_body)
     if sent_ok:
         _ALERT_THROTTLE_CACHE[cache_key] = now_ts
+        _persist_alert_ts(cache_key, now_ts)
         logging.warning(f"[SYSTEM INCIDENT ALERT] Sent {severity} email for {category}: {title} to {TEST_EMAIL}")
     else:
         logging.error(f"[SYSTEM INCIDENT ALERT] FAILED to send {severity} email for {category}: {title} — not throttling, will retry on next occurrence.")
@@ -1583,82 +1625,11 @@ _last_digest_sent_ts = 0.0
 
 
 def send_daily_warning_digest() -> bool:
-    """Sep 8 2026, Nick's ask (verbatim: "everyday i am getting emails ...
-    this is extremely serious and needs a permanent fix not a temporary
-    [one] ... build fail safe systems that put the whole thing back on
-    track automatically"): the single daily email that replaced individual
-    per-council WARNING escalation emails. Reads database.
-    get_all_recurring_warnings() (every category+title that's recurred 3+
-    of the last 7 days AND fired within the last 24h) and sends ONE email
-    listing all of them, grouped by category with plain-English context on
-    what each category actually means (see _WARNING_CATEGORY_CONTEXT) --
-    instead of a dozen+ separate "RECURRING" emails hitting his inbox
-    within the same hour. Sends nothing at all on a quiet day (empty
-    list). Called once per autonomous daily cycle (main.py's
-    _check_for_silent_source_failures neighbour) -- not a new cron entry
-    Nick has to remember to set up, it rides the existing once-a-day
-    cycle. Throttled to 20h independently of that cycle's own timing as a
-    safety net against ever double-sending in one day."""
-    global _last_digest_sent_ts
-    now_ts = time.time()
-    if (now_ts - _last_digest_sent_ts) < (_DIGEST_THROTTLE_HOURS * 3600):
-        logging.info("[WARNING DIGEST] Skipped — already sent within the last %.0fh.", _DIGEST_THROTTLE_HOURS)
-        return False
-
-    try:
-        import database
-        recurring = database.get_all_recurring_warnings(window_days=7, min_days=3, active_within_hours=24)
-    except Exception as e:
-        logging.error(f"[WARNING DIGEST] Failed to fetch recurring warnings: {e}")
-        return False
-
-    if not recurring:
-        logging.info("[WARNING DIGEST] Nothing currently recurring — no email sent.")
-        return False
-
-    by_category = {}
-    for w in recurring:
-        by_category.setdefault(w["category"], []).append(w)
-
-    sections_html = ""
-    for category, items in sorted(by_category.items()):
-        context = _WARNING_CATEGORY_CONTEXT.get(category, "")
-        rows = "".join([
-            f"<tr><td style='padding:6px 0; color:#0f172a; font-weight:700;'>{w['title']}</td>"
-            f"<td style='padding:6px 0; text-align:right; color:#64748b; white-space:nowrap;'>{w['days_seen']}/7 days</td></tr>"
-            for w in sorted(items, key=lambda w: -w["days_seen"])
-        ])
-        sections_html += f"""
-        <div style="margin-bottom:22px;">
-            <div style="font-size:13px; font-weight:800; color:#0f172a; text-transform:uppercase; margin-bottom:4px;">{category} ({len(items)})</div>
-            {f'<p style="font-size:12px; color:#64748b; margin:0 0 8px 0;">{context}</p>' if context else ''}
-            <table style="width:100%; border-collapse:collapse; font-size:13px; border-top:1px solid #e2e8f0;">{rows}</table>
-        </div>
-        """
-
-    total = len(recurring)
-    subject = f"Daily warning digest — {total} recurring issue{'s' if total != 1 else ''}"
-    html_body = f"""
-    <div style="font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width:640px; margin:auto; padding:0; border:2px solid #cbd5e1; border-radius:14px; overflow:hidden; background:#ffffff;">
-        <div style="background:#0f172a; color:#ffffff; padding:20px; text-align:center;">
-            <h1 style="margin:0; font-size:18px; font-weight:800;">Daily Warning Digest</h1>
-            <p style="margin:6px 0 0 0; font-size:13px; opacity:0.85;">{total} issue{'s' if total != 1 else ''} currently recurring across the last 7 days — one email, not one per issue.</p>
-        </div>
-        <div style="padding:24px 22px;">
-            {sections_html}
-            <p style="font-size:12px; color:#94a3b8; text-align:center; margin-top:8px;">
-                Vector Data Labs Automated Resilience Sentry • Host: Render Production
-            </p>
-        </div>
-    </div>
-    """
-    sent_ok = send_resend_email(subject, html_body)
-    if sent_ok:
-        _last_digest_sent_ts = now_ts
-        logging.warning(f"[WARNING DIGEST] Sent digest covering {total} recurring issue(s) to {TEST_EMAIL}.")
-    else:
-        logging.error("[WARNING DIGEST] FAILED to send — not throttling, will retry on next cycle.")
-    return sent_ok
+    """14 Oct 2026: superseded. Recurring warnings are now included, by topic, in the daily digests sent by
+    internal_digest.run_due_digests() (08:00 UK, one email per non-empty topic). Kept so old callers do not break;
+    it sends nothing."""
+    logging.info("[WARNING DIGEST] Superseded by internal_digest daily topic digests -- nothing sent here.")
+    return False
 
 
 def send_non_tree_leak_digest(flagged: list) -> bool:
@@ -1681,38 +1652,16 @@ def send_non_tree_leak_digest(flagged: list) -> bool:
     if not flagged:
         logging.info("[NON-TREE LEAK DIGEST] Nothing newly flagged — no email sent.")
         return False
-
-    total = len(flagged)
-    rows_html = "".join([
-        f"<tr><td style='padding:6px 0; color:#0f172a; font-weight:700; font-family:monospace; font-size:12px;'>{reference or ''}</td>"
-        f"<td style='padding:6px 0 6px 12px; color:#334155; font-size:13px;'>{(summary or '')[:160]}</td>"
-        f"<td style='padding:6px 0 6px 12px; color:#64748b; font-size:11px; white-space:nowrap;'>{status or '(new)'}</td></tr>"
-        for reference, summary, status in flagged
-    ])
-    subject = f"{total} new possible non-tree lead{'s' if total != 1 else ''} worth a look"
-    html_body = f"""
-    <div style="font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width:640px; margin:auto; padding:0; border:2px solid #cbd5e1; border-radius:14px; overflow:hidden; background:#ffffff;">
-        <div style="background:#0f172a; color:#ffffff; padding:20px; text-align:center;">
-            <h1 style="margin:0; font-size:18px; font-weight:800;">Non-Tree Leak Check</h1>
-            <p style="margin:6px 0 0 0; font-size:13px; opacity:0.85;">{total} lead{'s' if total != 1 else ''} in the tree bucket newly mention a building-fabric/other-development term (chimney, extension, driveway, etc.) — flagged automatically today, not yet reviewed.</p>
-        </div>
-        <div style="padding:24px 22px;">
-            <table style="width:100%; border-collapse:collapse; border-top:1px solid #e2e8f0;">{rows_html}</table>
-            <p style="font-size:12px; color:#64748b; margin-top:16px; line-height:1.5;">
-                This is a "worth checking" signal, not a verdict — a real tree lead can rarely mention one of these words incidentally (e.g. clearance from a chimney). Read each summary, then use the links below for anything genuinely not tree work. Each of these is reported here once and won't repeat tomorrow even if left as-is.
-            </p>
-            <p style="text-align:center; margin-top:8px;">
-                <a href="{PUBLIC_APP_URL}/admin/vertical-audit" style="color:#059669; font-weight:700; text-decoration:none; font-size:13px;">Review in Vertical Audit →</a>
-            </p>
-            <p style="font-size:12px; color:#94a3b8; text-align:center; margin-top:16px;">
-                Vector Data Labs Automated Resilience Sentry • Host: Render Production
-            </p>
-        </div>
-    </div>
-    """
-    sent_ok = send_resend_email(subject, html_body)
-    if sent_ok:
-        logging.warning(f"[NON-TREE LEAK DIGEST] Sent digest covering {total} newly-flagged lead(s) to {TEST_EMAIL}.")
-    else:
-        logging.error("[NON-TREE LEAK DIGEST] FAILED to send — leads stay flagged, will retry next cycle since they aren't marked seen until the email is at least attempted... see caller.")
-    return sent_ok
+    # 14 Oct 2026: queued for the daily SYSTEM digest instead of a separate email. True = safely stored (the caller
+    # then marks these leads as reported); False = not stored, so the caller leaves them unmarked and retries next cycle.
+    try:
+        import internal_digest
+        notes = [{"key": reference, "title": reference or "(no reference)", "detail": f"{(summary or '')[:160]} [{status or 'new'}]",
+                  "link": f"{PUBLIC_APP_URL}/admin/vertical-audit" if PUBLIC_APP_URL else ""} for reference, summary, status in flagged if reference]
+        ok = internal_digest.enqueue_notes("SYSTEM", notes)
+    except Exception as e:
+        logging.error(f"[NON-TREE LEAK DIGEST] could not queue: {e}")
+        ok = False
+    if ok:
+        logging.warning(f"[NON-TREE LEAK DIGEST] Queued {len(flagged)} newly-flagged lead(s) for the daily system digest.")
+    return ok

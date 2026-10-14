@@ -12193,6 +12193,11 @@ def run_master_daily_pipeline():
                 except Exception as leeds_e:
                     logger.error(f"[PIPELINE] Stage 1 Leeds ArcGIS error: {leeds_e}")
         logger.info(f"[PIPELINE] Stage 1 Complete: All UK regions scanned ({total_leads_scanned} planning leads processed).")
+        try:
+            import internal_digest
+            internal_digest.mark_resolved("SCANNER", "AUTOMATED SCRAPER PIPELINE", "DAILY PLANNING RADAR SWEEP (STAGE 1) FAILED")
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"[PIPELINE] Stage 1 error: {e}")
         import notifications
@@ -12347,11 +12352,8 @@ def run_full_autonomous_cycle():
     # Rides this existing once-a-day cycle rather than needing a new
     # cron-job.org entry -- see notifications.send_daily_warning_digest's
     # own docstring for the full reasoning.
-    try:
-        import notifications
-        notifications.send_daily_warning_digest()
-    except Exception as e:
-        logger.error(f"[AUTO] Daily warning digest error: {e}")
+    # 14 Oct 2026: recurring warnings now go out inside the daily topic digests (internal_digest.py, scheduler
+    # tick above), so this cycle no longer sends its own email.
 
     # Sep 11 2026, Nick's ask (verbatim): "these systems should kick in in
     # sync, in order and repeat day after day autonomously. not just this
@@ -12522,6 +12524,14 @@ def _autonomous_scheduler_loop():
         except Exception as e:
             logger.error(f"[AUTO] Accepted-letter status check error: {e}")
         try:
+            # 14 Oct 2026: daily internal digests to Nick (new leads, scanner issues, billing, security, system) -- at most
+            # one email per non-empty topic per day, from 08:00 Europe/London. Isolated so it can never stop the rest of
+            # this tick; returns at once before 08:00 and once each topic is done for the day. See internal_digest.py.
+            import internal_digest
+            internal_digest.run_due_digests()
+        except Exception as e:
+            logger.error(f"[AUTO] Internal digest error: {e}")
+        try:
             # 2026-09-23, Request F ("ensure the purge schedule matches the
             # published 72-hour commitment -- a daily sweep of records
             # already 72 hours old is insufficient"): this was previously
@@ -12574,6 +12584,13 @@ def _autonomous_scheduler_loop():
 
 @app.on_event("startup")
 def _start_autonomous_scheduler():
+    try:
+        # 14 Oct 2026: record the durable lead cut-over for the internal digests BEFORE any scan can save a lead. Retried on
+        # every scheduler tick and before any lead is queued if the database is not reachable right now.
+        import internal_digest
+        internal_digest.ensure_cutover()
+    except Exception as e:
+        logger.error(f"[InternalDigest] startup cut-over failed: {e}")
     threading.Thread(target=_autonomous_scheduler_loop, daemon=True).start()
     logger.info("[AUTO] Autonomous scheduler thread started -- no manual scanning/enriching needed going forward.")
 
@@ -12625,6 +12642,11 @@ def _dispatch_locked_scan(target_fn, action_name: str, precheck=None) -> dict:
     def _wrapped():
         try:
             target_fn()
+            try:
+                import internal_digest
+                internal_digest.mark_resolved("SCANNER", "AUTONOMOUS CYCLE", f"{action_name.upper()} CRASHED BEFORE FINISHING")
+            except Exception:
+                pass
         except Exception as e:
             logger.error(f"[{action_name}] Unhandled error: {e}")
             # Sep 12 2026: this used to be a silent log-only catch. Found
