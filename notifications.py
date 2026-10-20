@@ -4,6 +4,7 @@ import urllib.parse
 import logging
 from typing import Optional, Dict, Any, Tuple, List
 from dotenv import load_dotenv
+import email_layout   # shared branded email design (tables + inline CSS) -- see email_layout.py
 
 
 load_dotenv()
@@ -23,24 +24,24 @@ def _teaser_pricing_note_html() -> str:
     """Closing note on the teaser lead email. Subscription wording only while
     subscription sales are on; otherwise points at the one-off marketplace."""
     if _subscription_sales_open():
-        return f'''<p style="font-size:13px; color:#64748b; border-top:1px solid #e5e7eb; padding-top:14px; margin-top:4px;">
-            Jobs like this land in our system daily. <a href="{PUBLIC_APP_URL}/pricing" style="color:#059669; font-weight:bold;">Subscribe from £29/mo</a> and get matching leads sent to you automatically, instead of waiting or paying one at a time.
+        return f'''<p style="font-size:13px; color:#667269; border-top:1px solid #d1d4bf; padding-top:14px; margin-top:4px;">
+            Jobs like this land in our system daily. <a href="{PUBLIC_APP_URL}/pricing" style="color:#846022; font-weight:bold;">Subscribe from £29/mo</a> and get matching leads sent to you automatically, instead of waiting or paying one at a time.
         </p>'''
-    return f'''<p style="font-size:13px; color:#64748b; border-top:1px solid #e5e7eb; padding-top:14px; margin-top:4px;">
-            Jobs like this land in our system daily. <a href="{PUBLIC_APP_URL}/marketplace" style="color:#059669; font-weight:bold;">Browse the marketplace</a> to see current opportunities.
+    return f'''<p style="font-size:13px; color:#667269; border-top:1px solid #d1d4bf; padding-top:14px; margin-top:4px;">
+            Jobs like this land in our system daily. <a href="{PUBLIC_APP_URL}/marketplace" style="color:#846022; font-weight:bold;">Browse the marketplace</a> to see current opportunities.
         </p>'''
 
 
 def _teaser_plans_note_html() -> str:
     """Closing note on the free-list teaser email (same switch as above)."""
     if _subscription_sales_open():
-        return '''<p style="font-size: 13px; color: #64748b;">
+        return '''<p style="font-size: 13px; color: #667269;">
             Subscribe to get jobs like this the moment they're filed, not after we've teased it to you:
-            <a href="https://treekey.co.uk/pricing" style="color:#059669; font-weight:bold;">See plans →</a>
+            <a href="https://treekey.co.uk/pricing" style="color:#846022; font-weight:bold;">See plans →</a>
         </p>'''
-    return '''<p style="font-size: 13px; color: #64748b;">
+    return '''<p style="font-size: 13px; color: #667269;">
             Want to see more jobs like this?
-            <a href="https://treekey.co.uk/marketplace" style="color:#059669; font-weight:bold;">Browse the marketplace →</a>
+            <a href="https://treekey.co.uk/marketplace" style="color:#846022; font-weight:bold;">Browse the marketplace →</a>
         </p>'''
 ALERT_BATCH_THRESHOLD = 5
 
@@ -58,7 +59,7 @@ _NOT_WHAT_YOU_EXPECTED_HTML = (
     '<b>Not what you were expecting?</b> Every lead is filtered to confirm '
     "it's genuine tree work before it reaches you, so this is rare — but if "
     'this one isn\'t, screenshot it and email <a href="mailto:contact@treekey.co.uk" '
-    'style="color:#059669;">contact@treekey.co.uk</a> and we\'ll issue a correct '
+    'style="color:#846022;">contact@treekey.co.uk</a> and we\'ll issue a correct '
     'lead or a refund.'
 )
 
@@ -72,10 +73,10 @@ def _agent_status_badge(lead: dict) -> str:
     unknown, never as "confirmed no agent"."""
     has_agent = lead.get("has_agent")
     if has_agent is True:
-        return "<span style='color:#b45309; font-weight:bold;'>Agent on record</span>"
+        return "<span style='color:#9a5b13; font-weight:bold;'>Agent on record</span>"
     if has_agent is False:
-        return "<span style='color:#059669;'>No agent listed</span>"
-    return "<span style='color:#94a3b8;'>— Unconfirmed</span>"
+        return "<span style='color:#2e6b46;'>No agent listed</span>"
+    return "<span style='color:#8a948c;'>— Unconfirmed</span>"
 
 
 def _record_email_attempt(success: bool, error: Optional[str]):
@@ -240,10 +241,10 @@ def _street_view_link_html(address: str) -> str:
     # neighbouring building instead. Said plainly so nobody mistakes it for
     # a guarantee.
     caveat = (
-        ' <span style="color:#94a3b8; font-size:12px;">(imagery may be out of date or not show the exact property)</span>'
+        ' <span style="color:#8a948c; font-size:12px;">(imagery may be out of date or not show the exact property)</span>'
         if is_pano else ""
     )
-    return f'To {verb}, click here: <a href="{url}" style="color: #0ea5e9;">{label}</a>{caveat}'
+    return f'To {verb}, click here: <a href="{url}" style="color: #846022;">{label}</a>{caveat}'
 
 
 def _format_filed_date(registered_date) -> str:
@@ -291,13 +292,13 @@ def _free_tools_and_subscribe_html(reference: str, address_release_allowed: bool
     already stopped making."""
     ref_q = requests.utils.quote(reference or "")
     if address_release_allowed:
-        tools_html = f"""<a href="{PUBLIC_APP_URL}/generate-letter/{ref_q}" style="color:#059669; font-weight:bold; margin-right:16px;">Generate a homeowner intro letter →</a>
-                <a href="{PUBLIC_APP_URL}/generate-street-flyer/{ref_q}" style="color:#059669; font-weight:bold;">Generate a street flyer →</a>"""
+        tools_html = f"""<a href="{PUBLIC_APP_URL}/generate-letter/{ref_q}" style="color:#846022; font-weight:bold; margin-right:16px;">Generate a homeowner intro letter →</a>
+                <a href="{PUBLIC_APP_URL}/generate-street-flyer/{ref_q}" style="color:#846022; font-weight:bold;">Generate a street flyer →</a>"""
     else:
-        tools_html = f"""<a href="{PUBLIC_APP_URL}/generate-letter/{ref_q}" style="color:#059669; font-weight:bold;">Preview your intro letter template →</a>"""
+        tools_html = f"""<a href="{PUBLIC_APP_URL}/generate-letter/{ref_q}" style="color:#846022; font-weight:bold;">Preview your intro letter template →</a>"""
     return f"""
-        <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:6px; padding:14px; margin:20px 0;">
-            <p style="margin:0 0 8px 0; font-size:13px; color:#065f46;"><strong>Free help winning this job:</strong></p>
+        <div style="background:#f3f5ef; border:1px solid #d1d4bf; border-radius:6px; padding:14px; margin:20px 0;">
+            <p style="margin:0 0 8px 0; font-size:13px; color:#2e6b46;"><strong>Free help winning this job:</strong></p>
             <p style="margin:0; font-size:13px;">
                 {tools_html}
             </p>
@@ -421,19 +422,19 @@ def _send_purchased_lead_email_inner(customer_email: str, lead_data: dict):
     applicant_row = (
         f'<p style="margin: 0 0 10px 0;"><strong>Homeowner / Applicant:</strong> {applicant_name}</p>'
         if applicant_name else
-        '<p style="margin: 0 0 10px 0; color: #94a3b8;"><strong>Homeowner / Applicant:</strong> Not published by the council for this application.</p>'
+        '<p style="margin: 0 0 10px 0; color: #8a948c;"><strong>Homeowner / Applicant:</strong> Not published by the council for this application.</p>'
     )
 
     if has_agent is True:
         agent_label = agent_company or agent_name or "an agent"
         agent_row = (
-            f'<p style="margin: 10px 0 0 0; color: #b45309;"><strong>Heads up:</strong> this application already lists an agent/contractor '
+            f'<p style="margin: 10px 0 0 0; color: #9a5b13;"><strong>Heads up:</strong> this application already lists an agent/contractor '
             f'on record ({agent_label}) — the homeowner may already have someone instructed. Worth confirming before you invest time quoting.</p>'
         )
     elif has_agent is False:
-        agent_row = '<p style="margin: 10px 0 0 0; color: #059669;">No agent/contractor is listed on record for this application.</p>'
+        agent_row = '<p style="margin: 10px 0 0 0; color: #2e6b46;">No agent/contractor is listed on record for this application.</p>'
     else:
-        agent_row = '<p style="margin: 10px 0 0 0; color: #94a3b8;">Agent/contractor status: not confirmed — the council record didn\'t clearly show one way or the other.</p>'
+        agent_row = '<p style="margin: 10px 0 0 0; color: #8a948c;">Agent/contractor status: not confirmed — the council record didn\'t clearly show one way or the other.</p>'
 
     filed_date = _format_filed_date(lead_data.get("registered_date"))
     filed_row = f'<p style="margin: 0 0 10px 0;"><strong>Application filed:</strong> {filed_date}</p>' if filed_date else ""
@@ -462,12 +463,7 @@ def _send_purchased_lead_email_inner(customer_email: str, lead_data: dict):
             "details above."
         )
 
-    html = f"""
-    <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
-        <h2 style="color: #059669; margin-top: 0;">You've Secured This Lead!</h2>
-        <p style="color: #374151;">Thank you for your purchase. Here are the details for the lead you just secured. This lead has been permanently removed from the marketplace.</p>
-
-        <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
+    _details_html = f"""
             <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {_buyer_ref or 'N/A'}</p>
             <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {guarded_addr}</p>
             <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source') or 'N/A'}</p>
@@ -475,23 +471,26 @@ def _send_purchased_lead_email_inner(customer_email: str, lead_data: dict):
             <p style="margin: 0 0 10px 0;"><strong>Estimated Value Grade:</strong> {(lead_data.get('lead_score') or 'Medium').title()}</p>
             {applicant_row}
             <p style="margin: 0;"><strong>Description / Summary:</strong><br/>
-               <span style="color: #475569; font-size: 14px;">{_guarded_summary}</span>
+               <span style="color: #667269; font-size: 14px;">{_guarded_summary}</span>
             </p>
             {agent_row}
-        </div>
-
-        <p style="font-size: 13px; color: #64748b;">
+    """
+    _body_html = f"""
+        {email_layout.p("Thank you for your purchase. Here are the details for the lead you just secured. This lead has been permanently removed from the marketplace.")}
+        {email_layout.detail_box(_details_html)}
+        <p style="font-size: 13px; color: #667269;">
             {_street_view_link_html(lead_data.get('address') or '') if _address_release_allowed else ''}
         </p>
-        <p style="font-size: 12px; color: #94a3b8;">
+        <p style="font-size: 12px; color: #8a948c;">
             {_disclosure_note}
         </p>
-        <p style="font-size: 11px; color: #94a3b8; margin-top: 14px; padding-top: 10px; border-top: 1px solid #f1f5f9;">
+        <p style="font-size: 11px; color: #8a948c; margin-top: 14px; padding-top: 10px; border-top: 1px solid #d1d4bf;">
             {_NOT_WHAT_YOU_EXPECTED_HTML}
         </p>
         {_free_tools_and_subscribe_html(_buyer_ref, address_release_allowed=_address_release_allowed)}
-    </div>
     """
+    html = email_layout.render(heading="You've Secured This Lead!", eyebrow_text="Your lead", body_html=_body_html,
+                               title=subject)
 
     try:
         res = requests.post(
@@ -589,22 +588,22 @@ def _send_free_lead_granted_email_inner(customer_email: str, lead_data: dict, un
     applicant_row = (
         f'<p style="margin: 0 0 10px 0;"><strong>Homeowner / Applicant:</strong> {applicant_name}</p>'
         if applicant_name else
-        '<p style="margin: 0 0 10px 0; color: #94a3b8;"><strong>Homeowner / Applicant:</strong> Not published by the council for this application.</p>'
+        '<p style="margin: 0 0 10px 0; color: #8a948c;"><strong>Homeowner / Applicant:</strong> Not published by the council for this application.</p>'
     )
 
     if has_agent is True:
         agent_label = agent_company or agent_name or "an agent"
         agent_row = (
-            f'<p style="margin: 10px 0 0 0; color: #b45309;"><strong>Heads up:</strong> this application already lists an agent/contractor '
+            f'<p style="margin: 10px 0 0 0; color: #9a5b13;"><strong>Heads up:</strong> this application already lists an agent/contractor '
             f'on record ({agent_label}) — the homeowner may already have someone instructed. Worth confirming before you invest time quoting.</p>'
         )
     elif has_agent is False:
-        agent_row = '<p style="margin: 10px 0 0 0; color: #059669;">No agent/contractor is listed on record for this application.</p>'
+        agent_row = '<p style="margin: 10px 0 0 0; color: #2e6b46;">No agent/contractor is listed on record for this application.</p>'
     else:
-        agent_row = '<p style="margin: 10px 0 0 0; color: #94a3b8;">Agent/contractor status: not confirmed — the council record didn\'t clearly show one way or the other.</p>'
+        agent_row = '<p style="margin: 10px 0 0 0; color: #8a948c;">Agent/contractor status: not confirmed — the council record didn\'t clearly show one way or the other.</p>'
 
     unsub_html = (
-        f'<p style="font-size:10px; color:#9ca3af; margin-top:20px;"><a href="{unsubscribe_url}" style="color:#9ca3af;">Unsubscribe</a></p>'
+        f'<p style="font-size:10px; color:#8a948c; margin-top:20px;"><a href="{unsubscribe_url}" style="color:#8a948c;">Unsubscribe</a></p>'
         if unsubscribe_url else ""
     )
 
@@ -631,12 +630,7 @@ def _send_free_lead_granted_email_inner(customer_email: str, lead_data: dict, un
             "details above."
         )
 
-    html = f"""
-    <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
-        <h2 style="color: #059669; margin-top: 0;">Your free lead is confirmed!</h2>
-        <p style="color: #374151;">This job is genuinely yours now — nobody else can claim it. Here are the full details.</p>
-
-        <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
+    _details_html = f"""
             <p style="margin: 0 0 10px 0;"><strong>Reference:</strong> {_buyer_ref or 'N/A'}</p>
             <p style="margin: 0 0 10px 0;"><strong>Address:</strong> {guarded_addr}</p>
             <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source') or 'N/A'}</p>
@@ -644,24 +638,26 @@ def _send_free_lead_granted_email_inner(customer_email: str, lead_data: dict, un
             <p style="margin: 0 0 10px 0;"><strong>Estimated Value Grade:</strong> {(lead_data.get('lead_score') or 'Medium').title()}</p>
             {applicant_row}
             <p style="margin: 0;"><strong>Description / Summary:</strong><br/>
-               <span style="color: #475569; font-size: 14px;">{_guarded_summary}</span>
+               <span style="color: #667269; font-size: 14px;">{_guarded_summary}</span>
             </p>
             {agent_row}
-        </div>
-
-        <p style="font-size: 13px; color: #64748b;">
+    """
+    _body_html = f"""
+        {email_layout.p("This job is genuinely yours now — nobody else can claim it. Here are the full details.")}
+        {email_layout.detail_box(_details_html)}
+        <p style="font-size: 13px; color: #667269;">
             {_street_view_link_html(lead_data.get('address') or '') if _address_release_allowed else ''}
         </p>
-        <p style="font-size: 12px; color: #94a3b8;">
+        <p style="font-size: 12px; color: #8a948c;">
             {_disclosure_note}
         </p>
-        <p style="font-size: 11px; color: #94a3b8; margin-top: 14px; padding-top: 10px; border-top: 1px solid #f1f5f9;">
+        <p style="font-size: 11px; color: #8a948c; margin-top: 14px; padding-top: 10px; border-top: 1px solid #d1d4bf;">
             {_NOT_WHAT_YOU_EXPECTED_HTML}
         </p>
         {_free_tools_and_subscribe_html(_buyer_ref, address_release_allowed=_address_release_allowed)}
-        {unsub_html}
-    </div>
     """
+    html = email_layout.render(heading="Your free lead is confirmed!", eyebrow_text="Your free lead", body_html=_body_html,
+                               footer_note_html=email_layout.unsubscribe_html(unsubscribe_url), title=subject)
     return send_transactional_email(to_email=customer_email, subject=subject, html_body=html,
                                      headers=_list_unsubscribe_headers(unsubscribe_url))
 
@@ -791,36 +787,26 @@ def send_cold_email_1(email: str, lead_data: dict, code: str, director_name: str
     # precision reads as specificity rather than clutter.
     subject_area = area.split(", ", 1)[1] if ", " in area else area
     subject = f"{subject_area} — tree job filed this week, unclaimed"
-    unsub_html = (
-        f'<p style="font-size:10px; color:#9ca3af; margin-top:40px; padding-top:10px; '
-        f'border-top:1px solid #eee;"><a href="{unsubscribe_url}" style="color:#9ca3af;">Unsubscribe</a></p>'
-        if unsubscribe_url else ""
-    )
-    logo_url = f"{PUBLIC_APP_URL}/static/icon-192.png"
-    # Still plain/personal in the body copy (that part tested fine) --
-    # only the signature gets a small logo, so it reads as a real person
-    # writing on behalf of an actual business, not a marketing template.
-    html = f"""
-    <div style="font-family: -apple-system, Segoe UI, Arial, sans-serif; max-width: 560px; margin: auto; padding: 8px; color:#1f2937; font-size:15px; line-height:1.6;">
-        <p style="margin:0 0 14px 0;">{director_line}</p>
-        <p style="margin:0 0 14px 0;">Found a live tree job near {area} that nobody's claimed yet.</p>
-        <p style="margin:0 0 14px 0;">{council} logged {work} this week (ref {ref}). No tree surgeon's listed as the agent on it yet.</p>
-        <p style="margin:0 0 14px 0;">Nobody's contacted the homeowner yet — it's still fully unclaimed. It's yours, free, no card needed: <a href="{link}" style="color:#059669;">{link}</a></p>
-        <p style="margin:0 0 14px 0;">Your code: <strong style="font-family:monospace; letter-spacing:1px;">{code}</strong> — enter it on that page to claim it and see the full job details.</p>
-        <p style="margin:0 0 14px 0;">I run TreeKey — we scan every UK council's planning register daily for tree work and pass on jobs like this before most contractors even know they exist.</p>
-        <p style="margin:0 0 20px 0;">More in a few days if it's useful. No obligation either way.</p>
-        <table role="presentation" cellpadding="0" cellspacing="0" style="border-top:1px solid #e5e7eb; padding-top:12px; width:100%;">
-            <tr>
-                <td style="width:30px; vertical-align:middle;"><img src="{logo_url}" width="24" height="24" alt="TreeKey" style="display:block; border-radius:5px;"></td>
-                <td style="vertical-align:middle; padding-left:8px; font-size:14px; color:#374151;">
-                    Nick — TreeKey<br>
-                    <a href="https://treekey.co.uk" style="color:#9ca3af; font-size:12px;">treekey.co.uk</a>
-                </td>
-            </tr>
-        </table>
-        {unsub_html}
-    </div>
-    """
+    # 20 Oct 2026: PRESENTATION ONLY changed (now uses email_layout.render_outreach: thin forest band,
+    # crest in the signature). The wording below is untouched and is the OLD free-lead copy --
+    # OUTREACH_START_HERE.md says this sender is retired and does NOT match the approved campaign
+    # (TREEKEY_EMAIL_1/2/3 .md, sent from Instantly, not from this app). Outreach wording is not final
+    # and the "Nick" sender/signature is to be replaced before launch: see email_layout.OUTREACH_SIGNATURE_NAME.
+    # (paragraphs are built as plain strings first so this stays valid on Python < 3.12)
+    _paras = [
+        director_line,
+        "Found a live tree job near " + area + " that nobody's claimed yet.",
+        council + " logged " + work + " this week (ref " + ref + "). No tree surgeon's listed as the agent on it yet.",
+        "Nobody's contacted the homeowner yet — it's still fully unclaimed. It's yours, free, no card needed: "
+        '<a href="' + link + '" style="color:#846022;">' + link + "</a>",
+        'Your code: <strong style="font-family:monospace; letter-spacing:1px;">' + code + "</strong> — "
+        "enter it on that page to claim it and see the full job details.",
+        "I run TreeKey — we scan every UK council's planning register daily for tree work and pass on jobs like this "
+        "before most contractors even know they exist.",
+    ]
+    _body_html = "".join(email_layout.p(x) for x in _paras) + email_layout.p(
+        "More in a few days if it's useful. No obligation either way.", last=True)
+    html = email_layout.render_outreach(body_html=_body_html, unsubscribe_url=unsubscribe_url, title=subject)
     return send_transactional_email(to_email=email, subject=subject, html_body=html,
                                      from_label="Nick from TreeKey <leads@mail.treekey.co.uk>",
                                      headers=_list_unsubscribe_headers(unsubscribe_url))
@@ -891,8 +877,8 @@ def send_free_lead_code_email(email: str, lead_data: dict, code: str, expires_ho
     subject = f"Your TreeKey confirmation code — {lead_data.get('council_source', 'Local')} job reserved"
     expires_label = f"{int(expires_hours)} hours" if expires_hours < 48 else f"{int(expires_hours / 24)} days"
     unsub_html = (
-        f'<p style="font-size:11px; color:#94a3b8; margin-top:36px; padding-top:12px; '
-        f'border-top:1px solid #e2e8f0;"><a href="{unsubscribe_url}" style="color:#94a3b8;">Unsubscribe</a></p>'
+        f'<p style="font-size:11px; color:#8a948c; margin-top:36px; padding-top:12px; '
+        f'border-top:1px solid #d1d4bf;"><a href="{unsubscribe_url}" style="color:#8a948c;">Unsubscribe</a></p>'
         if unsubscribe_url else ""
     )
     # Hidden preheader: this is the snippet Gmail/Outlook show next to the
@@ -905,45 +891,29 @@ def send_free_lead_code_email(email: str, lead_data: dict, code: str, expires_ho
         f"Confirmation code for the job reserved for you near "
         f"{_blur_address_to_area(lead_data.get('address', ''))}."
     )
-    preheader_html = (
-        f'<div style="display:none; max-height:0; overflow:hidden; mso-hide:all;">{preheader}'
-        + "&nbsp;&zwnj;" * 40 +
-        '</div>'
-    )
-    logo_url = f"{PUBLIC_APP_URL}/static/icon-192.png"
-    html = f"""
-    {preheader_html}
-    <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 600px; margin: auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 8px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid #e5e7eb; width:100%;">
-            <tr>
-                <td style="width:34px; vertical-align:middle;"><img src="{logo_url}" width="28" height="28" alt="TreeKey" style="display:block; border-radius:6px;"></td>
-                <td style="vertical-align:middle; padding-left:8px; font-size:15px; font-weight:bold; color:#111827; letter-spacing:0.3px;">TreeKey</td>
-            </tr>
-        </table>
-        <h2 style="color: #111827; margin: 0 0 12px 0; font-size: 19px;">Your job reservation is confirmed</h2>
-        <p style="color: #374151; margin: 0 0 16px 0;">We've reserved the job below for you and taken it off the market. Use the confirmation code to view the full job details.</p>
-        <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 0 0 20px 0; border: 1px solid #e2e8f0;">
+    # Preheader (hidden inbox-preview text) is passed to email_layout.render below.
+    _details_html = f"""
             <p style="margin: 0 0 10px 0;"><strong>Location:</strong> {_blur_address_to_area(lead_data.get('address', ''))}</p>
             <p style="margin: 0 0 10px 0;"><strong>Source:</strong> {lead_data.get('council_source', 'N/A')}</p>
             <p style="margin: 0;"><strong>Job details:</strong><br/>
-               <span style="color: #475569; font-size: 14px;">{_redacted_summary(lead_data.get('summary'))}</span>
+               <span style="color: #667269; font-size: 14px;">{_redacted_summary(lead_data.get('summary'))}</span>
             </p>
-        </div>
-        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 15px; margin: 0 0 20px 0; text-align: center;">
-            <p style="margin: 0 0 6px 0; font-size: 12px; color: #166534; font-weight: bold; letter-spacing: 0.5px;">CONFIRMATION CODE</p>
-            <p style="margin: 0; font-size: 26px; font-weight: bold; color: #14532d; letter-spacing: 2px; font-family: monospace;">{code}</p>
-        </div>
-        <p style="font-size: 13px; color: #64748b; margin: 0 0 8px 0;">
+    """
+    _body_html = f"""
+        {email_layout.p("We've reserved the job below for you and taken it off the market. Use the confirmation code to view the full job details.")}
+        {email_layout.detail_box(_details_html)}
+        {email_layout.code_box("CONFIRMATION CODE", code)}
+        <p style="font-size: 13px; color: #667269; margin: 0 0 8px 0;">
             Enter this code to view the full job details:
-            <a href="{PUBLIC_APP_URL}/free-account" style="color:#059669; font-weight:bold;">View my reserved job →</a>
+            <a href="{PUBLIC_APP_URL}/free-account" style="color:#846022; font-weight:bold;">View my reserved job →</a>
         </p>
-        <p style="font-size: 12px; color: #94a3b8; margin: 0;">
+        <p style="font-size: 12px; color: #8a948c; margin: 0;">
             This code is valid for {expires_label}. If it isn't used in time, the job is released and you can request another one near you from the same page.
         </p>
-        <p style="font-size:11px; color:#cbd5e1; margin-top:24px;">TreeKey — Vector Data Labs · treekey.co.uk</p>
-        {unsub_html}
-    </div>
     """
+    html = email_layout.render(heading="Your job reservation is confirmed", eyebrow_text="Job reserved",
+                               body_html=_body_html, footer_note_html=email_layout.unsubscribe_html(unsubscribe_url),
+                               preheader=preheader, title=subject)
     return send_transactional_email(to_email=email, subject=subject, html_body=html,
                                      headers=_list_unsubscribe_headers(unsubscribe_url))
 
@@ -957,21 +927,21 @@ def send_teaser_lead_email(email: str, lead_data: dict, unsubscribe_url: str = "
     only the address is blurred (see _blur_address_to_area)."""
     subject = f"A {lead_data.get('vertical', 'tree')} job just filed near you — still unclaimed"
     registered = lead_data.get("registered_date") or "recently"
-    unsub_html = f'<p style="font-size:11px; color:#94a3b8; margin-top:16px;"><a href="{unsubscribe_url}" style="color:#94a3b8;">Unsubscribe from these emails</a></p>' if unsubscribe_url else ""
-    html = f"""
-    <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
-        <h2 style="color: #059669; margin-top: 0;">Still-unclaimed job near you</h2>
-        <div style="background: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
+    unsub_html = f'<p style="font-size:11px; color:#8a948c; margin-top:16px;"><a href="{unsubscribe_url}" style="color:#8a948c;">Unsubscribe from these emails</a></p>' if unsubscribe_url else ""
+    _details_html = f"""
             <p style="margin: 0 0 10px 0;"><strong>Location:</strong> {_blur_address_to_area(lead_data.get('address', ''))}</p>
             <p style="margin: 0 0 10px 0;"><strong>Filed:</strong> {registered}</p>
             <p style="margin: 0;"><strong>Job details:</strong><br/>
-               <span style="color: #475569; font-size: 14px;">{_redacted_summary(lead_data.get('summary'))}</span>
+               <span style="color: #667269; font-size: 14px;">{_redacted_summary(lead_data.get('summary'))}</span>
             </p>
-        </div>
-        {_teaser_plans_note_html()}
-        {unsub_html}
-    </div>
     """
+    _body_html = f"""
+        {email_layout.detail_box(_details_html)}
+        {_teaser_plans_note_html()}
+    """
+    html = email_layout.render(heading="Still-unclaimed job near you", eyebrow_text="Still unclaimed", body_html=_body_html,
+                               footer_note_html=email_layout.unsubscribe_html(unsubscribe_url, "Unsubscribe from these emails"),
+                               title=subject)
     return send_transactional_email(to_email=email, subject=subject, html_body=html,
                                      headers=_list_unsubscribe_headers(unsubscribe_url))
 
@@ -1177,7 +1147,7 @@ def dispatch_lead_alerts(city: str, leads: list):
             if disc.get("eligible") else ""
         )
         notice_banner = f"""
-        <div style="background:#f0fdf4; border-left:3px solid #059669; padding:10px; font-size:12px; color:#065f46; margin-bottom:16px;">
+        <div style="background:#f3f5ef; border-left:3px solid #bb9147; padding:10px; font-size:12px; color:#2e6b46; margin-bottom:16px;">
             <b>Early Access:</b> These leads match your area and category and aren't visible on the public Marketplace yet. Whoever buys one first gets it -- exclusively, permanently removed from sale to anyone else.{discount_line}
         </div>
         """
@@ -1220,7 +1190,7 @@ def dispatch_lead_alerts(city: str, leads: list):
             # same, for the same reason.
             lead_id = l.get("id") or ""
             url = f"{PUBLIC_APP_URL}/checkout/single_lead_medium?lead_id={urllib.parse.quote(str(lead_id))}"
-            return f"<a href='{url}' style='background:#059669; color:white; padding:6px 14px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold; white-space:nowrap;'>Buy →</a>"
+            return f"<a href='{url}' style='background:#846022; color:white; padding:6px 14px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:bold; white-space:nowrap;'>Buy →</a>"
 
         rows = "".join([
             f"<tr>"
@@ -1231,7 +1201,7 @@ def dispatch_lead_alerts(city: str, leads: list):
             # pre-purchase card shows, nothing more. The full address is
             # not handed to buyers directly (2026-09-24 wording audit).
             f"<td style='padding:8px;'><b>{l.get('area_label', 'Area unavailable')}</b></td>"
-            f"<td style='padding:8px; white-space:nowrap; color:#044332; font-weight:bold;'>{_distance_cell(l)}</td>"
+            f"<td style='padding:8px; white-space:nowrap; color:#123b2b; font-weight:bold;'>{_distance_cell(l)}</td>"
             # Sep 15 2026: routed through _redacted_summary (same as every
             # other pre-purchase email) -- a raw scraped summary can
             # restate the site address inline, and this email now goes out
@@ -1242,15 +1212,16 @@ def dispatch_lead_alerts(city: str, leads: list):
             f"</tr>"
             for l in routed_leads
         ])
-        body = f"""
-            <div style="font-family:sans-serif; max-width:640px; margin:auto; color:#0f172a;">
-                <h2 style="color:#044332; margin-bottom:4px;">TreeKey Early Access — {len(routed_leads)} New Leads</h2>
-                <p style="color:#64748b; font-size:14px; margin-top:0;">New statutory tree work applications matching your area and category, ahead of the public Marketplace. Buy one to see the full application details -- it's yours exclusively, permanently removed from sale to anyone else. "Exclusive" doesn't mean the homeowner hasn't already engaged someone; check the Agent column below.</p>
+        _intro = ("New statutory tree work applications matching your area and category, ahead of the public Marketplace. "
+                  "Buy one to see the full application details -- it's yours exclusively, permanently removed from sale to anyone else. "
+                  "\"Exclusive\" doesn't mean the homeowner hasn't already engaged someone; check the Agent column below.")
+        _inner = f"""
+                {email_layout.p(_intro)}
 
                 {notice_banner}
 
-                <table border='1' cellspacing='0' style='border-collapse:collapse; width:100%; font-size:13px; border-color:#e2e8f0;'>
-                    <tr style='background:#f8fafc;'>
+                <table border='1' cellspacing='0' style='border-collapse:collapse; width:100%; font-size:13px; border-color:#d1d4bf;'>
+                    <tr style='background:#f3f5ef;'>
                         <th style='padding:8px; text-align:left;'>Type</th>
                         <th style='padding:8px; text-align:left;'>Area</th>
                         <th style='padding:8px; text-align:left;'>Distance</th>
@@ -1261,16 +1232,18 @@ def dispatch_lead_alerts(city: str, leads: list):
                     {rows}
                 </table>
 
-                <p style="font-size: 11px; color: #94a3b8; margin-top: 18px;">
+                <p style="font-size: 11px; color: #8a948c; margin-top: 18px;">
                     {_NOT_WHAT_YOU_EXPECTED_HTML}
                 </p>
 
-                <div style="margin-top:12px; padding:16px; background:#f8fafc; border-radius:8px; text-align:center; font-size:13px; color:#64748b;">
+                <div style="margin-top:12px; padding:16px; background:#f3f5ef; border-radius:8px; text-align:center; font-size:13px; color:#667269;">
                     Have an idea or want a new tool built for your business?
-                    <a href="{PUBLIC_APP_URL}/suggestions" style="color:#044332; font-weight:bold;">Submit a Suggestion →</a>
+                    <a href="{PUBLIC_APP_URL}/suggestions" style="color:#123b2b; font-weight:bold;">Submit a Suggestion →</a>
                 </div>
-            </div>
         """
+        body = email_layout.render(heading=f"{len(routed_leads)} New Leads", eyebrow_text="TreeKey Early Access",
+                                   body_html=_inner, pad_x=24,
+                                   title=f"{len(routed_leads)} New Leads Available in Your Area — Early Access")
         if RESEND_API_KEY:
             try:
                 requests.post(

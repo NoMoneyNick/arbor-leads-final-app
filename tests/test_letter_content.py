@@ -249,11 +249,13 @@ class TestAddressClearZoneMatchesIntelliprintTemplate(unittest.TestCase):
         # via its own rule, not the shared .body-text class.
         html = letter_content.render_preview_letter(_settings())
         self.assertIn(f'<h1 class="letter-headline">{letter_content.FRONT_PAGE_HEADLINE}</h1>', html)
-        self.assertIn(
-            ".letter-headline {{\n  font-size: 21px; font-weight: bold; color: {BRAND_DARK}; margin: 31mm 0 2mm 0;"
-            .replace("{{", "{").replace("{BRAND_DARK}", letter_content.BRAND_DARK),
-            html,
-        )
+        # 2026-10 TreeKey rebrand: the headline's font/colour changed (serif, brand heading
+        # colour); the 31mm zone-clearance margin is the safeguard and must stay exactly as it was.
+        import re
+        m = re.search(r"\.letter-headline \{(.*?)\}", html, re.S)
+        self.assertIsNotNone(m)
+        self.assertIn("margin: 31mm 0 2mm 0;", m.group(1))
+        self.assertIn(f"color: {letter_content.BRAND_DARK};", m.group(1))
 
     def test_greeting_paragraph_no_longer_carries_the_clearance_margin(self):
         # The clearance margin moved to .letter-headline above; the
@@ -698,7 +700,10 @@ class TestBrandHeaderResize(unittest.TestCase):
 
     def test_header_logo_and_tagline_are_scaled_up(self):
         html_out = letter_content.render_preview_letter(_settings())
-        self.assertIn(".brand-header-logo {{ height: 20.6mm;".replace("{{", "{"), html_out)
+        # 2026-10 rebrand: the logo image became the crest (.brand-header-crest) at the same 19mm
+        # inside the same 20.6mm-high brand block; the tagline size is unchanged.
+        self.assertIn("height: 20.6mm;", html_out)
+        self.assertIn(".brand-header-crest { width: 19mm; height: 19mm;", html_out)
         self.assertIn("font-size: 12.5px; font-weight: bold; letter-spacing: 0.03em; text-align: right;", html_out)
 
     def test_no_visible_border_or_outline_on_the_header(self):
@@ -714,8 +719,11 @@ class TestBrandHeaderResize(unittest.TestCase):
         m = re.search(r"\.brand-header \{.*?\n\}", html_out, re.S)
         self.assertIsNotNone(m)
         rule_without_comments = re.sub(r"/\*.*?\*/", "", m.group(0), flags=re.S)
-        self.assertNotIn("border:", rule_without_comments)
         self.assertNotIn("outline:", rule_without_comments)
+        # 2026-10 rebrand: the approved design has a thin gold hairline round the banner (the
+        # brand gold rule); the annotation outline Nick meant must still never appear.
+        self.assertIn(f"border: 1px solid {letter_content.BRAND_GOLD_RULE};", rule_without_comments)
+        self.assertEqual(rule_without_comments.count("border:"), 1)
 
 
 class TestReservedFeatureAreas(unittest.TestCase):

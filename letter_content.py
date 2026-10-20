@@ -83,6 +83,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+import brand   # shared brand colours / wording (brand.py)
+
 PRIVACY_CONTACT_EMAIL_ENV = "TREEKEY_PRIVACY_CONTACT_EMAIL"
 PRIVACY_POLICY_URL_ENV = "TREEKEY_PRIVACY_POLICY_URL"
 
@@ -120,11 +122,21 @@ class LetterConfigError(RuntimeError):
 # uses -- and handoff_inspect/README.txt's own split of which of the seven
 # supplied brand assets are "modern" vs "tiny heritage placement only").
 # ---------------------------------------------------------------------------
-BRAND_GREEN = "#08795F"
-BRAND_DARK = "#102D27"
-BRAND_INK = "#243B35"
-BRAND_MUTED = "#5B6C65"
-BRAND_PALE = "#EDF6F1"
+# 20 Oct 2026 rebrand (approved letter-new-brand-preview.html): the print palette now comes from
+# brand.py so the letter, flyer and storm quote stay in step. Names kept so the CSS below reads the same.
+_BC = brand.COLORS
+BRAND_GREEN = _BC["print_gold_label"]       # small gold labels on white paper (was green)
+BRAND_DARK = _BC["print_heading"]           # headings
+BRAND_INK = "#243B35"                       # body text (unchanged)
+BRAND_MUTED = "#5B6C65"                     # secondary text (unchanged)
+BRAND_PALE = _BC["print_paper_tint"]        # light tint boxes
+BRAND_GOLD_RULE = _BC["print_gold_rule"]    # gold rules / left edges
+BRAND_BANNER_BG = f"linear-gradient(120deg, {_BC['print_banner_from']}, {_BC['print_banner_to']})"
+BRAND_PANEL_BG = f"linear-gradient(110deg, {_BC['print_panel_from']}, {_BC['print_panel_to']})"
+BRAND_ON_DARK_GOLD = _BC["print_gold_on_dark"]
+BRAND_ON_DARK_IVORY = _BC["print_ivory_on_dark"]
+BRAND_ON_DARK_SOFT = _BC["print_ivory_soft"]
+BRAND_SERIF = brand.SERIF
 BRAND_TAGLINE_LINE_1 = "LOCAL CONNECTIONS."
 BRAND_TAGLINE_LINE_2 = "PERSONAL INTRODUCTIONS."
 
@@ -139,8 +151,9 @@ BRAND_TAGLINE_LINE_2 = "PERSONAL INTRODUCTIONS."
 # a mark rendered at a few millimetres) -- same image, same design, smaller
 # file. See app/assets/letter_branding/ for all three.
 _ASSET_DIR = Path(__file__).resolve().parent / "assets" / "letter_branding"
-BRAND_ASSET_FULL_LOGO = "treekey-full-logo.png"
-BRAND_ASSET_ICON_BADGE_SMALL = "treekey-icon-badge-small.png"
+# 20 Oct 2026: the selected crest (treekey-crest.png) replaces the old full logo and icon badge on both pages.
+# (treekey-full-logo.png and treekey-icon-badge-small.png are no longer used by the letter.)
+BRAND_ASSET_CREST = "treekey-crest.png"
 BRAND_ASSET_TK_MARK_SMALL = "treekey-tk-mark-small.png"
 
 _brand_asset_cache: "dict[str, str]" = {}
@@ -1110,8 +1123,7 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
     insurance_html = f'<p class="body-text">{esc(settings.insurance_note)}</p>' if settings.insurance_note.strip() else ""
     qualifications_html = f'<p class="body-text">{esc(settings.qualifications_note)}</p>' if settings.qualifications_note.strip() else ""
 
-    full_logo_uri = _brand_asset_data_uri(BRAND_ASSET_FULL_LOGO)
-    icon_badge_uri = _brand_asset_data_uri(BRAND_ASSET_ICON_BADGE_SMALL)
+    crest_uri = _brand_asset_data_uri(BRAND_ASSET_CREST)
     tk_mark_uri = _brand_asset_data_uri(BRAND_ASSET_TK_MARK_SMALL)
 
     front_page = f"""<div class="letter-page">
@@ -1121,7 +1133,7 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
   </div>
 
   <div class="brand-header">
-    <img class="brand-header-logo" src="{full_logo_uri}" alt="TreeKey">
+    <div class="brand-header-brand"><img class="brand-header-crest" src="{crest_uri}" alt=""><span class="brand-header-word">TreeKey</span></div>
     <div class="brand-header-tagline">
       <div>{BRAND_TAGLINE_LINE_1}</div>
       <div class="brand-header-tagline-sub">{BRAND_TAGLINE_LINE_2}</div>
@@ -1185,7 +1197,7 @@ def render_letter(settings: ContractorLetterSettings, *, lead_reference: str, ad
     # guarantee is claimed.
     reverse_page = f"""<div class="letter-page">
   <div class="reverse-header">
-    <img class="reverse-header-mark" src="{icon_badge_uri}" alt="TreeKey">
+    <img class="reverse-header-mark" src="{crest_uri}" alt="TreeKey">
     <div class="reverse-header-word">TREEKEY</div>
   </div>
   <div class="reverse-title">About this letter and your information</div>
@@ -1374,7 +1386,7 @@ body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Arial, Helvetic
 .disclaimer-text {{ font-size: 10px; line-height: 1.5; color: {BRAND_MUTED}; margin: 5px 0; }}
 
 .brand-header {{
-  background: {BRAND_DARK}; border-radius: 6px; padding: 16px 18px;
+  background: {BRAND_BANNER_BG}; border: 1px solid {BRAND_GOLD_RULE}; border-radius: 5px; padding: 16px 18px;
   /* 2026-09-27, header-resize pass (Nick's annotated-image request, green
      outline: "resize the banner to the indicated proportions, scaling its
      logo and text appropriately"). Measured the green outline against this
@@ -1415,9 +1427,11 @@ body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Arial, Helvetic
   margin-top: 0;
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }}
-.brand-header-logo {{ height: 20.6mm; max-width: 60%; object-fit: contain; }}
-.brand-header-tagline {{ color: #fff; font-size: 12.5px; font-weight: bold; letter-spacing: 0.03em; text-align: right; }}
-.brand-header-tagline-sub {{ color: #A5E5CD; font-weight: normal; margin-top: 3px; }}
+.brand-header-brand {{ display: flex; align-items: center; gap: 12px; height: 20.6mm; }}
+.brand-header-crest {{ width: 19mm; height: 19mm; object-fit: contain; }}
+.brand-header-word {{ font-family: {BRAND_SERIF}; font-size: 34px; color: {_BC["ivory_text"]}; }}
+.brand-header-tagline {{ color: {BRAND_ON_DARK_GOLD}; font-size: 12.5px; font-weight: bold; letter-spacing: 0.03em; text-align: right; }}
+.brand-header-tagline-sub {{ color: {BRAND_ON_DARK_SOFT}; font-weight: normal; margin-top: 3px; }}
 
 /* 2026-09-26 fix (ninth pass -- supersedes the previous top:20mm/left:40mm/
    width:120mm fix directly below this comment in version history).
@@ -1539,7 +1553,7 @@ body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Arial, Helvetic
    empirically-measured Intelliprint zone clearance and stays exactly as
    measured. */
 .letter-headline {{
-  font-size: 21px; font-weight: bold; color: {BRAND_DARK}; margin: 31mm 0 2mm 0;
+  font-family: {BRAND_SERIF}; font-size: 25px; font-weight: bold; color: {BRAND_DARK}; margin: 31mm 0 2mm 0;
   line-height: 1.25;
 }}
 .greeting-text {{ margin-top: 0; }}
@@ -1547,7 +1561,7 @@ body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Arial, Helvetic
 
 /* 2026-09-27, header-resize pass: margin trimmed 12px->8px, same
    page-budget reclaim as .body-text/.disclaimer-text above. */
-.spec-box {{ background: {BRAND_PALE}; border-left: 3px solid {BRAND_GREEN}; padding: 10px 14px; margin: 8px 0; font-size: 12px; }}
+.spec-box {{ background: {BRAND_PALE}; border-left: 3px solid {BRAND_GOLD_RULE}; padding: 10px 14px; margin: 8px 0; font-size: 12px; }}
 
 /* margin trimmed from 14px to 8px top+bottom as part of the page-budget
    accounting in .letter-headline's comment above -- pure whitespace
@@ -1560,8 +1574,8 @@ body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Arial, Helvetic
    render_letter) than the single combined line it replaced, so its own
    whitespace is trimmed to help offset that, same page-budget reclaim as
    .body-text/.disclaimer-text/.spec-box above. */
-.contact-panel {{ background: {BRAND_PALE}; border-left: 3px solid {BRAND_GREEN}; border-radius: 4px; padding: 10px 16px; margin: 4px 0; }}
-.contact-panel-label {{ font-size: 10.5px; font-weight: bold; color: {BRAND_GREEN}; letter-spacing: 0.02em; text-transform: uppercase; margin-bottom: 6px; }}
+.contact-panel {{ background: {BRAND_PANEL_BG}; border: 1px solid {BRAND_GOLD_RULE}; border-left-width: 3px; color: {BRAND_ON_DARK_IVORY}; border-radius: 4px; padding: 10px 16px; margin: 4px 0; }}
+.contact-panel-label {{ font-size: 10.5px; font-weight: bold; color: {BRAND_ON_DARK_GOLD}; letter-spacing: 0.02em; text-transform: uppercase; margin-bottom: 6px; }}
 /* 2026-09-27, contact panel redesign (Nick's annotated-image request, red
    circle: "prominently show the contractor's company name, contact's first
    name if supplied, and telephone number"). Business name now gets its own
@@ -1569,9 +1583,13 @@ body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Arial, Helvetic
    email address); contact-panel-person is genuinely optional and only
    rendered at all when a first name is actually saved (see render_letter's
    contact_first_name_html) -- never a placeholder. */
-.contact-panel-business {{ font-size: 15px; font-weight: bold; color: {BRAND_DARK}; margin-bottom: 2px; }}
-.contact-panel-person {{ font-size: 12px; color: {BRAND_INK}; margin-bottom: 4px; }}
-.contact-panel-phone {{ font-size: 17px; font-weight: bold; color: {BRAND_DARK}; margin-bottom: 4px; }}
+/* 20 Oct 2026 rebrand: approved mock used 18px / 20px for business name / phone; 16px / 18px here because the
+   worst realistic contact box (100-character business name) pushed the front page onto a 3rd page at 18/20.
+   Re-run tests/letter_pagination_check/run_pagination_check.py before enlarging these. */
+.contact-panel-business {{ font-family: {BRAND_SERIF}; font-size: 16px; font-weight: bold; color: {BRAND_ON_DARK_IVORY}; margin-bottom: 2px; }}
+.contact-panel-person {{ font-size: 12px; color: {BRAND_ON_DARK_SOFT}; margin-bottom: 4px; }}
+.contact-panel-phone {{ font-size: 18px; font-weight: bold; color: {BRAND_ON_DARK_IVORY}; margin-bottom: 4px; }}
+.contact-panel .meta-line {{ color: {BRAND_ON_DARK_SOFT}; }}
 
 /* 2026-09-30, optional contractor offer: compact, sits directly below the
    contact panel -- gated entirely on offer_text in render_letter (see
@@ -1588,11 +1606,11 @@ body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Arial, Helvetic
 
 .reverse-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 4mm; }}
 .reverse-header-mark {{ height: 7mm; width: 7mm; object-fit: contain; }}
-.reverse-header-word {{ font-size: 12px; font-weight: bold; letter-spacing: 0.04em; color: {BRAND_DARK}; }}
-.reverse-title {{ font-size: 14px; font-weight: bold; margin-bottom: 8mm; color: {BRAND_INK}; }}
+.reverse-header-word {{ font-family: {BRAND_SERIF}; font-size: 22px; font-weight: bold; letter-spacing: 0.04em; color: {BRAND_DARK}; }}
+.reverse-title {{ font-family: {BRAND_SERIF}; font-size: 20px; font-weight: bold; margin-bottom: 8mm; color: {BRAND_DARK}; }}
 
 .notice-section {{ margin-bottom: 9px; }}
-.notice-heading {{ font-size: 10.5px; font-weight: bold; color: {BRAND_INK}; margin-bottom: 2px; }}
+.notice-heading {{ font-size: 10.5px; font-weight: bold; color: {BRAND_DARK}; margin-bottom: 2px; }}
 .notice-body {{ font-size: 9.5px; line-height: 1.45; color: #333D38; margin: 0; }}
 
 /* 2026-09-27, Nick's annotated-image request (orange + blue areas: "leave
@@ -1624,11 +1642,11 @@ body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Arial, Helvetic
 
 .page-footer {{
   position: absolute; left: 18mm; right: 18mm; bottom: 8mm;
-  border-top: 1px solid #D7E5DD; padding-top: 6px;
+  border-top: 1px solid {BRAND_GOLD_RULE}; padding-top: 6px;
   display: flex; align-items: center; gap: 8px; font-size: 9px; color: {BRAND_MUTED};
 }}
 .page-footer-mark {{ height: 5mm; width: auto; }}
-.page-footer-domain {{ color: {BRAND_GREEN}; font-weight: bold; }}
+.page-footer-domain {{ color: {BRAND_DARK}; font-weight: bold; }}
 .page-footer-pageno {{ margin-left: auto; }}
 """
 

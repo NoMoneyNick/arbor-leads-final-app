@@ -703,16 +703,17 @@ class CustomerPathsUnchangedTests(unittest.TestCase):
     EXPECTED = {
         "send_transactional_email": "72f7d255e532c9d5d3f8d55dc764cb1e224c4e07be61d2b470f634d5dc2e7e45",
         "send_purchased_lead_email": "62e61b5cd9a27ac566694b20c4f0d34184ee67dac621080fab120d219b11f1fb",
-        "_send_purchased_lead_email_inner": "470dbcae05e876850b008b21e143485e2c1517995039679c2af1740b638e8062",
+        "_send_purchased_lead_email_inner": "791f3f7efdfb675564078891a6c6b51de3373a4fc8628318563fd71f1d4c2fa5",
         "send_free_lead_granted_email": "f6db52777d1288f19501bc5e03b41cd5829e449b8567e824ed4862612008a064",
-        "_send_free_lead_granted_email_inner": "654db89b15c829ad833d322945885e438f42daee3726aef4f90e92d8e7c908be",
+        "_send_free_lead_granted_email_inner": "b27f1b8180e7575b383f9e1b4ce985df96b49027b4827e9d4ac12b0ebbefd78e",
         "_list_unsubscribe_headers": "e22f292a0fade81c79256ce68b59cc4de6fb92698f8911e39a17d6c987259564",
-        "send_cold_email_1": "f04cbf1065963436fa4ee1d491e51e218dbb9463f8206262710b9e268ec4dbc9",
-        "send_free_lead_code_email": "212c72c45f204fd450c240645e882acc76d31a0ba9aad9ad774085395bdfc038",
-        "send_teaser_lead_email": "4f31a7e5e1f9ca38fc3ee20c9d1f470d7d205d3693ae904e23284cb0b75d5493",
+        "send_cold_email_1": "2205af8934c596ece85c7fee9be6415774c6de06d2edac8c28feb7c9193bc822",
+        "send_free_lead_code_email": "c3789b4b4b94e4cfddd1b22cff6aa24bcb6da9820c311519269810d727a5399d",
+        "send_teaser_lead_email": "f8bb109704f4f6bc5ff36ebb317da1e9cdbe92b73f08e057a0979981fb9e0539",
         "send_teaser_email_batch": "5faa386e50748f52b841c638c57404fa507fc1fc80d114aae6dd1a38c522958f",
         "create_whatsapp_link": "43c58af601f87d63a1c94e464181a64ce5fa3528c7fbca3eadf62925a9960d58",
-    }   # function name -> sha256 of its pre-change source
+    }   # function name -> sha256 of its source. 21 Oct 2026: the hashes of the functions listed in the
+        # TreeKey email rebrand (shared branded layout, presentation only) were re-taken after that approved restyle.
 
     def test_customer_email_functions_are_unchanged(self):
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "notifications.py"), encoding="utf-8").read()

@@ -1,0 +1,324 @@
+/* ==========================================================================
+   TreeKey page theme  (static/treekey-pages.css)
+   ONE stylesheet for every "remaining page" (everything except the approved
+   homepage "/" and the marketplace "/marketplace", which never load this file).
+
+   Everything below is scoped to `.tk-v2`, a class added to <body> by
+   page_theme.py. A page without that class is not affected by any rule here.
+
+   HOW TO CHANGE THINGS (see also STYLING_GUIDE.md):
+     1. Colours, fonts, spacing, borders, buttons ......... section 1 (tokens)
+     2. Header / footer ................................... section 3
+     3. Cards, buttons, forms, notices, tables, badges .... section 4 (components)
+     4. Quick links (free dashboard, account, dashboard) .. section 5
+     5. Letter preview .................................... section 6
+     6. Older pages that still use Tailwind / inline styles  section 7 (bridge)
+     7. Per-page tweaks ................................... section 8
+   Section order inside a page is changed in the page's own code in main.py,
+   never here.
+   ========================================================================== */
+
+/* ---- 1. TOKENS ---------------------------------------------------------- */
+.tk-v2 {
+  /* colour */
+  --tk-navy: #031923;           /* page background */
+  --tk-forest: #103b2b;         /* card gradient start */
+  --tk-forest-deep: #06272a;    /* card gradient end */
+  --tk-header-from: #031620;
+  --tk-header-to: #092c24;
+  --tk-gold: #dfb85f;           /* accents, links, headings underline */
+  --tk-gold-soft: #dfc181;
+  --tk-gold-button-from: #f4d17d;
+  --tk-gold-button-to: #d3a343;
+  --tk-ivory: #f4eedc;          /* main text */
+  --tk-muted: #bac9bd;          /* secondary text */
+  --tk-ink: #11251b;            /* text on gold buttons */
+  --tk-field-bg: #05231f;
+  --tk-field-line: #8b986e;
+  --tk-line: #ad985e80;         /* card border */
+  --tk-line-soft: #aa945d55;    /* dividers */
+  --tk-danger: #f2a5a0;
+  --tk-ok: #9fdcb4;
+  --tk-info: #9fd3df;
+  /* type */
+  --tk-font-body: Arial, Helvetica, sans-serif;
+  --tk-font-display: Georgia, "Times New Roman", serif;
+  --tk-text: 15px;
+  /* spacing (use these instead of raw px in new rules) */
+  --tk-gap-sm: 8px;
+  --tk-gap-md: 14px;
+  --tk-gap-lg: 24px;
+  --tk-gutter: 5%;
+  /* shape */
+  --tk-radius-card: 12px;
+  --tk-radius-control: 7px;
+  --tk-content-max: 1280px;
+}
+
+/* ---- 2. BASE ------------------------------------------------------------ */
+.tk-v2, .tk-v2 *, .tk-v2 *::before, .tk-v2 *::after { box-sizing: border-box; }
+body.tk-v2 {
+  margin: 0 !important; padding: 0 !important;
+  background: var(--tk-navy) !important; color: var(--tk-ivory) !important;
+  font: var(--tk-text)/1.65 var(--tk-font-body) !important;
+}
+.tk-v2 a { color: var(--tk-gold); text-underline-offset: 5px; }
+.tk-v2 h1, .tk-v2 h2, .tk-v2 h3, .tk-v2 h4 {
+  font-family: var(--tk-font-display) !important; color: var(--tk-ivory) !important;
+  letter-spacing: -.025em; line-height: 1.18 !important;
+}
+.tk-v2 h1 { font-size: clamp(30px, 4vw, 48px) !important; }
+.tk-v2 h2 { font-size: 30px !important; }
+.tk-v2 h3 { font-size: 23px !important; }
+.tk-v2 p { line-height: 1.7; }
+.tk-v2 svg { max-width: 100%; }
+.tk-v2 img { max-width: 100%; height: auto; }
+.tk-v2 .tk-nowrap { white-space: nowrap; }
+
+/* ---- 3. SHELL: header, content area, footer ---------------------------- */
+.tk-v2 .tk-header {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--tk-gap-lg);
+  padding: 18px var(--tk-gutter);
+  border-bottom: 1px solid #b89b555c;
+  background: linear-gradient(110deg, var(--tk-header-from), var(--tk-header-to));
+}
+.tk-v2 .tk-brand {
+  display: flex; align-items: center; gap: 12px;
+  font: 38px/1 var(--tk-font-display); color: var(--tk-ivory); text-decoration: none;
+}
+.tk-v2 .tk-brand img { width: 59px; height: 59px; object-fit: contain; }
+.tk-v2 .tk-header-nav, .tk-v2 .tk-footer-nav { display: flex; gap: 27px; align-items: center; font-size: 13px; }
+.tk-v2 .tk-header-nav a { color: var(--tk-ivory); text-decoration: none; }
+.tk-v2 .tk-header-nav a:hover { color: var(--tk-gold); }
+.tk-v2 .tk-header-account { display: flex; align-items: center; gap: var(--tk-gap-md); font-size: 13px; }
+.tk-v2 .tk-header-link { color: var(--tk-ivory); text-decoration: none; white-space: nowrap; }
+.tk-v2 .tk-header-link:hover { color: var(--tk-gold); }
+.tk-v2 .tk-account {
+  padding: 10px 19px; border: 1px solid var(--tk-gold); border-radius: 6px;
+  text-decoration: none; white-space: nowrap; color: var(--tk-gold);
+}
+.tk-v2 .tk-account:hover { background: var(--tk-gold); color: var(--tk-ink); }
+
+.tk-v2 .tk-content {
+  min-height: 65vh; max-width: var(--tk-content-max); margin: auto;
+  padding: 35px var(--tk-gutter) 50px;
+}
+.tk-v2 .tk-content > .container,
+.tk-v2 .tk-content > .lp-wrap { padding: 0 !important; margin: auto !important; }
+.tk-v2 .tk-content > div[class*="max-w"] { margin-inline: auto; }
+
+.tk-v2 .tk-footer {
+  display: block; margin: 0; padding: 28px var(--tk-gutter) 24px;
+  border-top: 1px solid #aa945d66; background: #05221f; color: var(--tk-muted);
+}
+.tk-v2 .tk-footer-top { display: flex; align-items: center; justify-content: space-between; gap: 25px; flex-wrap: wrap; }
+.tk-v2 .tk-footer .tk-brand { font-size: 26px; }
+.tk-v2 .tk-footer .tk-brand img { width: 40px; height: 40px; }
+.tk-v2 .tk-footer-nav { flex-wrap: wrap; gap: 6px 22px; }
+.tk-v2 .tk-footer-nav a { color: var(--tk-ivory); text-decoration: none; padding: 6px 0; }
+.tk-v2 .tk-footer-nav a:hover { color: var(--tk-gold); }
+.tk-v2 .tk-footer-about { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--tk-line-soft); font-size: 12px; }
+.tk-v2 .tk-footer-about p { margin: 0 0 6px; line-height: 1.6; }
+
+/* ---- 4. COMPONENTS ------------------------------------------------------ */
+/* Card: .tk-card is the name for new code; the others are the names older pages
+   already use, so they get the same look without editing their markup. */
+.tk-v2 .tk-content :is(.tk-card, .card, .lp-card, .box, .trust-item, .stat-box, [class*="bg-slate-8"], [class*="bg-slate-9"], [class*="bg-brand-card"], [class*="bg-[#"]) {
+  background: radial-gradient(ellipse at 15% 0, #54704830, transparent 70%), linear-gradient(135deg, var(--tk-forest), var(--tk-forest-deep)) !important;
+  border: 1px solid var(--tk-line) !important; border-radius: var(--tk-radius-card) !important;
+  box-shadow: 0 9px 24px #00101630;
+}
+.tk-v2 .tk-content :is(.tk-card, .card, .lp-card) { padding: var(--tk-gap-lg); margin-bottom: 20px; }
+
+/* Button: gold. Also applies to every <button>, .lp-btn, .btn and green links. */
+.tk-v2 .tk-content :is(.tk-btn, button, .lp-btn, .btn, .acct-btn, .tk-offer-btn, .tk-pkg-btn, a[class*="bg-emerald"]) {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--tk-gap-sm);
+  min-height: 48px; padding: 12px 23px !important; width: auto;
+  background: linear-gradient(115deg, var(--tk-gold-button-from), var(--tk-gold-button-to)) !important;
+  color: var(--tk-ink) !important; border: 1px solid #edca78 !important; border-radius: var(--tk-radius-control) !important;
+  font: 17px/1.3 var(--tk-font-display) !important; cursor: pointer; text-decoration: none;
+  box-shadow: inset 0 1px #ffe6a655;
+}
+.tk-v2 .tk-content :is(.tk-btn, button, .lp-btn, .btn, .acct-btn, .tk-offer-btn, .tk-pkg-btn):hover { filter: brightness(1.06); }
+.tk-v2 .tk-content :is(.tk-btn, button, .lp-btn, .btn, .acct-btn, .tk-offer-btn, .tk-pkg-btn):focus-visible { outline: 2px solid var(--tk-ivory); outline-offset: 2px; }
+.tk-v2 .tk-content .lp-btn { width: 100%; }
+.tk-v2 .tk-content .lp-choice { display: block; text-align: left; border-radius: var(--tk-radius-control); padding: 14px 16px; margin-top: 10px; }
+.tk-v2 .tk-content .lp-choice-secondary { background: transparent !important; color: var(--tk-ivory) !important; border: 1px solid var(--tk-line) !important; font: 16px var(--tk-font-body) !important; }
+.tk-v2 .tk-content .lp-choice-primary { background: linear-gradient(115deg, var(--tk-gold-button-from), var(--tk-gold-button-to)) !important; color: var(--tk-ink) !important; }
+
+/* Small helper buttons inside the letter form keep their compact size */
+.tk-v2 .tk-content .lp-suggest button { min-height: 0; padding: 3px 10px !important; font: 12px var(--tk-font-body) !important; background: none !important; color: var(--tk-ivory) !important; border: 1px solid var(--tk-line) !important; }
+
+/* Form fields */
+.tk-v2 .tk-content :is(input:not([type=checkbox], [type=radio], [type=hidden]), textarea, select) {
+  width: 100%; max-width: 100%; min-height: 47px; padding: 11px 13px;
+  background: var(--tk-field-bg) !important; border: 1px solid var(--tk-field-line) !important;
+  border-radius: var(--tk-radius-control); color: var(--tk-ivory) !important; font: 14px/1.4 var(--tk-font-body);
+}
+.tk-v2 input[type=checkbox], .tk-v2 input[type=radio] { accent-color: var(--tk-gold); width: 18px; height: 18px; flex-shrink: 0; }
+.tk-v2 :is(input, textarea, select):focus { outline: 2px solid var(--tk-gold); outline-offset: 2px; }
+.tk-v2 :is(input, textarea)::placeholder { color: #a8b9ac !important; opacity: 1; }
+.tk-v2 textarea { min-height: 110px; }
+.tk-v2 label { font-size: 13px; font-weight: 600; }
+.tk-v2 label:not(.tk-radio, .acct-check) { margin-top: 12px; }
+.tk-v2 :is(small, .lp-hint, .lp-section-note) { font: 12px/1.6 var(--tk-font-body); color: var(--tk-muted); }
+.tk-v2 .lp-hint { margin: 4px 0 13px; }
+.tk-v2 .lp-section { padding: 18px 0; border-top: 1px solid var(--tk-line-soft); margin-top: 0; }
+.tk-v2 .lp-section h2 { font-size: 25px !important; }
+.tk-v2 .lp-wrap { max-width: 760px; margin: auto; padding: 0; width: 100%; }
+.tk-v2 .lp-static { padding: 10px 0; color: #e7ddc6; background: none; border: 0; }
+.tk-v2 .tk-radio { display: flex; gap: 13px; align-items: start; border: 1px solid #aa945d77; border-radius: 8px; padding: 16px; margin: 10px 0; }
+.tk-v2 .tk-radio small { display: block; }
+.tk-v2 .lp-fielderr { color: var(--tk-danger); }
+
+/* Notice: messages, errors, banners */
+.tk-v2 .tk-content :is(.tk-notice, .acct-err, .acct-note) {
+  padding: 12px 16px; border: 1px solid var(--tk-line); border-radius: var(--tk-radius-control);
+  background: #ffffff0f; color: var(--tk-ivory); font-size: 14px;
+}
+.tk-v2 .tk-notice--error, .tk-v2 .acct-err { border-color: var(--tk-danger); color: var(--tk-danger); }
+
+/* Badge / tag */
+.tk-v2 .tk-badge { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--tk-gold); }
+.tk-v2 .lp-tag { font: 10px var(--tk-font-body) !important; letter-spacing: .06em; text-transform: uppercase; display: inline-block; border: 1px solid #b39a5e66; border-radius: 20px; padding: 4px 8px; vertical-align: middle; color: var(--tk-gold-soft); margin-left: 7px; background: none; }
+
+/* Table */
+.tk-v2 table { width: 100%; border-collapse: collapse; }
+.tk-v2 th { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--tk-gold) !important; background: none !important; }
+.tk-v2 :is(td, th) { padding: 13px 12px; border-bottom: 1px solid #ab945f44 !important; color: inherit; }
+.tk-v2 td { font-size: 14px; }
+
+.tk-v2 .tk-content details { border-bottom: 1px solid #9f8c5655; padding: 15px 0; }
+.tk-v2 .tk-content summary { cursor: pointer; color: var(--tk-ivory); font: 21px var(--tk-font-display); }
+.tk-v2 .tk-content pre { white-space: pre-wrap; }
+.tk-v2 .tk-empty { padding: 20px; color: var(--tk-muted); font-size: 14px; }
+
+/* ---- 5. QUICK LINKS ----------------------------------------------------- */
+/* Each link is its own padded, bordered, clickable tile. The grid wraps with a
+   constant gap; the arrow lives inside .tk-nowrap so it can never drop onto a
+   line by itself. Used by /free-dashboard (markup: main.py _quick_links_html);
+   the older .quick-grid/.quick-card pages (/account, /dashboard) share the look. */
+.tk-v2 .tk-content h3.tk-quick-title {
+  margin: 28px 0 var(--tk-gap-md); font: 700 12px var(--tk-font-body) !important;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--tk-gold-soft) !important;
+}
+.tk-v2 :is(.tk-quick-grid, .quick-grid) {
+  display: grid; gap: var(--tk-gap-md);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+  margin: 0;
+}
+.tk-v2 :is(.tk-quick-card, .quick-card) {
+  display: flex; flex-direction: column; justify-content: center; gap: 4px;
+  min-height: 76px; padding: 16px 18px; min-width: 0;
+  border: 1px solid var(--tk-line); border-radius: 10px;
+  background: radial-gradient(ellipse at 15% 0, #54704830, transparent 70%), linear-gradient(135deg, var(--tk-forest), var(--tk-forest-deep));
+  color: var(--tk-ivory); text-decoration: none;
+  transition: border-color .15s, transform .15s;
+}
+.tk-v2 :is(.tk-quick-card, .quick-card):hover { border-color: var(--tk-gold); transform: translateY(-1px); }
+.tk-v2 :is(.tk-quick-card, .quick-card):focus-visible { outline: 2px solid var(--tk-gold); outline-offset: 2px; }
+.tk-v2 .tk-quick-card__title { font: 20px/1.25 var(--tk-font-display); color: var(--tk-ivory); overflow-wrap: anywhere; }
+.tk-v2 .tk-quick-card__arrow { color: var(--tk-gold); }
+.tk-v2 .tk-quick-card__hint { font-size: 13px; line-height: 1.45; color: var(--tk-muted); }
+.tk-v2 .tk-quick-card__status { font-size: 12px; color: var(--tk-gold-soft); }
+@media (max-width: 520px) {
+  .tk-v2 :is(.tk-quick-grid, .quick-grid) { grid-template-columns: 1fr; }
+  .tk-v2 :is(.tk-quick-card, .quick-card) { min-height: 64px; padding: 14px 16px; }
+}
+
+/* ---- 6. LETTER PREVIEW -------------------------------------------------- */
+/* The real letter renderer is shown in an iframe that is 794px wide (A4 at
+   96dpi). main.py's fit script scales it to the panel's usable width and sets
+   .lp-preview-sizer's size. On narrow screens the scale stops at data-min-scale
+   so the text stays readable and the viewer scrolls sideways instead. */
+.tk-v2 .lp-preview-fit {
+  position: relative; display: block; width: 100%; margin: 14px 0 0; padding: 12px;
+  overflow: auto; scrollbar-gutter: stable; overscroll-behavior: contain;
+  max-height: min(78vh, 880px);
+  background: #0a2a24; border: 1px solid var(--tk-line) !important; border-radius: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+.tk-v2 .lp-preview-sizer { position: relative; margin: 0 auto; width: 100%; height: 560px; }
+.tk-v2 .lp-wrap .lp-preview-fit iframe {
+  display: block; position: absolute; top: 0; left: 0; margin: 0; border: 0; border-radius: 0;
+  width: 100%; height: 100%; max-width: none !important; background: #fff;
+  transform-origin: top left; box-shadow: 0 8px 28px #00000066;
+}
+.tk-v2 .lp-preview-fit[data-fitted="true"] iframe { width: 794px; }   /* JS then sets exact width/height/scale */
+.tk-v2 .lp-preview-hint { margin: 8px 0 0; font-size: 12px; color: var(--tk-muted); }
+@media (min-width: 701px) { .tk-v2 .lp-preview-hint { display: none; } }
+@media (max-width: 700px) {
+  .tk-v2 .lp-preview-fit { padding: 8px; max-height: 72vh; }
+}
+
+/* ---- 7. BRIDGE: older pages still written with Tailwind classes / inline colours
+   These map the old dark-slate look onto the tokens above. Delete a rule once the
+   page that needed it has been converted to the components in section 4. ------- */
+.tk-v2 .tk-content :is([class*="text-slate-"], [style*="color:#94a3b8"], [style*="color: #94a3b8"]) { color: var(--tk-muted) !important; }
+.tk-v2 .tk-content :is([class*="text-emerald"], [style*="color:#34d399"], [style*="color: #34d399"]) { color: var(--tk-gold) !important; }
+.tk-v2 .tk-content :is([class*="text-white"], [class*="text-slate-100"], [class*="text-slate-200"]) { color: var(--tk-ivory) !important; }
+.tk-v2 .tk-content [class*="border-slate"] { border-color: var(--tk-line-soft) !important; }
+.tk-v2 .tk-content :is([style*="background:#0f172a"], [style*="background: #0f172a"]) { background: linear-gradient(135deg, #163d2c, var(--tk-forest-deep)) !important; }
+.tk-v2 .tk-content :is([style*="background:#020617"], [style*="background: #020617"]) { background: var(--tk-field-bg) !important; }
+.tk-v2 .tk-content [style*="color:#e2e8f0"] { color: var(--tk-ivory) !important; }
+.tk-v2 .tk-content [style*="border:1px solid #1e293b"], .tk-v2 .tk-content [style*="border: 1px solid #1e293b"] { border-color: var(--tk-line-soft) !important; }
+.tk-v2 .tk-content a[style*="background:#059669"], .tk-v2 .tk-content a[style*="background: #059669"] {
+  background: linear-gradient(115deg, var(--tk-gold-button-from), var(--tk-gold-button-to)) !important; color: var(--tk-ink) !important; border-radius: var(--tk-radius-control) !important;
+}
+/* Light admin pages (inline white cards on #f4f4f9) */
+.tk-v2 .tk-content :is([style*="background:white"], [style*="background: white"], [style*="background:#fff"], [style*="background: #fff"], [style*="background:#ffffff"]) {
+  background: linear-gradient(135deg, var(--tk-forest), var(--tk-forest-deep)) !important; color: var(--tk-ivory) !important;
+  border-color: var(--tk-line) !important;
+}
+.tk-v2 .tk-content :is([style*="background:#f8fafc"], [style*="background:#f1f5f9"], [style*="background:#f9fafb"], [style*="background:#f4f4f9"], [style*="background: #f8fafc"]) { background: #ffffff10 !important; color: var(--tk-ivory) !important; }
+.tk-v2 .tk-content :is([style*="color:#333"], [style*="color:#111"], [style*="color:#0f172a"], [style*="color:#1e293b"], [style*="color:#334155"], [style*="color:#444"], [style*="color:#555"], [style*="color:#666"], [style*="color:#222"], [style*="color:black"]) { color: var(--tk-ivory) !important; }
+
+/* Light admin pages: pale chips/rows, slate text and green buttons written as inline colours */
+.tk-v2 .tk-content :is([style*="background"][style*="#f1f5f9"], [style*="background"][style*="#f8fafc"], [style*="background"][style*="#fffbeb"], [style*="background"][style*="#fef9c3"], [style*="background"][style*="#f4f4f9"]) {
+  background: #ffffff12 !important; color: var(--tk-ivory) !important; border-color: var(--tk-line-soft) !important;
+}
+.tk-v2 .tk-content :is([style*="color:#0f172a"], [style*="color: #0f172a"], [style*="color:#334155"], [style*="color: #334155"], [style*="color:#044332"], [style*="color:#64748b"], [style*="color:#888"], [style*="color:#cbd5e1"]) { color: var(--tk-ivory) !important; }
+.tk-v2 .tk-content :is([style*="color:#059669"], [style*="color:#0284c7"], [style*="color:#d97706"], [style*="color:#b45309"]) { color: var(--tk-gold) !important; }
+.tk-v2 .tk-content [style*="border"][style*="#e2e8f0"] { border-color: var(--tk-line-soft) !important; }
+.tk-v2 .tk-content :is(a, span, div, b)[style*="background"][style*="#059669"],
+.tk-v2 .tk-content :is(a, span, div, b)[style*="background"][style*="#10b981"] {
+  background: linear-gradient(115deg, var(--tk-gold-button-from), var(--tk-gold-button-to)) !important; color: var(--tk-ink) !important; border-radius: var(--tk-radius-control);
+}
+
+/* Dark inline panels (not inputs) become cards; amber buttons become gold */
+.tk-v2 .tk-content :is(div, section, aside, form)[style*="background"][style*="#020617"] {
+  background: linear-gradient(135deg, var(--tk-forest), var(--tk-forest-deep)) !important; border-color: var(--tk-line) !important;
+}
+.tk-v2 .tk-content :is(a, button, span)[style*="background"][style*="#f59e0b"] {
+  background: linear-gradient(115deg, var(--tk-gold-button-from), var(--tk-gold-button-to)) !important; color: var(--tk-ink) !important;
+}
+
+/* Brand mark above sign-in style boxes */
+.tk-v2 .tk-brand-mark { width: 58px; margin: 0 auto 12px; }
+.tk-v2 .tk-brand-mark img { display: block; width: 100%; height: auto; }
+
+/* ---- 8. PER-PAGE LAYOUT (keep short; one block per page) ---------------- */
+/* /pricing, /partner-offer: package cards and offers sit in a wrapping grid */
+.tk-v2 .tk-pkgs { gap: var(--tk-gap-md); }
+.tk-v2 .tk-offer { border-radius: var(--tk-radius-card); }
+
+/* ---- 9. NARROW SCREENS -------------------------------------------------- */
+@media (max-width: 700px) {
+  .tk-v2 .tk-header { padding: 12px 16px; gap: 10px; flex-wrap: wrap; }
+  .tk-v2 .tk-brand { font-size: 29px; }
+  .tk-v2 .tk-brand img { width: 43px; height: 43px; }
+  .tk-v2 .tk-header-nav { order: 3; width: 100%; justify-content: space-between; gap: 12px; }
+  .tk-v2 .tk-header-account { gap: 10px; font-size: 12px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+  .tk-v2 .tk-account { font-size: 12px; padding: 9px 12px; }
+  .tk-v2 .tk-content { padding: 24px 16px 32px; }
+  .tk-v2 .tk-content h1 { font-size: 32px !important; }
+  .tk-v2 .tk-content h2 { font-size: 25px !important; }
+  .tk-v2 .tk-content h3 { font-size: 21px !important; }
+  .tk-v2 .tk-content :is(.tk-card, .card, .lp-card, .box) { padding: 18px !important; margin-bottom: 16px; }
+  .tk-v2 .tk-content .grid { grid-template-columns: 1fr !important; }
+  .tk-v2 .tk-content table { display: block; overflow-x: auto; }
+  .tk-v2 .tk-content [style*="min-width"] { min-width: 0 !important; }
+  .tk-v2 .tk-footer { padding: 22px 16px; }
+  .tk-v2 .tk-footer-top { gap: 14px; }
+  .tk-v2 .tk-footer-nav { width: 100%; justify-content: space-between; font-size: 12px; }
+}

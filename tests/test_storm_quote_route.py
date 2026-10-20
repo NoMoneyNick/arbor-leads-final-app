@@ -140,6 +140,39 @@ class TestStormQuotePersonalization(unittest.TestCase):
         self.assertIn("Public liability insured up to £2M", body)
         self.assertIn("NPTC Level 2 Certificate in Arboriculture", body)
 
+    # 21 Oct 2026: company / phone are inserted into the page, so they must be HTML-escaped on every path
+    # (query string with no session, and saved settings), while the text a person sees stays the same.
+    def test_query_parameters_are_escaped_but_display_unchanged(self):
+        response = main.generate_storm_quote(
+            _request(email=None), "EMERGENCY-DISPATCH",
+            company='Oak & Ash <script>alert(1)</script> "Ltd"', phone="01234 <b>567</b>")
+        body = _body(response)
+        self.assertNotIn("<script>alert(1)</script>", body)
+        self.assertNotIn("<b>567</b>", body)
+        self.assertIn("Oak &amp; Ash &lt;script&gt;alert(1)&lt;/script&gt; &quot;Ltd&quot;", body)
+        self.assertIn("01234 &lt;b&gt;567&lt;/b&gt;", body)
+
+    @patch("main.database.get_db_conn")
+    @patch("main.letter_content.get_contractor_settings")
+    def test_saved_settings_are_escaped_and_plain_text_unchanged(self, mock_settings, mock_get_conn):
+        mock_settings.return_value = _FakeSettings(
+            business_name="Smith & Sons <i>Tree</i> Care", phone="07700 900123 <x>")
+        conn = MagicMock(); cur = MagicMock()
+        conn.cursor.return_value = cur
+        mock_get_conn.return_value = conn
+
+        body = _body(main.generate_storm_quote(_request(email="dave@apex-trees.co.uk"), "EMERGENCY-DISPATCH"))
+        self.assertNotIn("<i>Tree</i>", body)
+        self.assertNotIn("<x>", body)
+        self.assertIn("Smith &amp; Sons &lt;i&gt;Tree&lt;/i&gt; Care", body)
+        self.assertIn("07700 900123 &lt;x&gt;", body)
+
+    def test_ordinary_values_still_display_exactly(self):
+        body = _body(main.generate_storm_quote(
+            _request(email=None), "EMERGENCY-DISPATCH", company="Apex Tree Surgery", phone="01234 567890"))
+        self.assertIn(">Apex Tree Surgery<", body)
+        self.assertIn(">01234 567890<", body)
+
 
 if __name__ == "__main__":
     unittest.main()

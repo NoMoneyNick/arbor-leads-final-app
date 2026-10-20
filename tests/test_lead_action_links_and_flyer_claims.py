@@ -403,7 +403,11 @@ class TestFreeDashboardToolCards(_DashboardTestBase):
             response = main.free_dashboard(self._request())
         body = response if isinstance(response, str) else getattr(response, "body", str(response))
 
-        self.assertIn("Preview Intro Letter", body)
+        # 20 Oct 2026: the quick-link title now wraps its last word in a non-breaking span (so a
+        # lone arrow never wraps), which splits the raw HTML; compare the words a visitor actually reads.
+        import re as _re
+        visible = _re.sub(r"\s+", " ", _re.sub(r"<[^>]+>", "", body).replace("&nbsp;", " "))
+        self.assertIn("Preview Intro Letter", visible)
         self.assertNotIn("Street Flyer", body)
 
 
@@ -650,8 +654,8 @@ class TestStreetFlyerRemovesUnconditionalClaims(unittest.TestCase):
              patch("main._verify_session_cookie", return_value=None):
             response = main.generate_street_flyer(request, "PLANIT-001")
         body = response if isinstance(response, str) else getattr(response, "body", str(response))
-        self.assertIn("Neighbor Street Notice |", body)
-        self.assertNotIn("Neighbor Street Notice & Discount", body)
+        self.assertIn("Neighbour Street Notice |", body)
+        self.assertNotIn("Neighbour Street Notice & Discount", body)
 
 
 if __name__ == "__main__":

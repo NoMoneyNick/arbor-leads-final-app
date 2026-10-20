@@ -23,6 +23,10 @@ import funding as funding_module
 import suppression as suppression_module
 import address_release
 import worker as fulfilment_worker
+import page_theme
+import brand          # brand colours / wording / icon + share-link tags (brand.py)
+import email_layout   # shared branded email design (email_layout.py)
+import document_print # shared print look for the street flyer + storm quote (document_print.py)
 from fastapi import FastAPI, Query, BackgroundTasks, HTTPException, Depends, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -850,6 +854,18 @@ def verify_admin_or_secret(request: Request, secret: Optional[str] = None):
 # ---------------------------------------------------------
 # Progressive Web App (PWA) Service Worker
 # ---------------------------------------------------------
+@app.get("/favicon.ico", include_in_schema=False)
+def _favicon_ico():
+    """Browsers ask for /favicon.ico by default; serve the brand file."""
+    return RedirectResponse(brand.v("/static/favicon.ico"), status_code=307)
+
+
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+@app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
+def _apple_touch_icon():
+    return RedirectResponse(brand.v(brand.ICON_APPLE_TOUCH), status_code=307)
+
+
 @app.get("/sw.js")
 def service_worker():
     # Sep 8 2026: this was the real cause of Nick's "I update the site, it
@@ -869,7 +885,7 @@ def service_worker():
     # wiped on activate, and skipWaiting/clients.claim make the new worker
     # take over immediately instead of waiting for every tab to be closed.
     sw_code = """
-const CACHE_NAME = 'treekey-v2';
+const CACHE_NAME = 'treekey-v3';   // bump with brand.ASSET_VERSION when icons change
 const urlsToCache = [
   '/static/tailwind.css',
   '/static/icon-192.png',
@@ -1363,6 +1379,108 @@ def _shared_footer_html() -> str:
     """
 
 
+# ── Shared page theme (header, footer, quick links) ──────────────────────────
+# 2026-10-20: the "remaining pages" redesign. page_theme.py decides WHICH pages
+# get the new look; static/treekey-pages.css is the look itself; the three
+# functions below own the new header/footer wording and links. The approved
+# homepage "/" and "/marketplace" are never wrapped (see page_theme.py), and
+# TREEKEY_PAGE_THEME=off restores every page to its previous markup.
+
+def _v2_header_html(request: Optional[Request] = None) -> str:
+    """New site header: crest + wordmark, four main links, account links.
+    Login state comes from the same _nav_auth_state() the old header used."""
+    auth = _nav_auth_state(request)
+    if auth:
+        account = (f'<a class="tk-header-link" href="{auth["dashboard_url"]}">Dashboard</a>'
+                   '<a class="tk-header-link" href="/logout">Log out</a>'
+                   '<a class="tk-account" href="/account">My account</a>')
+    else:
+        account = ('<a class="tk-header-link" href="/free-account">Create account</a>'
+                   '<a class="tk-account" href="/login">Log in</a>')
+    return f"""
+    <header class="tk-header">
+        <a class="tk-brand" href="/"><img src="/static/images/treekey-crest.png" alt="" width="59" height="55"><span>TreeKey</span></a>
+        <nav class="tk-header-nav" aria-label="Main navigation">
+            <a href="/marketplace">Marketplace</a>
+            <a href="/pricing">Pricing</a>
+            <a href="/chip-drop">Tools</a>
+            <a href="/faq">Help</a>
+        </nav>
+        <div class="tk-header-account">{account}</div>
+    </header>"""
+
+
+def _v2_footer_html() -> str:
+    """New site footer. The wording and links are the existing footer's
+    (unchanged); Storm Radar and Chip-drop are added because the new header no
+    longer lists Storm Radar."""
+    return """
+    <footer class="tk-footer">
+        <div class="tk-footer-top">
+            <a class="tk-brand" href="/"><img src="/static/images/treekey-crest.png" alt="" width="40" height="37"><span>TreeKey</span></a>
+            <nav class="tk-footer-nav" aria-label="Footer">
+                <a href="mailto:contact@treekey.co.uk">Help</a>
+                <a href="/marketplace">Marketplace</a>
+                <a href="/pricing">Packages</a>
+                <a href="/storm-radar">Storm Radar</a>
+                <a href="/chip-drop">Chip-drop</a>
+                <a href="/faq">FAQ</a>
+                <a href="/suggestions">Suggestions</a>
+                <a href="/privacy-policy">Privacy</a>
+                <a href="/terms-of-service">Terms</a>
+                <a href="/login">Login</a>
+            </nav>
+        </div>
+        <div class="tk-footer-about">
+            <p>Planning information comes from public UK council planning registers.</p>
+            <p>&copy; 2026 Tree Key. All rights reserved.</p>
+            <p>Proudly engineered in the United Kingdom &#127468;&#127463;</p>
+            <p>Contact: nick@treekey.co.uk</p>
+        </div>
+    </footer>"""
+
+
+def _tk_v2_wrap(request: Request, page_html: str) -> str:
+    """Re-wrap a finished page in the new header/footer + stylesheet."""
+    return page_theme.wrap(
+        page_html, _v2_header_html(request), _v2_footer_html(),
+        strip_css=(f"<style>{_SHARED_NAV_CSS}</style>", f"<style>{_SHARED_FOOTER_CSS}</style>"),
+    )
+
+
+@app.middleware("http")
+async def _tk_page_theme(request: Request, call_next):
+    """(1) Applies the shared page theme to the pages listed in page_theme.py.
+    (2) Swaps the old icon / theme-colour tags for the current brand set on every HTML page
+    (brand.py -> apply_head_branding; switch off with TREEKEY_BRAND_HEAD=off).
+    Only finished text/html responses are touched; redirects, JSON, files pass through untouched.
+    If either step fails, the original page is served."""
+    response = await call_next(request)
+    path = request.url.path
+    if "text/html" not in response.headers.get("content-type", ""):
+        return response
+    do_theme = page_theme.applies_to(path, response.status_code)
+    do_brand = brand.enabled() and not path.startswith(("/api/", "/static/"))
+    if not (do_theme or do_brand):
+        return response
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    new_body = body
+    try:
+        text = body.decode("utf-8")
+        if do_theme:
+            text = _tk_v2_wrap(request, text)
+        if do_brand:
+            text = brand.apply_head_branding(text, path)
+        new_body = text.encode("utf-8")
+    except Exception as e:
+        logger.error(f"[PageTheme] Could not wrap {path}: {e}")
+        new_body = body
+    out = Response(content=new_body, status_code=response.status_code)
+    out.raw_headers = [h for h in response.raw_headers if h[0].lower() != b"content-length"] + [
+        (b"content-length", str(len(new_body)).encode())]
+    return out
+
+
 def _branded_message_page(request: Request, heading: str, message: str,
                            cta_text: str = "Browse the Marketplace", cta_href: str = "/marketplace",
                            status_code: int = 200) -> HTMLResponse:
@@ -1484,7 +1602,7 @@ async def _branded_500_handler(request: Request, exc: Exception):
         raise exc
     # 2026-09-24: same missing-stylesheet fix as _branded_message_page
     # above -- see that function's docstring.
-    return HTMLResponse(f"""
+    _page = f"""
     <!DOCTYPE html>
     <html lang="en-GB">
     <head>
@@ -1511,7 +1629,15 @@ async def _branded_500_handler(request: Request, exc: Exception):
     {_shared_footer_html()}
     </body>
     </html>
-    """, status_code=500)
+    """
+    if page_theme.enabled() and request.url.path not in ("/", "/marketplace"):
+        # New shared header/footer + theme (this handler runs outside the page-theme middleware).
+        try:
+            _page = _tk_v2_wrap(request, _page)
+        except Exception as _e:
+            logger.error(f"[PageTheme] Could not wrap the 500 page: {_e}")
+    _page = brand.apply_head_branding(_page, request.url.path)
+    return HTMLResponse(_page, status_code=500)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -3713,7 +3839,11 @@ _LETTER_PREVIEW_FIT_SCRIPT = """
 (() => {
     const frame = document.getElementById('letter-preview-frame');
     const viewport = document.getElementById('letter-preview-viewport');
-    if (!frame || !viewport) return;
+    const sizer = document.getElementById('letter-preview-sizer');
+    if (!frame || !viewport || !sizer) return;
+    // Lowest scale allowed on narrow screens; below this the letter would be too
+    // small to read, so the viewer scrolls sideways instead (see treekey-pages.css section 6).
+    const minScale = parseFloat(viewport.dataset.minScale) || 0.7;
     function fitLetter() {
         const doc = frame.contentDocument;
         if (!doc || !doc.body || !doc.querySelector('.letter-page')) return;
@@ -3723,11 +3853,15 @@ _LETTER_PREVIEW_FIT_SCRIPT = """
         const width = Math.max(794, doc.documentElement.scrollWidth, doc.body.scrollWidth);
         frame.style.width = width + 'px';
         const height = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight) + 2;
-        const scale = Math.min(1, viewport.clientWidth / width);
+        const cs = getComputedStyle(viewport);
+        const room = viewport.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+        const scale = Math.max(minScale, Math.min(1, room / width));
         frame.style.height = height + 'px';
         frame.style.transform = 'scale(' + scale + ')';
-        viewport.style.height = (Math.ceil(height * scale) + 2) + 'px';
+        sizer.style.width = Math.ceil(width * scale) + 'px';
+        sizer.style.height = Math.ceil(height * scale) + 'px';
         viewport.dataset.fitted = 'true';
+        viewport.dataset.scale = scale.toFixed(2);
     }
     frame.addEventListener('load', () => {
         fitLetter();
@@ -4282,18 +4416,21 @@ def letter_settings_preview(request: Request, next: Optional[str] = Query(None))
     
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
             <h1 style="margin:0; font-size:22px; color:#34d399;">Preview Your Letter Template</h1>
-            <a href="/letter-settings{next_q}" style="font-size:14px; font-weight:600;">&larr; Edit</a>
+            <a href="/letter-settings{next_q}" style="font-size:14px; font-weight:600; white-space:nowrap;">&larr; Edit</a>
         </div>
         <div class="lp-card">
             {next_banner}
             <p style="font-size:13px; color:#94a3b8; margin-top:0;">This uses illustrative example lead details ({html.escape(letter_content.PREVIEW_LEAD_REFERENCE)}) so you can see the exact wording and layout -- your real letters will use the same template with each homeowner's actual details filled in.</p>
-            <div id="letter-preview-viewport" class="lp-preview-fit" style="height:600px;">
-                <iframe id="letter-preview-frame" title="Your two-page letter preview" srcdoc="{html.escape(preview_html)}"></iframe>
+            <div id="letter-preview-viewport" class="lp-preview-fit" data-min-scale="0.7" tabindex="0" role="region" aria-label="Letter preview (scrollable)">
+                <div id="letter-preview-sizer" class="lp-preview-sizer">
+                    <iframe id="letter-preview-frame" title="Your two-page letter preview" srcdoc="{html.escape(preview_html)}"></iframe>
+                </div>
             </div>
+            <p class="lp-preview-hint">Swipe sideways and down to read the whole letter.</p>
             {_LETTER_PREVIEW_FIT_SCRIPT}
             <div style="margin-top:16px;">{approve_section}</div>
         </div>
-    """, max_width=760))
+    """, max_width=980))
 
 
 @app.post("/letter-settings/approve")
@@ -4767,60 +4904,58 @@ def generate_street_flyer(request: Request, lead_id: str, company: str = "Your L
     if settings is not None and (settings.qualifications_note or "").strip():
         _cred_bits.append(html.escape(settings.qualifications_note.strip()))
     credentials_html = (
-        f'<span style="font-size:12px; color:#64748b;">{" &bull; ".join(_cred_bits)}</span>' if _cred_bits else ""
+        f'<span class="tk-doc-creds">{" &bull; ".join(_cred_bits)}</span>' if _cred_bits else ""
     )
+    # 20 Oct 2026: styling moved to document_print.py (shared with the storm quote). Wording is unchanged
+    # apart from UK spelling (neighbor -> neighbour); the claims review of this flyer is still pending.
     return f"""
     <!DOCTYPE html>
     <html lang="en-GB">
     <head>
         <meta charset="UTF-8">
-        <title>Neighbor Street Notice | {street_name}</title>
-        <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; color: #0f172a; max-width: 650px; margin: auto; line-height: 1.6; background: #fff; }}
-            .card {{ border: 2px solid #044332; border-radius: 12px; padding: 28px; background: #ffffff; }}
-            .badge {{ background: #044332; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; }}
-            .btn-print {{ background: #044332; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; margin-bottom: 20px; }}
-            .btn-back {{ color: #044332; font-size: 13px; text-decoration: none; font-weight: bold; }}
-            @media print {{ .btn-print {{ display: none; }} .btn-back {{ display: none; }} body {{ padding: 0; }} }}
-        </style>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Neighbour Street Notice | {html.escape(street_name)}</title>
+        <style>{document_print.css()}</style>
     </head>
     <body>
-        <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div class="tk-doc-controls">
             <a href="{back_url}" class="btn-back">&larr; Back to Dashboard</a>
-            <button class="btn-print" onclick="window.print()">Print 5 Copies for Neighbors</button>
+            <button class="btn-print" onclick="window.print()">Print 5 Copies for Neighbours</button>
         </div>
 
-        <div class="card">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+        <main class="tk-doc">
+            {document_print.banner_html()}
+            <div class="tk-doc-top">
                 <span class="badge">Tree Works Notice</span>
                 {credentials_html}
             </div>
 
-            <h2 style="margin:0 0 10px 0; color:#044332; font-size:22px;">Notice to Neighbors on {street_name}</h2>
+            <h2>Notice to Neighbours on {html.escape(street_name)}</h2>
 
-            <p style="font-size:14px; color:#334155;">
-                Hello neighbor, our professional arboricultural team will be carrying out approved tree work on your street at <b>{addr}</b> in the coming days.
+            <p>
+                Hello neighbour, our professional arboricultural team will be carrying out approved tree work on your street at <b>{html.escape(addr)}</b> in the coming days.
             </p>
 
-            <h4 style="margin:16px 0 8px 0; font-size:15px; color:#0f172a;">Services Available on the Day:</h4>
-            <ul style="font-size:13px; color:#334155; padding-left:20px; margin:0 0 20px 0;">
+            <h4>Services Available on the Day:</h4>
+            <ul>
                 <li>Crown reduction, thinning & branch pruning</li>
                 <li>Conifer & overgrown boundary hedge trimming</li>
                 <li>Felling dead, diseased, or hazardous trees</li>
                 <li>Stump grinding & complete green waste removal</li>
             </ul>
 
-            <div style="background:#f8fafc; border-radius:8px; padding:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div class="tk-doc-contact">
                 <div>
-                    <div style="font-size:11px; color:#64748b; text-transform:uppercase; font-weight:bold;">Contractor:</div>
-                    <div style="font-weight:bold; color:#0f172a; font-size:15px;">{company}</div>
+                    <div class="label">Contractor:</div>
+                    <div class="value">{html.escape(company)}</div>
                 </div>
-                <div style="text-align:right;">
-                    <div style="font-size:11px; color:#64748b; text-transform:uppercase; font-weight:bold;">Call or Text for a Free Quote:</div>
-                    <div style="font-weight:800; color:#044332; font-size:17px;">{phone}</div>
+                <div class="right">
+                    <div class="label">Call or Text for a Free Quote:</div>
+                    <div class="value">{html.escape(phone)}</div>
                 </div>
             </div>
-        </div>
+            {document_print.footer_html()}
+        </main>
     </body>
     </html>
     """
@@ -7749,7 +7884,7 @@ def ledger_dashboard(request: Request):
                     <input type="number" name="gross_amount" step="0.01" placeholder="e.g. 850.00" required>
                 </div>
                 <div>
-                    <label style="font-size:12px; font-weight:bold;">Labor Portion (for CIS) (£):</label>
+                    <label style="font-size:12px; font-weight:bold;">Labour Portion (for CIS) (£):</label>
                     <input type="number" name="labor_amount" step="0.01" placeholder="e.g. 600.00">
                 </div>
                 <div>
@@ -8140,8 +8275,8 @@ def login_page(request: Request, error: Optional[str] = None, next: Optional[str
     <div class="px-4 py-6 sm:py-16">
     <div class="box max-w-[420px] mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl">
         <div class="text-center mb-4 sm:mb-5">
-            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30 mx-auto mb-2.5 sm:mb-3">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"/></svg>
+            <div class="tk-brand-mark">
+                <img src="/static/images/treekey-crest.png" alt="" width="58" height="54">
             </div>
             <h2 class="text-white text-xl font-bold m-0 mb-1">Log In</h2>
             <p class="text-slate-400 text-[13px] m-0">Zero-Password — enter your email, we'll send you a secure link</p>
@@ -8300,17 +8435,22 @@ def _deliver_login_link(request: Request, contact: str, auth_data: dict, safe_ne
     # read" bug Nick flagged. Switched to the same dark-on-white palette
     # (#0f172a / #334155 / #64748b) already used by every other transactional
     # email in notifications.py (e.g. send_purchased_lead_email).
-    email_body = f"""
-    <div style="font-family:sans-serif; max-width:500px; margin:auto; padding:20px; color:#334155;">
-        <h2 style="color:#059669;">Your TreeKey Login Link</h2>
-        <p style="color:#334155;">Click the secure button below to log in directly to your Contractor Command Center:</p>
-        <div style="text-align:center; margin:24px 0;">
-            <a href="{magic_url}" style="background:#059669; color:white; padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:15px; display:inline-block;">Sign In to Dashboard ➔</a>
-        </div>
-        <p style="font-size:13px; color:#64748b;">Logging in on a different device than this email is on? Enter this 6-digit code there instead: <b style="font-size:16px; color:#0f172a; letter-spacing:1px;">{otp_code}</b></p>
-        <p style="font-size:11px; color:#94a3b8; margin-top:24px;">This secure link and code are valid for 15 minutes. If you did not request this, you can safely ignore this email -- nothing happens unless the link is clicked or the code is entered.</p>
-    </div>
-    """
+    # 20 Oct 2026: presentation moved to the shared branded email layout (email_layout.py); every
+    # word, the link, the 6-digit code and the 15-minute notice are unchanged.
+    _otp_html = ('Logging in on a different device than this email is on? Enter this 6-digit code there instead: '
+                 '<b style="font-size:16px; color:#203c30; letter-spacing:1px;">' + str(otp_code) + '</b>')
+    email_body = email_layout.render(
+        heading="Your TreeKey Login Link",
+        eyebrow_text="Your sign-in link",
+        title="Your TreeKey 1-Tap Login Link",
+        body_html=(
+            email_layout.p("Click the secure button below to log in directly to your Contractor Command Centre:")
+            + email_layout.button("Sign In to Dashboard", magic_url)
+            + '<p style="margin:20px 0 0 0; font-size:13px; color:#667269;">' + _otp_html + '</p>'
+            + email_layout.note("This secure link and code are valid for 15 minutes. If you did not request this, you can safely "
+                                "ignore this email -- nothing happens unless the link is clicked or the code is entered.")
+        ),
+    )
     # Sep 5 2026 CRITICAL FIX: this used to call send_resend_email(), which
     # ALWAYS sends to the fixed internal TEST_EMAIL address (built for admin
     # incident alerts, not customer email) -- meaning no contractor other
@@ -8930,6 +9070,26 @@ async def resend_webhook(request: Request):
     return Response(status_code=200)
 
 
+def _quick_links_html(cards, heading: str = "Quick Links") -> str:
+    """Quick-link tiles: each link is its own padded, bordered, clickable tile
+    in a wrapping grid (styles: static/treekey-pages.css section 5). `cards` is
+    a list of dicts: href, title, hint, optional status, optional new_tab.
+    The arrow is kept inside a no-wrap span with the title's last word so it can
+    never wrap onto a line by itself. All text is escaped here."""
+    tiles = []
+    for c in cards:
+        head, _, last = c["title"].rpartition(" ")
+        title_html = (f'{html.escape(head)} ' if head else "") + (
+            f'<span class="tk-nowrap">{html.escape(last)}&nbsp;<span class="tk-quick-card__arrow" aria-hidden="true">&rarr;</span></span>')
+        hint = f'<span class="tk-quick-card__hint">{html.escape(c["hint"])}</span>' if c.get("hint") else ""
+        status = f'<span class="tk-quick-card__status">{html.escape(c["status"])}</span>' if c.get("status") else ""
+        target = ' target="_blank" rel="noopener"' if c.get("new_tab") else ""
+        tiles.append(f'<a class="tk-quick-card" href="{c["href"]}"{target}>'
+                     f'<span class="tk-quick-card__title">{title_html}</span>{hint}{status}</a>')
+    return (f'<h3 class="tk-quick-title">{html.escape(heading)}</h3>'
+            f'<div class="tk-quick-grid">{"".join(tiles)}</div>')
+
+
 @app.get("/free-dashboard", response_class=HTMLResponse)
 def free_dashboard(request: Request):
     email = _verify_session_cookie(request.cookies.get("treekey_contractor_session"))
@@ -8997,7 +9157,7 @@ def free_dashboard(request: Request):
     # lead when they have one, same generator tools already offered from
     # the free-lead-granted email.
     free_ref = account.get("free_lead_ref")
-    tool_cards = ""
+    quick_cards = []
     if free_ref:
         # 2026-09-23: Request D, Part 1 -- link with the buyer-facing
         # reference, not the raw council reference; generate_homeowner_
@@ -9016,37 +9176,18 @@ def free_dashboard(request: Request):
         # refuse with "Not Available Yet" -- not offered at all, same
         # reasoning as my_leads_view/contractor_dashboard's identical fix.
         status_label = fulfilment.get_letter_status_label_for_lead_reference(free_ref)
-        status_line = (
-            f'<div class="text-slate-400 text-xs mt-1">Mailed introduction: {html.escape(status_label)}</div>'
-            if status_label else ""
-        )
-        tool_cards += f"""
-            <a href="/generate-letter/{ref_q}" target="_blank" class="block bg-slate-800/50 border border-slate-700 hover:border-emerald-500 rounded-xl p-4 no-underline transition-colors">
-                <div class="text-white font-bold text-sm mb-1">Preview Intro Letter</div>
-                <div class="text-slate-400 text-xs">For your free lead's homeowner</div>
-                {status_line}
-            </a>"""
-    tool_cards += """
-            <a href="/marketplace" class="block bg-slate-800/50 border border-slate-700 hover:border-sky-500 rounded-xl p-4 no-underline transition-colors">
-                <div class="text-white font-bold text-sm mb-1">Lead Marketplace</div>
-                <div class="text-slate-400 text-xs">Buy other unallocated leads outright</div>
-            </a>
-            <a href="/ledger" class="block bg-slate-800/50 border border-slate-700 hover:border-violet-500 rounded-xl p-4 no-underline transition-colors">
-                <div class="text-white font-bold text-sm mb-1">TreeKey Ledger</div>
-                <div class="text-slate-400 text-xs">Van-day costing &amp; £90k VAT gauge</div>
-            </a>
-            <a href="/chip-drop" class="block bg-slate-800/50 border border-slate-700 hover:border-orange-500 rounded-xl p-4 no-underline transition-colors">
-                <div class="text-white font-bold text-sm mb-1">Chip-Drop Network</div>
-                <div class="text-slate-400 text-xs">Skip £60-£120 tipping fees, free</div>
-            </a>
-            <a href="/storm-radar" class="block bg-slate-800/50 border border-slate-700 hover:border-amber-500 rounded-xl p-4 no-underline transition-colors">
-                <div class="text-white font-bold text-sm mb-1">Storm Radar</div>
-                <div class="text-slate-400 text-xs">High-wind warnings, be first to call</div>
-            </a>
-            <a href="/suggestions" class="block bg-slate-800/50 border border-slate-700 hover:border-slate-500 rounded-xl p-4 no-underline transition-colors">
-                <div class="text-white font-bold text-sm mb-1">Suggest a Tool</div>
-                <div class="text-slate-400 text-xs">Request features from the founders</div>
-            </a>"""
+        quick_cards.append({
+            "href": f"/generate-letter/{ref_q}", "new_tab": True, "title": "Preview Intro Letter",
+            "hint": "For your free lead's homeowner",
+            "status": f"Mailed introduction: {status_label}" if status_label else "",
+        })
+    quick_cards += [
+        {"href": "/marketplace", "title": "Lead Marketplace", "hint": "Buy other unallocated leads outright"},
+        {"href": "/ledger", "title": "TreeKey Ledger", "hint": "Van-day costing & £90k VAT gauge"},
+        {"href": "/chip-drop", "title": "Chip-Drop Network", "hint": "Skip £60-£120 tipping fees, free"},
+        {"href": "/storm-radar", "title": "Storm Radar", "hint": "High-wind warnings, be first to call"},
+        {"href": "/suggestions", "title": "Suggest a Tool", "hint": "Request features from the founders"},
+    ]
 
     return HTMLResponse(f"""
     <!DOCTYPE html>
@@ -9067,10 +9208,7 @@ def free_dashboard(request: Request):
         </div>
         {_free_list_upsell_html()}
 
-        <h3 class="text-slate-400 text-xs font-bold uppercase tracking-wider mb-3">Quick Links</h3>
-        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {tool_cards}
-        </div>
+        {_quick_links_html(quick_cards)}
     </div>
     {_shared_footer_html()}
     </body>
@@ -9079,13 +9217,16 @@ def free_dashboard(request: Request):
 
 
 @app.get("/unsubscribe-teaser", response_class=HTMLResponse)
-def unsubscribe_teaser(token: Optional[str] = None):
+def unsubscribe_teaser(request: Request, token: Optional[str] = None):
     email = _verify_session_cookie(token)
     if not email:
-        return HTMLResponse("<h3>Invalid or expired unsubscribe link.</h3>", status_code=400)
+        return _branded_message_page(request, "Unsubscribe link not valid", "Invalid or expired unsubscribe link.",
+                                     cta_text="Go to TreeKey", cta_href="/", status_code=400)
     database.set_limbo_account_unsubscribed(email)
     database.add_email_suppression(email, reason="teaser_unsubscribe")
-    return HTMLResponse(f"<h3>You've been unsubscribed, {email}. You won't receive any more of these emails.</h3>")
+    return _branded_message_page(request, "You've been unsubscribed",
+                                 f"You've been unsubscribed, {html.escape(email)}. You won't receive any more of these emails.",
+                                 cta_text="Go to TreeKey", cta_href="/")
 
 
 @app.post("/unsubscribe-teaser")
@@ -9107,7 +9248,7 @@ def unsubscribe_teaser_one_click(token: Optional[str] = None):
 
 
 @app.get("/unsubscribe", response_class=HTMLResponse)
-def unsubscribe_generic(token: Optional[str] = None):
+def unsubscribe_generic(request: Request, token: Optional[str] = None):
     """Sep 10 2026: the canonical unsubscribe link, works for ANY email --
     unlike /unsubscribe-teaser above, this does NOT require the address to
     already have a limbo_accounts row, closing the gap flagged repeatedly
@@ -9121,10 +9262,13 @@ def unsubscribe_generic(token: Optional[str] = None):
     account exists, so nothing relying on that column breaks."""
     email = _verify_session_cookie(token)
     if not email:
-        return HTMLResponse("<h3>Invalid or expired unsubscribe link.</h3>", status_code=400)
+        return _branded_message_page(request, "Unsubscribe link not valid", "Invalid or expired unsubscribe link.",
+                                     cta_text="Go to TreeKey", cta_href="/", status_code=400)
     database.add_email_suppression(email, reason="unsubscribe_link")
     database.set_limbo_account_unsubscribed(email)  # no-op if no account exists for this email
-    return HTMLResponse(f"<h3>You've been unsubscribed, {email}. You won't receive any more marketing emails from TreeKey.</h3>")
+    return _branded_message_page(request, "You've been unsubscribed",
+                                 f"You've been unsubscribed, {html.escape(email)}. You won't receive any more marketing emails from TreeKey.",
+                                 cta_text="Go to TreeKey", cta_href="/")
 
 
 @app.post("/unsubscribe")
@@ -9339,7 +9483,7 @@ def contractor_dashboard(request: Request):
         <div class="header-box">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
                 <div>
-                    <div style="font-size:12px; color:#a7f3d0; text-transform:uppercase; font-weight:bold;">Contractor Command Center</div>
+                    <div style="font-size:12px; color:#a7f3d0; text-transform:uppercase; font-weight:bold;">Contractor Command Centre</div>
                     <h2 style="margin:4px 0; font-size:24px;">{session_email}</h2>
                     <div style="font-size:13px; color:#e2e8f0;">
                         Tier: <b>{tier_name}</b> • Sector: <b>{outcode} (15-Mile Radius)</b>
@@ -9988,7 +10132,7 @@ def my_account_view(request: Request):
             </a>
             <a href="{'/dashboard' if is_paid else '/welcome'}" class="quick-card">
                 <div style="color:white; font-weight:bold; font-size:14px; margin-bottom:2px;">{'Dashboard' if is_paid else 'Get started'}</div>
-                <div style="color:#94a3b8; font-size:12px;">{'Your command center' if is_paid else 'Your offer and letter setup'}</div>
+                <div style="color:#94a3b8; font-size:12px;">{'Your command centre' if is_paid else 'Your offer and letter setup'}</div>
             </a>
             <a href="/marketplace" class="quick-card">
                 <div style="color:white; font-weight:bold; font-size:14px; margin-bottom:2px;">Marketplace</div>
@@ -10667,13 +10811,13 @@ def storm_radar_view(request: Request):
         <div class="flex justify-between items-center mb-5 flex-wrap gap-2.5">
             <div>
                 <h1 class="m-0 text-[28px] font-extrabold text-white">Emergency Storm Weather Radar</h1>
-                <p class="mt-1 mb-0 text-slate-400 text-sm">Severe gale & wind triggers (45mph+). Targeted emergency mobilization without notification spam.</p>
+                <p class="mt-1 mb-0 text-slate-400 text-sm">Severe gale & wind triggers (45mph+). Targeted emergency mobilisation without notification spam.</p>
             </div>
             <a href="/dashboard" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-4 py-2 rounded-lg no-underline text-[13px] font-bold transition-colors">← Contractor Dashboard</a>
         </div>
 
         <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4.5 py-3.5 mb-6 text-[13px] text-emerald-200">
-            <b>Zero-Spam Guarantee:</b> We never alert you for normal rain or mild breezes. Alerts trigger strictly for verified 45mph+ gale forecasts in your registered sector so you can mobilize emergency standby crews.
+            <b>Zero-Spam Guarantee:</b> We never alert you for normal rain or mild breezes. Alerts trigger strictly for verified 45mph+ gale forecasts in your registered sector so you can mobilise emergency standby crews.
         </div>
 
         {alert_cards or empty_state_html}
@@ -10747,69 +10891,68 @@ def generate_storm_quote(request: Request, lead_id: str, company: Optional[str] 
         if (settings.qualifications_note or "").strip():
             _cred_bits.append(html.escape(settings.qualifications_note.strip()))
     credentials_line_html = (
-        f'<span style="font-size:12px; color:#64748b;">{" • ".join(_cred_bits)}</span>' if _cred_bits else ""
+        f'<span class="tk-doc-creds">{" • ".join(_cred_bits)}</span>' if _cred_bits else ""
     )
 
     # Sep 10 2026: same standalone-PWA "no way back" fix as
     # generate_homeowner_letter/generate_street_flyer above.
     _back_auth = _nav_auth_state(request)
     back_url = _back_auth["dashboard_url"] if _back_auth else "/"
+    # 20 Oct 2026: styling moved to document_print.py (shared with the street flyer). Wording unchanged apart
+    # from UK spelling (stabilization -> stabilisation, mobilization -> mobilisation). The statutory-exemption
+    # paragraph still needs a content review before use.
     return f"""
     <!DOCTYPE html>
     <html lang="en-GB">
     <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Emergency Tree Works Quote Sheet</title>
-        <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; color: #0f172a; max-width: 650px; margin: auto; line-height: 1.6; background: #fff; }}
-            .card {{ border: 2px solid #dc2626; border-radius: 12px; padding: 28px; background: #ffffff; }}
-            .badge {{ background: #dc2626; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; }}
-            .btn-print {{ background: #044332; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; margin-bottom: 20px; }}
-            .btn-back {{ color: #044332; font-size: 13px; text-decoration: none; font-weight: bold; }}
-            @media print {{ .btn-print {{ display: none; }} .btn-back {{ display: none; }} body {{ padding: 0; }} }}
-        </style>
+        <style>{document_print.css()}</style>
     </head>
     <body>
-        <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div class="tk-doc-controls">
             <a href="{back_url}" class="btn-back">&larr; Back to Dashboard</a>
             <button class="btn-print" onclick="window.print()">Print / Save Emergency Quote PDF</button>
         </div>
 
-        <div class="card">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+        <main class="tk-doc">
+            {document_print.banner_html()}
+            <div class="tk-doc-top">
                 <span class="badge">Emergency Dangerous Tree Quotation</span>
                 {credentials_line_html}
             </div>
 
-            <h2 style="margin:0 0 10px 0; color:#991b1b; font-size:22px;">Immediate Hazardous Tree Assessment</h2>
-            
-            <p style="font-size:14px; color:#334155;">
-                This formal quotation covers priority hazardous tree felling, storm damage clearance, hanging limb removal, and structural stabilization under emergency mobilization protocols.
+            <h2>Immediate Hazardous Tree Assessment</h2>
+
+            <p>
+                This formal quotation covers priority hazardous tree felling, storm damage clearance, hanging limb removal, and structural stabilisation under emergency mobilisation protocols.
             </p>
 
-            <div style="background:#fef2f2; border-left:4px solid #dc2626; padding:12px 16px; margin:16px 0; font-size:13px; color:#991b1b;">
+            <div class="tk-doc-legal">
                 <b>Exempt from Standard 6-Week Council Wait:</b> Under Section 211 & TPO regulations, trees posing an immediate danger to persons or property (dead, dying, or dangerous) may be made safe immediately without standard statutory delay.
             </div>
 
-            <h4 style="margin:16px 0 8px 0; font-size:15px; color:#0f172a;">Scope of Emergency Works:</h4>
-            <ul style="font-size:13px; color:#334155; padding-left:20px; margin:0 0 20px 0;">
+            <h4>Scope of Emergency Works:</h4>
+            <ul>
                 <li>Safe controlled dismantle of windblown / hung-up stems</li>
                 <li>Rigging and winching away from building structures & powerlines</li>
                 <li>Reduction of hazardous fractured branches to safe points</li>
                 <li>Full site clearance and chipping of green waste</li>
             </ul>
 
-            <div style="background:#f8fafc; border-radius:8px; padding:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div class="tk-doc-contact">
                 <div>
-                    <div style="font-size:11px; color:#64748b; text-transform:uppercase; font-weight:bold;">Emergency Contractor:</div>
-                    <div style="font-weight:bold; color:#0f172a; font-size:16px;">{company}</div>
+                    <div class="label">Emergency Contractor:</div>
+                    <div class="value">{html.escape(company)}</div>
                 </div>
-                <div style="text-align:right;">
-                    <div style="font-size:11px; color:#64748b; text-transform:uppercase; font-weight:bold;">24/7 Emergency Line:</div>
-                    <div style="font-weight:800; color:#dc2626; font-size:18px;">{phone}</div>
+                <div class="right">
+                    <div class="label">24/7 Emergency Line:</div>
+                    <div class="value">{html.escape(phone)}</div>
                 </div>
             </div>
-        </div>
+            {document_print.footer_html()}
+        </main>
     </body>
     </html>
     """
@@ -11044,7 +11187,7 @@ def quote_estimator_page():
             </div>
 
             <label style="font-size:12px; font-weight:bold;">Job Description / Tree Species (Optional):</label>
-            <textarea id="notes" rows="2" placeholder="e.g. Mature Oak overhangs neighbor conservatory; want 2m branch clearance."></textarea>
+            <textarea id="notes" rows="2" placeholder="e.g. Mature Oak overhangs neighbour conservatory; want 2m branch clearance."></textarea>
 
             <button type="submit" class="btn">Calculate Scope & Estimate </button>
         </form>
@@ -14121,7 +14264,7 @@ async def privacy_policy(request: Request = None):
         <p class="mb-4">Customer account data is retained for the life of the account. We do not currently operate an automated deletion process for billing records or for data belonging to a closed account.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">10. Security</h2>
-        <p class="mb-4">We take reasonable technical and organizational measures to protect personal data: encrypted (HTTPS) connections throughout the Service; account sessions secured with signed, tamper-evident tokens rather than plain credentials; no customer passwords are stored at all (login uses a one-time emailed link, so there is no password database to be breached); and administrative and automated-scan functions are protected by a separate access secret, not exposed publicly.</p>
+        <p class="mb-4">We take reasonable technical and organisational measures to protect personal data: encrypted (HTTPS) connections throughout the Service; account sessions secured with signed, tamper-evident tokens rather than plain credentials; no customer passwords are stored at all (login uses a one-time emailed link, so there is no password database to be breached); and administrative and automated-scan functions are protected by a separate access secret, not exposed publicly.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">11. Cookies</h2>
         <p class="mb-4">Tree Key currently sets one cookie: a signed session cookie (<code class="text-emerald-300">treekey_contractor_session</code>) used solely to keep you logged in, marked HttpOnly, Secure, and SameSite=Lax. This is a strictly necessary cookie required for the Service to function, so under UK PECR rules it does not require a cookie consent banner. This will be revisited the moment any analytics, advertising, or tracking cookie is added.</p>
