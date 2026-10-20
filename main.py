@@ -478,16 +478,19 @@ def api_map_leads():
     try:
         conn = database.get_db_conn()
         cur = conn.cursor()
-        cur.execute("""SELECT id, address, summary, discovered_at, status, source_type FROM leads
-                       WHERE (status = 'new' OR status IS NULL) ORDER BY discovered_at DESC LIMIT 6000""")
+        cur.execute("""SELECT id, address, summary, discovered_at, planning_status, registered_date,
+                              COALESCE(lead_source_type, 'council_planning') AS source_type
+                       FROM leads
+                       WHERE (status = 'new' OR status IS NULL) AND COALESCE(vertical, 'tree') = 'tree'
+                       ORDER BY discovered_at DESC LIMIT 6000""")
         rows = cur.fetchall()
         picked = []
-        for lid, address, summary, discovered_at, status, source_type in rows:
+        for lid, address, summary, discovered_at, planning_status, registered_date, source_type in rows:
             ocs = database._extract_outcodes_lenient(address or "")
             if not ocs:
                 continue
             try:
-                if database.calculate_lead_freshness(discovered_at, status, summary or "", source_type=source_type or "council_planning").get("tier") == "expired":
+                if database.calculate_lead_freshness(discovered_at, planning_status, summary or "", source_type=source_type or "council_planning", registered_date=registered_date).get("tier") == "expired":
                     continue
             except Exception:
                 pass
@@ -499,6 +502,14 @@ def api_map_leads():
             for oc, la, lo in cur.fetchall():
                 if la is not None and lo is not None:
                     coords[oc] = (float(la), float(lo))
+            # a few area look-ups per refresh (cached for good), so coverage fills in over time
+            _missing = [oc for oc in distinct if oc not in coords]
+            try:
+                for oc, area in database._bulk_get_outcode_area_labels(_missing[:40]).items():
+                    if area.get("lat") is not None and area.get("lon") is not None:
+                        coords[oc] = (float(area["lat"]), float(area["lon"]))
+            except Exception as e:
+                logging.getLogger(__name__).debug(f"[map-leads] area look-up skipped: {e}")
         cur.close()
         by_oc = {}
         for p in picked:
