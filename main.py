@@ -940,7 +940,8 @@ _SHARED_NAV_CSS = """
 .tk-nav a, .tk-nav a:visited { text-decoration:none; }
 .tk-nav a:focus-visible, .tk-nav button:focus-visible { outline:2px solid #34d399; outline-offset:3px; border-radius:6px; }
 .tk-brand, .tk-brand:visited { display:flex; align-items:center; gap:12px; color:#ffffff; font-weight:700; flex-shrink:0; }
-.tk-brand-logo { width:40px; height:40px; border-radius:12px; background:linear-gradient(135deg,#059669,#064e3b); border:1px solid rgba(16,185,129,.3); display:flex; align-items:center; justify-content:center; box-shadow:0 4px 12px rgba(0,0,0,.4); flex-shrink:0; }
+.tk-brand-logo { width:43px; height:40px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.tk-brand-logo img { display:block; width:43px; height:40px; object-fit:contain; }
 .tk-brand-text { display:flex; flex-direction:column; line-height:1; }
 .tk-brand-name { font-weight:800; font-size:18px; letter-spacing:.08em; color:#ffffff; }
 .tk-brand-name span { color:#34d399; }
@@ -1309,11 +1310,7 @@ def _shared_nav_html(request: Optional[Request] = None) -> str:
         <div class="tk-nav-inner">
             <div class="tk-nav-row">
                 <a href="/" class="tk-brand">
-                    <span class="tk-brand-logo">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"/>
-                        </svg>
-                    </span>
+                    <span class="tk-brand-logo"><img src="/static/images/treekey-crest.png" alt="" width="43" height="40"></span>
                     <span class="tk-brand-text">
                         <span class="tk-brand-name">TREE<span>KEY</span></span>
                         <span class="tk-brand-tag">Arbor Intelligence</span>
@@ -1894,11 +1891,7 @@ def public_homepage(request: Request):
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center h-20">
                 <a href="/" class="flex items-center gap-3 text-white font-bold text-xl tracking-tight no-underline">
-                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-900 flex items-center justify-center shadow-lg border border-emerald-500/30">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"/>
-                        </svg>
-                    </div>
+                    <img src="/static/images/treekey-crest.png" alt="" width="43" height="40" class="w-[43px] h-10 block">
                     <div class="flex flex-col">
                         <span class="font-extrabold text-lg text-white leading-none tracking-wider font-sans">TREE<span class="text-emerald-400">KEY</span></span>
                         <span class="text-[9px] uppercase tracking-widest text-emerald-500 font-mono font-semibold">Arbor Intelligence</span>
