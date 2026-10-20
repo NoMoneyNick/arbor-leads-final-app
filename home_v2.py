@@ -211,7 +211,16 @@ _SCRIPT = r"""
   var btn = document.getElementById('pwaInstallBtn'), tip = document.getElementById('pwaInstallTip');
   var standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent), deferred = null;
-  if (btn && !standalone) {
+  var isDesktop = !/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+  if (btn && !standalone && isDesktop) {
+    /* desktop: never install a desktop app -- point people to their phone instead */
+    btn.classList.remove('tk-hide'); btn.textContent = 'Get the phone app';
+    window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); });
+    window.tkInstallApp = function () {
+      tip.innerHTML = '<button type="button" class="tip-close" aria-label="Close" onclick="document.getElementById(\'pwaInstallTip\').classList.add(\'tk-hide\')">\u00d7</button><strong>TreeKey is a phone app</strong><p>Scan this with your phone camera, then follow the steps to add TreeKey to your home screen.</p><img src="/static/images/app-install-qr.png" alt="QR code to open TreeKey on your phone" width="140" height="140" style="display:block;margin:8px auto 0;background:#fff;padding:6px;border-radius:8px">';
+      tip.classList.toggle('tk-hide');
+    };
+  } else if (btn && !standalone) {
     if (isIOS) {
       btn.classList.remove('tk-hide');
       var shown = false; try { shown = localStorage.getItem('tk_install_tip_shown') === '1'; } catch (e) {}
@@ -229,6 +238,17 @@ _SCRIPT = r"""
   var map = L.map('map', { zoomControl: false }).setView([54.5, -4.0], 6);
   L.control.zoom({ position: 'bottomright' }).addTo(map);
   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri &mdash; Esri, DeLorme, NAVTEQ', maxZoom: 16 }).addTo(map);
+  /* Decorative leaf foliage over the land (not woodland data). Sits above the tiles, below pins; moves with the map. */
+  try {
+    var fp = map.createPane('foliage'); fp.style.zIndex = 250; fp.style.pointerEvents = 'none';
+    var art = new Image();
+    art.onload = function () {
+      var cv = document.createElement('canvas'); cv.width = 1200; cv.height = 1200;
+      var cx = cv.getContext('2d'); cx.drawImage(art, 0, 0, 1200, 600); cx.drawImage(art, 0, 600, 1200, 600);
+      L.imageOverlay(cv.toDataURL('image/png'), [[49, -11], [61, 3]], { pane: 'foliage', opacity: 0.88, interactive: false }).addTo(map);
+    };
+    art.src = '/static/home-v2/map-botanical.svg?v=20261020';
+  } catch (e) {}
   [["London", 51.5074, -0.1278], ["Manchester", 53.4808, -2.2426], ["Birmingham", 52.4862, -1.8904], ["Cardiff", 51.4816, -3.1791], ["Glasgow", 55.8642, -4.2518], ["Aberdeen", 57.1497, -2.0943], ["Newcastle", 54.9783, -1.6178], ["Leeds", 53.8008, -1.5491], ["Liverpool", 53.4084, -2.9916], ["Bristol", 51.4545, -2.5879], ["Sheffield", 53.3811, -1.4701]].forEach(function (c) {
     L.marker([c[1], c[2]], { icon: L.divIcon({ className: 'tk-city-label', html: '<span class="tk-city-dot"></span><span class="tk-city-name">' + c[0] + '</span>', iconSize: [0, 0] }), interactive: false, keyboard: false, zIndexOffset: -1000 }).addTo(map);
   });
@@ -260,8 +280,21 @@ _SCRIPT = r"""
     if (data.council_source_issue) status.textContent += ' Note: ' + data.council_source_issue;
     countEl.textContent = (data.area_notices || []).length ? 'Latest in ' + data.postcode : 'None listed in ' + data.postcode;
     renderRows(data.area_notices);
+    drawPins(data.pins);
   }
-  function fail(msg) { status.textContent = msg; countEl.textContent = ''; renderRows([]); emptyEl.hidden = true; }
+  var pinLayer = L.layerGroup().addTo(map);
+  function drawPins(pins) {
+    pinLayer.clearLayers();
+    (pins || []).forEach(function (p) {
+      var inR = p.in_radius, n = p.count;
+      var m = L.circleMarker([p.lat, p.lng], { radius: Math.min(16, 7 + Math.sqrt(n) * 2), color: inR ? '#f3d27a' : '#9c916b', weight: 2, fillColor: inR ? '#d9a845' : '#6f7a63', fillOpacity: inR ? 0.85 : 0.55 });
+      var box = document.createElement('div'), t = document.createElement('strong'), q = document.createElement('div'), a = document.createElement('a');
+      t.textContent = n + (n === 1 ? ' tree-work opportunity' : ' tree-work opportunities'); q.textContent = p.outcode + ' area' + (inR ? '' : ' (just outside your radius)');
+      a.href = '/marketplace'; a.textContent = 'View in marketplace \u2192';
+      box.appendChild(t); box.appendChild(q); box.appendChild(a); m.bindPopup(box); pinLayer.addLayer(m);
+    });
+  }
+  function fail(msg) { status.textContent = msg; countEl.textContent = ''; renderRows([]); drawPins([]); emptyEl.hidden = true; }
   async function scan(skipZoom, latlng) {
     var miles = parseInt(radiusSel.value, 10) || 15, mine = ++token;
     circle.setRadius(miles * 1609.34);

@@ -4329,7 +4329,8 @@ def _extract_outcodes_lenient(address: str) -> list:
 
 
 def classify_leads_by_radius(pool_addresses: list, target_lat: Optional[float], target_lng: Optional[float],
-                              radius_miles: float, max_fresh_lookups: int = 20, conn=None) -> dict:
+                              radius_miles: float, max_fresh_lookups: int = 20, conn=None,
+                              pins_out: Optional[list] = None) -> dict:
     """Sep 8 2026, Nick's ask: the radar's "X Active Leads in radius" figure
     was matching leads against the EXACT outcode typed (e.g. "NG22" only) --
     it never actually used the radius dropdown or the map circle at all, so
@@ -4429,6 +4430,9 @@ def classify_leads_by_radius(pool_addresses: list, target_lat: Optional[float], 
             in_radius += 1
         elif dist <= radius_miles + 20:
             nearby += 1
+        if pins_out is not None and dist <= radius_miles + 20:
+            # 20 Oct 2026: map pins. Approximate only: one pin per outcode (area centre), never an address.
+            pins_out.append((oc, lead_lat, lead_lon, dist <= radius_miles))
         # else: genuinely too far away to call "nearby" -- excluded from
         # both buckets, same treatment as a lead whose outcode can't be
         # resolved at all.

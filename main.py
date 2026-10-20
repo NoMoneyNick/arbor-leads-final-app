@@ -661,7 +661,13 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
     # into classify_leads_by_radius below instead of it opening (and this
     # function then closing) its own separate connection. See the matching
     # note on that function in database.py.
-    radius_split = database.classify_leads_by_radius(wide_pool_addresses, target_lat, target_lng, radius, conn=conn)
+    _pin_rows = []
+    radius_split = database.classify_leads_by_radius(wide_pool_addresses, target_lat, target_lng, radius, conn=conn, pins_out=_pin_rows)
+    _pins = {}
+    for _oc, _la, _lo, _inr in _pin_rows:
+        _p = _pins.setdefault(_oc, {"outcode": _oc, "lat": round(float(_la), 3), "lng": round(float(_lo), 3), "count": 0, "in_radius": bool(_inr)})
+        _p["count"] += 1
+    area_pins = sorted(_pins.values(), key=lambda p: -p["count"])[:80]
 
     # Sep 8 2026, Nick's ask: the radar's "Intercepted Notices" panel should
     # follow wherever the radar is currently pointed, not always show the
@@ -732,7 +738,8 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
         "est_max_val": f"{max_val:,}",
         "capacity_status": capacity_status,
         "council_source_issue": council_source_issue,
-        "area_notices": area_notices
+        "area_notices": area_notices,
+        "pins": area_pins
     }
 
 
@@ -888,7 +895,7 @@ def service_worker():
     # wiped on activate, and skipWaiting/clients.claim make the new worker
     # take over immediately instead of waiting for every tab to be closed.
     sw_code = """
-const CACHE_NAME = 'treekey-v3';   // bump with brand.ASSET_VERSION when icons change
+const CACHE_NAME = 'treekey-v4';   // bump with brand.ASSET_VERSION when icons change
 const urlsToCache = [
   '/static/tailwind.css',
   '/static/icon-192.png',
@@ -2911,6 +2918,19 @@ def public_homepage(request: Request):
 
             const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
             let deferredPrompt = null;
+            const isDesktop = !/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+
+            if (isDesktop) {{
+                // 20 Oct 2026, Nick's ask: no desktop app. On a computer the button points people to their phone.
+                btn.classList.remove('hidden');
+                btn.classList.add('inline-flex');
+                window.addEventListener('beforeinstallprompt', (e) => {{ e.preventDefault(); }});
+                window.tkInstallApp = function() {{
+                    tip.innerHTML = '<button onclick="document.getElementById(\'pwaInstallTip\').classList.add(\'hidden\')" type="button" class="absolute top-2 right-2 text-slate-400" aria-label="Close">\u00d7</button><div class="font-bold text-emerald-300 mb-1">TreeKey is a phone app</div><div>Scan this with your phone camera, then follow the steps to add TreeKey to your home screen.</div><img src="/static/images/app-install-qr.png" alt="QR code to open TreeKey on your phone" width="140" height="140" style="display:block;margin:8px auto 0;background:#fff;padding:6px;border-radius:8px">';
+                    tip.classList.toggle('hidden');
+                }};
+                return;
+            }}
 
             if (isIOS) {{
                 btn.classList.remove('hidden');
@@ -7060,6 +7080,27 @@ def _marketplace_heading_html() -> str:
             '<p class="mt-1 mb-0 text-slate-400 text-sm">Real-time council and National Park planning notices with statutory freshness countdowns.</p>')
 
 
+# 20 Oct 2026: compact marketplace cards on phones (one lead was filling a whole screen).
+# Phones only (max-width 639px); desktop layout is untouched.
+_MARKET_MOBILE_CSS = """
+@media (max-width:639px){
+.mk-card{padding:12px!important;margin-bottom:10px!important;border-width:1px!important;border-radius:14px!important}
+.mk-card>div{gap:8px!important}
+.mk-badges{gap:6px!important}
+.mk-badges>span:nth-child(n+3){display:none!important}
+.mk-card h3{font-size:16px!important;margin-top:8px!important;margin-bottom:0!important}
+.mk-spec{padding:6px 10px!important;margin-top:6px!important;font-size:12px!important;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.mk-spec span{display:none!important}
+.mk-buy{flex-direction:row!important;align-items:center!important;justify-content:space-between!important;padding:8px 10px!important;gap:10px!important;text-align:left!important}
+.mk-buy a[href^="/checkout"]{padding:10px 14px!important;white-space:nowrap}
+.mk-buy{flex-wrap:wrap!important}
+.mk-buy>a:not([href^="/checkout"]){flex:1 1 100%;font-size:11px!important;text-align:center!important;margin:0!important}
+.mk-card>div>div>a[href^="/marketplace/lead/"]{margin-top:6px!important}
+.mk-fine{display:none!important}
+}
+"""
+
+
 @app.get("/marketplace", response_class=HTMLResponse)
 def marketplace_view(request: Request, tier: Optional[str] = "all", category: Optional[str] = None,
                       outcode: Optional[str] = None, radius: int = 15):
@@ -7384,10 +7425,10 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
         # "copy go-live gate" before this code is deployed, exactly like
         # every other feature-claim on this site.
         lead_cards += f"""
-        <div class="relative bg-slate-800/50 rounded-2xl p-5 sm:p-6 mb-4 shadow-lg overflow-hidden transition-all duration-300 hover:brightness-110" style="border: 2px solid {cat_color};">
+        <div class="mk-card relative bg-slate-800/50 rounded-2xl p-5 sm:p-6 mb-4 shadow-lg overflow-hidden transition-all duration-300 hover:brightness-110" style="border: 2px solid {cat_color};">
             <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-5">
                 <div class="flex-1 min-w-0">
-                    <div class="flex flex-wrap items-center gap-2">
+                    <div class="mk-badges flex flex-wrap items-center gap-2">
                         <span style="font-size:11px; background:{cat_color}26; color:{cat_color}; font-weight:bold; padding:4px 10px; border-radius:12px; display:inline-flex; align-items:center; gap:4px;">
                             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="{cat_color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">{cat_icon}</svg>
                             {cat_label}
@@ -7404,14 +7445,14 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
                     </h3>
                     <div class="text-[11px] text-slate-500 font-mono">Listed {listed_date}</div>
 
-                    <div class="bg-slate-900/60 border-l-[3px] border-emerald-600 px-3.5 py-3 mt-3 text-[13px] text-slate-300 leading-relaxed rounded-r-lg">
+                    <div class="mk-spec bg-slate-900/60 border-l-[3px] border-emerald-600 px-3.5 py-3 mt-3 text-[13px] text-slate-300 leading-relaxed rounded-r-lg">
                         <span class="text-emerald-400 font-mono text-[10px] uppercase tracking-widest block mb-1">Job Specification</span>
                         {summary[:220]}...
                     </div>
                     <a href="/marketplace/lead/{lid}" class="inline-block mt-2 text-emerald-400 hover:text-emerald-300 text-[12px] font-bold no-underline">View Full Job Details →</a>
                 </div>
 
-                <div class="sm:w-[210px] shrink-0 bg-slate-900/60 border border-emerald-900/50 rounded-xl p-4 flex flex-col gap-3 text-center">
+                <div class="mk-buy sm:w-[210px] shrink-0 bg-slate-900/60 border border-emerald-900/50 rounded-xl p-4 flex flex-col gap-3 text-center">
                     <div>
                         {price_block_html}
                         <!-- Sep 16 2026, Nick's ask: "the leads need to state
@@ -7437,7 +7478,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
                     </div>
                 </div>
             </div>
-            <div class="text-[10px] text-slate-500 mt-3 sm:hidden">
+            <div class="mk-fine text-[10px] text-slate-500 mt-3 sm:hidden">
                 Single-Sale Asset — sold to one contractor only, then permanently removed from sale.{" Includes 1 printed &amp; posted intro letter." if _letter_promise_live else ""}
             </div>
         </div>"""
@@ -7453,6 +7494,9 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
         <div class="text-center py-10 px-5 bg-slate-800/50 rounded-xl border border-slate-700">
             <p class="text-slate-400 m-0">No leads currently{_empty_reason}. Check back shortly for new council and National Park registrations, widen your search, or switch tabs.</p>
         </div>"""
+
+    if "mk-card" in lead_cards:
+        lead_cards = "<style>" + _MARKET_MOBILE_CSS + "</style>" + lead_cards
 
     # Sep 9 2026, Nick's ask: brought this page's whole shell in line with
     # the homepage's dark redesign -- shared nav/footer (_shared_nav_html /
@@ -9549,6 +9593,10 @@ def contractor_dashboard(request: Request):
             body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:32px 16px; line-height:1.5; }}
             .container {{ max-width: 900px; margin: auto; }}
             .header-box {{ background:linear-gradient(135deg, #065f46 0%, #022c22 100%); color: white; border-radius: 14px; padding: 24px; margin-bottom: 24px; }}
+            .header-box h2 {{ overflow-wrap:anywhere; word-break:break-word; }}
+            .hb-left {{ min-width:0; flex:1 1 240px; }}
+            .hb-right {{ text-align:right; }}
+            @media (max-width:640px) {{ body {{ padding:16px 12px; }} .header-box {{ padding:16px; }} .header-box h2 {{ font-size:17px!important; }} .hb-right {{ text-align:left!important; flex:1 1 100%; }} .hb-right a {{ display:inline-block; margin:0 12px 6px 0!important; }} }}
             .quick-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }}
             .quick-card {{ background:#0f172a; border:1px solid #1e293b; border-radius: 10px; padding: 14px; text-decoration: none; color: inherit; display: block; }}
             .quick-card:hover {{ border-color:#34d399; }}
@@ -9559,14 +9607,14 @@ def contractor_dashboard(request: Request):
         <!-- Header Profile -->
         <div class="header-box">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                <div>
+                <div class="hb-left">
                     <div style="font-size:12px; color:#a7f3d0; text-transform:uppercase; font-weight:bold;">Contractor Command Centre</div>
                     <h2 style="margin:4px 0; font-size:24px;">{session_email}</h2>
                     <div style="font-size:13px; color:#e2e8f0;">
                         Tier: <b>{tier_name}</b> • Sector: <b>{outcode} (15-Mile Radius)</b>
                     </div>
                 </div>
-                <div style="text-align:right;">
+                <div class="hb-right">
                     {active_badge}
                     <div style="margin-top:8px;">
                         <a href="/my-leads" style="color:#a7f3d0; font-size:12px; text-decoration:none; margin-right:12px;">My Leads</a>
