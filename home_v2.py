@@ -270,7 +270,7 @@ _SCRIPT = r"""
     var label = map.getStyle().layers.find(function (l) { return l.type === 'symbol'; }).id;
     map.addLayer({ id: 'radius-fill', type: 'fill', source: 'search-radius', paint: { 'fill-color': '#d6b55d', 'fill-opacity': 0.11 } }, label);
     map.addLayer({ id: 'radius-outline', type: 'line', source: 'search-radius', paint: { 'line-color': '#e0c06a', 'line-width': 1.4 } }, label);
-    ready = true; if (pendingPins) drawPins(pendingPins);
+    ready = true; fitRing(); if (pendingPins) drawPins(pendingPins);
   });
   function setRing() { if (ready) map.getSource('search-radius').setData(ring()); }
   var input = document.getElementById('postcodeInput'), radiusSel = document.getElementById('radiusSelect'), status = document.getElementById('areaStatus');
@@ -349,6 +349,10 @@ _SCRIPT = r"""
   map.on('click', function (e) { var t = e.originalEvent && e.originalEvent.target; if (t && t.closest && t.closest('.map-pin,.maplibregl-popup')) return; lastClick = { lat: e.lngLat.lat, lng: e.lngLat.lng }; centre = [e.lngLat.lng, e.lngLat.lat]; setRing(); input.value = ''; scan(true, lastClick); });
   scan(true);
   map.once('load', function () { fitRing(); });
+  /* robustness: re-measure once the page has fully laid out, and re-fit if the first view came out too far out */
+  window.addEventListener('load', function () { map.resize(); });
+  if (window.ResizeObserver) new ResizeObserver(function () { map.resize(); }).observe(document.getElementById('map'));
+  map.once('idle', function () { if (map.getZoom() < 7) fitRing(); });
 })();
 </script>
 </body>
@@ -357,7 +361,7 @@ _SCRIPT = r"""
 
 
 def render(data: dict) -> str:
-    asset = _e(data.get("asset_version") or "1")
+    asset = _e(data.get("asset_version") or "1") + "m2"   # map rebuild: bust cached CSS/JS
     head = _HEAD.replace("__ASSET__", asset)
     script = _SCRIPT.replace("__ASSET__", asset)
     parts = [
