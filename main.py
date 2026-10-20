@@ -25,6 +25,7 @@ import address_release
 import worker as fulfilment_worker
 import page_theme
 import bot_guard
+import home_v2
 import brand          # brand colours / wording / icon + share-link tags (brand.py)
 import email_layout   # shared branded email design (email_layout.py)
 import document_print # shared print look for the street flyer + storm quote (document_print.py)
@@ -681,6 +682,7 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
                 "area_label": l["area_label"],
                 "summary": (l["summary"] or "")[:120],
                 "size": l["lead_score"],
+                "category": database.classify_job_category(l["summary"])["label"],
                 "time": _to_uk_display_time(l["discovered_at"]).strftime("%H:%M") if l["discovered_at"] else "--:--",
                 "date": _to_uk_display_time(l["discovered_at"]).strftime("%d %b") if l["discovered_at"] else "",
             })
@@ -1638,6 +1640,44 @@ async def _branded_500_handler(request: Request, exc: Exception):
     return HTMLResponse(_page, status_code=500)
 
 
+def _home_v2_enabled(request: Request) -> bool:
+    """New homepage design (home_v2.py). TREEKEY_HOME_V2=off, or ?design=old for one visit, shows the previous page.
+    The new design only describes the one-off (no subscription) model, so it is not used while subscriptions are open."""
+    if os.getenv("TREEKEY_HOME_V2", "").strip().lower() in ("off", "0", "false", "no"):
+        return False
+    try:
+        if (request.query_params.get("design") or "").strip().lower() == "old":
+            return False
+    except Exception:
+        pass
+    return not _subs_open()
+
+
+def _render_home_v2(request: Request, stats: dict, total_notices) -> str:
+    feed = []
+    for l in stats.get("diverse_leads") or []:
+        feed.append({
+            "title": database.classify_job_category(l["summary"])["label"],
+            "area": l["area_label"],
+            "size": f"{l['lead_score']} job",
+        })
+    offer = None
+    promo = _first_offer_promo_html(request, hero=True)
+    m = re.search(r'href="([^"]+)" class="tk-offer-cta"', promo or "")
+    if m:
+        pence = getattr(payments, "FIRST_INTRO_PRICE_PENCE", 499)
+        offer = {"href": html.unescape(m.group(1)),
+                 "price": f"\u00a3{pence / 100:.2f}" if isinstance(pence, int) else "\u00a34.99"}
+    return home_v2.render({
+        "feed": feed,
+        "counts": stats.get("counts") or {},
+        "total": total_notices,
+        "offer": offer,
+        "auth": _nav_auth_state(request),
+        "asset_version": brand.ASSET_VERSION,
+    })
+
+
 @app.get("/", response_class=HTMLResponse)
 def public_homepage(request: Request):
     stats = {"p": 0, "l": 0, "diverse_leads": [], "counts": {"today": 0, "week": 0, "month": 0}}
@@ -1801,6 +1841,12 @@ def public_homepage(request: Request):
         _home_notify_a = "Our system checks UK planning sources regularly. New tree-related planning applications and TPO/S211 notices are listed in the Marketplace as they are processed, so you can choose which opportunities to pursue."
         _home_tools_text = "No portals to refresh. New notices in your patch are listed in the Marketplace as they are processed — chainsaw still in the van."
         _home_capacity_js = "false"
+
+    if _home_v2_enabled(request):
+        try:
+            return _render_home_v2(request, stats, display_leads)
+        except Exception as exc:  # never leave the front door blank: fall back to the previous homepage below
+            logger.error(f"[HOMEPAGE] new design failed, serving the previous homepage: {exc}")
 
     return f"""<!DOCTYPE html>
 <html lang="en-GB" class="scroll-smooth">
@@ -7003,6 +7049,17 @@ def _first_offer_price_block(normal_price, *, large: bool = False) -> str:
             f'<span class="text-[11px] font-bold text-emerald-400 align-top ml-1">FIRST INTRODUCTION</span></div>')
 
 
+def _marketplace_heading_html() -> str:
+    """Marketplace heading: the approved new introduction, or the previous heading when TREEKEY_MARKET_V2=off."""
+    if page_theme.applies_to("/marketplace"):
+        return ('<p class="m-0 mb-2 text-xs tracking-[.18em] uppercase" style="color:#e3b95f;">The TreeKey Marketplace</p>'
+                '<h1 class="m-0 text-[28px] font-extrabold text-white">Good work starts with an introduction.</h1>'
+                '<p class="mt-1 mb-0 text-slate-400 text-sm">Find potential tree work in the places you cover. Choose an opportunity. We print and post your introduction.</p>'
+                '<p class="mt-3 mb-0 text-sm" style="color:#f0d9a0;"><strong>No shared leads. No race to the bottom.</strong> Buy a lead and it is taken off our marketplace, for you alone.</p>')
+    return ('<h1 class="m-0 text-[28px] font-extrabold text-white">Statutory Planning Marketplace</h1>'
+            '<p class="mt-1 mb-0 text-slate-400 text-sm">Real-time council and National Park planning notices with statutory freshness countdowns.</p>')
+
+
 @app.get("/marketplace", response_class=HTMLResponse)
 def marketplace_view(request: Request, tier: Optional[str] = "all", category: Optional[str] = None,
                       outcode: Optional[str] = None, radius: int = 15):
@@ -7416,8 +7473,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
         <div class="flex justify-between items-center mb-5 flex-wrap gap-2.5">
             <div>
-                <h1 class="m-0 text-[28px] font-extrabold text-white">Statutory Planning Marketplace</h1>
-                <p class="mt-1 mb-0 text-slate-400 text-sm">Real-time council and National Park planning notices with statutory freshness countdowns.</p>
+                {_marketplace_heading_html()}
             </div>
             {'<a href="/pricing" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg no-underline font-bold text-[13px] transition-colors">View Monthly Subscriptions</a>' if _subs_open() else ''}
         </div>

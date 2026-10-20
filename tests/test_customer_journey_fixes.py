@@ -471,7 +471,7 @@ class TestNavigationAndSubscriptionsOffWording(_Base):
         off_list, _ = self._signed_out_marketplace(False)
         on_list, _ = self._signed_out_marketplace(True)
         self.assertNotIn("View Monthly Subscriptions", off_list)
-        self.assertIn("Statutory Planning Marketplace", off_list)
+        self.assertIn("Good work starts with an introduction.", off_list)  # new marketplace heading (previous one: TREEKEY_MARKET_V2=off)
         self.assertIn("/checkout/", off_list)
         self.assertIn('<a href="/pricing" class="bg-emerald-600', on_list)
         self.assertIn("View Monthly Subscriptions", on_list)

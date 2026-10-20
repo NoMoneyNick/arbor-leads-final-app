@@ -202,7 +202,9 @@ class TestHomepage(unittest.TestCase):
 
     def _page(self, enabled):
         req = MagicMock(); req.cookies = {}; req.query_params = {}; req.headers = {}
-        with patch("main.HTMLResponse", side_effect=lambda content=None, *a, **k: content), \
+        # These tests describe the previous homepage, which is still served when TREEKEY_HOME_V2=off; the new design is in test_home_v2.py.
+        with patch.dict(os.environ, {"TREEKEY_HOME_V2": "off"}), \
+             patch("main.HTMLResponse", side_effect=lambda content=None, *a, **k: content), \
              patch("main.payments.PLANS", self._PLANS, create=True), \
              patch("main.payments.subscription_sales_enabled", return_value=enabled, create=True), \
              patch("main.payments.plan_description", return_value="d", create=True), \

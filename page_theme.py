@@ -67,6 +67,8 @@ def applies_to(path: str, status_code: int = 200) -> bool:
         return False
     if path in V2_PATHS or path.startswith(V2_PREFIXES):
         return True
+    if path == "/marketplace" and os.getenv("TREEKEY_MARKET_V2", "on").strip().lower() not in ("off", "0", "false", "no"):
+        return True   # 20 Oct 2026: marketplace gets the new header, footer and theme (TREEKEY_MARKET_V2=off restores the old look)
     # Branded "page not found" for any non-API, non-admin address.
     return status_code == 404 and not path.startswith(("/api/", "/admin"))
 
