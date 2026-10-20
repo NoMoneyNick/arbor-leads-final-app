@@ -461,6 +461,71 @@ def api_live_counts():
     return database.get_public_lead_counts()
 
 
+_MAP_LEADS_CACHE = {"t": 0.0, "data": None}
+
+
+@app.get("/api/map-leads")
+def api_map_leads():
+    """20 Oct 2026: every open lead as an approximate map point (homepage map).
+    Privacy: never an address -- each lead is placed at its postcode-area centre, then spread
+    in a small deterministic spiral so leads in the same area do not sit on top of each other.
+    Cached for two minutes. Leads whose area is not in the cache yet are left out (no live lookups here)."""
+    now = time.time()
+    if _MAP_LEADS_CACHE["data"] is not None and now - _MAP_LEADS_CACHE["t"] < 120:
+        return _MAP_LEADS_CACHE["data"]
+    out = {"leads": []}
+    conn = None
+    try:
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""SELECT id, address, summary, discovered_at, status, source_type FROM leads
+                       WHERE (status = 'new' OR status IS NULL) ORDER BY discovered_at DESC LIMIT 6000""")
+        rows = cur.fetchall()
+        picked = []
+        for lid, address, summary, discovered_at, status, source_type in rows:
+            ocs = database._extract_outcodes_lenient(address or "")
+            if not ocs:
+                continue
+            try:
+                if database.calculate_lead_freshness(discovered_at, status, summary or "", source_type=source_type or "council_planning").get("tier") == "expired":
+                    continue
+            except Exception:
+                pass
+            picked.append((str(lid), ocs[0], summary or ""))
+        coords = {}
+        distinct = list({p[1] for p in picked})
+        if distinct:
+            cur.execute("SELECT outcode, lat, lon FROM outcode_area_cache WHERE outcode = ANY(%s)", (distinct,))
+            for oc, la, lo in cur.fetchall():
+                if la is not None and lo is not None:
+                    coords[oc] = (float(la), float(lo))
+        cur.close()
+        by_oc = {}
+        for p in picked:
+            if p[1] in coords:
+                by_oc.setdefault(p[1], []).append(p)
+        for oc, items in by_oc.items():
+            la, lo = coords[oc]
+            items.sort(key=lambda x: x[0])
+            for i, (lid, _oc, summary) in enumerate(items):
+                r = 0.0030 * math.sqrt(i + 0.5)
+                ang = i * 2.39996
+                out["leads"].append([lid, round(la + r * math.sin(ang), 5), round(lo + r * math.cos(ang) / max(0.3, math.cos(math.radians(la))), 5),
+                                     database.classify_job_category(summary)["label"], oc])
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"[map-leads] failed: {e}")
+        return out
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+    _MAP_LEADS_CACHE["t"] = now
+    _MAP_LEADS_CACHE["data"] = out
+    return out
+
+
 @app.get("/api/check-postcode")
 @app.get("/check-postcode")
 @app.get("/check-postcode/{postcode}")

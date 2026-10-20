@@ -235,7 +235,7 @@ _SCRIPT = r"""
 
   /* the area map: same endpoint and behaviour as before (postcode or place search, radius, click to move) */
   if (typeof maplibregl === 'undefined') { var st = document.getElementById('areaStatus'); if (st) st.textContent = 'The map could not load. You can still browse the marketplace.'; return; }
-  var centre = [-1.8904, 52.4862], radiusMiles = 15, ready = false, pendingPins = null, pinMarkers = [];
+  var centre = [-1.8904, 52.4862], radiusMiles = 15, ready = false;
   var map;
   try {
     map = new maplibregl.Map({ container: 'map', style: location.origin + '/static/home-v2/forest-map-style.json', center: centre, zoom: 8.6, maxZoom: 17, attributionControl: false });
@@ -264,13 +264,54 @@ _SCRIPT = r"""
     };
     art.src = '/static/home-v2/map-botanical.svg?v=20261020';
   }
+  /* every open lead is a pin (approximate area, never an address). Pins group into numbered circles when zoomed out; groups stay locked to the land. */
+  function pinImage() {
+    var c = document.createElement('canvas'); c.width = 54; c.height = 74; var x = c.getContext('2d'); x.scale(2, 2);
+    x.beginPath(); x.moveTo(13.5, 1); x.bezierCurveTo(-1, 1, -2, 16, 5, 24); x.lineTo(13.5, 36); x.lineTo(22, 24); x.bezierCurveTo(29, 15, 28, 1, 13.5, 1); x.closePath();
+    x.fillStyle = '#e8bf6c'; x.fill(); x.lineWidth = 1; x.strokeStyle = '#ffe4a6'; x.stroke();
+    x.beginPath(); x.arc(13.5, 13, 4, 0, Math.PI * 2); x.fillStyle = '#15362d'; x.fill();
+    return x.getImageData(0, 0, 54, 74);
+  }
+  function leadPopup(props) {
+    var box = mk('div', 'tk-pop');
+    box.appendChild(mk('h3', null, props.cat || 'Tree work'));
+    box.appendChild(mk('p', 'tk-pop-area', props.oc + ' area'));
+    box.appendChild(mk('p', 'tk-pop-note', 'Approximate location'));
+    var a = mk('a', 'tk-pop-link', 'View opportunity →'); a.href = '/marketplace/lead/' + encodeURIComponent(props.id); box.appendChild(a);
+    return box;
+  }
+  function addLeadLayers() {
+    fetch('/api/map-leads').then(function (r) { return r.json(); }).then(function (d) {
+      var feats = (d.leads || []).map(function (l) { return { type: 'Feature', properties: { id: l[0], cat: l[3], oc: l[4] }, geometry: { type: 'Point', coordinates: [l[2], l[1]] } }; });
+      map.addImage('tk-pin', pinImage(), { pixelRatio: 2 });
+      map.addSource('leads', { type: 'geojson', data: { type: 'FeatureCollection', features: feats }, cluster: true, clusterRadius: 48, clusterMaxZoom: 13 });
+      map.addLayer({ id: 'lead-clusters', type: 'circle', source: 'leads', filter: ['has', 'point_count'],
+        paint: { 'circle-color': '#0b2f22', 'circle-opacity': 0.96, 'circle-stroke-color': '#e8bf6c', 'circle-stroke-width': 2, 'circle-radius': ['step', ['get', 'point_count'], 16, 10, 19, 50, 23, 200, 28] } });
+      map.addLayer({ id: 'lead-cluster-count', type: 'symbol', source: 'leads', filter: ['has', 'point_count'],
+        layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-font': ['Montserrat Medium', 'Open Sans Bold', 'Noto Sans Regular'], 'text-size': 14, 'text-allow-overlap': true },
+        paint: { 'text-color': '#f4eddc' } });
+      map.addLayer({ id: 'lead-pins', type: 'symbol', source: 'leads', filter: ['!', ['has', 'point_count']],
+        layout: { 'icon-image': 'tk-pin', 'icon-anchor': 'bottom', 'icon-allow-overlap': true } });
+      map.on('click', 'lead-clusters', function (e) {
+        var f = e.features[0]; map.getSource('leads').getClusterExpansionZoom(f.properties.cluster_id).then(function (z) { map.easeTo({ center: f.geometry.coordinates, zoom: z + 0.5 }); });
+      });
+      map.on('click', 'lead-pins', function (e) {
+        var f = e.features[0];
+        new maplibregl.Popup({ offset: [0, -34], maxWidth: 'min(290px, calc(100vw - 44px))', focusAfterOpen: false }).setLngLat(f.geometry.coordinates.slice()).setDOMContent(leadPopup(f.properties)).addTo(map);
+      });
+      ['lead-clusters', 'lead-pins'].forEach(function (id) {
+        map.on('mouseenter', id, function () { map.getCanvas().style.cursor = 'pointer'; });
+        map.on('mouseleave', id, function () { map.getCanvas().style.cursor = ''; });
+      });
+    }).catch(function () {});
+  }
   map.on('load', function () {
     addLandFoliage();
     map.addSource('search-radius', { type: 'geojson', data: ring() });
     var label = map.getStyle().layers.find(function (l) { return l.type === 'symbol'; }).id;
     map.addLayer({ id: 'radius-fill', type: 'fill', source: 'search-radius', paint: { 'fill-color': '#d6b55d', 'fill-opacity': 0.11 } }, label);
     map.addLayer({ id: 'radius-outline', type: 'line', source: 'search-radius', paint: { 'line-color': '#e0c06a', 'line-width': 1.4 } }, label);
-    ready = true; fitRing(); if (pendingPins) drawPins(pendingPins);
+    ready = true; fitRing(); addLeadLayers();
   });
   function setRing() { if (ready) map.getSource('search-radius').setData(ring()); }
   var input = document.getElementById('postcodeInput'), radiusSel = document.getElementById('radiusSelect'), status = document.getElementById('areaStatus');
@@ -300,34 +341,8 @@ _SCRIPT = r"""
     if (data.council_source_issue) status.textContent += ' Note: ' + data.council_source_issue;
     countEl.textContent = (data.area_notices || []).length ? 'Latest in ' + data.postcode : 'None listed in ' + data.postcode;
     renderRows(data.area_notices);
-    drawPins(data.pins);
   }
-  function pinElement(p) {
-    var el = document.createElement('button'); el.type = 'button'; el.className = p.count > 1 ? 'map-pin map-cluster' : 'map-pin';
-    el.setAttribute('aria-label', p.count + (p.count === 1 ? ' tree-work opportunity' : ' tree-work opportunities') + ' in the ' + p.outcode + ' area');
-    if (p.count > 1) { el.textContent = p.count > 99 ? '99+' : String(p.count); }
-    else { el.innerHTML = '<svg width="27" height="37" viewBox="0 0 27 37" aria-hidden="true"><path d="M13.5 1C-1 1-2 16 5 24l8.5 12L22 24C29 15 28 1 13.5 1Z" fill="#e8bf6c" stroke="#ffe4a6"/><circle cx="13.5" cy="13" r="4" fill="#15362d"/></svg>'; }
-    if (!p.in_radius) el.className += ' map-pin-far';
-    return el;
-  }
-  function popupContent(p) {
-    var box = mk('div', 'tk-pop'), n = p.count;
-    box.appendChild(mk('h3', null, n + (n === 1 ? ' tree-work opportunity' : ' tree-work opportunities')));
-    box.appendChild(mk('p', 'tk-pop-area', p.outcode + ' area' + (p.in_radius ? '' : ' (just outside your radius)')));
-    box.appendChild(mk('p', 'tk-pop-note', 'Approximate location'));
-    var a = mk('a', 'tk-pop-link', 'View opportunities →'); a.href = '/marketplace?outcode=' + encodeURIComponent(p.outcode) + '&radius=' + radiusMiles; box.appendChild(a);
-    return box;
-  }
-  function drawPins(pins) {
-    pinMarkers.forEach(function (m) { m.remove(); }); pinMarkers = [];
-    if (!ready) { pendingPins = pins || []; return; }
-    pendingPins = null;
-    (pins || []).forEach(function (p) {
-      var popup = new maplibregl.Popup({ offset: p.count > 1 ? 22 : 30, maxWidth: 'min(290px, calc(100vw - 44px))', focusAfterOpen: false }).setDOMContent(popupContent(p));
-      pinMarkers.push(new maplibregl.Marker({ element: pinElement(p), anchor: p.count > 1 ? 'center' : 'bottom' }).setLngLat([p.lng, p.lat]).setPopup(popup).addTo(map));
-    });
-  }
-  function fail(msg) { status.textContent = msg; countEl.textContent = ''; renderRows([]); drawPins([]); emptyEl.hidden = true; }
+  function fail(msg) { status.textContent = msg; countEl.textContent = ''; renderRows([]); emptyEl.hidden = true; }
   async function scan(skipZoom, latlng) {
     var miles = parseInt(radiusSel.value, 10) || 15, mine = ++token;
     radiusMiles = miles; setRing();
@@ -346,7 +361,7 @@ _SCRIPT = r"""
   document.getElementById('areaForm').addEventListener('submit', function (e) { e.preventDefault(); scan(false); });
   var lastClick = null;
   radiusSel.addEventListener('change', function () { scan(true, input.value.trim() ? null : lastClick); });
-  map.on('click', function (e) { var t = e.originalEvent && e.originalEvent.target; if (t && t.closest && t.closest('.map-pin,.maplibregl-popup')) return; lastClick = { lat: e.lngLat.lat, lng: e.lngLat.lng }; centre = [e.lngLat.lng, e.lngLat.lat]; setRing(); input.value = ''; scan(true, lastClick); });
+  map.on('click', function (e) { var t = e.originalEvent && e.originalEvent.target; if (t && t.closest && t.closest('.maplibregl-popup')) return; if (map.getLayer('lead-pins') && map.queryRenderedFeatures(e.point, { layers: ['lead-pins', 'lead-clusters'] }).length) return; lastClick = { lat: e.lngLat.lat, lng: e.lngLat.lng }; centre = [e.lngLat.lng, e.lngLat.lat]; setRing(); input.value = ''; scan(true, lastClick); });
   scan(true);
   map.once('load', function () { fitRing(); });
   /* robustness: re-measure once the page has fully laid out, and re-fit if the first view came out too far out */
