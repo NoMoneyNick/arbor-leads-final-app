@@ -24,6 +24,7 @@ import suppression as suppression_module
 import address_release
 import worker as fulfilment_worker
 import page_theme
+import bot_guard
 import brand          # brand colours / wording / icon + share-link tags (brand.py)
 import email_layout   # shared branded email design (email_layout.py)
 import document_print # shared print look for the street flyer + storm quote (document_print.py)
@@ -8285,6 +8286,7 @@ def login_page(request: Request, error: Optional[str] = None, next: Optional[str
              happens rather than promising a channel that doesn't exist. -->
         <form action="/api/request-magic-link" method="POST">
             {next_field_html}
+            {_bot_fields(request)}
             <label for="login-email" class="text-xs font-bold text-slate-300">Email Address:</label>
             <input id="login-email" type="email" name="contact" placeholder="e.g. dave@apex-trees.co.uk" required autofocus>
             <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white border-none py-3.5 rounded-lg font-bold text-[15px] cursor-pointer w-full transition-colors">Send Secure Login Link →</button>
@@ -8314,6 +8316,18 @@ def login_page(request: Request, error: Optional[str] = None, next: Optional[str
 # codes already issued can still be used (verification routes are untouched). Unset or "false" = normal.
 _AUTH_PAUSED_MESSAGE = "Sign-in and sign-up emails are temporarily unavailable. Please try again later."
 _LOGIN_LINK_BUSY_MESSAGE = "We're receiving a lot of requests right now. Please wait a few minutes and try again."
+
+
+def _bot_ip(request) -> str:
+    try:
+        return str(request.client.host) if request.client else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _bot_fields(request) -> str:
+    """Hidden trap field + signed form token (+ Turnstile when configured) for the sign-in and sign-up forms."""
+    return bot_guard.fields_html(_SESSION_SECRET, _bot_ip(request))
 
 
 def _auth_emails_paused() -> bool:
@@ -8346,6 +8360,14 @@ async def request_magic_link(request: Request):
         return RedirectResponse(url="/login?error=Too+many+attempts.+Please+wait+a+minute+and+try+again.", status_code=303)
 
     form = await request.form()
+    bot_ok, bot_reason = bot_guard.check(form, _SESSION_SECRET, _bot_ip(request))
+    if not bot_ok:
+        logger.warning(f"[BotGuard] sign-in request refused ({bot_reason}); no record created, no email sent.")
+        bot_redirect = "/login?error=" + urllib.parse.quote_plus(bot_guard.FAIL_MESSAGE)
+        bot_next = _safe_next_url(form.get("next"))
+        if bot_next:
+            bot_redirect += f"&next={urllib.parse.quote(bot_next)}"
+        return RedirectResponse(url=bot_redirect, status_code=303)
     contact = form.get("contact", "").strip().lower()
     # Sep 15 2026: carry the validated `next` target (see /login's own
     # comment) through to both the magic-link URL and the OTP form below,
@@ -8707,6 +8729,7 @@ def _first_time_signup_page_html(request: Optional[Request], *, values: Optional
             {err_html}
             <p style="font-size:14px; color:#94a3b8; margin-top:0;">{intro}</p>
             <form method="POST" action="{form_action}" id="signup-form">
+                {_bot_fields(request) if form_action == "/api/signup" else ""}
                 <div id="signup-js-errors" role="alert" style="display:none; background:rgba(248,113,113,0.12); border:1px solid #f87171; color:#fca5a5; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:13px;"></div>
                 {next_field}
                 <div class="lp-section" style="border-top:none; margin-top:8px;">
@@ -8866,11 +8889,16 @@ async def first_time_signup(request: Request):
     values["email"] = values["email"].lower()
     safe_next = _safe_next_url(form.get("next"))
     terms_ticked = (form.get("agree_terms") or "").strip().lower() in ("yes", "on", "true", "1")
+    bot_ok, bot_reason = bot_guard.check(form, _SESSION_SECRET, _bot_ip(request))
 
     def _fail(msg: str):
         return HTMLResponse(_first_time_signup_page_html(request, values=values, error=msg, next=safe_next,
                                                          field_errors=_signup_field_errors(values)), status_code=400)
 
+    if not bot_ok:
+        logger.warning(f"[BotGuard] sign-up request refused ({bot_reason}); no record created, no email sent.")
+        return HTMLResponse(_first_time_signup_page_html(request, values=values, error=bot_guard.FAIL_MESSAGE,
+                                                         next=safe_next), status_code=400)
     email = values["email"]
     error, letter_fields = _validate_signup_values(values, terms_ticked)
     if error:

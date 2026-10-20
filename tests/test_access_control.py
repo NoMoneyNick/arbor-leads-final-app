@@ -21,6 +21,10 @@ import unittest
 import urllib.parse
 from unittest.mock import MagicMock, patch
 
+# The bot check (bot_guard.py) is exercised by tests/test_bot_guard.py. The older route tests post forms
+# without its hidden fields, so it is switched off for them.
+os.environ.setdefault("BOT_GUARD", "off")
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _APP_DIR = os.path.dirname(_THIS_DIR)
 sys.path.insert(0, _APP_DIR)
