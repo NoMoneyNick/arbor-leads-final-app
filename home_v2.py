@@ -72,13 +72,13 @@ def _header_html(auth) -> str:
         '<button class="outline mobile-toggle" type="button" aria-expanded="false" aria-controls="main-nav">Menu</button>'
         '<nav id="main-nav" aria-label="Main navigation"><a href="#how">How it works</a><a href="/marketplace">Available leads</a>'
         '<a href="/pricing">Pricing</a><a href="#area-map">Map</a><a href="#tools">Tools</a><a href="/faq">FAQ</a></nav>'
-        '<div class="account"><button id="pwaInstallBtn" class="install-link tk-hide" type="button" onclick="tkInstallApp()">Install app</button>'
+        '<div class="account"><button id="pwaInstallBtn" class="install-link tk-hide" type="button" onclick="tkInstallApp()">Download app</button>'
         + account +
         '</div>'
-        '<div id="pwaInstallTip" class="tk-hide" role="dialog" aria-label="Install TreeKey on your phone">'
+        '<div id="pwaInstallTip" class="tk-hide" role="dialog" aria-label="Download the TreeKey app">'
         '<button type="button" class="tip-close" aria-label="Close" onclick="document.getElementById(\'pwaInstallTip\').classList.add(\'tk-hide\')">×</button>'
-        '<strong>1. Tap the Share icon</strong><p>It is in Safari’s toolbar, usually along the bottom of the screen.</p>'
-        '<strong>2. Tap “Add to Home Screen”</strong><p>TreeKey then opens like any other app, full screen with no browser bar.</p></div>'
+        '<strong>Two quick taps (Apple requires these)</strong><p>1. Tap the Share icon in Safari’s toolbar.</p>'
+        '<p>2. Tap “Add to Home Screen”. TreeKey then opens like any other app.</p></div>'
         '</header>'
     )
 
@@ -176,7 +176,7 @@ _HEAD = """<!DOCTYPE html>
 <meta name="theme-color" content="#06291f">
 <link rel="icon" href="/static/icon-192.png">
 <link rel="apple-touch-icon" href="/static/icon-192.png">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.2/dist/maplibre-gl.css">
 <link rel="stylesheet" href="/static/home-v2.css?v=__ASSET__">
 <script>if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('/sw.js'); }); }</script>
 </head>
@@ -184,7 +184,7 @@ _HEAD = """<!DOCTYPE html>
 """
 
 _SCRIPT = r"""
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/maplibre-gl@5.6.2/dist/maplibre-gl.js"></script>
 <script src="/static/job-type-icons.js?v=__ASSET__"></script>
 <script>
 (function () {
@@ -214,7 +214,7 @@ _SCRIPT = r"""
   var isDesktop = !/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
   if (btn && !standalone && isDesktop) {
     /* desktop: never install a desktop app -- point people to their phone instead */
-    btn.classList.remove('tk-hide'); btn.textContent = 'Get the phone app';
+    btn.classList.remove('tk-hide'); btn.textContent = 'Download app';
     window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); });
     window.tkInstallApp = function () {
       tip.innerHTML = '<button type="button" class="tip-close" aria-label="Close" onclick="document.getElementById(\'pwaInstallTip\').classList.add(\'tk-hide\')">\u00d7</button><strong>TreeKey is a phone app</strong><p>Scan this with your phone camera, then follow the steps to add TreeKey to your home screen.</p><img src="/static/images/app-install-qr.png" alt="QR code to open TreeKey on your phone" width="140" height="140" style="display:block;margin:8px auto 0;background:#fff;padding:6px;border-radius:8px">';
@@ -234,25 +234,45 @@ _SCRIPT = r"""
   }
 
   /* the area map: same endpoint and behaviour as before (postcode or place search, radius, click to move) */
-  if (typeof L === 'undefined') { var st = document.getElementById('areaStatus'); if (st) st.textContent = 'The map could not load. You can still browse the marketplace.'; return; }
-  var map = L.map('map', { zoomControl: false }).setView([54.5, -4.0], 6);
-  L.control.zoom({ position: 'bottomright' }).addTo(map);
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri &mdash; Esri, DeLorme, NAVTEQ', maxZoom: 16 }).addTo(map);
-  /* Decorative leaf foliage over the land (not woodland data). Sits above the tiles, below pins; moves with the map. */
+  if (typeof maplibregl === 'undefined') { var st = document.getElementById('areaStatus'); if (st) st.textContent = 'The map could not load. You can still browse the marketplace.'; return; }
+  var centre = [-1.8904, 52.4862], radiusMiles = 15, ready = false, pendingPins = null, pinMarkers = [];
+  var map;
   try {
-    var fp = map.createPane('foliage'); fp.style.zIndex = 250; fp.style.pointerEvents = 'none';
+    map = new maplibregl.Map({ container: 'map', style: location.origin + '/static/home-v2/forest-map-style.json', center: centre, zoom: 8.6, maxZoom: 17, attributionControl: false });
+  } catch (e) { var st2 = document.getElementById('areaStatus'); if (st2) st2.textContent = 'The map could not load on this device. You can still browse the marketplace.'; return; }
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+  map.addControl(new maplibregl.AttributionControl({ compact: false }));
+  function ring() {
+    var pts = [], r = radiusMiles * 1609.344 / 6371000, lat = centre[1] * Math.PI / 180, lng = centre[0] * Math.PI / 180;
+    for (var i = 0; i <= 128; i++) {
+      var a = i / 128 * 2 * Math.PI, y = Math.asin(Math.sin(lat) * Math.cos(r) + Math.cos(lat) * Math.sin(r) * Math.cos(a)),
+          x = lng + Math.atan2(Math.sin(a) * Math.sin(r) * Math.cos(lat), Math.cos(r) - Math.sin(lat) * Math.sin(y));
+      pts.push([x * 180 / Math.PI, y * 180 / Math.PI]);
+    }
+    return { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [pts] } };
+  }
+  function fitRing() { var b = new maplibregl.LngLatBounds(); ring().geometry.coordinates[0].forEach(function (p) { b.extend(p); }); map.fitBounds(b, { padding: 30, duration: 900 }); }
+  /* Decorative leaf foliage fixed to the land (geographic raster, moves and scales with the map). Not woodland data. */
+  function addLandFoliage() {
     var art = new Image();
     art.onload = function () {
       var cv = document.createElement('canvas'); cv.width = 1200; cv.height = 1200;
       var cx = cv.getContext('2d'); cx.drawImage(art, 0, 0, 1200, 600); cx.drawImage(art, 0, 600, 1200, 600);
-      L.imageOverlay(cv.toDataURL('image/png'), [[49, -11], [61, 3]], { pane: 'foliage', opacity: 0.88, interactive: false }).addTo(map);
+      map.addSource('land-botanical', { type: 'raster', tiles: [cv.toDataURL('image/png')], tileSize: 512, minzoom: 8, maxzoom: 8, bounds: [-11, 49, 3, 61] });
+      var before = map.getStyle().layers.find(function (l) { return l.type === 'line' || l.type === 'symbol'; });
+      map.addLayer({ id: 'land-botanical', type: 'raster', source: 'land-botanical', paint: { 'raster-opacity': 0.88, 'raster-fade-duration': 0 } }, before && before.id);
     };
     art.src = '/static/home-v2/map-botanical.svg?v=20261020';
-  } catch (e) {}
-  [["London", 51.5074, -0.1278], ["Manchester", 53.4808, -2.2426], ["Birmingham", 52.4862, -1.8904], ["Cardiff", 51.4816, -3.1791], ["Glasgow", 55.8642, -4.2518], ["Aberdeen", 57.1497, -2.0943], ["Newcastle", 54.9783, -1.6178], ["Leeds", 53.8008, -1.5491], ["Liverpool", 53.4084, -2.9916], ["Bristol", 51.4545, -2.5879], ["Sheffield", 53.3811, -1.4701]].forEach(function (c) {
-    L.marker([c[1], c[2]], { icon: L.divIcon({ className: 'tk-city-label', html: '<span class="tk-city-dot"></span><span class="tk-city-name">' + c[0] + '</span>', iconSize: [0, 0] }), interactive: false, keyboard: false, zIndexOffset: -1000 }).addTo(map);
+  }
+  map.on('load', function () {
+    addLandFoliage();
+    map.addSource('search-radius', { type: 'geojson', data: ring() });
+    var label = map.getStyle().layers.find(function (l) { return l.type === 'symbol'; }).id;
+    map.addLayer({ id: 'radius-fill', type: 'fill', source: 'search-radius', paint: { 'fill-color': '#d6b55d', 'fill-opacity': 0.11 } }, label);
+    map.addLayer({ id: 'radius-outline', type: 'line', source: 'search-radius', paint: { 'line-color': '#e0c06a', 'line-width': 1.4 } }, label);
+    ready = true; if (pendingPins) drawPins(pendingPins);
   });
-  var circle = L.circle([52.4862, -1.8904], { color: '#e3b95f', fillColor: '#d9a845', fillOpacity: 0.14, radius: 24140, weight: 2 }).addTo(map);
+  function setRing() { if (ready) map.getSource('search-radius').setData(ring()); }
   var input = document.getElementById('postcodeInput'), radiusSel = document.getElementById('radiusSelect'), status = document.getElementById('areaStatus');
   var countEl = document.getElementById('area-result-count'), body = document.getElementById('area-results'), emptyEl = document.getElementById('area-empty');
   var token = 0;
@@ -274,7 +294,7 @@ _SCRIPT = r"""
     emptyEl.hidden = !!(notices && notices.length);
   }
   function show(data, miles) {
-    circle.setLatLng([data.lat, data.lng]); circle.setRadius(miles * 1609.34);
+    centre = [data.lng, data.lat]; radiusMiles = miles; setRing();
     var inR = data.selected_area_leads || 0, near = data.connected_area_leads || 0;
     status.textContent = inR + (inR === 1 ? ' opportunity' : ' opportunities') + ' within ' + miles + ' miles of ' + data.postcode + (near ? ', plus ' + near + ' in connected areas' : '') + '.';
     if (data.council_source_issue) status.textContent += ' Note: ' + data.council_source_issue;
@@ -282,39 +302,53 @@ _SCRIPT = r"""
     renderRows(data.area_notices);
     drawPins(data.pins);
   }
-  var pinLayer = L.layerGroup().addTo(map);
+  function pinElement(p) {
+    var el = document.createElement('button'); el.type = 'button'; el.className = p.count > 1 ? 'map-pin map-cluster' : 'map-pin';
+    el.setAttribute('aria-label', p.count + (p.count === 1 ? ' tree-work opportunity' : ' tree-work opportunities') + ' in the ' + p.outcode + ' area');
+    if (p.count > 1) { el.textContent = p.count > 99 ? '99+' : String(p.count); }
+    else { el.innerHTML = '<svg width="27" height="37" viewBox="0 0 27 37" aria-hidden="true"><path d="M13.5 1C-1 1-2 16 5 24l8.5 12L22 24C29 15 28 1 13.5 1Z" fill="#e8bf6c" stroke="#ffe4a6"/><circle cx="13.5" cy="13" r="4" fill="#15362d"/></svg>'; }
+    if (!p.in_radius) el.className += ' map-pin-far';
+    return el;
+  }
+  function popupContent(p) {
+    var box = mk('div', 'tk-pop'), n = p.count;
+    box.appendChild(mk('h3', null, n + (n === 1 ? ' tree-work opportunity' : ' tree-work opportunities')));
+    box.appendChild(mk('p', 'tk-pop-area', p.outcode + ' area' + (p.in_radius ? '' : ' (just outside your radius)')));
+    box.appendChild(mk('p', 'tk-pop-note', 'Approximate location'));
+    var a = mk('a', 'tk-pop-link', 'View opportunities →'); a.href = '/marketplace?outcode=' + encodeURIComponent(p.outcode) + '&radius=' + radiusMiles; box.appendChild(a);
+    return box;
+  }
   function drawPins(pins) {
-    pinLayer.clearLayers();
+    pinMarkers.forEach(function (m) { m.remove(); }); pinMarkers = [];
+    if (!ready) { pendingPins = pins || []; return; }
+    pendingPins = null;
     (pins || []).forEach(function (p) {
-      var inR = p.in_radius, n = p.count;
-      var m = L.circleMarker([p.lat, p.lng], { radius: Math.min(16, 7 + Math.sqrt(n) * 2), color: inR ? '#f3d27a' : '#9c916b', weight: 2, fillColor: inR ? '#d9a845' : '#6f7a63', fillOpacity: inR ? 0.85 : 0.55 });
-      var box = document.createElement('div'), t = document.createElement('strong'), q = document.createElement('div'), a = document.createElement('a');
-      t.textContent = n + (n === 1 ? ' tree-work opportunity' : ' tree-work opportunities'); q.textContent = p.outcode + ' area' + (inR ? '' : ' (just outside your radius)');
-      a.href = '/marketplace'; a.textContent = 'View in marketplace \u2192';
-      box.appendChild(t); box.appendChild(q); box.appendChild(a); m.bindPopup(box); pinLayer.addLayer(m);
+      var popup = new maplibregl.Popup({ offset: p.count > 1 ? 22 : 30, maxWidth: 'min(290px, calc(100vw - 44px))', focusAfterOpen: false }).setDOMContent(popupContent(p));
+      pinMarkers.push(new maplibregl.Marker({ element: pinElement(p), anchor: p.count > 1 ? 'center' : 'bottom' }).setLngLat([p.lng, p.lat]).setPopup(popup).addTo(map));
     });
   }
   function fail(msg) { status.textContent = msg; countEl.textContent = ''; renderRows([]); drawPins([]); emptyEl.hidden = true; }
   async function scan(skipZoom, latlng) {
     var miles = parseInt(radiusSel.value, 10) || 15, mine = ++token;
-    circle.setRadius(miles * 1609.34);
+    radiusMiles = miles; setRing();
     var url = latlng ? '/api/check-postcode?lat=' + latlng.lat + '&lng=' + latlng.lng + '&radius=' + miles : '/api/check-postcode?postcode=' + encodeURIComponent(input.value) + '&radius=' + miles;
     status.textContent = 'Searching…';
     try {
       var res = await fetch(url), data = await res.json();
       if (mine !== token) return;
-      if (data.status === 'ok') { if (!skipZoom && !latlng) map.flyTo([data.lat, data.lng], 10, { duration: 1.0 }); show(data, miles); }
+      if (data.status === 'ok') { show(data, miles); if (!skipZoom && !latlng) fitRing(); }
       else if (data.status === 'out_of_bounds') fail(data.message || 'That is outside the area we cover.');
       else fail('We could not find that postcode or place. Try an outward code such as NG22.');
-    } catch (e) { if (mine === token) fail('The search could not be completed. Please try again.'); }
+    } catch (e) { if (window.console) console.error('TreeKey map search error', e); if (mine === token) fail('The search could not be completed. Please try again.'); }
   }
   var timer = null;
   input.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { if (input.value.trim().length >= 2) scan(false); }, 550); });
   document.getElementById('areaForm').addEventListener('submit', function (e) { e.preventDefault(); scan(false); });
   var lastClick = null;
   radiusSel.addEventListener('change', function () { scan(true, input.value.trim() ? null : lastClick); });
-  map.on('click', function (e) { lastClick = e.latlng; circle.setLatLng(e.latlng); input.value = ''; scan(true, e.latlng); });
+  map.on('click', function (e) { var t = e.originalEvent && e.originalEvent.target; if (t && t.closest && t.closest('.map-pin,.maplibregl-popup')) return; lastClick = { lat: e.lngLat.lat, lng: e.lngLat.lng }; centre = [e.lngLat.lng, e.lngLat.lat]; setRing(); input.value = ''; scan(true, lastClick); });
   scan(true);
+  map.once('load', function () { fitRing(); });
 })();
 </script>
 </body>

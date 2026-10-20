@@ -1976,7 +1976,7 @@ def public_homepage(request: Request):
                         <button id="pwaInstallBtn" onclick="tkInstallApp()" type="button" class="hidden items-center gap-1.5 bg-slate-800/60 text-emerald-300 border border-emerald-500/40 px-3.5 py-1.5 rounded-lg font-bold uppercase text-xs hover:bg-emerald-600 hover:text-white transition-all">
                             <span id="pwaInstallPulse" class="hidden absolute -top-1 -right-1 h-2.5 w-2.5"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span></span>
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 3v12"></path><polyline points="7 10 12 15 17 10"></polyline><path d="M5 19h14"></path></svg>
-                            Install App
+                            Download App
                         </button>
                         <!-- Sep 9 2026, Nick's ask: iOS Safari has no API for a
                              site to trigger installation itself -- Apple only
