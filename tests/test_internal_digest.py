@@ -701,9 +701,9 @@ class CustomerPathsUnchangedTests(unittest.TestCase):
     """Customer-facing / outreach / login email functions must be byte-for-byte what they were before this change.
     Hashes were taken from the pre-change source."""
     EXPECTED = {
-        "send_transactional_email": "72f7d255e532c9d5d3f8d55dc764cb1e224c4e07be61d2b470f634d5dc2e7e45",
+        "send_transactional_email": "ba74ad1f514651c7d6eb1172c34806c4683adea9efcd41147491930c923b1052",
         "send_purchased_lead_email": "62e61b5cd9a27ac566694b20c4f0d34184ee67dac621080fab120d219b11f1fb",
-        "_send_purchased_lead_email_inner": "791f3f7efdfb675564078891a6c6b51de3373a4fc8628318563fd71f1d4c2fa5",
+        "_send_purchased_lead_email_inner": "e677771b8b2a30ad84287147be412e5fbf146a395dc137bb8e0b56b3187c69d1",
         "send_free_lead_granted_email": "f6db52777d1288f19501bc5e03b41cd5829e449b8567e824ed4862612008a064",
         "_send_free_lead_granted_email_inner": "b27f1b8180e7575b383f9e1b4ce985df96b49027b4827e9d4ac12b0ebbefd78e",
         "_list_unsubscribe_headers": "e22f292a0fade81c79256ce68b59cc4de6fb92698f8911e39a17d6c987259564",

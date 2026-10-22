@@ -44,7 +44,7 @@ class TestLetterPageShell(unittest.TestCase):
         self.assertIn('height:28px', footer)
         for claim in ("GDPR Compliant", "Open Government Licence", "Operating in compliance", "256-bit"):
             self.assertNotIn(claim, footer)
-        for link in ("/privacy-policy", "/terms-of-service", "mailto:contact@treekey.co.uk"):
+        for link in ("/privacy-policy", "/terms-of-service", "mailto:support@treekey.co.uk"):
             self.assertIn(link, footer)
 
     def test_purchase_nudge_renders_through_the_shell(self):

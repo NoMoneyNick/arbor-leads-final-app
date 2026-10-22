@@ -9,6 +9,7 @@ import email_layout   # shared branded email design (tables + inline CSS) -- see
 
 load_dotenv()
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+REPLY_TO_EMAIL = "support@treekey.co.uk"
 TEST_EMAIL     = os.getenv("TEST_EMAIL", "").strip()
 PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
 
@@ -58,8 +59,8 @@ SCORE_LABEL = {"small": "Small — £19", "medium": "Medium — £29", "large": 
 _NOT_WHAT_YOU_EXPECTED_HTML = (
     '<b>Not what you were expecting?</b> Every lead is filtered to confirm '
     "it's genuine tree work before it reaches you, so this is rare — but if "
-    'this one isn\'t, screenshot it and email <a href="mailto:contact@treekey.co.uk" '
-    'style="color:#846022;">contact@treekey.co.uk</a> and we\'ll issue a correct '
+    'this one isn\'t, screenshot it and email <a href="mailto:support@treekey.co.uk" '
+    'style="color:#846022;">support@treekey.co.uk</a> and we\'ll issue a correct '
     'lead or a refund.'
 )
 
@@ -182,6 +183,7 @@ def send_transactional_email(to_email: str, subject: str, html_body: str,
     try:
         payload = {
             "from": from_label,
+            "reply_to": REPLY_TO_EMAIL,
             "to": [to_email],
             "subject": subject,
             "html": html_body
@@ -501,6 +503,7 @@ def _send_purchased_lead_email_inner(customer_email: str, lead_data: dict):
             },
             json={
                 "from": "TreeKey Support <leads@mail.treekey.co.uk>",
+                "reply_to": REPLY_TO_EMAIL,
                 "to": [customer_email],
                 "subject": subject,
                 "html": html
@@ -1251,6 +1254,7 @@ def dispatch_lead_alerts(city: str, leads: list):
                     headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
                     json={
                         "from": "TreeKey Intelligence <leads@mail.treekey.co.uk>",
+                        "reply_to": REPLY_TO_EMAIL,
                         "to": [email],
                         "subject": f"{len(routed_leads)} New Leads Available in Your Area — Early Access",
                         "html": body

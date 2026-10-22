@@ -147,11 +147,11 @@ def _footer_html() -> str:
     return (
         '<footer><div class="foot-left"><a href="/" class="brand"><span class="chosen-logo"><img src="/static/images/logo-wreath.png" alt="TreeKey tree and key with gold wreaths"></span>TreeKey</a>'
         '<div><p>Built around the way tree contractors work.</p>'
-        '<p class="footer-note">Planning information comes from public UK council planning registers.<br>© 2026 Tree Key. All rights reserved.<br>Contact: nick@treekey.co.uk</p>'
+        '<p class="footer-note">Planning information comes from public UK council planning registers.<br>© 2026 Tree Key. All rights reserved.<br>Contact: support@treekey.co.uk</p>'
         '<img class="legacy-tk" src="/static/images/legacy-tk-mark.png" alt="TK" width="34" height="26"></div></div>'
         '<nav aria-label="Footer"><a href="#how">How it works</a><a href="/marketplace">Marketplace</a><a href="/pricing">Packages</a>'
         '<a href="/storm-radar">Storm Radar</a><a href="/chip-drop">Chip-drop</a><a href="/faq">FAQ</a>'
-        '<a href="mailto:contact@treekey.co.uk">Help</a><a href="/suggestions">Suggestions</a><a href="/privacy-policy">Privacy</a>'
+        '<a href="mailto:support@treekey.co.uk">Help</a><a href="/suggestions">Suggestions</a><a href="/privacy-policy">Privacy</a>'
         '<a href="/terms-of-service">Terms</a><a href="/login">Login</a></nav></footer>'
     )
 

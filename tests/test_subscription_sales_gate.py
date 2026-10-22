@@ -280,7 +280,7 @@ class TestFaq(unittest.TestCase):
         self.assertIn("Find it in your account once you're signed in.", page)
         self.assertIn("The Chip-Drop directory gives you a direct WhatsApp link", page)
         # approved refund answer and Lead-Quality Promise answer are untouched
-        for kept in ("You may cancel a purchase by emailing <strong>nick@treekey.uk</strong>.",
+        for kept in ("You may cancel a purchase by emailing <strong>support@treekey.co.uk</strong>.",
                      "Total refunds for a purchase never exceed the amount you paid, taking account of any earlier refunds.",
                      "we will, at your choice, give you a replacement introduction of equivalent value or a refund for that purchase."):
             self.assertIn(kept, page, kept)
@@ -330,10 +330,10 @@ class TestTermsAndRefundWording(unittest.TestCase):
         return page if isinstance(page, str) else page.decode()
 
     _SEND_OR_REFUND = "If your letter is not sent, we will send it or, at your choice, refund the amount you paid for it."
-    _CANCEL = "You may cancel a purchase by emailing <strong>nick@treekey.uk</strong>."
+    _CANCEL = "You may cancel a purchase by emailing <strong>support@treekey.co.uk</strong>."
     _CAP = "Total refunds for a purchase never exceed the amount you paid, taking account of any earlier refunds."
     _NO_RECALL_PROMISE = "we cannot promise that it can be stopped"
-    _PROMISE = ("email <strong>nick@treekey.uk</strong> telling us which purchase it concerns, and we will, at your choice, "
+    _PROMISE = ("email <strong>support@treekey.co.uk</strong> telling us which purchase it concerns, and we will, at your choice, "
                 "give you a replacement introduction of equivalent value or a refund for that purchase.")
 
     def test_terms_section_4_describes_the_product_and_keeps_subscriber_rights(self):
@@ -408,7 +408,7 @@ class TestTermsAndRefundWording(unittest.TestCase):
             out = main._account_request_form_html("a@b.co", True)
             free = main._account_request_form_html("a@b.co", False)
         self.assertIn("This request does not cancel it.", out)
-        self.assertIn("mailto:contact@treekey.co.uk", out)
+        self.assertIn("mailto:support@treekey.co.uk", out)
         self.assertNotIn("/pricing", out)
         self.assertNotIn("Manage subscription", free)
 
@@ -431,7 +431,7 @@ class TestTermsAndRefundWording(unittest.TestCase):
                 out = main.my_account_view(req)
             return out if isinstance(out, str) else getattr(out, "body", b"").decode()
         paid_off = page(True, False)
-        self.assertIn("mailto:contact@treekey.co.uk", paid_off)
+        self.assertIn("mailto:support@treekey.co.uk", paid_off)
         self.assertIn("Your plan is unchanged.", paid_off)
         self.assertNotIn("Change Plan", paid_off)
         free_off = page(False, False)
@@ -500,10 +500,10 @@ class TestLegalOperatorIdentity(unittest.TestCase):
         self.assertIn('operated by Nicholas Michael Secular, a sole trader trading as TreeKey ("we", "us", "our")', self._terms())
         priv = self._privacy()
         self.assertIn("who is the data controller for the personal data described below", priv)
-        self.assertIn("For privacy matters, contact <strong>nick@treekey.uk</strong>.", priv)
+        self.assertIn("For privacy matters, contact <strong>support@treekey.co.uk</strong>.", priv)
 
     def test_general_support_contact_in_terms_is_unchanged(self):
-        self.assertIn("Questions about these Terms can be sent to <strong>contact@treekey.co.uk</strong>.", self._terms())
+        self.assertIn("Questions about these Terms can be sent to <strong>support@treekey.co.uk</strong>.", self._terms())
 
 
 if __name__ == "__main__":

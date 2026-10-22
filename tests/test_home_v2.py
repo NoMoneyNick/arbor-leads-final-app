@@ -67,7 +67,7 @@ class TestRender(unittest.TestCase):
     def test_real_routes_and_provenance_kept(self):
         page = _page()
         for href in ("/marketplace", "/pricing", "/faq", "/storm-radar", "/chip-drop", "/free-account", "/suggestions",
-                     "/privacy-policy", "/terms-of-service", "mailto:contact@treekey.co.uk"):
+                     "/privacy-policy", "/terms-of-service", "mailto:support@treekey.co.uk"):
             self.assertIn(href, page, href)
         self.assertIn("Open Government Licence", page)
         self.assertIn("Planning information comes from public UK council planning registers", page)

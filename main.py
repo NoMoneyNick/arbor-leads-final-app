@@ -1434,7 +1434,7 @@ def _shared_footer_html() -> str:
     """Companion to _shared_nav_html -- same reasoning, see there. Self-contained
     (_SHARED_FOOTER_CSS), so it renders correctly whether or not a page links
     /static/tailwind.css. The T/k mark stays small (28px high, 64px max wide).
-    Help is a mailto to the same contact@treekey.co.uk used across the site."""
+    Help is a mailto to the same support@treekey.co.uk used across the site."""
     return f"""
     <style>{_SHARED_FOOTER_CSS}</style>
     <footer class="tk-footer">
@@ -1445,10 +1445,10 @@ def _shared_footer_html() -> str:
                 <p>Planning information comes from public UK council planning registers.</p>
                 <p>&copy; 2026 Tree Key. All rights reserved.</p>
                 <p class="tk-footer-uk">Proudly engineered in the United Kingdom &#127468;&#127463;</p>
-                <p class="tk-footer-contact">Contact: nick@treekey.co.uk</p>
+                <p class="tk-footer-contact">Contact: support@treekey.co.uk</p>
             </div>
             <nav class="tk-footer-links" aria-label="Footer">
-                <a href="mailto:contact@treekey.co.uk">Help</a>
+                <a href="mailto:support@treekey.co.uk">Help</a>
                 <a href="/marketplace">Marketplace</a>
                 <a href="/pricing">Packages</a>
                 <a href="/faq">FAQ</a>
@@ -1502,7 +1502,7 @@ def _v2_footer_html() -> str:
         <div class="tk-footer-top">
             <a class="tk-brand" href="/"><img src="/static/images/treekey-crest.png" alt="" width="40" height="37"><span>TreeKey</span></a>
             <nav class="tk-footer-nav" aria-label="Footer">
-                <a href="mailto:contact@treekey.co.uk">Help</a>
+                <a href="mailto:support@treekey.co.uk">Help</a>
                 <a href="/marketplace">Marketplace</a>
                 <a href="/pricing">Packages</a>
                 <a href="/storm-radar">Storm Radar</a>
@@ -1518,7 +1518,7 @@ def _v2_footer_html() -> str:
             <p>Planning information comes from public UK council planning registers.</p>
             <p>&copy; 2026 Tree Key. All rights reserved.</p>
             <p>Proudly engineered in the United Kingdom &#127468;&#127463;</p>
-            <p>Contact: nick@treekey.co.uk</p>
+            <p>Contact: support@treekey.co.uk</p>
         </div>
     </footer>"""
 
@@ -3633,7 +3633,7 @@ def pricing(request: Request):
              marketplace page, so it's visible wherever a customer is deciding
              to pay, not just at the point of picking an individual lead. -->
         <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-emerald-200">
-            <b>Lead-Quality Promise:</b> Every opportunity is filtered to check it is genuine tree work before it is offered to you. On the rare chance one is not, email <a href="mailto:nick@treekey.uk" class="underline hover:text-emerald-100">nick@treekey.uk</a> telling us which purchase it concerns &mdash; we will give you a replacement introduction of equivalent value or a refund, at your choice.
+            <b>Lead-Quality Promise:</b> Every opportunity is filtered to check it is genuine tree work before it is offered to you. On the rare chance one is not, email <a href="mailto:support@treekey.co.uk" class="underline hover:text-emerald-100">support@treekey.co.uk</a> telling us which purchase it concerns &mdash; we will give you a replacement introduction of equivalent value or a refund, at your choice.
         </div>
 
         <div class="text-center mt-10 p-5 bg-slate-800/50 rounded-xl border border-slate-700">
@@ -4678,7 +4678,7 @@ def generate_homeowner_letter(request: Request, lead_id: str, company: str = "Yo
     # Sep 18 2026 (this session, Section 6 of the bundled-lead-and-letter
     # brief): this route used to hand-roll its own copy of the letter HTML
     # inline (hardcoded £5,000,000 insurance claim, hardcoded
-    # contact@treekey.co.uk, no relationship to what would actually get
+    # support@treekey.co.uk, no relationship to what would actually get
     # posted). It now calls letter_content.render_letter -- the SAME
     # function the fulfilment/provider path will call when actually
     # submitting a letter (see letter_providers/registry.py's attempt_send,
@@ -5240,7 +5240,7 @@ def checkout(plan_key: str, request: Request):
                 )
             return _branded_message_page(
                 request, "Payment System Unavailable",
-                "Please contact support at contact@treekey.co.uk.",
+                "Please contact support at support@treekey.co.uk.",
                 cta_text="Return to Pricing", cta_href="/pricing", status_code=503
             )
         return RedirectResponse(url=url)
@@ -5443,7 +5443,7 @@ async def checkout_post(plan_key: str, request: Request, outcode: str = Form(...
             <p style="color:#94a3b8; max-width:480px; margin:16px auto;">
                 You can still buy individual leads as they appear via the
                 <a href="/marketplace" style="color:#34d399;">Marketplace</a>, or
-                <a href="mailto:contact@treekey.co.uk?subject=Waitlist:%20{urllib.parse.quote(clean_outcode)}" style="color:#34d399;">email us to be notified</a>
+                <a href="mailto:support@treekey.co.uk?subject=Waitlist:%20{urllib.parse.quote(clean_outcode)}" style="color:#34d399;">email us to be notified</a>
                 if a slot opens up here.
             </p>
             <a href="/pricing" style="color:#34d399;">← Back to pricing</a>
@@ -5456,7 +5456,7 @@ async def checkout_post(plan_key: str, request: Request, outcode: str = Form(...
     if not url:
         return _branded_message_page(
             request, "Payment System Unavailable",
-            "Please contact support at contact@treekey.co.uk.",
+            "Please contact support at support@treekey.co.uk.",
             cta_text="Return to Pricing", cta_href="/pricing", status_code=503
         )
     return RedirectResponse(url=url, status_code=303)
@@ -7617,7 +7617,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
              case a non-tree lead slips past our filters, so it's clear this
              gets made right rather than customers having to guess/argue. -->
         <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-emerald-200">
-            <b>Lead-Quality Promise:</b> Every opportunity is filtered to check it is genuine tree work before it is offered to you. On the rare chance one is not, email <a href="mailto:nick@treekey.uk" class="underline hover:text-emerald-100">nick@treekey.uk</a> telling us which purchase it concerns &mdash; we will give you a replacement introduction of equivalent value or a refund, at your choice.
+            <b>Lead-Quality Promise:</b> Every opportunity is filtered to check it is genuine tree work before it is offered to you. On the rare chance one is not, email <a href="mailto:support@treekey.co.uk" class="underline hover:text-emerald-100">support@treekey.co.uk</a> telling us which purchase it concerns &mdash; we will give you a replacement introduction of equivalent value or a refund, at your choice.
         </div>
 
         {search_html}
@@ -10201,7 +10201,7 @@ def my_account_view(request: Request):
             # New subscription sales are off: /pricing no longer offers plans, so do not send an
             # existing subscriber there. Plans and rights are unchanged; changes go by email.
             manage_block = ('<p style="font-size:13px; color:#94a3b8; margin:10px 0 0 0;">Your plan is unchanged. '
-                            'To change or cancel it, email <a href="mailto:contact@treekey.co.uk" style="color:#34d399;">contact@treekey.co.uk</a>.</p>')
+                            'To change or cancel it, email <a href="mailto:support@treekey.co.uk" style="color:#34d399;">support@treekey.co.uk</a>.</p>')
     else:
         tier_name = "Free Tier"
         status_badge = "<span style='background:#1e293b; color:#94a3b8; font-size:11px; font-weight:bold; padding:4px 10px; border-radius:12px;'>FREE TIER</span>"
@@ -10423,7 +10423,7 @@ def _account_request_form_html(session_email: str, is_paid: bool, error: str = "
     if is_paid:
         sub_html = ('<li>You have an active subscription. <b>This request does not cancel it.</b> '
                     'To change or cancel it, email '
-                    '<a href="mailto:contact@treekey.co.uk">contact@treekey.co.uk</a>.</li>')
+                    '<a href="mailto:support@treekey.co.uk">support@treekey.co.uk</a>.</li>')
     err_html = f'<div class="acct-err">{html.escape(error)}</div>' if error else ""
     existing_html = ""
     if existing:
@@ -10516,7 +10516,7 @@ async def account_close_submit(request: Request):
         # Nothing was recorded: say so plainly, never report success.
         return _account_request_page(request, f"""
     <h2 style="color:white; font-size:24px; font-weight:800; margin:0 0 22px 0;">We couldn't record your request</h2>
-    <div class="card"><p style="margin:0;"><b>Nothing has been submitted.</b> Please try again in a few minutes, or email contact@treekey.co.uk from the address on your account.</p>
+    <div class="card"><p style="margin:0;"><b>Nothing has been submitted.</b> Please try again in a few minutes, or email support@treekey.co.uk from the address on your account.</p>
     <p style="margin:12px 0 0 0;"><a href="/account/close">Try again</a> &middot; <a href="/account">Back to My Account</a></p></div>""", 503)
 
     amended = bool(saved["duplicate"] and saved.get("added"))
@@ -14417,7 +14417,7 @@ async def privacy_policy(request: Request = None):
         <p class="mb-6 text-sm text-slate-500">Last updated: October 2026 &middot; TreeKey is a trading name of Nicholas Michael Secular, a sole trader</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">1. Who We Are</h2>
-        <p class="mb-4">TreeKey ("we", "us", "our") operates the website treekey.co.uk and the lead-generation service described in our <a href="/terms-of-service" class="text-emerald-400 underline">Terms of Service</a>. TreeKey is a trading name of Nicholas Michael Secular, a sole trader, who is the data controller for the personal data described below. Our correspondence address (a PO Box) is Nicholas Secular / TreeKey, Unit 173384, PO Box 7169, Poole, BH15 9EL. For privacy matters, contact <strong>nick@treekey.uk</strong>.</p>
+        <p class="mb-4">TreeKey ("we", "us", "our") operates the website treekey.co.uk and the lead-generation service described in our <a href="/terms-of-service" class="text-emerald-400 underline">Terms of Service</a>. TreeKey is a trading name of Nicholas Michael Secular, a sole trader, who is the data controller for the personal data described below. Our correspondence address (a PO Box) is Nicholas Secular / TreeKey, Unit 173384, PO Box 7169, Poole, BH15 9EL. For privacy matters, contact <strong>support@treekey.co.uk</strong>.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">2. The Two Kinds of Personal Data We Handle</h2>
         <p class="mb-2"><strong class="text-white">2.1 Customer data</strong> &mdash; information about you, our paying customer: name, business name, email, phone number, billing details (processed by Stripe), and your usage of the Service.</p>
@@ -14454,14 +14454,14 @@ async def privacy_policy(request: Request = None):
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">8. Your Rights</h2>
         <p class="mb-2">Both customers and individuals named in Lead data have the right, under UK GDPR, to: request access to the personal data we hold about them; request correction of inaccurate data; request erasure ("right to be forgotten"), subject to our legal bases for retaining it; object to processing based on legitimate interests (Section 3); request restriction of processing in certain circumstances; and lodge a complaint with the Information Commissioner's Office (ico.org.uk).</p>
-        <p class="mb-2">To exercise any of these rights, email <strong>nick@treekey.uk</strong>. If you have a TreeKey account, you can also sign in and use the request form at the bottom of <a href="/account" class="text-emerald-400 underline">My Account</a> (&ldquo;Close account / request data deletion&rdquo;). The form only submits a request: it does not delete anything or cancel a subscription by itself, and we review every request by hand.</p>
+        <p class="mb-2">To exercise any of these rights, email <strong>support@treekey.co.uk</strong>. If you have a TreeKey account, you can also sign in and use the request form at the bottom of <a href="/account" class="text-emerald-400 underline">My Account</a> (&ldquo;Close account / request data deletion&rdquo;). The form only submits a request: it does not delete anything or cancel a subscription by itself, and we review every request by hand.</p>
         <p class="mb-4">We will respond to a rights request without undue delay and at the latest within one month of receiving it (counted from when we have any information we reasonably need to confirm who you are). If a request is complex, or you make several, we may extend that by up to two further months, and we will tell you within the first month if we do. Responding means telling you what we have done, or will do, and why if we cannot do something; some records (for example payment and accounting records, and suppression records that stop us contacting someone again) may have to be kept. You can complain to the Information Commissioner&rsquo;s Office (ico.org.uk).</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">9. Data Retention</h2>
         <p class="mb-2">Lead data for a planning application that is never purchased is permanently deleted after 60 days.</p>
         <p class="mb-2">Once a Lead is purchased and a physical letter to the homeowner is dispatched, the homeowner's name, home address, and the personalised letter content are permanently deleted from our live application database once 72 hours have passed since our mailing provider confirmed that the letter had been handed to Royal Mail for delivery (our system records the time at which it sees that confirmation). This is carried out by an automated process that checks for newly-eligible records approximately every 20 minutes, so in normal operation deletion happens within minutes of the 72-hour mark, not after a further delay. If our systems are briefly unavailable (for example during a deployment or an outage), the check resumes as soon as service is restored and deletes anything that became eligible in the meantime -- so we do not guarantee deletion at the exact 72-hour mark in every circumstance, only that it is not left to a manual or indefinite process. A minimal record of the transaction (payment reference, dispatch confirmation, and any postal-suppression request) is kept for accounting, complaint-handling, and legal purposes; we have not yet set a fixed expiry for that minimal record.</p>
         <p class="mb-4">This deletion applies to our own live application database. It does not, and cannot, reach: routine backups of that database, which persist on their own separate schedule until they age out or are overwritten; records our mailing provider keeps of a letter it has already printed and posted (see the next paragraph); or the physical letter itself once it has reached the homeowner's postal address. We do not control those systems and do not claim to delete data from them.</p>
-        <p class="mb-4">Our mailing provider, Intelliprint, has told us in writing that it keeps the PDF of each letter for 90 days from the date the print job is confirmed, and that its separate recipient and letter records have no automatic deletion period. It has told us those records can be deleted on request, subject to legal requirements. We have not been given a provider deletion guarantee beyond that. If you want your information deleted from those provider records, email <strong>nick@treekey.uk</strong> and we will ask the provider to delete it, subject to those legal requirements.</p>
+        <p class="mb-4">Our mailing provider, Intelliprint, has told us in writing that it keeps the PDF of each letter for 90 days from the date the print job is confirmed, and that its separate recipient and letter records have no automatic deletion period. It has told us those records can be deleted on request, subject to legal requirements. We have not been given a provider deletion guarantee beyond that. If you want your information deleted from those provider records, email <strong>support@treekey.co.uk</strong> and we will ask the provider to delete it, subject to those legal requirements.</p>
         <p class="mb-4">Customer account data is retained for the life of the account. We do not currently operate an automated deletion process for billing records or for data belonging to a closed account.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">10. Security</h2>
@@ -14477,7 +14477,7 @@ async def privacy_policy(request: Request = None):
         <p class="mb-4">We may update this policy from time to time; material changes will be reflected by an updated "last updated" date, and significant changes affecting Lead data subjects' rights will be communicated where practical.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">14. Contact</h2>
-        <p class="mb-6">Privacy questions or requests regarding this policy: <strong>nick@treekey.uk</strong>.</p>
+        <p class="mb-6">Privacy questions or requests regarding this policy: <strong>support@treekey.co.uk</strong>.</p>
 
         <a href="/" class="text-emerald-500 hover:text-emerald-400 mt-4 inline-block font-bold">&larr; Back to Home</a>
     </div>
@@ -14545,8 +14545,8 @@ async def terms_of_service(request: Request = None):
         <p class="mb-2"><strong>What you buy.</strong> TreeKey sells a printed and posted introduction. You choose an opportunity in your area and approve the wording of your letter; we print the letter and post it, postage included, to the homeowner at the property concerned, introducing your business. You do not receive the homeowner's name, address or contact details, and there is no step that unlocks them: the homeowner contacts you directly if they choose to. An opportunity you buy is reserved to you and withdrawn from sale to other contractors by TreeKey; this does not stop other businesses finding the same public planning information or contacting the homeowner themselves. We do not guarantee that a homeowner will reply or that you will win any work.</p>
         <p class="mb-2">Prices are those displayed on the Service when you buy, and include printing and postage of your letter. Prices may change; changes will not affect a purchase already paid for. Where a first-introduction price is shown on the pricing page, it applies once per business. New subscription plans are not currently offered.</p>
         <p class="mb-2">Payments are processed by Stripe. A one-off purchase is a single payment: it does not start a subscription and you will not be charged again for it.</p>
-        <p class="mb-4 border-l-4 border-amber-500 pl-4 bg-amber-500/10 py-3 text-slate-200"><strong>Refunds.</strong> You may cancel a purchase by emailing <strong>nick@treekey.uk</strong>. If our cancellation process confirms that your letter was stopped before it was submitted to our printing provider, we will refund the full amount you paid. If submission has already begun, we will investigate whether the letter can be stopped and tell you the outcome; we cannot promise that it can be stopped. If your letter is not sent, we will send it or, at your choice, refund the amount you paid for it. Once your letter has been sent, refunds remain available under the Lead-Quality Promise and your statutory rights. Total refunds for a purchase never exceed the amount you paid, taking account of any earlier refunds.</p>
-        <p class="mb-4 border-l-4 border-emerald-500 pl-4 bg-emerald-500/10 py-3 text-slate-200"><strong>Lead-Quality Promise.</strong> Every opportunity is automatically filtered to check that it describes genuine tree work before it is offered to you. On the rare occasion that an opportunity you have bought turns out not to be genuine tree work despite this, email <strong>nick@treekey.uk</strong> telling us which purchase it concerns, and we will, at your choice, give you a replacement introduction of equivalent value or a refund for that purchase.</p>
+        <p class="mb-4 border-l-4 border-amber-500 pl-4 bg-amber-500/10 py-3 text-slate-200"><strong>Refunds.</strong> You may cancel a purchase by emailing <strong>support@treekey.co.uk</strong>. If our cancellation process confirms that your letter was stopped before it was submitted to our printing provider, we will refund the full amount you paid. If submission has already begun, we will investigate whether the letter can be stopped and tell you the outcome; we cannot promise that it can be stopped. If your letter is not sent, we will send it or, at your choice, refund the amount you paid for it. Once your letter has been sent, refunds remain available under the Lead-Quality Promise and your statutory rights. Total refunds for a purchase never exceed the amount you paid, taking account of any earlier refunds.</p>
+        <p class="mb-4 border-l-4 border-emerald-500 pl-4 bg-emerald-500/10 py-3 text-slate-200"><strong>Lead-Quality Promise.</strong> Every opportunity is automatically filtered to check that it describes genuine tree work before it is offered to you. On the rare occasion that an opportunity you have bought turns out not to be genuine tree work despite this, email <strong>support@treekey.co.uk</strong> telling us which purchase it concerns, and we will, at your choice, give you a replacement introduction of equivalent value or a refund for that purchase.</p>
         <p class="mb-4"><strong>Your statutory rights.</strong> Nothing in these Terms, including this section and our refund policy, affects any statutory rights you have that cannot lawfully be excluded.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">5. Lead Accuracy &mdash; No Warranty</h2>
@@ -14584,7 +14584,7 @@ async def terms_of_service(request: Request = None):
         <p class="mb-2"><strong class="text-white">Governing law.</strong> These Terms are governed by the laws of England and Wales, and the courts of England and Wales have exclusive jurisdiction.</p>
         <p class="mb-2"><strong class="text-white">Severability.</strong> If any provision of these Terms is found unenforceable, the remaining provisions continue in full force.</p>
         <p class="mb-2"><strong class="text-white">Entire agreement.</strong> These Terms, together with the <a href="/privacy-policy" class="text-emerald-400 underline">Privacy Policy</a> and any order confirmation, constitute the entire agreement between the parties regarding the Service.</p>
-        <p class="mb-6"><strong class="text-white">Contact.</strong> Questions about these Terms can be sent to <strong>contact@treekey.co.uk</strong>.</p>
+        <p class="mb-6"><strong class="text-white">Contact.</strong> Questions about these Terms can be sent to <strong>support@treekey.co.uk</strong>.</p>
 
         <a href="/" class="text-emerald-500 hover:text-emerald-400 mt-4 inline-block font-bold">&larr; Back to Home</a>
     </div>
@@ -14640,9 +14640,9 @@ async def faq_page(request: Request = None):
         ("Pricing & Plans", [
             *_faq_pricing_intro_entries(),
             ("Can I get a refund?",
-             "You may cancel a purchase by emailing <strong>nick@treekey.uk</strong>. If our cancellation process confirms that your letter was stopped before it was submitted to our printing provider, we will refund the full amount you paid. If submission has already begun, we will investigate whether the letter can be stopped and tell you the outcome; we cannot promise that it can be stopped. If your letter is not sent, we will send it or, at your choice, refund the amount you paid for it. Once your letter has been sent, refunds remain available under the Lead-Quality Promise and your statutory rights. Total refunds for a purchase never exceed the amount you paid, taking account of any earlier refunds."),
+             "You may cancel a purchase by emailing <strong>support@treekey.co.uk</strong>. If our cancellation process confirms that your letter was stopped before it was submitted to our printing provider, we will refund the full amount you paid. If submission has already begun, we will investigate whether the letter can be stopped and tell you the outcome; we cannot promise that it can be stopped. If your letter is not sent, we will send it or, at your choice, refund the amount you paid for it. Once your letter has been sent, refunds remain available under the Lead-Quality Promise and your statutory rights. Total refunds for a purchase never exceed the amount you paid, taking account of any earlier refunds."),
             ("What if an opportunity turns out not to be tree work at all?",
-             "Every opportunity is automatically filtered to check that it describes genuine tree work before it is offered to you. On the rare occasion that an opportunity you have bought turns out not to be genuine tree work despite this, email <strong>nick@treekey.uk</strong> telling us which purchase it concerns, and we will, at your choice, give you a replacement introduction of equivalent value or a refund for that purchase."),
+             "Every opportunity is automatically filtered to check that it describes genuine tree work before it is offered to you. On the rare occasion that an opportunity you have bought turns out not to be genuine tree work despite this, email <strong>support@treekey.co.uk</strong> telling us which purchase it concerns, and we will, at your choice, give you a replacement introduction of equivalent value or a refund for that purchase."),
         ]),
         ("How Matching Works", [
             ("How do you decide which leads I get?",
@@ -14679,7 +14679,7 @@ async def faq_page(request: Request = None):
             ("Is my business data sold to anyone?",
              "No. Your own account information (name, email, phone, billing) is never sold to data brokers or advertisers &mdash; it's used only to run your account and the Service. What you're paying for is licensed access to Lead data compiled from public records, which is a different thing entirely. See our <a href=\"/privacy-policy\" class=\"text-emerald-400 underline\">Privacy Policy</a> for the full breakdown."),
             ("I'm named in a Lead and want it removed &mdash; what do I do?",
-             "Email <strong>contact@treekey.co.uk</strong> and we'll action your request in line with the rights set out in our Privacy Policy."),
+             "Email <strong>support@treekey.co.uk</strong> and we'll action your request in line with the rights set out in our Privacy Policy."),
         ]),
     ]
 
@@ -14724,7 +14724,7 @@ async def faq_page(request: Request = None):
         {groups_html}
 
         <div class="text-center mt-4 pb-8 text-sm text-slate-500">
-            Still have a question? Email <strong class="text-slate-300">contact@treekey.co.uk</strong> or <a href="/suggestions" class="text-emerald-400 underline">submit a suggestion</a>.
+            Still have a question? Email <strong class="text-slate-300">support@treekey.co.uk</strong> or <a href="/suggestions" class="text-emerald-400 underline">submit a suggestion</a>.
         </div>
     </div>
 {_shared_footer_html()}

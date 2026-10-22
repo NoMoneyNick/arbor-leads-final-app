@@ -141,7 +141,7 @@ class TestForm(_Base):
         self.db.get_contractor_subscription.return_value = {"active": True}
         html = _body(main.account_close_form(_mock_request(main._sign_session_cookie(EMAIL), path="/account/close")))
         self.assertIn("does not cancel it", html)
-        self.assertIn('mailto:contact@treekey.co.uk', html)  # 6 Oct 2026: no self-service manage page; email route
+        self.assertIn('mailto:support@treekey.co.uk', html)  # 6 Oct 2026: no self-service manage page; email route
         self.assertNotIn("/cancel", html)
 
     def test_already_open_request_shows_notice_not_form(self):
@@ -340,12 +340,11 @@ class TestPrivacyPolicy(_Base):
         src = inspect.getsource(main)
         i = src.index("8. Your Rights")
         seg = src[i:i + 4500]
-        self.assertIn("nick@treekey.uk", seg)
+        self.assertIn("support@treekey.co.uk", seg)
         self.assertIn('href="/account"', seg)
         self.assertIn("request form", seg)
         self.assertIn("within one month", seg)
         self.assertIn("two further months", seg)
-        self.assertNotIn("contact@treekey.co.uk", seg[:seg.index("9. Data Retention")])
 
 
 class TestMyAccountLink(_Base):
