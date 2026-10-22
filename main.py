@@ -10844,6 +10844,18 @@ def _budget_form_html(secret: Optional[str], amount: str = "", reference: str = 
             f'<button type="submit">Review</button></form>')
 
 
+@app.get("/admin/pdf-render-check")
+def admin_pdf_render_check(request: Request, secret: Optional[str] = Query(None)):
+    """Admin check: renders a fixed 2-page sample PDF with the production browser setup. Sends nothing,
+    touches no database, no provider and no order. Returns 500 with the reason if the browser cannot render."""
+    verify_admin_or_secret(request, secret)
+    from letter_providers.intelliprint_provider import pdf_render_selfcheck
+    try:
+        return pdf_render_selfcheck()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"ok": False, "error": str(e)[:600]})
+
+
 @app.get("/admin/mailing-budget", response_class=HTMLResponse)
 def admin_mailing_budget(request: Request, secret: Optional[str] = Query(None), done: Optional[str] = Query(None)):
     """Admin page: shows the active budget and a form to record funding that is ALREADY in Intelliprint.

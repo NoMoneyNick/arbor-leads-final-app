@@ -484,6 +484,48 @@ def _pages_sheets_note(data: dict) -> str:
     return note
 
 
+def _project_browsers_dir() -> str:
+    """Where render_build_browser.sh installs Chromium on the server: a folder INSIDE the project.
+    Render keeps the project folder from build to runtime, but not its build cache
+    (/opt/render/.cache), which is where Playwright puts browsers by default."""
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".playwright-browsers")
+
+
+def _use_project_browsers() -> None:
+    """Point Playwright at the project-folder browsers if they exist, unless the environment already
+    names a location (PLAYWRIGHT_BROWSERS_PATH is respected as-is). Must run before Playwright starts."""
+    if os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+        return
+    folder = _project_browsers_dir()
+    if os.path.isdir(folder):
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = folder
+
+
+_SELFCHECK_HTML = (
+    "<!doctype html><html><head><meta charset='utf-8'><style>"
+    "@page{size:A4;margin:0}body{margin:0;font-family:sans-serif}"
+    ".p{width:210mm;height:297mm;padding:20mm;box-sizing:border-box;page-break-after:always}"
+    ".p:last-child{page-break-after:auto}</style></head><body>"
+    "<div class='p'><h1>TreeKey PDF render check</h1><p>Page one.</p></div>"
+    "<div class='p'><p>Page two.</p></div></body></html>"
+)
+
+
+def pdf_render_selfcheck() -> dict:
+    """Renders a fixed two-page A4 sample through the SAME function a real letter uses. Sends nothing,
+    touches no database and no provider. Raises RuntimeError if the browser cannot render."""
+    import re
+    import time
+
+    started = time.time()
+    pdf = _render_html_to_pdf_bytes(_SELFCHECK_HTML)
+    pages = len(re.findall(rb"/Type\s*/Page(?![s\w])", pdf))
+    if not pdf.startswith(b"%PDF") or pages != 2:
+        raise RuntimeError(f"Self-check PDF looks wrong: starts_with_pdf={pdf.startswith(b'%PDF')}, pages={pages} (expected 2).")
+    return {"ok": True, "bytes": len(pdf), "pages": pages, "seconds": round(time.time() - started, 2),
+            "browsers_path": os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or "(Playwright default)"}
+
+
 def _render_html_to_pdf_bytes(html: str) -> bytes:
     """2026-09-26, eighth fix -- see module docstring for the full
     investigation. Renders content_html to an actual PDF using the SAME
@@ -513,6 +555,7 @@ def _render_html_to_pdf_bytes(html: str) -> bytes:
 
     import tempfile
 
+    _use_project_browsers()
     with tempfile.TemporaryDirectory() as tmpdir:
         html_path = os.path.join(tmpdir, "letter.html")
         pdf_path = os.path.join(tmpdir, "letter.pdf")
@@ -520,7 +563,7 @@ def _render_html_to_pdf_bytes(html: str) -> bytes:
             f.write(html)
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch()
+                browser = p.chromium.launch(args=["--disable-dev-shm-usage"])
                 try:
                     page = browser.new_page()
                     page.goto("file://" + html_path)

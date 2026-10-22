@@ -20,6 +20,7 @@ svix>=1.0.0
 # verified (tests/letter_pagination_check/run_pagination_check.py) rather than a
 # different, unverified PDF engine. THIS IS NOW A REAL PRODUCTION DEPENDENCY, not just
 # a test-time one: wherever this code actually sends live letters needs both
-# `pip install playwright` (this line) AND a one-time `playwright install chromium` to
-# download the actual browser -- pip alone is not enough.
+# `pip install playwright` (this line) AND the browser download -- pip alone is not enough.
+# On Render this is done by render_build_browser.sh (run from the Build Command), which installs
+# Chromium into the project folder (.playwright-browsers) and renders a test PDF.
 playwright>=1.40.0

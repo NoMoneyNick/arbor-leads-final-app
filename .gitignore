@@ -41,3 +41,6 @@ desktop.ini
 # locally, not something the website's code repo should carry.
 *.exe
 tailwindcss.exe
+
+# Chromium installed by render_build_browser.sh on the server
+.playwright-browsers/
