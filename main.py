@@ -7049,7 +7049,9 @@ def trigger_letter_fulfilment_worker(secret: Optional[str] = Query(None), live: 
     except Exception as e:
         conn.rollback()
         logger.error(f"[Worker Trigger] run_one_pass failed, rolled back: {e}", exc_info=True)
-        return {"status": "error", "error": str(e)}
+        # HTTP 500 (not 200) so an external scheduler's failure alert fires.
+        # The rollback above is unchanged; the body still says status/error.
+        raise HTTPException(status_code=500, detail={"status": "error", "error": str(e)})
     finally:
         cur.close()
         conn.close()

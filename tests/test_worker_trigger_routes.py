@@ -139,12 +139,17 @@ class TestTriggerLetterFulfilmentWorkerRoute(_TriggerRouteTestBase):
         mock_get_db_conn.return_value = mock_conn
         mock_run_one_pass.side_effect = RuntimeError("simulated DB outage mid-pass")
 
-        result = main.trigger_letter_fulfilment_worker(secret="test-trigger-secret")
+        with self.assertRaises(main.HTTPException) as ctx:
+            main.trigger_letter_fulfilment_worker(secret="test-trigger-secret")
 
+        # Still rolled back, never committed, connection still closed.
         mock_conn.rollback.assert_called_once()
         mock_conn.commit.assert_not_called()
-        self.assertEqual(result["status"], "error")
-        self.assertIn("simulated DB outage mid-pass", result["error"])
+        mock_conn.close.assert_called_once()
+        # HTTP 500 so a scheduler's failure alert fires; body keeps status/error.
+        self.assertEqual(ctx.exception.status_code, 500)
+        self.assertEqual(ctx.exception.detail["status"], "error")
+        self.assertIn("simulated DB outage mid-pass", ctx.exception.detail["error"])
 
     @patch("main.fulfilment_worker.run_one_pass")
     @patch("main.database.get_db_conn")
@@ -164,7 +169,8 @@ class TestTriggerLetterFulfilmentWorkerRoute(_TriggerRouteTestBase):
         mock_conn.reset_mock()
         mock_cur.reset_mock()
         mock_run_one_pass.side_effect = RuntimeError("boom")
-        main.trigger_letter_fulfilment_worker(secret="test-trigger-secret")
+        with self.assertRaises(main.HTTPException):
+            main.trigger_letter_fulfilment_worker(secret="test-trigger-secret")
         mock_cur.close.assert_called_once()
         mock_conn.close.assert_called_once()
 
