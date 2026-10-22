@@ -1073,30 +1073,31 @@ def get_pending_review_queue(limit: int = 50, max_llm_attempts: int = None) -> l
         return []
 
 
-def get_lead_source_health_report(recent_days: int = 3, baseline_days: int = 30, min_baseline_daily_rate: float = 0.1) -> list:
+def get_lead_source_health_report(recent_days: int = 3, baseline_days: int = 30, min_baseline_daily_rate: float = 0.1,
+                                  false_alarm_chance: float = 0.01, max_judgeable_days: int = 21) -> list:
     """Sep 3 2026: the failsafe Nick asked for after the Leeds ArcGIS
-    incident -- 'predict possible future issues... even if they have never
-    shown an error.' Leeds' bug never raised a single exception in months;
-    it just silently produced zero real leads while quietly stuffing junk
-    into the manual-review queue instead. No error-rate alert would ever
-    have caught that, because there was no error. The only signal that
-    incident actually left behind was a source that used to produce leads
-    and then, quietly, stopped -- so that's what this checks for directly,
-    per council_source, instead of only watching for exceptions.
+    incident -- a source that used to produce leads and then, silently,
+    stopped. For each council_source it compares its historical daily rate
+    (leads/day over the `baseline_days` window EXCLUDING the most recent
+    `recent_days`) against what it produced since.
 
-    For each council_source that has ever produced a lead: compares its
-    historical daily rate (leads/day over the `baseline_days` window,
-    EXCLUDING the most recent `recent_days` so a real ongoing problem
-    doesn't get averaged away) against how many it actually produced in
-    that most recent window. Flags a source as `possible_silent_failure`
-    only when BOTH (a) its historical rate clears `min_baseline_daily_rate`
-    -- so a genuinely low-volume source (a small council that might
-    legitimately go a week between applications) isn't flagged just for
-    having a quiet few days -- AND (b) it produced literally zero in the
-    recent window. Read-only, never raises: returns [] on any DB error so
-    a broken health check can never itself become an outage."""
+    Oct 22 2026 fix (daily digest listed 12 "zero leads in 3 days" sources):
+    the old rule flagged any source with a rate of 0.1/day or more that had
+    produced nothing for 3 days. For a source making 0.2 leads/day, three
+    quiet days happen by chance about half the time, so quiet small
+    councils were flagged constantly. The rule now scales with the source's
+    own rate: a source is flagged only when the quiet spell is long enough
+    that it would happen by chance less than `false_alarm_chance` (1%) of
+    the time -- quiet days needed = ln(1/chance) / daily_rate, never fewer
+    than `recent_days`. A busy source (2 leads/day) is still flagged after
+    3 days; a slow one (0.3/day) after about 16. A source so slow that the
+    needed spell exceeds `max_judgeable_days` is reported but never
+    flagged, because silence cannot be told from chance.
+
+    Read-only, never raises: returns [] on any DB error."""
     if not SURL:
         return []
+    import math
     try:
         conn = get_db_conn()
         cur = conn.cursor()
@@ -1111,7 +1112,8 @@ def get_lead_source_health_report(recent_days: int = 3, baseline_days: int = 30,
                     ) AS baseline_leads,
                     COUNT(*) FILTER (
                         WHERE discovered_at >= NOW() - (%s || ' days')::interval
-                    ) AS recent_leads
+                    ) AS recent_leads,
+                    EXTRACT(EPOCH FROM (NOW() - MAX(discovered_at))) / 86400.0 AS days_since_last
                 FROM leads
                 GROUP BY council_source;
                 """,
@@ -1124,14 +1126,28 @@ def get_lead_source_health_report(recent_days: int = 3, baseline_days: int = 30,
 
         baseline_window_days = max(1, baseline_days - recent_days)
         report = []
-        for council_source, baseline_leads, recent_leads in rows:
+        for row in rows:
+            council_source, baseline_leads, recent_leads = row[0], row[1], row[2]
+            days_since_last = row[3] if len(row) > 3 else None
             baseline_daily_rate = (baseline_leads or 0) / baseline_window_days
-            flagged = baseline_daily_rate >= min_baseline_daily_rate and (recent_leads or 0) == 0
+            recent = recent_leads or 0
+            needed_days = None
+            if baseline_daily_rate >= min_baseline_daily_rate:
+                needed_days = max(recent_days, math.ceil(math.log(1.0 / false_alarm_chance) / baseline_daily_rate))
+            quiet_days = float(days_since_last) if days_since_last is not None else float(recent_days)
+            flagged = bool(
+                needed_days is not None
+                and needed_days <= max_judgeable_days
+                and recent == 0
+                and quiet_days >= needed_days
+            )
             report.append({
                 "council_source": council_source,
                 "baseline_daily_rate": round(baseline_daily_rate, 3),
-                "recent_leads": recent_leads or 0,
+                "recent_leads": recent,
                 "recent_days": recent_days,
+                "quiet_days": round(quiet_days, 1),
+                "quiet_days_needed": needed_days,
                 "possible_silent_failure": flagged,
             })
         return report

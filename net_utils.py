@@ -58,6 +58,12 @@ WHAT THIS DOES NOT SOLVE (documented honestly, not hidden):
 import os
 import time
 import json
+import os
+import ssl
+import socket
+import hashlib
+import tempfile
+import threading
 import random
 import logging
 import requests
@@ -75,6 +81,15 @@ _TLS_ALERT_THROTTLE = {}
 _TLS_ALERT_THROTTLE_HOURS = 24.0
 
 
+_TLS_CAUSE_TEXT = {
+    "missing_intermediate": "the server did not send its intermediate certificate and the automatic repair could not fetch or verify it.",
+    "expired": "the server's certificate has expired -- the council needs to renew it.",
+    "hostname_mismatch": "the certificate is issued for a different website name than the one we asked for.",
+    "self_signed": "the certificate is self-signed, so no trusted authority vouches for it.",
+    "other": "not one of the usual causes; see the logs for the exact error.",
+}
+
+
 def _domain(url: str) -> str:
     try:
         return urlparse(url).netloc or url
@@ -82,7 +97,7 @@ def _domain(url: str) -> str:
         return url
 
 
-def _alert_tls_fallback(url: str):
+def _alert_tls_fallback(url: str, cause: str = "unknown"):
     """Fires a throttled, low-severity incident alert the first time (per
     domain, per 24h) a request needed the unverified-TLS fallback. This is
     informational, not urgent -- the request still succeeded -- but it
@@ -118,9 +133,8 @@ def _alert_tls_fallback(url: str):
             description=(
                 f"A request to {domain} failed HTTPS certificate verification "
                 f"and was retried without it so the scrape could still complete. "
-                f"The fetch succeeded, but the certificate problem's exact cause "
-                f"(expired, self-signed, missing intermediate, hostname mismatch, "
-                f"or something else) is not determined by this alert."
+                f"Likely cause: {_TLS_CAUSE_TEXT.get(cause, _TLS_CAUSE_TEXT['other'])} "
+                f"(missing-intermediate cases are repaired automatically and no longer reach this alert)."
             ),
             impact="No impact to this scrape -- the fallback request succeeded. Logged for visibility only.",
             action_required="No action needed unless this keeps recurring for the same domain.",
@@ -129,6 +143,168 @@ def _alert_tls_fallback(url: str):
         )
     except Exception as e:
         logger.debug(f"[net_utils] Could not send TLS fallback alert for {domain}: {e}")
+
+
+
+# ---------------------------------------------------------------------------
+# Oct 22 2026: proper fix for the "SCRAPER TLS FALLBACK" digest warnings
+# (9 council hosts, every day). The usual real cause on council portals is a
+# server that sends its own certificate but NOT the intermediate certificate
+# that links it to a trusted root, so strict verification fails even though
+# the site is fine in a browser (browsers fetch the missing piece themselves).
+# Instead of switching verification OFF, we do what a browser does: read the
+# "CA Issuers" address inside the server's certificate, download the missing
+# intermediate, CHECK it chains to a trusted root, and only then trust it for
+# that host. Verification stays ON. If the cause is anything else (expired,
+# wrong name, self-signed) nothing is trusted and the old unverified fallback
+# plus the alert remain -- now naming the real cause.
+# ---------------------------------------------------------------------------
+_CA_DIR = os.path.join(tempfile.gettempdir(), "treekey_ca")
+_ROOT_CA_BUNDLE = None            # None = certifi's bundle (tests point this at their own root)
+_VERIFIED_BUNDLE = {}            # host -> path of the bundle that verified it
+_REPAIR_FAILED_AT = {}           # host -> time of the last failed repair (retry after 6h)
+_REPAIR_LOCK = threading.Lock()
+_REPAIR_RETRY_SECONDS = 6 * 3600
+
+
+def _root_bundle_path() -> str:
+    if _ROOT_CA_BUNDLE:
+        return _ROOT_CA_BUNDLE
+    try:
+        import certifi
+        return certifi.where()
+    except Exception:
+        return requests.certs.where()
+
+
+def classify_ssl_error(exc) -> str:
+    """Names the likely cause of a certificate failure from its message."""
+    msg = str(exc).lower()
+    if "unable to get local issuer" in msg or "unable to get issuer" in msg or "unable to verify the first certificate" in msg:
+        return "missing_intermediate"
+    if "expired" in msg:
+        return "expired"
+    if "hostname" in msg or "doesn't match" in msg or "does not match" in msg or "ip address mismatch" in msg:
+        return "hostname_mismatch"
+    if "self-signed" in msg or "self signed" in msg:
+        return "self_signed"
+    return "other"
+
+
+def _fetch_leaf_der(host: str, port: int = 443, timeout: float = 10.0) -> bytes:
+    """The certificate the server presents, fetched WITHOUT trusting it (only
+    used to read its public 'where is my issuer' address, never to talk)."""
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    with socket.create_connection((host, port), timeout=timeout) as sock:
+        with ctx.wrap_socket(sock, server_hostname=host) as tls:
+            return tls.getpeercert(binary_form=True)
+
+
+def _load_certs_from_bytes(data: bytes):
+    from cryptography import x509
+    from cryptography.hazmat.primitives.serialization import pkcs7
+    for loader in (lambda d: [x509.load_der_x509_certificate(d)],
+                   lambda d: x509.load_pem_x509_certificates(d),
+                   lambda d: pkcs7.load_der_pkcs7_certificates(d),
+                   lambda d: pkcs7.load_pem_pkcs7_certificates(d)):
+        try:
+            certs = loader(data)
+            if certs:
+                return list(certs)
+        except Exception:
+            continue
+    return []
+
+
+def _issuer_urls(cert):
+    from cryptography import x509
+    from cryptography.x509.oid import ExtensionOID, AuthorityInformationAccessOID
+    try:
+        ext = cert.extensions.get_extension_for_oid(ExtensionOID.AUTHORITY_INFORMATION_ACCESS).value
+    except Exception:
+        return []
+    return [d.access_location.value for d in ext
+            if d.access_method == AuthorityInformationAccessOID.CA_ISSUERS
+            and isinstance(d.access_location, x509.UniformResourceIdentifier)
+            and d.access_location.value.lower().startswith(("http://", "https://"))]
+
+
+def _build_repair_bundle(host: str, port: int = 443):
+    """Returns the path of a CA bundle that makes `host` verify, or None."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.x509.verification import PolicyBuilder, Store
+    from cryptography.x509 import DNSName, IPAddress
+    import ipaddress
+
+    leaf = x509.load_der_x509_certificate(_fetch_leaf_der(host, port))
+    intermediates, current = [], leaf
+    for _ in range(4):                                   # chain depth limit
+        got = None
+        for url in _issuer_urls(current):
+            try:
+                r = requests.get(url, timeout=10)
+                if r.status_code == 200 and r.content:
+                    certs = _load_certs_from_bytes(r.content)
+                    if certs:
+                        got = certs
+                        break
+            except Exception:
+                continue
+        if not got:
+            break
+        intermediates.extend(got)
+        current = got[0]
+        if current.issuer == current.subject:             # reached a self-signed root
+            break
+    if not intermediates:
+        return None
+    with open(_root_bundle_path(), "rb") as fh:
+        roots = x509.load_pem_x509_certificates(fh.read())
+    try:
+        subject = IPAddress(ipaddress.ip_address(host)) if host.replace(".", "").isdigit() else DNSName(host)
+        verifier = PolicyBuilder().store(Store(roots)).build_server_verifier(subject)
+        verifier.verify(leaf, intermediates)              # raises unless it chains to a trusted root
+    except Exception as e:
+        logger.debug(f"[net_utils] Downloaded intermediate for {host} did not verify: {e}")
+        return None
+    os.makedirs(_CA_DIR, exist_ok=True)
+    pem = b"".join(c.public_bytes(serialization.Encoding.PEM) for c in intermediates)
+    name = hashlib.sha256(pem).hexdigest()[:16]
+    bundle_path = os.path.join(_CA_DIR, f"bundle-{name}.pem")
+    if not os.path.exists(bundle_path):
+        with open(_root_bundle_path(), "rb") as fh:
+            base = fh.read()
+        tmp = bundle_path + ".tmp"
+        with open(tmp, "wb") as out:
+            out.write(base + b"\n" + pem)
+        os.replace(tmp, bundle_path)
+    return bundle_path
+
+
+def _repair_missing_intermediate(url: str):
+    """Best-effort, never raises. Returns a verifying bundle path or None."""
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if not host or parsed.scheme != "https":
+        return None
+    now = time.time()
+    with _REPAIR_LOCK:
+        if now - _REPAIR_FAILED_AT.get(host, 0) < _REPAIR_RETRY_SECONDS:
+            return None
+        try:
+            path = _build_repair_bundle(host, parsed.port or 443)
+        except Exception as e:
+            logger.debug(f"[net_utils] Intermediate repair failed for {host}: {e}")
+            path = None
+        if path:
+            _VERIFIED_BUNDLE[host] = path
+            logger.info(f"[net_utils] {host}: fetched the missing intermediate certificate; TLS verification stays ON.")
+        else:
+            _REPAIR_FAILED_AT[host] = now
+        return path
 
 
 def _request(method: str, url: str, session=None, max_retries: int = 2, backoff_base: float = 0.6, **kwargs):
@@ -180,19 +356,29 @@ def _request(method: str, url: str, session=None, max_retries: int = 2, backoff_
     if caller_headers is not None:
         kwargs["headers"] = caller_headers
 
-    verify_flag = True
+    _host = urlparse(url).hostname or ""
+    verify_flag = _VERIFIED_BUNDLE.get(_host, True)   # a host we already repaired verifies with its own bundle
+    repair_tried = False
     attempt = 0
     res = None
 
     while True:
         try:
             res = caller(method, url, verify=verify_flag, **kwargs)
-        except requests.exceptions.SSLError:
-            if verify_flag:
+        except requests.exceptions.SSLError as ssl_exc:
+            if verify_flag is not False:
+                cause = classify_ssl_error(ssl_exc)
+                if cause == "missing_intermediate" and not repair_tried:
+                    repair_tried = True
+                    _VERIFIED_BUNDLE.pop(_host, None)
+                    repaired = _repair_missing_intermediate(url)
+                    if repaired:
+                        verify_flag = repaired
+                        continue
                 # One-time, immediate downgrade -- doesn't consume a retry
                 # slot, and can't loop (verify=False never raises SSLError).
                 verify_flag = False
-                _alert_tls_fallback(url)
+                _alert_tls_fallback(url, cause)
                 continue
             raise
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):

@@ -30,7 +30,7 @@ import brand          # brand colours / wording / icon + share-link tags (brand.
 import email_layout   # shared branded email design (email_layout.py)
 import document_print # shared print look for the street flyer + storm quote (document_print.py)
 from fastapi import FastAPI, Query, BackgroundTasks, HTTPException, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, Response, PlainTextResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, PlainTextResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from typing import Optional
@@ -416,7 +416,32 @@ def _check_rate_limit(ip: str):
 import hmac as _hmac
 import hashlib as _hashlib
 import base64 as _base64
-_SESSION_SECRET = (os.getenv("SESSION_SECRET", "").strip() or T_SEC or "treekey-fallback-dev-secret").encode()
+def _resolve_session_secret(env=None):
+    """Which secret signs login cookies. Order: SESSION_SECRET, then
+    TRIGGER_SECRET (existing behaviour, so current logins keep working), and
+    only then a fallback. Oct 22 2026: the last fallback used to be a fixed,
+    public string -- anyone could have forged a login cookie if both
+    variables were ever missing in production. On Render (RENDER is set) a
+    random per-process secret is used instead (logins reset on restart, and
+    an error is logged); the fixed string remains only for local development.
+    Returns (secret_bytes, source) where source is one of
+    'SESSION_SECRET', 'TRIGGER_SECRET', 'random', 'dev-default'."""
+    import secrets as _secrets
+    env = os.environ if env is None else env
+    explicit = (env.get("SESSION_SECRET", "") or "").strip()
+    if explicit:
+        return explicit.encode(), "SESSION_SECRET"
+    trigger = (env.get("TRIGGER_SECRET", "") or "").strip()
+    if trigger:
+        return trigger.encode(), "TRIGGER_SECRET"
+    if (env.get("RENDER", "") or "").strip():
+        return _secrets.token_hex(32).encode(), "random"
+    return b"treekey-fallback-dev-secret", "dev-default"
+
+
+_SESSION_SECRET, _SESSION_SECRET_SOURCE = _resolve_session_secret()
+if _SESSION_SECRET_SOURCE == "random":
+    logger.error("[Auth] Neither SESSION_SECRET nor TRIGGER_SECRET is set on Render -- using a random per-process secret; all logins reset on every restart. Set SESSION_SECRET.")
 if not os.getenv("SESSION_SECRET", "").strip():
     logger.warning("[Auth] SESSION_SECRET not set — falling back to TRIGGER_SECRET (or a dev default) to sign session cookies. Set a dedicated SESSION_SECRET in Render for defense-in-depth.")
 
@@ -785,13 +810,7 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
     # into classify_leads_by_radius below instead of it opening (and this
     # function then closing) its own separate connection. See the matching
     # note on that function in database.py.
-    _pin_rows = []
-    radius_split = database.classify_leads_by_radius(wide_pool_addresses, target_lat, target_lng, radius, conn=conn, pins_out=_pin_rows)
-    _pins = {}
-    for _oc, _la, _lo, _inr in _pin_rows:
-        _p = _pins.setdefault(_oc, {"outcode": _oc, "lat": round(float(_la), 3), "lng": round(float(_lo), 3), "count": 0, "in_radius": bool(_inr)})
-        _p["count"] += 1
-    area_pins = sorted(_pins.values(), key=lambda p: -p["count"])[:80]
+    radius_split = database.classify_leads_by_radius(wide_pool_addresses, target_lat, target_lng, radius, conn=conn)
 
     # Sep 8 2026, Nick's ask: the radar's "Intercepted Notices" panel should
     # follow wherever the radar is currently pointed, not always show the
@@ -862,8 +881,7 @@ def api_check_postcode(request: Request, postcode: Optional[str] = None, lat: Op
         "est_max_val": f"{max_val:,}",
         "capacity_status": capacity_status,
         "council_source_issue": council_source_issue,
-        "area_notices": area_notices,
-        "pins": area_pins
+        "area_notices": area_notices
     }
 
 
@@ -991,13 +1009,15 @@ def verify_admin_or_secret(request: Request, secret: Optional[str] = None):
 @app.get("/favicon.ico", include_in_schema=False)
 def _favicon_ico():
     """Browsers ask for /favicon.ico by default; serve the brand file."""
-    return RedirectResponse(brand.v("/static/favicon.ico"), status_code=307)
+    return FileResponse(os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "favicon.ico"),
+                        media_type="image/x-icon", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/apple-touch-icon.png", include_in_schema=False)
 @app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
 def _apple_touch_icon():
-    return RedirectResponse(brand.v(brand.ICON_APPLE_TOUCH), status_code=307)
+    return FileResponse(os.path.join(os.path.dirname(os.path.abspath(__file__)), brand.ICON_APPLE_TOUCH.lstrip("/")),
+                        media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/sw.js")
@@ -1408,7 +1428,7 @@ def _nav_auth_panel_html(request: Optional[Request]) -> str:
 
 
 def _shared_nav_html(request: Optional[Request] = None) -> str:
-    """Sep 9 2026, Nick's ask: Marketplace, Storm Radar and Packages/Pricing
+    """Sep 9 2026, Nick's ask: Marketplace, Storm Watch and Packages/Pricing
     still looked like an entirely different, older (light-themed, no nav)
     site next to the homepage's current dark redesign -- he wants them
     brought in line before layering more content changes on top. Pulled the
@@ -1423,7 +1443,7 @@ def _shared_nav_html(request: Optional[Request] = None) -> str:
 
     Sep 16 2026, Nick's ask ("make the site fuller, more inline with other
     websites, anything we're missing"): the desktop nav links (RADAR /
-    MARKETPLACE / STORM RADAR / PACKAGES / FAQ) were `hidden lg:flex` --
+    MARKETPLACE / STORM WATCH / PACKAGES / FAQ) were `hidden lg:flex` --
     on any screen under ~1024px wide (i.e. every phone) they simply
     weren't there, and the footer doesn't carry Marketplace or Pricing
     either, so a mobile visitor had no way at all to reach two of the
@@ -1452,9 +1472,9 @@ def _shared_nav_html(request: Optional[Request] = None) -> str:
                 </a>
                 <div class="tk-nav-right">
                     <div class="tk-nav-links">
-                        <a href="/#radar" class="tk-l-radar">RADAR</a>
+                        <a href="/#radar" class="tk-l-radar">MAP</a>
                         <a href="/marketplace" class="tk-l-market">MARKETPLACE</a>
-                        <a href="/storm-radar" class="tk-l-storm">STORM RADAR</a>
+                        <a href="/storm-radar" class="tk-l-storm">STORM WATCH</a>
                         <a href="/pricing" class="tk-l-pack">PACKAGES</a>
                         <a href="/faq" class="tk-l-faq">FAQ</a>
                     </div>
@@ -1466,9 +1486,9 @@ def _shared_nav_html(request: Optional[Request] = None) -> str:
             </div>
             <div id="tk-mnav-panel" class="tk-mnav-panel">
                 <div class="tk-mpanel">
-                    <a href="/#radar" class="tk-l-radar">RADAR</a>
+                    <a href="/#radar" class="tk-l-radar">MAP</a>
                     <a href="/marketplace" class="tk-l-market">MARKETPLACE</a>
-                    <a href="/storm-radar" class="tk-l-storm">STORM RADAR</a>
+                    <a href="/storm-radar" class="tk-l-storm">STORM WATCH</a>
                     <a href="/pricing" class="tk-l-pack">PACKAGES</a>
                     <a href="/faq" class="tk-l-faq">FAQ</a>{_nav_auth_panel_html(request)}
                 </div>
@@ -1543,8 +1563,8 @@ def _v2_header_html(request: Optional[Request] = None) -> str:
 
 def _v2_footer_html() -> str:
     """New site footer. The wording and links are the existing footer's
-    (unchanged); Storm Radar and Chip-drop are added because the new header no
-    longer lists Storm Radar."""
+    (unchanged); Storm Watch and Chip-drop are added because the new header no
+    longer lists Storm Watch."""
     return """
     <footer class="tk-footer">
         <div class="tk-footer-top">
@@ -1553,7 +1573,7 @@ def _v2_footer_html() -> str:
                 <a href="mailto:support@treekey.co.uk">Help</a>
                 <a href="/marketplace">Marketplace</a>
                 <a href="/pricing">Packages</a>
-                <a href="/storm-radar">Storm Radar</a>
+                <a href="/storm-radar">Storm Watch</a>
                 <a href="/chip-drop">Chip-drop</a>
                 <a href="/faq">FAQ</a>
                 <a href="/suggestions">Suggestions</a>
@@ -2051,7 +2071,7 @@ def public_homepage(request: Request):
     <!-- Sep 24 2026, presentation pass: this homepage nav is a separate,
          hand-maintained copy that predates (or was never migrated onto)
          _shared_nav_html() below -- the Sep 16 2026 fix for "RADAR/
-         MARKETPLACE/STORM RADAR/PACKAGES/FAQ are hidden lg:flex, i.e.
+         MARKETPLACE/STORM WATCH/PACKAGES/FAQ are hidden lg:flex, i.e.
          invisible on every phone, with no mobile alternative" only ever
          reached the SHARED function that other pages call; this page's own
          copy of the same hidden-lg:flex links was never given the matching
@@ -2077,7 +2097,7 @@ def public_homepage(request: Request):
                 </a>
                 <div class="flex items-center gap-3 md:gap-6 font-mono text-sm tracking-wide">
                     <!-- Sep 5 2026: Nick's feedback -- tabs were too small/thin and
-                         only Storm Radar had any colour, making the others look
+                         only Storm Watch had any colour, making the others look
                          inactive/unimportant by comparison. Bumped every tab to
                          font-bold and gave each its own distinct colour so the
                          whole bar reads as a set of equally live destinations. -->
@@ -2090,9 +2110,9 @@ def public_homepage(request: Request):
                          Access grid below; removed from here, kept only the
                          actual public/marketing destinations. -->
                     <div class="hidden lg:flex items-center gap-6 text-slate-300">
-                        <a href="/#radar" class="hover:brightness-125 transition-all text-emerald-400 font-bold">RADAR</a>
+                        <a href="/#radar" class="hover:brightness-125 transition-all text-emerald-400 font-bold">MAP</a>
                         <a href="/marketplace" class="hover:brightness-125 transition-all text-sky-400 font-bold">MARKETPLACE</a>
-                        <a href="/storm-radar" class="hover:brightness-125 transition-all text-amber-400 font-bold">STORM RADAR</a>
+                        <a href="/storm-radar" class="hover:brightness-125 transition-all text-amber-400 font-bold">STORM WATCH</a>
                         <a href="/pricing" class="hover:brightness-125 transition-all text-rose-400 font-bold">PACKAGES</a>
                         <a href="/faq" class="hover:brightness-125 transition-all text-violet-400 font-bold">FAQ</a>
                     </div>
@@ -2132,9 +2152,9 @@ def public_homepage(request: Request):
             </div>
             <div id="tk-mnav-panel" class="tk-mnav-panel" style="border-top:1px solid #052e1f; padding:14px 0;">
                 <div style="display:flex; flex-direction:column; gap:14px; font-family:monospace; font-size:14px; font-weight:bold;">
-                    <a href="/#radar" style="color:#34d399; text-decoration:none;">RADAR</a>
+                    <a href="/#radar" style="color:#34d399; text-decoration:none;">MAP</a>
                     <a href="/marketplace" style="color:#38bdf8; text-decoration:none;">MARKETPLACE</a>
-                    <a href="/storm-radar" style="color:#fbbf24; text-decoration:none;">STORM RADAR</a>
+                    <a href="/storm-radar" style="color:#fbbf24; text-decoration:none;">STORM WATCH</a>
                     <a href="/pricing" style="color:#fb7185; text-decoration:none;">PACKAGES</a>
                     <a href="/faq" style="color:#a78bfa; text-decoration:none;">FAQ</a>{_nav_auth_panel_html(request)}
                 </div>
@@ -2416,7 +2436,7 @@ def public_homepage(request: Request):
             <div class="text-center mb-12">
                 <h2 class="text-3xl font-extrabold text-white font-mono tracking-tight uppercase flex items-center justify-center gap-3">
                     <span class="relative flex h-3 w-3"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span></span>
-                    Live Territory Radar
+                    Live Territory Map
                 </h2>
                 <p class="mt-4 text-lg text-slate-400 max-w-2xl mx-auto">Type your postcode or region below — the map, radius and live counts react as you go, no button to press.</p>
             </div>
@@ -2633,16 +2653,16 @@ def public_homepage(request: Request):
                     </div>
                 </div>
 
-                <!-- 3. Storm Radar -->
+                <!-- 3. Storm Watch -->
                 <div class="flex flex-col md:flex-row items-center gap-8 md:gap-12">
                     <div class="w-full md:w-1/2 aspect-video rounded-2xl overflow-hidden shrink-0">
                         <img src="/static/images/tool-storm-radar.jpg" alt="Forestry England stormy weather warning sign" class="w-full h-full object-cover" loading="lazy">
                     </div>
                     <div class="w-full md:w-1/2">
                         <div class="text-[11px] font-mono uppercase tracking-widest text-amber-400 font-bold mb-2">Emergency Alerts</div>
-                        <h3 class="text-2xl font-bold text-white mb-3">Storm Radar</h3>
-                        <p class="text-slate-400 leading-relaxed mb-5">A storm doesn't file a planning application — it just drops a tree on someone's fence at 2am, and whoever calls first gets the job. Storm Radar watches Met Office high-wind warnings (45mph+ gusts) and flags exactly where and when to expect the callouts, so you're first on the phone, not the fifth.</p>
-                        <a href="/storm-radar" class="inline-block text-xs font-mono uppercase tracking-wider text-amber-400 hover:brightness-125 border border-amber-500/30 hover:border-amber-400/60 rounded-full px-5 py-2 transition-all">View Storm Radar →</a>
+                        <h3 class="text-2xl font-bold text-white mb-3">Storm Watch</h3>
+                        <p class="text-slate-400 leading-relaxed mb-5">A storm doesn't file a planning application — it just drops a tree on someone's fence at 2am, and whoever calls first gets the job. Storm Watch watches Met Office high-wind warnings (45mph+ gusts) and flags exactly where and when to expect the callouts, so you're first on the phone, not the fifth.</p>
+                        <a href="/storm-radar" class="inline-block text-xs font-mono uppercase tracking-wider text-amber-400 hover:brightness-125 border border-amber-500/30 hover:border-amber-400/60 rounded-full px-5 py-2 transition-all">View Storm Watch →</a>
                     </div>
                 </div>
 
@@ -2675,7 +2695,7 @@ def public_homepage(request: Request):
                     <div class="w-full md:w-1/2">
                         <div class="text-[11px] font-mono uppercase tracking-widest text-emerald-400 font-bold mb-2">Mobile Access</div>
                         <h3 class="text-2xl font-bold text-white mb-3">The TreeKey App</h3>
-                        <p class="text-slate-400 leading-relaxed mb-5">No app store, no download, no faff — install TreeKey straight to your home screen and it opens full-screen like any other app. Your leads, Ledger, and Storm Radar alerts, one tap away, chainsaw still in your other hand.</p>
+                        <p class="text-slate-400 leading-relaxed mb-5">No app store, no download, no faff — install TreeKey straight to your home screen and it opens full-screen like any other app. Your leads, Ledger, and Storm Watch alerts, one tap away, chainsaw still in your other hand.</p>
                         <a href="/login" class="inline-block text-xs font-mono uppercase tracking-wider text-emerald-400 hover:brightness-125 border border-emerald-500/30 hover:border-emerald-400/60 rounded-full px-5 py-2 transition-all">Get the App →</a>
                     </div>
                 </div>
@@ -2954,7 +2974,7 @@ def public_homepage(request: Request):
                         status.innerHTML = `
                             <div class="flex items-center gap-2 text-emerald-400 mb-1 sm:justify-end">
                                 <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse sm:hidden"></span>
-                                Radar Locked: ${{data.postcode}}
+                                Area Locked: ${{data.postcode}}
                                 <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse hidden sm:inline-block"></span>
                             </div>
                         `;
@@ -7996,13 +8016,13 @@ def ledger_dashboard(request: Request):
                 <h1 style="margin:0; font-size:28px; color:#34d399;">TreeKey Ledger</h1>
                 <p style="margin:4px 0 0 0; color:#94a3b8; font-size:14px;">Verticalized Arborist Financial Engine • Van-Day Costing & CIS Tax Tracker</p>
             </div>
-            <a href="/" style="background:#0f172a; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold;">← Live Radar Map</a>
+            <a href="/" style="background:#0f172a; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold;">← Live Map</a>
         </div>
 
         <!-- 1. £90,000 UK VAT Threshold Early-Warning Radar -->
         <div class="card" style="border-left: 4px solid {vat_color};">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                <h3 style="margin:0; font-size:18px; color:#e2e8f0;">HMRC £90,000 Rolling VAT Radar</h3>
+                <h3 style="margin:0; font-size:18px; color:#e2e8f0;">HMRC £90,000 Rolling VAT Tracker</h3>
                 <span style="font-size:12px; font-weight:bold; color:{vat_color};">{vat_status}</span>
             </div>
             <p style="color:#94a3b8; font-size:13px; margin:8px 0 14px 0;">Tracks your rolling 12-month domestic turnover to prevent accidental VAT penalties or losing sole-trader price advantage.</p>
@@ -9430,7 +9450,7 @@ def free_dashboard(request: Request):
         {"href": "/marketplace", "title": "Lead Marketplace", "hint": "Buy other unallocated leads outright"},
         {"href": "/ledger", "title": "TreeKey Ledger", "hint": "Van-day costing & £90k VAT gauge"},
         {"href": "/chip-drop", "title": "Chip-Drop Network", "hint": "Skip £60-£120 tipping fees, free"},
-        {"href": "/storm-radar", "title": "Storm Radar", "hint": "High-wind warnings, be first to call"},
+        {"href": "/storm-radar", "title": "Storm Watch", "hint": "High-wind warnings, be first to call"},
         {"href": "/suggestions", "title": "Suggest a Tool", "hint": "Request features from the founders"},
     ]
 
@@ -9771,7 +9791,7 @@ def contractor_dashboard(request: Request):
                 <div style="font-size:11px; color:#94a3b8;">Upgrade or Adjust Coverage</div>
             </a>
             <a href="/storm-radar" class="quick-card" style="border-top:2px solid #f59e0b;">
-                <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Storm Radar</div>
+                <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Storm Watch</div>
                 <div style="font-size:11px; color:#94a3b8;">High-Wind Warnings, Be First To Call</div>
             </a>
             <a href="/suggestions" class="quick-card">
@@ -10974,12 +10994,12 @@ async def handle_submit_drop_spot(request: Request):
 
 
 
-# ── 6. Emergency Storm Weather Radar & Rate Multiplier ────────────────────────
+# ── 6. Emergency Storm Watch & Rate Multiplier ────────────────────────
 
 @app.get("/storm-radar", response_class=HTMLResponse)
 def storm_radar_view(request: Request):
     """
-    Emergency Storm Weather Radar:
+    Emergency Storm Watch:
     Monitors Met Office high-wind gale events (45mph+ gusts).
     Alerts contractors only in targeted impacted sectors with instant 1.5x-2.0x emergency quote sheets.
     """
@@ -11050,7 +11070,7 @@ def storm_radar_view(request: Request):
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Storm Weather Radar & Emergency Dispatch | TreeKey</title>
+        <title>Storm Watch & Emergency Dispatch | TreeKey</title>
         <link rel="icon" href="/static/icon-192.png">
         <link href="/static/tailwind.css" rel="stylesheet">
     </head>
@@ -11059,7 +11079,7 @@ def storm_radar_view(request: Request):
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
         <div class="flex justify-between items-center mb-5 flex-wrap gap-2.5">
             <div>
-                <h1 class="m-0 text-[28px] font-extrabold text-white">Emergency Storm Weather Radar</h1>
+                <h1 class="m-0 text-[28px] font-extrabold text-white">Emergency Storm Watch</h1>
                 <p class="mt-1 mb-0 text-slate-400 text-sm">Severe gale & wind triggers (45mph+). Targeted emergency mobilisation without notification spam.</p>
             </div>
             <a href="/dashboard" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-4 py-2 rounded-lg no-underline text-[13px] font-bold transition-colors">← Contractor Dashboard</a>
@@ -12859,7 +12879,9 @@ def _check_for_silent_source_failures():
                 description=(
                     f"'{r['council_source']}' historically produces roughly "
                     f"{r['baseline_daily_rate']} leads/day but has produced "
-                    f"exactly 0 in the last {r['recent_days']} days. No error was "
+                    f"exactly 0 for the last {r.get('quiet_days', r['recent_days'])} days "
+                    f"(it would need a quiet spell of {r.get('quiet_days_needed') or r['recent_days']}+ days "
+                    f"before this alert fires -- sources that are only quiet by chance are no longer flagged). No error was "
                     f"raised anywhere -- this is the same failure shape the Leeds "
                     f"ArcGIS bug had (wrong field names, zero real leads, zero "
                     f"exceptions) before it was found and fixed Sep 3 2026."

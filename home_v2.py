@@ -150,7 +150,7 @@ def _footer_html() -> str:
         '<p class="footer-note">Planning information comes from public UK council planning registers.<br>© 2026 Tree Key. All rights reserved.<br>Contact: support@treekey.co.uk</p>'
         '<img class="legacy-tk" src="/static/images/legacy-tk-mark.png" alt="TK" width="34" height="26"></div></div>'
         '<nav aria-label="Footer"><a href="#how">How it works</a><a href="/marketplace">Marketplace</a><a href="/pricing">Packages</a>'
-        '<a href="/storm-radar">Storm Radar</a><a href="/chip-drop">Chip-drop</a><a href="/faq">FAQ</a>'
+        '<a href="/storm-radar">Storm Watch</a><a href="/chip-drop">Chip-drop</a><a href="/faq">FAQ</a>'
         '<a href="mailto:support@treekey.co.uk">Help</a><a href="/suggestions">Suggestions</a><a href="/privacy-policy">Privacy</a>'
         '<a href="/terms-of-service">Terms</a><a href="/login">Login</a></nav></footer>'
     )
@@ -280,8 +280,9 @@ _SCRIPT = r"""
     var a = mk('a', 'tk-pop-link', 'View opportunity →'); a.href = '/marketplace/lead/' + encodeURIComponent(props.id); box.appendChild(a);
     return box;
   }
+  var leadsData = fetch('/api/map-leads').then(function (r) { return r.json(); });
   function addLeadLayers() {
-    fetch('/api/map-leads').then(function (r) { return r.json(); }).then(function (d) {
+    leadsData.then(function (d) {
       var feats = (d.leads || []).map(function (l) { return { type: 'Feature', properties: { id: l[0], cat: l[3], oc: l[4] }, geometry: { type: 'Point', coordinates: [l[2], l[1]] } }; });
       map.addImage('tk-pin', pinImage(), { pixelRatio: 2 });
       map.addSource('leads', { type: 'geojson', data: { type: 'FeatureCollection', features: feats }, cluster: true, clusterRadius: 48, clusterMaxZoom: 13 });

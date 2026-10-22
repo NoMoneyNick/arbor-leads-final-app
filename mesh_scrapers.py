@@ -53,6 +53,8 @@ def _parse_idox_date(raw: Optional[str]) -> Optional[str]:
     if not raw or not isinstance(raw, str):
         return None
     cleaned = raw.strip()
+    # Idox results pages write dates as "Fri 16 Oct 2026" -- drop a leading weekday.
+    cleaned = re.sub(r"^(mon|tue|wed|thu|fri|sat|sun)[a-z]*,?\s+(?=\d)", "", cleaned, flags=re.IGNORECASE)
     for fmt in _IDOX_DATE_FORMATS:
         try:
             return datetime.datetime.strptime(cleaned, fmt).date().isoformat()
@@ -498,7 +500,7 @@ class IdoxScraper:
     _structure_alert_throttle: dict = {}
     _structure_alert_throttle_hours = 24.0
 
-    def _alert_possible_structure_change(self, search_term: str, page_text_snippet: str = ""):
+    def _alert_possible_structure_change(self, search_term: str, page_text_snippet: str = "", cause: str = "unknown"):
         now = time.time()
         last = IdoxScraper._structure_alert_throttle.get(self.base_url, 0)
         if now - last < IdoxScraper._structure_alert_throttle_hours * 3600:
@@ -512,12 +514,15 @@ class IdoxScraper:
         # its own diagnostic -- the fix for a future recurrence of this exact
         # council can usually be read straight off the snippet instead of
         # requiring a manual portal visit first.
-        snippet = (page_text_snippet or "")[:400]
+        snippet = (page_text_snippet or "")[:800]
         try:
             import notifications
             notifications.send_system_incident_alert(
                 category="SCRAPER PAGE STRUCTURE",
-                title=f"{self.base_url} may have changed its Idox page layout",
+                title={
+                    "blocked": f"{self.base_url} appears to be blocking the scraper (bot protection)",
+                    "error": f"{self.base_url} keeps returning an error page to the scraper",
+                }.get(cause, f"{self.base_url} may have changed its Idox page layout"),
                 description=(
                     f"A search for '{search_term}' on {self.base_url} returned a page "
                     f"with no recognisable results list and no 'no results' message "
@@ -642,7 +647,214 @@ class IdoxScraper:
             logger.debug(f"[MESH] Could not fetch applicant/agent detail for keyVal={key_val} on {self.base_url}: {e}")
         return out
 
-    def search_tree_applications(self, days_back: int = 30, search_term: str = "tree", _retry_depth: int = 0) -> List[Dict]:
+    # ------------------------------------------------------------------
+    # Oct 22 2026 helpers (see search_tree_applications for the why)
+    # ------------------------------------------------------------------
+    MAX_RESULT_PAGES = 10          # hard ceiling on pages walked per search
+    RESULTS_PER_PAGE = "100"       # largest option Idox offers
+
+    # Page-text signals, checked in this order when a results page has no
+    # recognisable list. Add a phrase here when a new variant turns up -- no
+    # other code needs to change.
+    BLOCKED_PHRASES = ("access denied", "captcha", "verify you are human", "unusual traffic",
+                       "request blocked", "temporarily blocked", "are you a robot", "attention required",
+                       "checking your browser", "automated access", "pardon our interruption")
+    ERROR_PHRASES = ("server problem prevented", "an error occurred", "session has expired",
+                     "session expired", "something went wrong", "service unavailable",
+                     "please try again later", "temporarily unavailable", "http status 5")
+    NO_RESULTS_PHRASES = ("no results", "0 results", "no application", "your search did not match",
+                          "did not return any results", "no records", "no matching")
+    TOO_MANY_PHRASES = ("too many results", "narrow your search", "refine your search",
+                        "please refine", "more specific search")
+
+    @classmethod
+    def classify_results_page(cls, page_text: str) -> str:
+        """Names why a page with no results list has none: 'blocked', 'error',
+        'too_many', 'no_results' or 'unknown'. Blocked/error are checked first
+        because an error page can contain the words 'no results' too."""
+        t = (page_text or "").lower()
+        if any(x in t for x in cls.BLOCKED_PHRASES):
+            return "blocked"
+        if any(x in t for x in cls.ERROR_PHRASES):
+            return "error"
+        if any(x in t for x in cls.TOO_MANY_PHRASES):
+            return "too_many"
+        if any(x in t for x in cls.NO_RESULTS_PHRASES):
+            return "no_results"
+        return "unknown"
+
+    def _build_search_request(self, form_page_html, page_url, search_term, start_date, end_date, csrf_token):
+        """Returns (post_url, payload) built from the council's own advanced-search
+        form: every field the form declares is sent with its default value, then
+        the search term, the date range and the Application search type are set.
+        Falls back to the previous fixed payload when no form is found."""
+        fallback_url = f"{self.base_url}/advancedSearchResults.do?action=firstPage"
+        fallback = {
+            "searchCriteria.description": search_term,
+            "date(applicationReceivedStart)": start_date.strftime("%d/%m/%Y"),
+            "date(applicationReceivedEnd)": end_date.strftime("%d/%m/%Y"),
+            "searchType": "Application",
+            "caseAddressType": "Application",
+        }
+        if csrf_token:
+            fallback["_csrf"] = csrf_token
+        try:
+            soup = BeautifulSoup(form_page_html, 'html.parser')
+            form = None
+            for f in soup.find_all('form'):
+                if f.find(attrs={"name": "searchCriteria.description"}):
+                    form = f
+                    break
+            if form is None:
+                return fallback_url, fallback
+            payload = {}
+            for el in form.find_all(['input', 'select', 'textarea']):
+                name = el.get('name')
+                if not name:
+                    continue
+                typ = (el.get('type') or '').lower()
+                if typ in ('submit', 'button', 'image', 'reset', 'file'):
+                    continue
+                if typ in ('checkbox', 'radio') and not el.has_attr('checked'):
+                    continue
+                if el.name == 'select':
+                    opt = el.find('option', selected=True) or el.find('option')
+                    payload[name] = (opt.get('value') if opt is not None and opt.has_attr('value') else (opt.get_text(strip=True) if opt is not None else ""))
+                elif el.name == 'textarea':
+                    payload[name] = el.get_text()
+                else:
+                    payload[name] = el.get('value', '')
+            payload["searchCriteria.description"] = search_term
+            payload.setdefault("searchType", "Application")
+            payload.setdefault("caseAddressType", "Application")
+            if csrf_token:
+                payload["_csrf"] = csrf_token
+            # Date range: use whichever "received" pair the form has, else the
+            # "validated" pair, else none (the form then has no date filter).
+            start_s, end_s = start_date.strftime("%d/%m/%Y"), end_date.strftime("%d/%m/%Y")
+            for kind in ("applicationReceived", "applicationValidated"):
+                if f"date({kind}Start)" in payload:
+                    payload[f"date({kind}Start)"] = start_s
+                    payload[f"date({kind}End)"] = end_s
+                    break
+            action = form.get('action') or ""
+            post_url = urljoin(page_url, action) if action else fallback_url
+            return post_url, payload
+        except Exception as e:
+            logger.debug(f"[MESH] Could not read the search form on {self.base_url}, using fixed payload: {e}")
+            return fallback_url, fallback
+
+    @staticmethod
+    def _extract_result_fields(li, a_tag):
+        """(reference, description, received_iso_or_None) for one result <li>.
+        Real Idox puts the description in the link and the reference in
+        <p class="metaInfo">'Ref. No: X | Received: ...'. The older
+        'REF | description' link text is still accepted. A reference is never
+        invented from the clock: the fallback is built from the application's
+        own keyVal so the same application always gets the same reference."""
+        title_text = a_tag.get_text(" ", strip=True)
+        ref = desc = None
+        received = None
+        meta = li.find('p', class_='metaInfo')
+        if meta is not None:
+            meta_text = meta.get_text(" ", strip=True)
+            m = re.search(r'Ref\.?\s*No\.?:?\s*(.+?)(?:\s*\||$)', meta_text, re.I)
+            if m and m.group(1).strip():
+                ref = m.group(1).strip()
+            m = re.search(r'Received:?\s*(.+?)(?:\s*\||$)', meta_text, re.I)
+            if m:
+                received = _parse_idox_date(m.group(1).strip())
+        parts = title_text.split('|', 1)
+        if len(parts) == 2:
+            ref = ref or parts[0].strip()
+            desc = parts[1].strip()
+        else:
+            desc = title_text
+        if not ref:
+            km = re.search(r'keyVal=([^&]+)', a_tag.get('href', '') or '')
+            ref = f"MESH-{km.group(1)}" if km else f"MESH-{abs(hash(desc)) % 10**10}"
+        return ref, desc, received
+
+    def _iter_result_items(self, first_response, first_list, first_soup):
+        """Yields every result <li> across all pages (results-per-page is raised
+        to the maximum, then 'Next' is followed up to MAX_RESULT_PAGES)."""
+        items = list(first_list.find_all('li', class_='searchresult'))
+        for li in items:
+            yield li
+        soup = first_soup
+        page_url = first_response.url
+        seen_urls = {page_url}
+        # Raise the page size once, using the council's own paging form.
+        try:
+            paging_form = None
+            for f in soup.find_all('form'):
+                if f.find(attrs={"name": "searchCriteria.resultsPerPage"}):
+                    paging_form = f
+                    break
+            if paging_form is not None and len(items) >= 5:
+                payload = {}
+                for el in paging_form.find_all(['input', 'select']):
+                    n = el.get('name')
+                    if not n or (el.get('type') or '').lower() in ('submit', 'button'):
+                        continue
+                    if el.name == 'select':
+                        opt = el.find('option', selected=True) or el.find('option')
+                        payload[n] = opt.get('value', '') if opt is not None else ''
+                    else:
+                        payload[n] = el.get('value', '')
+                payload["searchCriteria.resultsPerPage"] = self.RESULTS_PER_PAGE
+                payload["searchCriteria.page"] = "1"
+                payload["action"] = "page"
+                res = net_utils.smart_post(urljoin(page_url, paging_form.get('action') or ''), session=self.session, data=payload, timeout=15)
+                new_soup = BeautifulSoup(res.text, 'html.parser')
+                new_list = self._find_results_list(new_soup)
+                if new_list is not None and len(new_list.find_all('li', class_='searchresult')) >= len(items):
+                    # Page size raised: the first page is re-read in full, so
+                    # yield only rows not already yielded (dedupe by link).
+                    already = {l.find('a').get('href') for l in items if l.find('a')}
+                    for li in new_list.find_all('li', class_='searchresult'):
+                        a = li.find('a')
+                        if a and a.get('href') not in already:
+                            yield li
+                    soup, page_url = new_soup, res.url
+        except Exception as e:
+            logger.debug(f"[MESH] Could not raise results-per-page on {self.base_url}: {e}")
+        # Follow "Next" links.
+        for _ in range(self.MAX_RESULT_PAGES - 1):
+            nxt = None
+            for a in soup.find_all('a', href=True):
+                if 'searchCriteria.page=' in a['href'] and a.get_text(strip=True).lower().startswith('next'):
+                    nxt = a['href']
+                    break
+            if not nxt:
+                return
+            next_url = urljoin(page_url, nxt)
+            if next_url in seen_urls:
+                return
+            seen_urls.add(next_url)
+            try:
+                time.sleep(0.5)
+                res = net_utils.smart_get(next_url, session=self.session, timeout=15)
+                soup = BeautifulSoup(res.text, 'html.parser')
+                page_url = res.url
+                lst = self._find_results_list(soup)
+                if lst is None:
+                    return
+                for li in lst.find_all('li', class_='searchresult'):
+                    yield li
+            except Exception as e:
+                logger.debug(f"[MESH] Paging stopped on {self.base_url}: {e}")
+                return
+
+    @staticmethod
+    def _find_results_list(soup):
+        lst = soup.find('ul', id='searchresults')
+        if lst is None:
+            first = soup.find('li', class_='searchresult')
+            lst = first.parent if first is not None else None
+        return lst
+
+    def search_tree_applications(self, days_back: int = 30, search_term: str = "tree", _retry_depth: int = 0, _fresh_retry: bool = False) -> List[Dict]:
         # Sep 2 2026: name kept as-is (only internal caller is scrape_mesh_council
         # below, plus test_scrapers.py references it by this name) but the filter
         # inside is no longer tree-only -- it now tags each lead with whichever
@@ -695,25 +907,24 @@ class IdoxScraper:
             # server rather than erroring, unlike a required field being
             # absent -- so this isn't being treated as the same class of bug
             # as the missing caseAddressType field above.
-            payload = {
-                "searchCriteria.description": search_term,
-                "date(applicationReceivedStart)": start_date.strftime("%d/%m/%Y"),
-                "date(applicationReceivedEnd)": end_date.strftime("%d/%m/%Y"),
-                "searchType": "Application",
-                "caseAddressType": "Application",
-            }
-            if csrf_token:
-                payload["_csrf"] = csrf_token
+            # Oct 22 2026 (daily digest: Leeds, Brighton, Cheshire East, Guildford,
+            # Dartford flagged 7/7 days): the payload used to be hard-coded, so any
+            # field a council's own form names differently (Leeds has no
+            # "applicationReceived" date pair, only "applicationValidated") or any
+            # new hidden field Idox adds was silently wrong. It is now BUILT FROM
+            # THE COUNCIL'S OWN FORM: every field the form declares is posted back
+            # with its default value, then only the few we care about are
+            # overridden. If the form can't be found the old fixed payload is used.
+            post_url, payload = self._build_search_request(res.text, adv_search_url, search_term, start_date, end_date, csrf_token)
 
             # Step 3: Execute Search
-            search_url = f"{self.base_url}/advancedSearchResults.do?action=firstPage"
-            res_post = net_utils.smart_post(search_url, session=self.session, data=payload, timeout=15)
+            res_post = net_utils.smart_post(post_url, session=self.session, data=payload, timeout=15)
 
             # Step 4: Parse Results
             soup = BeautifulSoup(res_post.text, 'html.parser')
 
             # Idox results are typically in a <ul id="searchresults">
-            results_list = soup.find('ul', id='searchresults')
+            results_list = self._find_results_list(soup)
             if not results_list:
                 # Some councils redirect directly to a single application if only 1 match is found
                 if "applicationDetails.do" in res_post.url:
@@ -750,12 +961,7 @@ class IdoxScraper:
                 # either direction, but it's strictly better than no signal
                 # at all.
                 page_text = soup.get_text(" ", strip=True).lower()
-                looks_like_genuine_no_results = any(
-                    phrase in page_text for phrase in (
-                        "no results", "0 results", "no application", "your search did not match",
-                        "did not return any results", "no records"
-                    )
-                )
+                looks_like_genuine_no_results = self.classify_results_page(page_text) == "no_results"
                 # Aug 30 2026: Idox also returns a valid, non-error page when a
                 # search is too broad -- "too many results, please narrow your
                 # search" -- distinct from both "genuine zero results" and a
@@ -795,31 +1001,31 @@ class IdoxScraper:
                             f"results over {days_back} days -- auto-retrying with a {narrower}-day "
                             f"window instead of dropping this council's leads for today."
                         )
-                        return self.search_tree_applications(days_back=narrower, search_term=search_term, _retry_depth=1)
+                        return self.search_tree_applications(days_back=narrower, search_term=search_term, _retry_depth=1, _fresh_retry=_fresh_retry)
                     logger.info(
                         f"[{self.base_url}] Idox search for '{search_term}' matched too many "
                         f"results and was not returned -- consider a narrower search term or "
                         f"date range for this council."
                     )
                 elif not looks_like_genuine_no_results:
-                    self._alert_possible_structure_change(search_term, page_text_snippet=page_text)
+                    cause = self.classify_results_page(page_text)
+                    if cause in ("error", "blocked") and not _fresh_retry:
+                        # A session/server error page is often a one-off: retry
+                        # once with a brand-new session (new cookie + token).
+                        time.sleep(2)
+                        self.session.cookies.clear()
+                        return self.search_tree_applications(days_back=days_back, search_term=search_term,
+                                                             _retry_depth=_retry_depth, _fresh_retry=True)
+                    self._alert_possible_structure_change(search_term, page_text_snippet=page_text, cause=cause)
                 return leads
 
-            # Parse multiple results
-            for li in results_list.find_all('li', class_='searchresult'):
+            # Parse every page of results (Oct 22 2026: only page 1 -- 10 rows --
+            # was ever read, so a busy council silently lost everything after it).
+            for li in self._iter_result_items(res_post, results_list, soup):
                 a_tag = li.find('a')
                 if not a_tag:
                     continue
-                
-                title_text = a_tag.text.strip()
-                parts = title_text.split('|', 1)
-                if len(parts) == 2:
-                    ref = parts[0].strip()
-                    desc = parts[1].strip()
-                else:
-                    ref = f"MESH-{int(time.time())}"
-                    desc = title_text
-                
+                ref, desc, received = self._extract_result_fields(li, a_tag)
                 address_p = li.find('p', class_='address')
                 addr = address_p.text.strip() if address_p else "Unknown Address"
 
@@ -831,6 +1037,8 @@ class IdoxScraper:
                         "description": desc,
                         "vertical": vertical,
                     }
+                    if received:
+                        lead["registered_date"] = received
                     # One extra request per real lead to read its Applicant/Agent
                     # fields (see _fetch_applicant_and_agent) -- small delay to
                     # stay gentle on the council's server since this multiplies
@@ -839,7 +1047,10 @@ class IdoxScraper:
                     key_match = re.search(r'keyVal=([^&]+)', href)
                     if key_match:
                         time.sleep(0.4)
-                        lead.update(self._fetch_applicant_and_agent(key_match.group(1)))
+                        detail = self._fetch_applicant_and_agent(key_match.group(1))
+                        if received and detail.get("registered_date"):
+                            detail.pop("registered_date")  # keep the results-page date
+                        lead.update(detail)
                     leads.append(lead)
 
             logger.info(f"[MESH] Successfully scraped {len(leads)} tree leads from {self.base_url} (term='{search_term}')")

@@ -154,6 +154,8 @@ class _JourneyFakeCursor:
             self._exec_claim_for_submission(params)
         elif "UPDATE letter_obligations SET attempts = attempts + 1" in s:
             self._exec_mark_provider_result(s, params)
+        elif s.startswith(("SAVEPOINT ", "RELEASE SAVEPOINT ", "ROLLBACK TO SAVEPOINT ")):
+            pass  # transaction control used by registry._settle_actual_cost; the fake state needs no rollback
         else:
             raise AssertionError(f"_JourneyFakeCursor: unrecognised query, add a handler: {s!r}")
 
