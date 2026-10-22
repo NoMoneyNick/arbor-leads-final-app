@@ -100,12 +100,59 @@ async def _redirect_old_domain(request: Request, call_next):
     return await call_next(request)
 
 
+@app.get("/manifest.json", include_in_schema=False)
+async def _manifest_redirect():
+    return RedirectResponse(url="/static/manifest.json", status_code=301)
+
+
 _SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
 }
+
+_LAUNCH_META_DESCRIPTIONS = {
+    "/marketplace": "Browse live tree-work leads from UK planning applications. Buy a lead once, contact the owner first.",
+    "/quote-estimator": "Get a quick guide price for tree work in the UK with the TreeKey quote estimator.",
+    "/pricing": "TreeKey pricing: single leads, lead packs and letters for UK tree surgeons. No contracts.",
+    "/faq": "Answers to common questions about TreeKey leads, letters, payments and your account.",
+    "/login": "Log in to your TreeKey account to see your leads, letters and orders.",
+    "/free-account": "Create a free TreeKey account and get your first tree-work lead.",
+    "/privacy-policy": "How TreeKey collects, uses and protects personal data.",
+    "/terms-of-service": "The terms that apply when you use TreeKey.",
+    "/suggestions": "Suggest a feature or improvement for TreeKey and see what other tree surgeons are asking for.",
+    "/partner-offer": "A special offer for tree-care businesses joining TreeKey.",
+    "/chip-drop": "Register to receive free wood chip from local tree surgeons through TreeKey.",
+    "/storm-radar": "Storm-damage opportunities and high-wind warnings for UK tree surgeons, so you can call first.",
+    "/boost-review": "Share your TreeKey experience and help other tree surgeons find us.",
+    "/register-drop-spot": "Offer your site as a wood chip drop spot for local tree surgeons.",
+}
+
+
+def _tidy_head_for_launch(text: str, path: str) -> str:
+    """Launch polish, applied once for every HTML page: brand spelling and
+    duplicated suffix in <title>, a meta description where a page has none,
+    and a visually hidden <h1> where a page has no main heading."""
+    import re as _re
+    text = text.replace("- Tree Key</title>", "- TreeKey</title>").replace("| Tree Key</title>", "| TreeKey</title>")
+    text = text.replace("| TreeKey | TreeKey</title>", "| TreeKey</title>")
+    if 'name="description"' not in text and "name='description'" not in text:
+        desc = _LAUNCH_META_DESCRIPTIONS.get(path.rstrip("/") or "/")
+        if desc is None and "<title>" in text:
+            m = _re.search(r"<title>(.*?)</title>", text, _re.S)
+            if m and ("Page Not Found" in m.group(1)):
+                desc = "This page could not be found. Head back to TreeKey to find tree-work leads."
+        if desc:
+            text = text.replace("</title>", '</title>\n<meta name="description" content="' + html.escape(desc, quote=True) + '">', 1)
+    if "<h1" not in text and path.rstrip("/") in ("/login", "/suggestions", "/register-drop-spot"):
+        m = _re.search(r"<title>(.*?)</title>", text, _re.S)
+        label = (m.group(1).split("|")[0].split(" - ")[0].strip() if m else "TreeKey") or "TreeKey"
+        h1 = ('<h1 style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap">'
+              + label + "</h1>")
+        text = _re.sub(r"(<body[^>]*>)", lambda mm: mm.group(1) + h1, text, count=1)
+    return text
+
 
 @app.middleware("http")
 async def _security_headers_and_canonical(request: Request, call_next):
@@ -135,6 +182,7 @@ async def _security_headers_and_canonical(request: Request, call_next):
         try:
             text = body.decode("utf-8")
             if "</head>" in text:
+                text = _tidy_head_for_launch(text, request.url.path)
                 canonical_url = f"https://{_NEW_DOMAIN}{request.url.path}"
                 text = text.replace(
                     "</head>",
