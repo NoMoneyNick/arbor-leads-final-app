@@ -121,7 +121,7 @@ payments.STRIPE_WEBHOOK_SECRET = "whsec_test_dummy"
 
 def _fake_event(event_id="evt_1", session_id="cs_test_1", lead_id=None,
                  reservation_token=None, customer_email="buyer@example.com",
-                 amount_total=1900, payment_intent="pi_1"):
+                 amount_total=1900, payment_intent="pi_1", account_email=None):
     data = {
         "id": session_id,
         "customer_details": {"email": customer_email},
@@ -133,6 +133,8 @@ def _fake_event(event_id="evt_1", session_id="cs_test_1", lead_id=None,
         data["metadata"]["lead_id"] = lead_id
     if reservation_token:
         data["metadata"]["reservation_token"] = reservation_token
+    if account_email:
+        data["metadata"]["account_email"] = account_email
     return {"id": event_id, "type": "checkout.session.completed", "data": {"object": data}}
 
 
@@ -466,6 +468,46 @@ class TestSuccessfulReservationSaleUnaffected(unittest.TestCase):
         self.assertNotIn("retry", result)
         notifications.send_purchased_lead_email.assert_called_once()
         database.record_payment_reconciliation_issue.assert_not_called()
+
+
+class TestSaleIsRecordedUnderTheBuyingAccount(unittest.TestCase):
+    """Regression: the letter obligation used to be recorded under the email typed on Stripe's page. If that
+    differed from the logged-in account, the worker looked for letter settings under an address that has none
+    and the order sat in pending_approval for ever. The sale must be recorded under the ACCOUNT email."""
+
+    def setUp(self):
+        payments._PROCESSED_STRIPE_EVENT_IDS.clear()
+        database.confirm_reserved_lead_sale = MagicMock(return_value={"reference": "R1", "address": "1 Tree Rd"})
+        database.burn_lead_inventory = MagicMock(return_value={"reference": "R2", "address": "2 Tree Rd"})
+        database.update_order_fulfillment = MagicMock()
+        database.record_payment_reconciliation_issue = MagicMock()
+        notifications.send_system_incident_alert = MagicMock()
+        notifications.send_purchased_lead_email = MagicMock()
+
+    @patch("stripe.Webhook.construct_event")
+    def test_reservation_path_uses_account_email_not_stripe_email(self, mock_construct):
+        mock_construct.return_value = _fake_event(lead_id="L1", reservation_token="tok", customer_email="typed@stripe.example",
+                                                   account_email="  Account@Example.COM ")
+        payments.handle_stripe_webhook(b"payload", "sig")
+        database.confirm_reserved_lead_sale.assert_called_once_with("L1", "tok", "account@example.com")
+        # the purchase confirmation still goes to the address the buyer gave Stripe
+        self.assertEqual(notifications.send_purchased_lead_email.call_args[0][0], "typed@stripe.example")
+
+    @patch("stripe.Webhook.construct_event")
+    def test_older_checkout_without_account_email_falls_back_to_stripe_email(self, mock_construct):
+        mock_construct.return_value = _fake_event(lead_id="L2", reservation_token="tok2", customer_email="typed@stripe.example")
+        payments.handle_stripe_webhook(b"payload", "sig")
+        database.confirm_reserved_lead_sale.assert_called_once_with("L2", "tok2", "typed@stripe.example")
+
+    @patch("stripe.Webhook.construct_event")
+    def test_legacy_path_uses_account_email(self, mock_construct):
+        mock_construct.return_value = _fake_event(lead_id="L3", customer_email="typed@stripe.example", account_email="a@example.com")
+        payments.handle_stripe_webhook(b"payload", "sig")
+        database.burn_lead_inventory.assert_called_once_with("L3", "a@example.com")
+
+    def test_helper_ignores_malformed_values(self):
+        for meta in (None, {}, {"account_email": ""}, {"account_email": "not-an-email"}, {"account_email": None}):
+            self.assertEqual(payments._buyer_account_email(meta, "typed@stripe.example"), "typed@stripe.example")
 
 
 if __name__ == "__main__":

@@ -703,6 +703,15 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
     return None
 
 
+def _buyer_account_email(metadata, customer_email: str) -> str:
+    """Who the sale belongs to. The TreeKey account that bought is recorded in the checkout's metadata
+    (set server-side from the verified login, never typed by the buyer). The email collected on Stripe's own
+    page can be a different address, and letter approval, My Leads and the letter worker all look the buyer up
+    by ACCOUNT email, so the sale must be recorded under that. Falls back to Stripe's email when there is none."""
+    acct = ((metadata or {}).get("account_email") or "").strip().lower()
+    return acct if "@" in acct else customer_email
+
+
 def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
     """
     Verifies and processes an incoming Stripe webhook event.
@@ -784,6 +793,7 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
         outcode = data.get("client_reference_id") or metadata.get("outcode")
         lead_id = metadata.get("lead_id")
         reservation_token = metadata.get("reservation_token")
+        buyer_email = _buyer_account_email(metadata, customer_email)
 
         import database
         import fulfilment
@@ -806,7 +816,7 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
             # for a genuinely expired/stolen reservation. Caught separately,
             # before lead_data is ever assigned from a call that could raise.
             try:
-                lead_data = database.confirm_reserved_lead_sale(lead_id, reservation_token, customer_email)
+                lead_data = database.confirm_reserved_lead_sale(lead_id, reservation_token, buyer_email)
             except fulfilment.AllocationPersistenceError as e:
                 issue_id = database.record_payment_reconciliation_issue(
                     reason=f"allocation_persistence_failed (reservation path): {e}",
@@ -996,7 +1006,7 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
             # DOUBLE SALE RACE CONDITION alert for what is actually a
             # transient DB-write problem on a legitimate, uncontested sale.
             try:
-                lead_data = database.burn_lead_inventory(lead_id, customer_email)
+                lead_data = database.burn_lead_inventory(lead_id, buyer_email)
             except fulfilment.AllocationPersistenceError as e:
                 issue_id = database.record_payment_reconciliation_issue(
                     reason=f"allocation_persistence_failed (legacy burn path): {e}",

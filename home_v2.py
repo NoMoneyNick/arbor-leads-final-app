@@ -72,13 +72,14 @@ def _header_html(auth) -> str:
         '<button class="outline mobile-toggle" type="button" aria-expanded="false" aria-controls="main-nav">Menu</button>'
         '<nav id="main-nav" aria-label="Main navigation"><a href="#how">How it works</a><a href="/marketplace">Available leads</a>'
         '<a href="/pricing">Pricing</a><a href="#area-map">Map</a><a href="#tools">Tools</a><a href="/faq">FAQ</a></nav>'
-        '<div class="account"><button id="pwaInstallBtn" class="install-link tk-hide" type="button" onclick="tkInstallApp()">Download app</button>'
+        '<div class="account"><button id="pwaInstallBtn" class="install-link tk-hide" type="button" onclick="tkInstallApp()">Install app</button>'
         + account +
         '</div>'
-        '<div id="pwaInstallTip" class="tk-hide" role="dialog" aria-label="Download the TreeKey app">'
+        '<div id="pwaInstallTip" class="tk-hide" role="dialog" aria-label="Add TreeKey to your Home Screen">'
         '<button type="button" class="tip-close" aria-label="Close" onclick="document.getElementById(\'pwaInstallTip\').classList.add(\'tk-hide\')">×</button>'
-        '<strong>Two quick taps (Apple requires these)</strong><p>1. Tap the Share icon in Safari’s toolbar.</p>'
-        '<p>2. Tap “Add to Home Screen”. TreeKey then opens like any other app.</p></div>'
+        '<strong>Add TreeKey to your Home Screen</strong>'
+        '<p>1. Tap the Share button (a square with an arrow). On newer iPhones it is under the \u2022\u2022\u2022 button at the bottom right of Safari.</p>'
+        '<p>2. Scroll down and tap “Add to Home Screen”.</p><p>3. Tap “Add”.</p></div>'
         '</header>'
     )
 
@@ -207,30 +208,36 @@ _SCRIPT = r"""
   function scheduleNext() { var h = new Date().getHours(), active = h >= 6 && h < 23; setTimeout(function () { if (active) pollCounts(); scheduleNext(); }, active ? (8000 + Math.random() * 22000) : 300000); }
   if (todayEl) scheduleNext();
 
-  /* install app: browser prompt on Chrome/Edge/Android, how-to on iPhone */
+  /* install app: computers get a QR code for their phone, Android gets the browser's own install prompt, iPhone gets the Safari steps */
   var btn = document.getElementById('pwaInstallBtn'), tip = document.getElementById('pwaInstallTip');
-  var standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-  var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent), deferred = null;
-  var isDesktop = !/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
-  if (btn && !standalone && isDesktop) {
-    /* desktop: never install a desktop app -- point people to their phone instead */
-    btn.classList.remove('tk-hide'); btn.textContent = 'Download app';
-    window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); });
-    window.tkInstallApp = function () {
-      tip.innerHTML = '<button type="button" class="tip-close" aria-label="Close" onclick="document.getElementById(\'pwaInstallTip\').classList.add(\'tk-hide\')">\u00d7</button><strong>TreeKey is a phone app</strong><p>Scan this with your phone camera, then follow the steps to add TreeKey to your home screen.</p><img src="/static/images/app-install-qr.png" alt="QR code to open TreeKey on your phone" width="140" height="140" style="display:block;margin:8px auto 0;background:#fff;padding:6px;border-radius:8px">';
-      tip.classList.toggle('tk-hide');
-    };
-  } else if (btn && !standalone) {
-    if (isIOS) {
+  var ua = navigator.userAgent;
+  var standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  var isIOS = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var isAndroid = /android/i.test(ua), isDesktop = !isIOS && !isAndroid && !/mobile/i.test(ua), deferred = null;
+  if (btn && !standalone) {
+    window.addEventListener('appinstalled', function () { btn.classList.add('tk-hide'); tip.classList.add('tk-hide'); deferred = null; });
+    if (isDesktop) {
+      /* a computer never gets an install prompt from us: point people to their phone */
+      btn.textContent = 'Get TreeKey on your phone'; btn.style.whiteSpace = 'nowrap'; btn.classList.remove('tk-hide');
+      window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); });
+      window.tkInstallApp = function () {
+        tip.innerHTML = '<button type="button" class="tip-close" aria-label="Close" onclick="document.getElementById(\'pwaInstallTip\').classList.add(\'tk-hide\')">\u00d7</button><strong>Get TreeKey on your phone</strong><p>Scan this with your phone camera to open the install page.</p><img src="/static/images/get-app-qr.png" alt="QR code to open treekey.co.uk/get-app on your phone" width="140" height="140" style="display:block;margin:8px auto 0;background:#fff;padding:6px;border-radius:8px">';
+        tip.classList.toggle('tk-hide');
+      };
+    } else if (isIOS) {
       btn.classList.remove('tk-hide');
       var shown = false; try { shown = localStorage.getItem('tk_install_tip_shown') === '1'; } catch (e) {}
       if (!shown) setTimeout(function () { tip.classList.remove('tk-hide'); try { localStorage.setItem('tk_install_tip_shown', '1'); } catch (e) {} }, 1800);
+      window.tkInstallApp = function () { tip.classList.toggle('tk-hide'); };
+    } else {
+      /* Android and other phone browsers: the button appears only when the browser says TreeKey can be installed */
+      window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferred = e; btn.classList.remove('tk-hide'); });
+      window.tkInstallApp = function () {
+        if (!deferred) return;
+        var d = deferred; deferred = null; d.prompt();
+        d.userChoice.finally(function () { btn.classList.add('tk-hide'); });
+      };
     }
-    window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferred = e; btn.classList.remove('tk-hide'); });
-    window.tkInstallApp = function () {
-      if (isIOS) { tip.classList.toggle('tk-hide'); return; }
-      if (deferred) { deferred.prompt(); deferred.userChoice.finally(function () { deferred = null; }); }
-    };
   }
 
   /* the area map: same endpoint and behaviour as before (postcode or place search, radius, click to move) */

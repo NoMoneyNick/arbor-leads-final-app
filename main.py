@@ -100,6 +100,100 @@ async def _redirect_old_domain(request: Request, call_next):
     return await call_next(request)
 
 
+# ── /get-app: the phone page the "Get TreeKey on your phone" QR code opens ────────────────────
+
+_GET_APP_HTML = """<!doctype html>
+<html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Get TreeKey on your phone | TreeKey</title>
+<meta name="description" content="Add TreeKey to your phone's home screen.">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#06291f">
+<link rel="manifest" href="/static/manifest.json">
+<link rel="icon" href="/static/icon-192.png">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+<style>
+body{margin:0;background:#031723;color:#f4eddd;font:16px/1.6 Arial,sans-serif}
+main{max-width:460px;margin:0 auto;padding:28px 20px 48px}
+.brand{font:30px Georgia,serif;color:#f4eddd;text-decoration:none}
+h1{font:34px/1.15 Georgia,'Times New Roman',serif;font-weight:400;margin:22px 0 14px}
+.card{border:1px solid #d2ae61;border-radius:10px;background:linear-gradient(135deg,#143d29,#052319);padding:20px 20px 16px;box-shadow:0 14px 40px #0008}
+ol{padding-left:22px;margin:10px 0}li{margin:0 0 10px;color:#e3e8dc}
+b{color:#f6eed8}p{color:#d6dccf;margin:8px 0}
+.gold{display:block;width:100%;box-sizing:border-box;text-align:center;background:linear-gradient(125deg,#f1ca78,#e7b450 80%,#dba645);border:1px solid #f5ce79;border-radius:7px;color:#102119;padding:14px 18px;font:21px Georgia,serif;cursor:pointer;min-height:54px}
+.small{font-size:13px;color:#a9b8ad}
+a{color:#eec16b}
+img.qr{display:block;margin:12px auto 4px;background:#fff;padding:8px;border-radius:8px}
+[hidden]{display:none!important}
+</style>
+<script>if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('/sw.js'); }); }</script>
+</head><body><main>
+<a class="brand" href="/">TreeKey</a>
+<h1>Get TreeKey on your phone</h1>
+<div class="card">
+
+<section id="s-installed" hidden>
+<p><b>TreeKey is already installed on this device.</b></p>
+<p><a href="/dashboard">Open your dashboard</a></p>
+</section>
+
+<section id="s-ios" hidden>
+<p>Open this page in <b>Safari</b>, then:</p>
+<ol>
+<li>Tap the <b>Share</b> button (a square with an arrow pointing up). On newer iPhones it is under the <b>&bull;&bull;&bull;</b> button at the bottom right.</li>
+<li>Scroll down and tap <b>Add to Home Screen</b>.</li>
+<li>Tap <b>Add</b>.</li>
+</ol>
+<p class="small">TreeKey then opens from your home screen like any other app. Apple does not let a website start this for you.</p>
+</section>
+
+<section id="s-android" hidden>
+<button id="installBtn" class="gold" type="button" hidden>Install TreeKey</button>
+<p id="androidFallback" hidden>Open your browser menu (the three dots) and tap <b>Install app</b> or <b>Add to Home screen</b>.</p>
+<p class="small">TreeKey then opens from your home screen like any other app.</p>
+</section>
+
+<section id="s-other">
+<p>Open this page on your phone to add TreeKey to its home screen. Scan this code with your phone camera:</p>
+<img class="qr" src="/static/images/get-app-qr.png" alt="QR code to open treekey.co.uk/get-app on your phone" width="180" height="180">
+<p class="small" style="text-align:center">treekey.co.uk/get-app</p>
+</section>
+
+</div>
+<p class="small" style="margin-top:18px"><a href="/">Back to TreeKey</a></p>
+</main>
+<script>
+(function () {
+  var ua = navigator.userAgent;
+  var standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  var isIOS = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var isAndroid = /android/i.test(ua);
+  function show(id) { ['s-installed', 's-ios', 's-android', 's-other'].forEach(function (x) { document.getElementById(x).hidden = (x !== id); }); }
+  if (standalone) { show('s-installed'); return; }
+  if (isIOS) { show('s-ios'); return; }
+  if (!isAndroid) { show('s-other'); return; }
+  show('s-android');
+  var btn = document.getElementById('installBtn'), fb = document.getElementById('androidFallback'), deferred = null;
+  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferred = e; fb.hidden = true; btn.hidden = false; });
+  window.addEventListener('appinstalled', function () { show('s-installed'); });
+  btn.addEventListener('click', function () {
+    if (!deferred) return;
+    var d = deferred; deferred = null; d.prompt();
+    d.userChoice.finally(function () { btn.hidden = true; fb.hidden = false; });
+  });
+  setTimeout(function () { if (!deferred) fb.hidden = false; }, 2500);
+})();
+</script>
+</body></html>"""
+
+
+@app.get("/get-app", response_class=HTMLResponse)
+def get_app_page():
+    """The page the desktop "Get TreeKey on your phone" QR code opens. Adapts to the device: Android gets the
+    browser's own install prompt, iPhone gets the Safari steps, an installed app is told it is installed, and
+    anything else is shown a QR code to open this page on a phone."""
+    return HTMLResponse(_GET_APP_HTML)
+
+
 @app.get("/manifest.json", include_in_schema=False)
 async def _manifest_redirect():
     return RedirectResponse(url="/static/manifest.json", status_code=301)
@@ -2120,7 +2214,7 @@ def public_homepage(request: Request):
                         <button id="pwaInstallBtn" onclick="tkInstallApp()" type="button" class="hidden items-center gap-1.5 bg-slate-800/60 text-emerald-300 border border-emerald-500/40 px-3.5 py-1.5 rounded-lg font-bold uppercase text-xs hover:bg-emerald-600 hover:text-white transition-all">
                             <span id="pwaInstallPulse" class="hidden absolute -top-1 -right-1 h-2.5 w-2.5"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span></span>
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 3v12"></path><polyline points="7 10 12 15 17 10"></polyline><path d="M5 19h14"></path></svg>
-                            Download App
+                            <span id="pwaInstallLabel">Install app</span>
                         </button>
                         <!-- Sep 9 2026, Nick's ask: iOS Safari has no API for a
                              site to trigger installation itself -- Apple only
@@ -2135,14 +2229,13 @@ def public_homepage(request: Request):
                              plus exactly where to look for it. -->
                         <div id="pwaInstallTip" class="hidden absolute right-0 mt-2 w-72 bg-slate-900 border border-emerald-500/30 rounded-lg p-3.5 text-[11px] text-slate-300 shadow-2xl z-50 font-sans normal-case font-normal leading-relaxed">
                             <button onclick="document.getElementById('pwaInstallTip').classList.add('hidden')" type="button" class="absolute top-2 right-2 text-slate-500 hover:text-white text-sm leading-none" aria-label="Close">&times;</button>
-                            <div class="flex items-center gap-2 mb-2">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a7f3d0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><path d="M12 2v13"></path><polyline points="8 6 12 2 16 6"></polyline><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"></path></svg>
-                                <span class="text-white font-bold text-xs">1. Tap the Share icon</span>
+                            <div class="text-white font-bold text-xs mb-1">Add TreeKey to your Home Screen</div>
+                            <ol class="m-0 pl-4" style="list-style:decimal">
+                                <li>Tap the Share button (a square with an arrow). On newer iPhones it is under the &bull;&bull;&bull; button at the bottom right of Safari.</li>
+                                <li>Scroll down and tap "Add to Home Screen".</li>
+                                <li>Tap "Add".</li>
+                            </ol>
                             </div>
-                            <p class="m-0 mb-2 pl-[26px]">It's in Safari's toolbar (usually along the bottom of the screen).</p>
-                            <div class="text-white font-bold text-xs mb-1">2. Tap "Add to Home Screen"</div>
-                            <p class="m-0 pl-0">TreeKey will then open like any other app, full-screen with no browser bar.</p>
-                        </div>
                     </div>
                     {_nav_auth_block_html(request)}
                     <button type="button" class="tk-mnav-toggle" aria-label="Menu" onclick="var p=document.getElementById('tk-mnav-panel'); p.style.display = (p.style.display==='block') ? 'none' : 'block';">
@@ -3057,39 +3150,37 @@ def public_homepage(request: Request):
             const pulse = document.getElementById('pwaInstallPulse');
             if (!btn) return;
 
-            const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+            const ua = navigator.userAgent;
+            const isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
             if (isStandalone) return; // already installed -- never show the button
 
-            const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+            const isIOS = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+            const isAndroid = /android/i.test(ua);
+            const isDesktop = !isIOS && !isAndroid && !/mobile/i.test(ua);
+            const label = document.getElementById('pwaInstallLabel');
             let deferredPrompt = null;
-            const isDesktop = !/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+
+            function showBtn() {{ btn.classList.remove('hidden'); btn.classList.add('inline-flex'); }}
+            function hideAll() {{ btn.classList.add('hidden'); btn.classList.remove('inline-flex'); tip.classList.add('hidden'); if (pulse) pulse.classList.add('hidden'); }}
+            window.addEventListener('appinstalled', hideAll);
 
             if (isDesktop) {{
-                // 20 Oct 2026, Nick's ask: no desktop app. On a computer the button points people to their phone.
-                btn.classList.remove('hidden');
-                btn.classList.add('inline-flex');
+                // Computers never get a desktop install prompt from us: the button points people to their phone.
+                // (A browser's own address-bar install icon is the browser's, and cannot be removed by a website.)
+                if (label) label.textContent = 'Get TreeKey on your phone';
+                showBtn();
                 window.addEventListener('beforeinstallprompt', (e) => {{ e.preventDefault(); }});
                 window.tkInstallApp = function() {{
-                    tip.innerHTML = '<button onclick="document.getElementById(\'pwaInstallTip\').classList.add(\'hidden\')" type="button" class="absolute top-2 right-2 text-slate-400" aria-label="Close">\u00d7</button><div class="font-bold text-emerald-300 mb-1">TreeKey is a phone app</div><div>Scan this with your phone camera, then follow the steps to add TreeKey to your home screen.</div><img src="/static/images/app-install-qr.png" alt="QR code to open TreeKey on your phone" width="140" height="140" style="display:block;margin:8px auto 0;background:#fff;padding:6px;border-radius:8px">';
+                    tip.innerHTML = `<button onclick="document.getElementById('pwaInstallTip').classList.add('hidden')" type="button" class="absolute top-2 right-2 text-slate-400" aria-label="Close">&times;</button><div class="font-bold text-emerald-300 mb-1">Get TreeKey on your phone</div><div>Scan this with your phone camera to open the install page.</div><img src="/static/images/get-app-qr.png" alt="QR code to open treekey.co.uk/get-app on your phone" width="140" height="140" style="display:block;margin:8px auto 0;background:#fff;padding:6px;border-radius:8px">`;
                     tip.classList.toggle('hidden');
                 }};
                 return;
             }}
 
             if (isIOS) {{
-                btn.classList.remove('hidden');
-                btn.classList.add('inline-flex');
+                showBtn();
                 pulse.classList.remove('hidden');
-
-                // Sep 9 2026, Nick's ask: "no one wants to click share in
-                // safari" -- can't remove that step (Apple restriction, see
-                // comment above the button markup), so instead of waiting
-                // for a click that may never come, open the how-to
-                // automatically the first time an iPhone visitor shows up.
-                // Once-per-browser via localStorage so it doesn't nag on
-                // every repeat visit; falls back to always-show if storage
-                // is blocked (private browsing etc.) since that's the safer
-                // failure direction here.
+                // Opens the steps once per browser on an iPhone's first visit; the button always reopens them.
                 let alreadyShown = false;
                 try {{ alreadyShown = localStorage.getItem('tk_install_tip_shown') === '1'; }} catch (e) {{}}
                 if (!alreadyShown) {{
@@ -3099,15 +3190,15 @@ def public_homepage(request: Request):
                         try {{ localStorage.setItem('tk_install_tip_shown', '1'); }} catch (e) {{}}
                     }}, 1800);
                 }}
+            }} else {{
+                // Android and other phone browsers: shown only when the browser says TreeKey can be installed.
+                window.addEventListener('beforeinstallprompt', (e) => {{
+                    e.preventDefault();
+                    deferredPrompt = e;
+                    showBtn();
+                    pulse.classList.remove('hidden');
+                }});
             }}
-
-            window.addEventListener('beforeinstallprompt', (e) => {{
-                e.preventDefault();
-                deferredPrompt = e;
-                btn.classList.remove('hidden');
-                btn.classList.add('inline-flex');
-                pulse.classList.remove('hidden');
-            }});
 
             window.tkInstallApp = function() {{
                 if (isIOS) {{
@@ -3116,9 +3207,10 @@ def public_homepage(request: Request):
                     return;
                 }}
                 if (deferredPrompt) {{
+                    const d = deferredPrompt; deferredPrompt = null;
                     pulse.classList.add('hidden');
-                    deferredPrompt.prompt();
-                    deferredPrompt.userChoice.finally(() => {{ deferredPrompt = null; }});
+                    d.prompt();
+                    d.userChoice.finally(() => {{ btn.classList.add('hidden'); btn.classList.remove('inline-flex'); }});
                 }}
             }};
         }})();
