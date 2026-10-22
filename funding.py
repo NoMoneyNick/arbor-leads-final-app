@@ -66,6 +66,11 @@ def init_funding_schema(cur) -> None:
             created_at TIMESTAMPTZ DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS idx_budget_active ON mailing_budget_confirmations(active) WHERE active = TRUE;
+        -- Website funding form: one optional unique reference per recorded top-up, so a double-click,
+        -- retry or concurrent submission cannot record the same funding twice. NULL for older rows.
+        ALTER TABLE mailing_budget_confirmations ADD COLUMN IF NOT EXISTS funding_reference TEXT;
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_budget_funding_reference
+            ON mailing_budget_confirmations (LOWER(funding_reference)) WHERE funding_reference IS NOT NULL;
 
         CREATE TABLE IF NOT EXISTS funding_reservations (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -125,6 +130,57 @@ def valid_cost_pence(value) -> Optional[int]:
     return value
 
 
+MAX_FUNDING_POUNDS = 10000          # typo guard for the website form only (a slip of a decimal point)
+
+
+class DuplicateFundingReference(Exception):
+    """The funding reference was already used. `existing` is that earlier record (or None)."""
+    def __init__(self, reference: str, existing: Optional[dict] = None):
+        super().__init__(f"Funding reference {reference!r} was already recorded.")
+        self.reference = reference
+        self.existing = existing
+
+
+def parse_pounds_to_pence(text) -> int:
+    """'12.50' / '£12.5' / '12' -> whole pence, exactly (integer arithmetic, no float).
+    Rejects blanks, negatives, zero, commas, more than 2 decimal places, non-digits and
+    anything above MAX_FUNDING_POUNDS. Raises ValueError with a message fit to show the operator."""
+    import re
+    raw = (text or "").strip()
+    if raw.startswith("\u00a3"):
+        raw = raw[1:].strip()
+    if not raw:
+        raise ValueError("Enter an amount in pounds, for example 20 or 20.50.")
+    m = re.fullmatch(r"([0-9]{1,6})(?:\.([0-9]{1,2}))?", raw)
+    if not m:
+        raise ValueError("Amount must be plain pounds and pence, for example 20 or 20.50 "
+                         "(no commas, no minus sign, at most 2 decimal places).")
+    pence = int(m.group(1)) * 100 + int((m.group(2) or "").ljust(2, "0") or 0)
+    if pence <= 0:
+        raise ValueError("Amount must be more than £0.00.")
+    if pence > MAX_FUNDING_POUNDS * 100:
+        raise ValueError(f"Amount is above the £{MAX_FUNDING_POUNDS:,} safety limit for this form. "
+                         "Check the decimal point.")
+    return pence
+
+
+def normalise_funding_reference(text) -> str:
+    """Trim and collapse spaces. 3-64 characters: letters, digits, space . _ / # -  (case-insensitive unique)."""
+    import re
+    ref = re.sub(r"\s+", " ", (text or "").strip())
+    if not ref:
+        raise ValueError("A funding reference is required (for example the Intelliprint top-up receipt number).")
+    if not re.fullmatch(r"[A-Za-z0-9 ._/#-]{3,64}", ref):
+        raise ValueError("Funding reference must be 3 to 64 characters: letters, numbers, spaces and . _ / # - only.")
+    return ref
+
+
+def format_pence(pence: int) -> str:
+    sign = "-" if pence < 0 else ""
+    pounds, rem = divmod(abs(int(pence)), 100)
+    return f"{sign}\u00a3{pounds:,}.{rem:02d}"
+
+
 class FundingGate:
     """One instance per process/request is fine -- it does not cache
     anything that changes mid-process; every check re-reads the DB (or the
@@ -146,7 +202,8 @@ class FundingGate:
             raise RuntimeError("simulate_budget() only valid when mode == 'simulate'.")
         self._simulated_available_pence = available_pence
 
-    def confirm_budget(self, cur, *, amount_pence: int, confirmed_by: str, note: str) -> str:
+    def confirm_budget(self, cur, *, amount_pence: int, confirmed_by: str, note: str,
+                       funding_reference: Optional[str] = None) -> str:
         """The restricted, audited admin action. Caller (main.py) must gate
         this behind verify_dashboard_auth or an equivalent admin check --
         this function itself does not check identity, it only records who
@@ -154,13 +211,54 @@ class FundingGate:
         reached without real admin auth."""
         if amount_pence <= 0:
             raise ValueError("amount_pence must be positive.")
-        cur.execute("""
-            INSERT INTO mailing_budget_confirmations (amount_pence, confirmed_by, note)
-            VALUES (%s, %s, %s) RETURNING id;
-        """, (amount_pence, confirmed_by, note))
-        budget_id = str(cur.fetchone()[0])
+        if funding_reference is None:
+            cur.execute("""
+                INSERT INTO mailing_budget_confirmations (amount_pence, confirmed_by, note)
+                VALUES (%s, %s, %s) RETURNING id;
+            """, (amount_pence, confirmed_by, note))
+            budget_id = str(cur.fetchone()[0])
+        else:
+            # Unique (case-insensitive) reference: a repeat or concurrent submission inserts nothing
+            # (the second waits for the first to commit, then does nothing) and raises instead.
+            cur.execute("""
+                INSERT INTO mailing_budget_confirmations (amount_pence, confirmed_by, note, funding_reference)
+                VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING RETURNING id;
+            """, (amount_pence, confirmed_by, note, funding_reference))
+            row = cur.fetchone()
+            if row is None:
+                raise DuplicateFundingReference(funding_reference, self.get_budget_by_reference(cur, funding_reference))
+            budget_id = str(row[0])
         logger.info(f"[Funding] Budget confirmed by {confirmed_by}: £{amount_pence/100:.2f} ({note}) -> {budget_id}")
         return budget_id
+
+    def get_budget_by_reference(self, cur, funding_reference: str) -> Optional[dict]:
+        cur.execute("""
+            SELECT id, amount_pence, spent_pence, reserved_pence, active, confirmed_by, created_at
+            FROM mailing_budget_confirmations WHERE LOWER(funding_reference) = LOWER(%s);
+        """, (funding_reference,))
+        r = cur.fetchone()
+        if r is None:
+            return None
+        return {"id": str(r[0]), "amount_pence": int(r[1]), "spent_pence": int(r[2]), "reserved_pence": int(r[3]),
+                "active": bool(r[4]), "confirmed_by": r[5], "created_at": r[6]}
+
+    def budget_summary(self, cur) -> dict:
+        """Totals over ACTIVE budget records (the same rows check()/reserve() use), in pence."""
+        cur.execute("""
+            SELECT COALESCE(SUM(amount_pence), 0), COALESCE(SUM(spent_pence), 0), COALESCE(SUM(reserved_pence), 0)
+            FROM mailing_budget_confirmations WHERE active = TRUE;
+        """)
+        amount, spent, reserved = (int(x or 0) for x in cur.fetchone())
+        return {"confirmed_pence": amount, "spent_pence": spent, "reserved_pence": reserved,
+                "available_pence": amount - spent - reserved}
+
+    def recent_budget_records(self, cur, limit: int = 10) -> list:
+        cur.execute("""
+            SELECT amount_pence, spent_pence, reserved_pence, active, funding_reference, confirmed_by, created_at
+            FROM mailing_budget_confirmations ORDER BY created_at DESC LIMIT %s;
+        """, (limit,))
+        return [{"amount_pence": int(r[0]), "spent_pence": int(r[1]), "reserved_pence": int(r[2]), "active": bool(r[3]),
+                 "funding_reference": r[4], "confirmed_by": r[5], "created_at": r[6]} for r in cur.fetchall()]
 
     def _available_pence_from_db(self, cur) -> int:
         # 2026-09-18 review, Section 6: subtracts reserved_pence too, not

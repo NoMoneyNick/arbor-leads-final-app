@@ -10634,20 +10634,20 @@ async def account_close_submit(request: Request):
     </div>""")
 
 
-def _admin_csrf_token() -> str:
+def _admin_csrf_token(purpose: str = "admin-account-requests") -> str:
     """Short-lived token for the operator's state-changing forms. Needed because Basic Auth
     credentials are sent automatically by the browser, so authentication alone would not stop
     another site from submitting the form on the operator's behalf."""
     ts = str(int(time.time()))
-    return f"{ts}." + _hmac.new(_SESSION_SECRET, f"admin-account-requests:{ts}".encode(), _hashlib.sha256).hexdigest()
+    return f"{ts}." + _hmac.new(_SESSION_SECRET, f"{purpose}:{ts}".encode(), _hashlib.sha256).hexdigest()
 
 
-def _admin_csrf_ok(token: Optional[str]) -> bool:
+def _admin_csrf_ok(token: Optional[str], purpose: str = "admin-account-requests") -> bool:
     try:
         ts, sig = (token or "").split(".", 1)
         if not 0 <= time.time() - int(ts) <= 4 * 3600:
             return False
-        good = _hmac.new(_SESSION_SECRET, f"admin-account-requests:{ts}".encode(), _hashlib.sha256).hexdigest()
+        good = _hmac.new(_SESSION_SECRET, f"{purpose}:{ts}".encode(), _hashlib.sha256).hexdigest()
         return secrets.compare_digest(sig.encode(), good.encode())
     except Exception:
         return False
@@ -10693,6 +10693,171 @@ async def admin_account_requests_resolve(request: Request):
     database.resolve_account_request(form.get("request_id") or "", form.get("note") or "")
     return RedirectResponse(url="/admin/account-requests" + (("?secret=" + urllib.parse.quote(secret)) if secret else ""),
                             status_code=303)
+
+
+# ── Admin: confirm mailing budget (records funding already in Intelliprint) ──────────────────
+
+_BUDGET_CSRF = "admin-mailing-budget"
+
+
+def _budget_page(request: Request, secret: Optional[str], body: str, status_code: int = 200) -> HTMLResponse:
+    return HTMLResponse(f"""<html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><title>Confirm mailing budget</title>
+<style>body{{font-family:Arial,sans-serif;font-size:14px;margin:16px;max-width:760px}}td,th{{border:1px solid #ccc;padding:6px;text-align:left}}
+table{{border-collapse:collapse;margin:8px 0}}.note{{background:#fffbe6;border:1px solid #e6d98a;padding:10px;margin:12px 0}}
+.err{{background:#fde8e8;border:1px solid #e0a0a0;padding:10px;margin:12px 0}}.ok{{background:#e8f7ec;border:1px solid #9fd2ac;padding:10px;margin:12px 0}}
+input{{padding:6px;font-size:14px}}button{{padding:8px 14px;font-size:14px}}</style></head><body>
+<h2>Confirm mailing budget</h2>{body}</body></html>""", status_code=status_code)
+
+
+def _budget_summary_html() -> str:
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        gate = funding_module.FundingGate(mode="hold")
+        sm = gate.budget_summary(cur)
+        recent = gate.recent_budget_records(cur, 10)
+    finally:
+        cur.close()
+        conn.close()
+    f = funding_module.format_pence
+    rows = "".join(
+        f"<tr><td>{str(r['created_at'])[:16]}</td><td>{f(r['amount_pence'])}</td><td>{f(r['spent_pence'])}</td>"
+        f"<td>{f(r['reserved_pence'])}</td><td>{'yes' if r['active'] else 'no'}</td>"
+        f"<td>{html.escape(r['funding_reference'] or '(older record)')}</td></tr>" for r in recent)
+    return (f"<h3>Current budget (active records)</h3><table>"
+            f"<tr><th>Confirmed in total</th><td>{f(sm['confirmed_pence'])}</td></tr>"
+            f"<tr><th>Spent</th><td>{f(sm['spent_pence'])}</td></tr>"
+            f"<tr><th>Reserved for letters in progress</th><td>{f(sm['reserved_pence'])}</td></tr>"
+            f"<tr><th>Available for new letters</th><td><b>{f(sm['available_pence'])}</b></td></tr>"
+            f"<tr><th>Should still be in Intelliprint (available + reserved)</th>"
+            f"<td>{f(sm['available_pence'] + sm['reserved_pence'])}</td></tr></table>"
+            f"<h3>Latest records</h3><table><tr><th>Recorded</th><th>Amount</th><th>Spent</th><th>Reserved</th>"
+            f"<th>Active</th><th>Reference</th></tr>{rows or '<tr><td colspan=6>None yet.</td></tr>'}</table>")
+
+
+def _budget_form_html(secret: Optional[str], amount: str = "", reference: str = "", error: str = "") -> str:
+    sec = f'<input type="hidden" name="secret" value="{html.escape(secret)}">' if secret else ""
+    err = f'<div class="err">{html.escape(error)}</div>' if error else ""
+    return (f'<div class="note"><b>This only records funding that is already in your Intelliprint account.</b> '
+            f'It does not top up, pay or send money to Intelliprint. Top up in the Intelliprint dashboard first, '
+            f'then record that same top-up here <b>once</b>, with its receipt or top-up number as the reference. '
+            f'Recording funding does not send any letters.</div>{err}'
+            f'<form method="POST" action="/admin/mailing-budget/review">'
+            f'<input type="hidden" name="csrf" value="{_admin_csrf_token(_BUDGET_CSRF)}">{sec}'
+            f'<p><label>Additional budget in pounds<br><input name="amount" value="{html.escape(amount)}" '
+            f'placeholder="20.00" inputmode="decimal" autocomplete="off"></label></p>'
+            f'<p><label>Unique funding reference (required)<br><input name="reference" value="{html.escape(reference)}" '
+            f'placeholder="e.g. Intelliprint top-up receipt number" size="40" autocomplete="off"></label></p>'
+            f'<button type="submit">Review</button></form>')
+
+
+@app.get("/admin/mailing-budget", response_class=HTMLResponse)
+def admin_mailing_budget(request: Request, secret: Optional[str] = Query(None), done: Optional[str] = Query(None)):
+    """Admin page: shows the active budget and a form to record funding that is ALREADY in Intelliprint.
+    Same admin access as the other /admin pages (Basic Auth, or ?secret=). Never touches the letter worker."""
+    verify_admin_or_secret(request, secret)
+    banner = ""
+    if done:
+        conn = database.get_db_conn()
+        cur = conn.cursor()
+        try:
+            rec = funding_module.FundingGate(mode="hold").get_budget_by_reference(cur, done)
+        finally:
+            cur.close()
+            conn.close()
+        if rec:
+            banner = (f'<div class="ok"><b>Recorded.</b> Reference {html.escape(done)}: '
+                      f'{funding_module.format_pence(rec["amount_pence"])} added. Resulting budget is shown below.</div>')
+    return _budget_page(request, secret, banner + _budget_summary_html() + "<h3>Record funding</h3>" + _budget_form_html(secret))
+
+
+def _budget_parse(form):
+    """Returns (pence, reference, error)."""
+    try:
+        pence = funding_module.parse_pounds_to_pence(form.get("amount"))
+        ref = funding_module.normalise_funding_reference(form.get("reference"))
+        return pence, ref, ""
+    except ValueError as e:
+        return None, None, str(e)
+
+
+@app.post("/admin/mailing-budget/review", response_class=HTMLResponse)
+async def admin_mailing_budget_review(request: Request):
+    form = await request.form()
+    secret = form.get("secret") or None
+    verify_admin_or_secret(request, secret)
+    if not _admin_csrf_ok(form.get("csrf"), _BUDGET_CSRF):
+        raise HTTPException(status_code=403, detail="Form expired or invalid. Reload the page and try again.")
+    pence, ref, error = _budget_parse(form)
+    if error:
+        return _budget_page(request, secret, _budget_summary_html() + "<h3>Record funding</h3>"
+                            + _budget_form_html(secret, form.get("amount") or "", form.get("reference") or "", error), 400)
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        gate = funding_module.FundingGate(mode="hold")
+        existing = gate.get_budget_by_reference(cur, ref)
+        sm = gate.budget_summary(cur)
+    finally:
+        cur.close()
+        conn.close()
+    f = funding_module.format_pence
+    if existing:
+        return _budget_page(request, secret, _budget_summary_html() + "<h3>Record funding</h3>" + _budget_form_html(
+            secret, form.get("amount") or "", "", f"Reference '{ref}' was already recorded ({f(existing['amount_pence'])}). "
+            "Nothing was added. Use a different reference only for a genuinely new top-up."), 409)
+    sec = f'<input type="hidden" name="secret" value="{html.escape(secret)}">' if secret else ""
+    return _budget_page(request, secret, f"""<div class="note"><b>Please confirm.</b> This records funding already in Intelliprint.
+It does not top up Intelliprint and sends no letters.</div>
+<table><tr><th>Amount to record</th><td><b>{f(pence)}</b> ({pence} pence)</td></tr>
+<tr><th>Reference</th><td>{html.escape(ref)}</td></tr>
+<tr><th>Available now</th><td>{f(sm['available_pence'])}</td></tr>
+<tr><th>Available after recording</th><td>{f(sm['available_pence'] + pence)}</td></tr></table>
+<form method="POST" action="/admin/mailing-budget/confirm">
+<input type="hidden" name="csrf" value="{_admin_csrf_token(_BUDGET_CSRF)}">{sec}
+<input type="hidden" name="amount" value="{html.escape(form.get('amount') or '')}">
+<input type="hidden" name="reference" value="{html.escape(ref)}">
+<button type="submit">Record this funding</button> &nbsp; <a href="/admin/mailing-budget{('?secret=' + urllib.parse.quote(secret)) if secret else ''}">Cancel</a></form>""")
+
+
+@app.post("/admin/mailing-budget/confirm", response_class=HTMLResponse)
+async def admin_mailing_budget_confirm(request: Request):
+    form = await request.form()
+    secret = form.get("secret") or None
+    verify_admin_or_secret(request, secret)
+    if not _admin_csrf_ok(form.get("csrf"), _BUDGET_CSRF):
+        raise HTTPException(status_code=403, detail="Form expired or invalid. Reload the page and try again.")
+    pence, ref, error = _budget_parse(form)
+    if error:
+        return _budget_page(request, secret, _budget_summary_html() + "<h3>Record funding</h3>"
+                            + _budget_form_html(secret, form.get("amount") or "", form.get("reference") or "", error), 400)
+    f = funding_module.format_pence
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        gate = funding_module.FundingGate(mode="hold")
+        gate.confirm_budget(cur, amount_pence=pence, confirmed_by="admin (website)",
+                            note=f"{ref} | recorded via website; funding already in Intelliprint",
+                            funding_reference=ref)
+        conn.commit()
+    except funding_module.DuplicateFundingReference as dup:
+        conn.rollback()
+        was = f(dup.existing["amount_pence"]) if dup.existing else "an earlier amount"
+        same = bool(dup.existing) and dup.existing["amount_pence"] == pence
+        msg = ("This funding was already recorded (a double-click or repeat). Nothing was added again."
+               if same else f"Reference '{ref}' was already used for {was}. Nothing was recorded.")
+        return _budget_page(request, secret, f'<div class="err">{html.escape(msg)}</div>' + _budget_summary_html(), 409)
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"[Budget Form] could not record funding: {e}", exc_info=True)
+        return _budget_page(request, secret, '<div class="err"><b>Not recorded.</b> The database refused the request. '
+                            'Check the budget below before trying again.</div>' + _budget_summary_html(), 500)
+    finally:
+        cur.close()
+        conn.close()
+    return RedirectResponse(url="/admin/mailing-budget?done=" + urllib.parse.quote(ref)
+                            + (("&secret=" + urllib.parse.quote(secret)) if secret else ""), status_code=303)
 
 
 # ── 5. Free Woodchip & Timber Drop-Spotter Hub ─────────────────────────────────
