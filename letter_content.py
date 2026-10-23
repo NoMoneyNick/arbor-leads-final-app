@@ -1466,7 +1466,7 @@ body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Arial, Helvetic
    measurement can't put us back outside the real zone, and a width that
    stops comfortably short of the barcode's left edge (74mm right edge vs
    the barcode's measured 77.1mm -- ~3mm clearance):
-     top:46mm left:19mm width:55mm
+     top:46mm left:25mm width:49mm (moved 2026-10-23 from left:19mm/width:55mm so no text sits left of the documented 23mm window edge)
    Whether the orange outline itself is print-visible ink or a preview-only
    diagnostic guide is NOT resolved by this fix (see the accompanying
    report) -- but that doesn't change what to do here: the barcode is
@@ -1481,7 +1481,7 @@ body {{ margin: 0; padding: 0; background: #d9d9d9; font-family: Arial, Helvetic
    confirmation against a fresh real Intelliprint submission before being
    called fixed -- per Nick's own explicit instruction, a local render is
    not sufficient evidence for this specific claim. */
-.address-clear-zone {{ position: absolute; top: 46mm; left: 19mm; width: 55mm; }}
+.address-clear-zone {{ position: absolute; top: 46mm; left: 25mm; width: 49mm; }}
 .recipient-address {{ font-size: 12.5px; font-weight: bold; white-space: pre-line; }}
 .intro-ref-block {{ text-align: right; margin-bottom: 4mm; }}
 /* 2026-09-26 fix (ninth pass) / 2026-09-27 fix (restoring the headline,

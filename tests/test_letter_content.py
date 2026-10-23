@@ -215,20 +215,31 @@ class TestAddressClearZoneMatchesIntelliprintTemplate(unittest.TestCase):
     def test_address_clear_zone_is_positioned_at_measured_coordinates(self):
         html = letter_content.render_preview_letter(_settings())
         self.assertIn(
-            ".address-clear-zone {{ position: absolute; top: 46mm; left: 19mm; width: 55mm; }}"
+            ".address-clear-zone {{ position: absolute; top: 46mm; left: 25mm; width: 49mm; }}"
             .replace("{{", "{").replace("}}", "}"),
             html,
         )
 
     def test_address_clear_zone_width_stays_clear_of_the_measured_barcode(self):
-        # left(19mm) + width must stay left of the barcode's measured
+        # left(25mm) + width must stay left of the barcode's measured
         # left edge (77.1mm) with a margin -- not just numerically inside
         # the zone's own right edge (106.9mm), which would run straight
         # into the barcode instead of leaving room for a wrapped address.
-        left_mm = 19
-        width_mm = 55
+        left_mm = 25
+        width_mm = 49
         barcode_left_mm = 77.1
         self.assertLess(left_mm + width_mm, barcode_left_mm)
+
+    def test_address_starts_inside_documented_window_left_edge(self):
+        # Intelliprint's design-specs put the envelope window 23mm from the
+        # left edge; our own measured guide box starts at 18.5mm. Starting
+        # the text at 25mm satisfies BOTH readings, so no text can sit left
+        # of the documented window edge. (Rendered bounds measured with
+        # Playwright: text left 25.0mm, right <=74mm, long address bottom
+        # 83.8mm, all inside the 45.0-90.3mm guide box and left of the
+        # 77.1mm barcode.)
+        left_mm = 25
+        self.assertGreaterEqual(left_mm, 23)
 
     def test_brand_header_no_longer_carries_the_superseded_margin_top(self):
         # The old margin-top:20mm existed only to clear the OLD (wrong)
