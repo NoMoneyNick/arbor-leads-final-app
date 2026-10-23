@@ -863,6 +863,8 @@ def init_db():
             "ALTER TABLE payments ADD COLUMN IF NOT EXISTS offer_kind TEXT;",
             "ALTER TABLE payments ADD COLUMN IF NOT EXISTS offer_phone_key TEXT;",
             "ALTER TABLE payments ADD COLUMN IF NOT EXISTS offer_business_key TEXT;",
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS refunded_pence INT NOT NULL DEFAULT 0;",
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS refund_synced_at TIMESTAMPTZ;",
         ]
         failed_ddl = _run_ddl_statements_resiliently(conn, resilience_cols, phase_label="Phase1-columns")
 

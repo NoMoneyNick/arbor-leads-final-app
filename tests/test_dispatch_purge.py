@@ -500,5 +500,37 @@ class TestUnknownOutcomesAreNeverSweptOrAutoResent(unittest.TestCase):
         self.assertEqual(result["resolved"], 0)
 
 
+class TestNoExtendedRetentionForTestModeOrders(unittest.TestCase):
+    """Decision (Nick): ONE retention period -- 72 hours -- for every dispatched order, including one the
+    provider accepted in test mode. No longer test-mode window exists. The test/real distinction is kept
+    as a record ([submitted_testmode=...] in last_error, which the purge never clears), not as a retention
+    exemption. Real-SQL behaviour: tests/postgres_concurrency/run_refund_and_purge_real_db_test.py."""
+
+    def test_only_the_72_hour_period_exists(self):
+        self.assertEqual(purge.DISPATCH_PURGE_DELAY_HOURS, 72)
+        self.assertFalse([n for n in dir(purge) if "TEST_MODE" in n.upper()])
+
+    def test_eligibility_sql_ignores_test_mode(self):
+        for fn in (purge.count_dispatch_purge_eligible, purge.purge_dispatched_personal_data):
+            conn, cur = _conn_with_cursor()
+            cur.fetchone.side_effect = [(0,), (0,)]
+            cur.fetchall.side_effect = [[], [], []]
+            with patch.object(purge.database, "get_db_conn", return_value=conn):
+                fn()
+            first_sql = cur.execute.call_args_list[0].args[0]
+            self.assertIn("INTERVAL '72 hours'", first_sql)
+            self.assertNotIn("testmode", first_sql)
+            self.assertNotIn("168", first_sql)
+
+    def test_purge_never_clears_the_test_mode_record(self):
+        conn, cur = _conn_with_cursor()
+        cur.fetchall.side_effect = [[("ob1", "L1")], [], [], []]
+        with patch.object(purge.database, "get_db_conn", return_value=conn):
+            purge.purge_dispatched_personal_data()
+        updates = " ".join(c.args[0] for c in cur.execute.call_args_list if c.args[0].strip().upper().startswith("UPDATE LETTER_OBLIGATIONS"))
+        self.assertNotIn("last_error", updates)
+        self.assertNotIn("provider_reference", updates)
+
+
 if __name__ == "__main__":
     unittest.main()

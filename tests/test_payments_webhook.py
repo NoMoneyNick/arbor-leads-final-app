@@ -510,5 +510,39 @@ class TestSaleIsRecordedUnderTheBuyingAccount(unittest.TestCase):
             self.assertEqual(payments._buyer_account_email(meta, "typed@stripe.example"), "typed@stripe.example")
 
 
+class TestRefundEventsAreRouted(unittest.TestCase):
+    """Refund events go to refund_sync (which checks Stripe itself); the checkout path is untouched."""
+
+    def setUp(self):
+        payments._PROCESSED_STRIPE_EVENT_IDS.clear()
+
+    @patch("stripe.Webhook.construct_event")
+    def test_each_refund_event_type_is_routed(self, mock_construct):
+        for et in ("charge.refunded", "charge.refund.updated", "refund.created", "refund.updated", "refund.failed"):
+            data = {"id": "ch_1", "object": "charge"}
+            mock_construct.return_value = {"id": "evt_r", "type": et, "data": {"object": data}}
+            with patch.object(payments.refund_sync, "handle_refund_event", return_value={"event": "refund_synced"}) as h:
+                out = payments.handle_stripe_webhook(b"payload", "sig")
+            h.assert_called_once_with(et, data, "evt_r")
+            self.assertEqual(out, {"event": "refund_synced"})
+
+    @patch("stripe.Webhook.construct_event")
+    def test_a_retry_result_is_passed_back_for_stripe_to_redeliver(self, mock_construct):
+        mock_construct.return_value = {"id": "evt_r", "type": "charge.refunded", "data": {"object": {"id": "ch_1"}}}
+        with patch.object(payments.refund_sync, "handle_refund_event", return_value={"error": "refund_sync_failed", "retry": True}):
+            out = payments.handle_stripe_webhook(b"payload", "sig")
+        self.assertTrue(out.get("retry"))
+
+    @patch("stripe.Webhook.construct_event")
+    def test_refund_event_never_runs_checkout_fulfilment(self, mock_construct):
+        database.confirm_reserved_lead_sale = MagicMock()
+        database.burn_lead_inventory = MagicMock()
+        mock_construct.return_value = {"id": "evt_r", "type": "charge.refunded", "data": {"object": {"id": "ch_1"}}}
+        with patch.object(payments.refund_sync, "handle_refund_event", return_value={"event": "refund_ignored"}):
+            payments.handle_stripe_webhook(b"payload", "sig")
+        database.confirm_reserved_lead_sale.assert_not_called()
+        database.burn_lead_inventory.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

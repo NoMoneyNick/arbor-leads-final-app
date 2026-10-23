@@ -2,6 +2,7 @@ import os
 import logging
 from typing import Optional, Dict, Any
 import stripe
+import refund_sync
 from dotenv import load_dotenv
 
 import fulfilment
@@ -1168,6 +1169,11 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> dict:
             throttle_hours=12.0
         )
         return {"event": "payment_failed", "email": customer_email}
+
+    elif event_type in refund_sync.REFUND_EVENT_TYPES:
+        # Refund state is synced from Stripe's own record (see refund_sync.py); it never cancels letters,
+        # releases allocations or touches funding.
+        return refund_sync.handle_refund_event(event_type, data, event_id)
 
     logger.info(f"[Stripe] Unhandled event type: {event_type}")
     return {"event": event_type, "status": "unhandled"}
