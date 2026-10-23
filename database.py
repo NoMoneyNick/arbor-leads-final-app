@@ -653,6 +653,9 @@ def init_db():
             # 1 Oct 2026: account-closure / data-deletion REQUESTS (a durable
             # queue for the operator; nothing is deleted or cancelled by it).
             init_account_request_schema(cur)
+            # Reply opt-out audit + saved-point tables (add-only suppression of outreach replies; see reply_optout.py).
+            import reply_optout as _reply_optout
+            _reply_optout.init_reply_optout_schema(cur)
             conn.commit()
             cur.close()
         except Exception as e:

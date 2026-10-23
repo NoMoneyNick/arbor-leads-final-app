@@ -23,6 +23,7 @@ import funding as funding_module
 import suppression as suppression_module
 import address_release
 import worker as fulfilment_worker
+import reply_optout
 import page_theme
 import bot_guard
 import home_v2
@@ -10854,6 +10855,99 @@ def admin_pdf_render_check(request: Request, secret: Optional[str] = Query(None)
         return pdf_render_selfcheck()
     except Exception as e:
         raise HTTPException(status_code=500, detail={"ok": False, "error": str(e)[:600]})
+
+
+@app.get("/trigger-reply-optout-check")
+def trigger_reply_optout_check(secret: Optional[str] = Query(None)):
+    """Reads new outreach REPLIES from Instantly and adds clear opt-outs to email_suppressions (+ Instantly's
+    blocklist). ADD-ONLY. Does nothing unless REPLY_OPTOUT_ENABLED=true and INSTANTLY_API_KEY is set, and nothing
+    schedules it: it only runs when an external cron (or Nick) calls this URL. Returns 500 on failure so a cron's
+    failure alert fires."""
+    verify_cron_secret(secret)
+    if not reply_optout.is_enabled():
+        return {"status": "disabled"}
+    client = reply_optout.build_client()
+    if client is None:
+        raise HTTPException(status_code=500, detail={"status": "error", "error": "INSTANTLY_API_KEY is not set"})
+    conn = database.get_db_conn()
+    try:
+        report = reply_optout.run_check(conn, client)
+    finally:
+        conn.close()
+    reply_optout.alert_if_needed(report)
+    if report.get("error"):
+        raise HTTPException(status_code=500, detail={"status": "error", **report})
+    return {"status": "ok", **report}
+
+
+@app.get("/admin/reply-optouts", response_class=HTMLResponse)
+def admin_reply_optouts(request: Request, secret: Optional[str] = Query(None)):
+    """Admin page: last check status, replies flagged for a person to look at, blocklist adds that failed, and the
+    latest automatic suppressions. Buttons only ADD a suppression or dismiss a flag; nothing here removes one."""
+    verify_admin_or_secret(request, secret)
+    q = f"?secret={urllib.parse.quote(secret)}" if secret else ""
+    conn = database.get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT last_seen, last_run_at, last_run_status, last_error FROM outreach_reply_state WHERE id = 1;")
+        st = cur.fetchone()
+        cur.execute("""SELECT instantly_email_id, lead_email, replied_at, reason, review_excerpt FROM outreach_reply_events
+                       WHERE decision = 'review' AND review_status = 'pending' ORDER BY replied_at DESC LIMIT 50;""")
+        review = cur.fetchall()
+        cur.execute("""SELECT lead_email, replied_at, blocklist_attempts, last_error FROM outreach_reply_events
+                       WHERE suppression_added AND blocklist_status = 'failed' ORDER BY replied_at DESC LIMIT 50;""")
+        failed = cur.fetchall()
+        cur.execute("""SELECT lead_email, replied_at, reason, blocklist_status FROM outreach_reply_events
+                       WHERE suppression_added ORDER BY replied_at DESC LIMIT 25;""")
+        recent = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+    e = html.escape
+    state = (f"Last check: {e(str(st[1]))} - <b>{e(str(st[2]))}</b>" + (f" - {e(str(st[3]))}" if st[3] else "")) if st else "Never run."
+    enabled = "ON" if reply_optout.is_enabled() else "OFF (REPLY_OPTOUT_ENABLED is not true)"
+    review_rows = "".join(
+        f"<tr><td>{e(str(r[1]))}</td><td>{e(str(r[2]))}</td><td>{e(str(r[3]))}</td><td style='white-space:pre-wrap'>{e(str(r[4] or ''))}</td>"
+        f"<td><form method='post' action='/admin/reply-optouts/{e(urllib.parse.quote(r[0]))}/suppress{q}' style='display:inline'><button>Suppress</button></form> "
+        f"<form method='post' action='/admin/reply-optouts/{e(urllib.parse.quote(r[0]))}/dismiss{q}' style='display:inline'><button>Dismiss</button></form></td></tr>"
+        for r in review) or "<tr><td colspan='5'>Nothing waiting.</td></tr>"
+    failed_rows = "".join(f"<tr><td>{e(str(r[0]))}</td><td>{e(str(r[1]))}</td><td>{e(str(r[2]))}</td><td>{e(str(r[3] or ''))}</td></tr>" for r in failed) \
+        or "<tr><td colspan='4'>None.</td></tr>"
+    recent_rows = "".join(f"<tr><td>{e(str(r[0]))}</td><td>{e(str(r[1]))}</td><td>{e(str(r[2] or ''))}</td><td>{e(str(r[3] or ''))}</td></tr>" for r in recent) \
+        or "<tr><td colspan='4'>None yet.</td></tr>"
+    return HTMLResponse(f"""<html><body style="font-family:sans-serif; padding:20px; max-width:1100px;">
+      <h2>Outreach reply opt-outs</h2>
+      <p>Automatic check: <b>{enabled}</b>. {state}</p>
+      <p style="font-size:12px;color:#64748b;">Add-only. Suppress adds the address to the suppression list and Instantly's blocklist. Dismiss changes nothing else. Neither button removes anything.</p>
+      <h3>Needs a person ({len(review)})</h3>
+      <table border="1" cellpadding="6" style="border-collapse:collapse;font-size:13px;"><tr><th>Address</th><th>Replied</th><th>Why flagged</th><th>Reply (start)</th><th></th></tr>{review_rows}</table>
+      <h3>Suppressed here but not yet on Instantly's blocklist ({len(failed)})</h3>
+      <table border="1" cellpadding="6" style="border-collapse:collapse;font-size:13px;"><tr><th>Address</th><th>Replied</th><th>Attempts</th><th>Last error</th></tr>{failed_rows}</table>
+      <h3>Latest automatic suppressions</h3>
+      <table border="1" cellpadding="6" style="border-collapse:collapse;font-size:13px;"><tr><th>Address</th><th>Replied</th><th>Why</th><th>Instantly blocklist</th></tr>{recent_rows}</table>
+    </body></html>""")
+
+
+@app.post("/admin/reply-optouts/{event_id}/suppress")
+def admin_reply_optout_suppress(event_id: str, request: Request, secret: Optional[str] = Query(None)):
+    verify_admin_or_secret(request, secret)
+    conn = database.get_db_conn()
+    try:
+        reply_optout.review_suppress(conn, reply_optout.build_client(), event_id)
+    finally:
+        conn.close()
+    return RedirectResponse(f"/admin/reply-optouts{('?secret=' + urllib.parse.quote(secret)) if secret else ''}", status_code=303)
+
+
+@app.post("/admin/reply-optouts/{event_id}/dismiss")
+def admin_reply_optout_dismiss(event_id: str, request: Request, secret: Optional[str] = Query(None)):
+    verify_admin_or_secret(request, secret)
+    conn = database.get_db_conn()
+    try:
+        reply_optout.review_dismiss(conn, event_id)
+    finally:
+        conn.close()
+    return RedirectResponse(f"/admin/reply-optouts{('?secret=' + urllib.parse.quote(secret)) if secret else ''}", status_code=303)
 
 
 @app.get("/admin/mailing-budget", response_class=HTMLResponse)
