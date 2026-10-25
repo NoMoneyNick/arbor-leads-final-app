@@ -107,7 +107,7 @@ def _activity_html(counts, total) -> str:
         f'<div><strong id="countToday">{n(counts.get("today"))}</strong><span>Today</span></div>'
         f'<div><strong id="countWeek">{n(counts.get("week"))}</strong><span>This week</span></div>'
         f'<div><strong id="countMonth">{n(counts.get("month"))}</strong><span>This month</span></div>'
-        f'<div><strong>{n(total)}</strong><span>Total notices recorded</span></div></section>'
+        f'<div><strong>{n(total)}</strong><span>Available now</span></div></section>'
         '<aside class="exclusive"><svg class="ornament" aria-hidden="true"><use href="#leaf"/></svg>'
         '<p><strong>Choose the work that suits you.</strong> The homeowner decides whether to respond.</p>'
         '<a class="text-link" href="/marketplace">Browse proposed work →</a></aside>'

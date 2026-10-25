@@ -6939,6 +6939,64 @@ def _within_early_access_window(discovered_at) -> bool:
         return False
 
 
+_LIVE_COUNT_CACHE = {"t": 0.0, "data": None}
+
+
+def count_live_marketplace_leads(max_age_seconds: int = 120) -> dict:
+    """25 Oct 2026, Nick's ask: the CURRENT number of leads on sale -- not every lead ever recorded.
+    Same rules as the public marketplace (get_marketplace_leads_with_freshness, anonymous visitor):
+    unsold (status new/NULL), tree vertical, not expired, no tree-surgeon agent on record, and past
+    the subscriber early-access window. Counts the whole pool (the marketplace page itself only loads
+    the most recent few hundred). Cached for two minutes. Returns {"total", "council", "domestic"};
+    all None when the database can't be read, so callers can show a dash instead of a wrong number."""
+    import time
+    now = time.time()
+    if _LIVE_COUNT_CACHE["data"] is not None and now - _LIVE_COUNT_CACHE["t"] < max_age_seconds:
+        return _LIVE_COUNT_CACHE["data"]
+    empty = {"total": None, "council": None, "domestic": None}
+    if not SURL:
+        return empty
+    conn = None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT discovered_at, planning_status, summary, registered_date,
+                   COALESCE(lead_source_type, 'council_planning'), has_agent, agent_is_tree_surgeon
+            FROM leads
+            WHERE (status = 'new' OR status IS NULL) AND COALESCE(vertical, 'tree') = 'tree';
+        """)
+        council = domestic = 0
+        for discovered_at, planning_status, summary, registered_date, source_type, has_agent, agent_tree in cur.fetchall():
+            try:
+                if calculate_lead_freshness(discovered_at, planning_status, summary or "", source_type=source_type,
+                                            registered_date=registered_date).get("tier") == "expired":
+                    continue
+            except Exception:
+                continue
+            if _is_agent_already_handling_the_job({"has_agent": has_agent, "agent_is_tree_surgeon": agent_tree, "vertical": "tree"}):
+                continue
+            if _within_early_access_window(discovered_at):
+                continue
+            if source_type in ("domestic_classified", "direct_homeowner"):
+                domestic += 1
+            else:
+                council += 1
+        cur.close()
+        data = {"total": council + domestic, "council": council, "domestic": domestic}
+        _LIVE_COUNT_CACHE.update(t=now, data=data)
+        return data
+    except Exception as e:
+        logging.getLogger(__name__).error(f"[LiveCount] could not count live marketplace leads: {e}")
+        return empty
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+
 def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 40, filter_category: str = None,
                                           target_lat: float = None, target_lng: float = None,
                                           radius_miles: float = None, max_fresh_lookups: int = 20,

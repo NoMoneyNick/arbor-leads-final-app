@@ -2090,7 +2090,7 @@ def public_homepage(request: Request):
 
     if _home_v2_enabled(request):
         try:
-            return _render_home_v2(request, stats, display_leads)
+            return _render_home_v2(request, stats, database.count_live_marketplace_leads().get("total"))
         except Exception as exc:  # never leave the front door blank: fall back to the previous homepage below
             logger.error(f"[HOMEPAGE] new design failed, serving the previous homepage: {exc}")
 
@@ -3380,15 +3380,16 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
     try:
         conn = database.get_db_conn(); cur = conn.cursor()
         cur.execute("SELECT count(*) FROM potential_partners"); stats["p"] = cur.fetchone()[0]
-        cur.execute("SELECT count(*) FROM leads"); stats["l"] = cur.fetchone()[0]
         # Aug 30 2026: this queried a column named "source_type", which has
         # never existed -- the real column, used correctly everywhere else
         # in this file, is "lead_source_type". Every /admin page load has
         # been hitting this, logging "[ADMIN] DB error: column source_type
         # does not exist" and silently leaving l_domestic/l_council at 0.
-        cur.execute("SELECT count(*) FROM leads WHERE lead_source_type IN ('direct_homeowner', 'domestic_classified')")
-        stats["l_domestic"] = cur.fetchone()[0]
-        stats["l_council"] = stats["l"] - stats["l_domestic"]
+        # 25 Oct 2026, Nick's ask: show what is on sale NOW, not every lead ever recorded.
+        _live = database.count_live_marketplace_leads()
+        stats["l"] = _live["total"] if _live["total"] is not None else "—"
+        stats["l_council"] = _live["council"] if _live["council"] is not None else "—"
+        stats["l_domestic"] = _live["domestic"] if _live["domestic"] is not None else "—"
         cur.execute("SELECT count(*) FROM potential_partners WHERE phone_number IS NOT NULL OR email IS NOT NULL")
         stats["enriched"] = cur.fetchone()[0]
         # 17 Sep 2026, Nick's ask: "phone is effectively useless at this
@@ -3543,7 +3544,7 @@ def admin_dashboard(request: Request, secret: Optional[str] = Query(None)):
         {pipeline_banner}
 
         <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:20px;">
-            <span style="background:#0f172a; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Total Leads: <b>{stats['l']}</b> ({stats['l_council']} council / {stats['l_domestic']} domestic)</span>
+            <span style="background:#0f172a; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Live on marketplace: <b>{stats['l']}</b> ({stats['l_council']} council / {stats['l_domestic']} domestic)</span>
             <span style="background:#047857; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Total Partners: <b>{stats['p']}</b></span>
             <span style="background:#059669; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Partners w/ Email: <b>{stats['with_email']} ({pct_email}%)</b></span>
             <span style="background:#64748b; color:white; padding:6px 12px; border-radius:6px; font-size:13px;">Partners w/ Phone or Email: <b>{stats['enriched']} ({pct}%)</b></span>
@@ -7311,6 +7312,18 @@ def _first_offer_price_block(normal_price, *, large: bool = False) -> str:
             f'<span class="text-[11px] font-bold text-emerald-400 align-top ml-1">FIRST INTRODUCTION</span></div>')
 
 
+def _live_count_html() -> str:
+    """25 Oct 2026: the live number of opportunities on sale right now (see database.count_live_marketplace_leads)."""
+    try:
+        n = database.count_live_marketplace_leads().get("total")
+    except Exception:
+        n = None
+    if not isinstance(n, int):
+        return ""
+    return (f'<p class="mt-2 mb-0 text-sm" style="color:#cbd5e1;"><strong class="text-white" style="font-size:18px;">{n:,}</strong> '
+            f'{"opportunity" if n == 1 else "opportunities"} available now</p>')
+
+
 def _marketplace_heading_html() -> str:
     """Marketplace heading: the approved new introduction, or the previous heading when TREEKEY_MARKET_V2=off."""
     if page_theme.applies_to("/marketplace"):
@@ -7760,6 +7773,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
         <div class="flex justify-between items-center mb-5 flex-wrap gap-2.5">
             <div>
                 {_marketplace_heading_html()}
+                {_live_count_html()}
             </div>
             {'<a href="/pricing" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg no-underline font-bold text-[13px] transition-colors">View Monthly Subscriptions</a>' if _subs_open() else ''}
         </div>
