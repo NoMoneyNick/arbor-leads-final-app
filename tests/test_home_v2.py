@@ -123,7 +123,8 @@ class TestAgreedCopy(unittest.TestCase):
     def test_agreed_wording_present(self):
         page = self._page()
         for text in ("LOCAL TREE WORK. ON YOUR PATCH.", "from crown reductions to felling and removals",
-                     "Buy one introduction at a time. No subscription. Printing and postage included.",
+                     "Find local tree-work opportunities from council planning applications, from crown reductions to felling and removals. Choose what suits your crew and kit.",
+                     "Planning activity indicates potential work, not a confirmed job.",
                      "Sold to one tree firm through TreeKey, then taken off sale.",
                      "Try your first introduction for", "Not available to subscribers.",
                      "Printed introductions and practical tools for tree contractors.",
@@ -140,5 +141,5 @@ class TestAgreedCopy(unittest.TestCase):
         page = self._page()
         for text in ("Browse local opportunities", "Find work that fits", "You choose the work.",
                      "Keep an eye on the weather", "Find a woodchip or timber tip site",
-                     "Proposed work near you", "See prices and what’s included"):
+                     "Local tree-work opportunities", "See prices and what’s included"):
             self.assertIn(text, page)
