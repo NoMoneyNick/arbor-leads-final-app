@@ -384,8 +384,29 @@ _SCRIPT = r"""
 """
 
 
+_FINGERPRINT = None
+
+
+def _asset_fingerprint() -> str:
+    """Short hash of home-v2.css and job-type-icons.js, so the ?v= on their links changes with every edit
+    (the browser's heuristic caching had kept an old stylesheet after a deploy)."""
+    global _FINGERPRINT
+    if _FINGERPRINT is None:
+        import hashlib, os
+        h = hashlib.sha1()
+        base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+        try:
+            for name in ("home-v2.css", "job-type-icons.js"):
+                with open(os.path.join(base, name), "rb") as fh:
+                    h.update(fh.read())
+            _FINGERPRINT = h.hexdigest()[:8]
+        except OSError:
+            _FINGERPRINT = ""
+    return _FINGERPRINT
+
+
 def render(data: dict) -> str:
-    asset = _e(data.get("asset_version") or "1") + "m2"   # map rebuild: bust cached CSS/JS
+    asset = _e(data.get("asset_version") or "1") + "m2" + _asset_fingerprint()   # changes whenever the CSS/JS change, so browsers never keep a stale copy
     head = _HEAD.replace("__ASSET__", asset)
     script = _SCRIPT.replace("__ASSET__", asset)
     parts = [
