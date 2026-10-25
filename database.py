@@ -196,6 +196,60 @@ def _run_ddl_statements_resiliently(conn, statements: list, phase_label: str,
     return failed
 
 
+_INDEX_NAME_RE = re.compile(r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+([A-Za-z_][A-Za-z0-9_]*)", re.I)
+
+
+def _create_missing_indexes(cur, statements: list, lock_timeout_ms: int = 5000) -> list:
+    """25 Oct 2026 incident: on a restart, `CREATE INDEX IF NOT EXISTS idx_leads_discovered_at` waited
+    2 minutes for a lock on `leads` (Postgres takes the table lock BEFORE noticing the index already
+    exists) and was cancelled by the statement timeout, rolling back the whole schema phase.
+
+    Now: an index that already exists is skipped with a catalogue lookup (no table lock at all). A
+    genuinely new index gets a short lock_timeout inside its own savepoint, so a busy table makes it
+    fail fast and on its own -- the rest of the phase still lands and the next restart retries it.
+    Returns [(statement, error)] for the indexes that could not be created."""
+    failed = []
+    for stmt in statements:
+        m = _INDEX_NAME_RE.search(stmt)
+        if m:
+            cur.execute("SELECT to_regclass(%s);", (m.group(1),))
+            row = cur.fetchone()
+            if row and row[0] is not None:
+                continue
+        cur.execute("SAVEPOINT tk_create_index;")
+        try:
+            cur.execute(f"SET LOCAL lock_timeout = '{int(lock_timeout_ms)}ms';")
+            cur.execute(stmt)
+            cur.execute("RELEASE SAVEPOINT tk_create_index;")
+        except Exception as e:
+            cur.execute("ROLLBACK TO SAVEPOINT tk_create_index;")
+            failed.append((" ".join(stmt.split()), str(e).strip()))
+    return failed
+
+
+def _report_phase1_problems(problems: list) -> bool:
+    """Logs and alerts on everything in the schema phase that did not land, naming each statement
+    or step. Returns True only when nothing is missing -- the only case that may log "Phase 1 OK"."""
+    if not problems:
+        return True
+    detail = "; ".join(f"{what[:160]} -> {err[:160]}" for what, err in problems[:6])
+    logger.error(f"[DB] Phase 1 INCOMPLETE -- {len(problems)} item(s) did not land: {detail}")
+    try:
+        import notifications
+        notifications.send_system_incident_alert(
+            category="DATABASE SCHEMA MIGRATION",
+            title="init_db() schema phase incomplete",
+            description=f"{len(problems)} schema item(s) did not land: {detail}",
+            impact="Features using the named tables/indexes may fail or run slowly until they land. Everything else committed normally.",
+            action_required="Check Supabase for a long-running transaction on the named table, then restart once it has finished. Nothing is dropped or reset by this check.",
+            severity="CRITICAL",
+            throttle_hours=1.0
+        )
+    except Exception:
+        pass
+    return False
+
+
 def init_db():
     """Ensures all required tables and columns exist. Safe to run on every startup.
 
@@ -222,6 +276,8 @@ def init_db():
     # for the rest of the app to work at all, so it's isolated and committed
     # first, before anything riskier (RLS, data cleanup) gets a chance to
     # take it down with it.
+    phase1_problems = []          # (statement or step, error) -- anything that did not land
+    _phase1_step = "core tables (CREATE TABLE IF NOT EXISTS batch)"
     try:
         cur = conn.cursor()
         cur.execute("""
@@ -616,11 +672,13 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_unclassified_status ON unclassified_applications(status, discovered_at ASC);",
             "CREATE INDEX IF NOT EXISTS idx_system_warnings_lookup ON system_warnings(category, title, occurred_at DESC);",
         ]
-        for idx in indices:
-            cur.execute(idx)
+        _phase1_step = "core indexes"
+        phase1_problems.extend(_create_missing_indexes(cur, indices))
+        _phase1_step = "core schema commit"
 
         conn.commit()
         cur.close()
+        _phase1_step = "later schema steps"
 
         # Phase 1b (this session's letter-fulfilment work): new tables for
         # lead_allocations/letter_obligations/payment_allocation_reconciliation
@@ -660,6 +718,7 @@ def init_db():
             cur.close()
         except Exception as e:
             logger.error(f"[DB Init] Phase 1b (letter fulfilment) schema error: {e}")
+            phase1_problems.append(("Phase 1b schema (letter fulfilment, suppression, account requests, reply opt-out)", str(e)))
             try:
                 conn.rollback()
             except Exception:
@@ -679,6 +738,7 @@ def init_db():
             cur.close()
         except Exception as e:
             logger.error(f"[DB Init] Phase 1c (scraper resilience) schema error: {e}")
+            phase1_problems.append(("Phase 1c schema (scraper resilience)", str(e)))
             try:
                 conn.rollback()
             except Exception:
@@ -887,17 +947,17 @@ def init_db():
                 )
             except Exception:
                 pass
-        else:
+        if _report_phase1_problems(phase1_problems) and not failed_ddl:
             logger.info("[DB] Phase 1 OK: tables, indices, and columns are up to date.")
     except Exception as e:
         conn.rollback()
-        logger.error(f"[DB] Phase 1 (tables/indices) FAILED -- app is likely broken until this is fixed: {e}")
+        logger.error(f"[DB] Phase 1 (tables/indices) FAILED during {_phase1_step} -- app is likely broken until this is fixed: {e}")
         try:
             import notifications
             notifications.send_system_incident_alert(
                 category="DATABASE SCHEMA MIGRATION",
                 title="init_db() schema phase failed",
-                description=f"A CREATE TABLE / index statement failed: {str(e)[:300]}",
+                description=f"Failed during {_phase1_step}: {str(e)[:300]}",
                 impact="Any code path that reads/writes a table/index added here will fail until this is fixed.",
                 action_required="Check the exact error above and fix the migration SQL, then redeploy.",
                 severity="CRITICAL",
