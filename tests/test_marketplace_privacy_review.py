@@ -253,6 +253,20 @@ class TestLeadDetailViewUsesOpaqueId(unittest.TestCase):
             body = main.lead_detail_view("3fae9c1e-fake-uuid", request)
         self.assertNotIn(_REAL_SLASH_REFERENCE, body)
 
+    def test_council_name_is_not_shown_on_the_detail_page(self):
+        request = MagicMock()
+        request.cookies = {}
+        with patch("main.database.get_marketplace_leads_with_freshness", return_value=[self._fake_lead()], create=True), \
+             patch("main.database.get_subscriber_discount", return_value={"eligible": False, "discount_pct": 0}, create=True), \
+             patch("main.database.get_contractor_subscription", return_value=None, create=True), \
+             patch("main._verify_session_cookie", return_value=None):
+            body = main.lead_detail_view("3fae9c1e-fake-uuid", request)
+        self.assertNotIn("LPA:", body)
+        self.assertNotIn("Newark and Sherwood</span>", body)
+        self.assertIn("Buy this introduction", body)
+        self.assertIn("Sold once through TreeKey", body)
+        self.assertNotIn("Single-Sale Asset", body)
+
 
 class TestMarketplaceCardLinksUseOpaqueId(unittest.TestCase):
     """main.marketplace_view -- the "View Full Job Details" card link."""
@@ -282,6 +296,27 @@ class TestMarketplaceCardLinksUseOpaqueId(unittest.TestCase):
         body_str = body if isinstance(body, str) else getattr(body, "body", str(body))
         self.assertIn("/marketplace/lead/3fae9c1e-fake-uuid", body_str)
         self.assertNotIn(_REAL_SLASH_REFERENCE, body_str)
+
+    def test_card_does_not_name_the_council_and_uses_agreed_labels(self):
+        request = MagicMock()
+        request.cookies = {}
+        with patch("main.database.get_marketplace_leads_with_freshness", return_value=[self._fake_lead_row()], create=True), \
+             patch("main.database.get_subscriber_discount", return_value={"eligible": False, "discount_pct": 0}, create=True), \
+             patch("main.database.get_contractor_subscription", return_value=None, create=True), \
+             patch("main.database.get_area_capacity_status", return_value={"status": "unknown"}, create=True), \
+             patch("main.database.release_expired_reservations", create=True), \
+             patch("main.database.JOB_CATEGORIES", _real_database.JOB_CATEGORIES, create=True), \
+             patch("main.database.EARLY_ACCESS_WINDOW_MINUTES", _real_database.EARLY_ACCESS_WINDOW_MINUTES, create=True), \
+             patch("main._verify_session_cookie", return_value=None):
+            body = main.marketplace_view(request)
+        body_str = body if isinstance(body, str) else getattr(body, "body", str(body))
+        self.assertNotIn("LPA:", body_str)
+        self.assertNotIn("Newark and Sherwood</span>", body_str)
+        for label in ("What sort of work are you looking for?", "Proposed work", "Read the proposed work",
+                      "Buy this introduction", "Sold once through TreeKey", "Back to the opportunities map"):
+            self.assertIn(label, body_str)
+        for old in ("Job Specification", "Buy This Lead", "Single-Sale Asset", "Return to Main Intelligence Map"):
+            self.assertNotIn(old, body_str)
 
 
 # ---------------------------------------------------------------------------

@@ -218,8 +218,8 @@ _LAUNCH_META_DESCRIPTIONS = {
     "/terms-of-service": "The terms that apply when you use TreeKey.",
     "/suggestions": "Suggest a feature or improvement for TreeKey and see what other tree surgeons are asking for.",
     "/partner-offer": "A special offer for tree-care businesses joining TreeKey.",
-    "/chip-drop": "Register to receive free wood chip from local tree surgeons through TreeKey.",
-    "/storm-radar": "Storm-damage opportunities and high-wind warnings for UK tree surgeons, so you can call first.",
+    "/chip-drop": "Find registered woodchip and timber drop spots near your job.",
+    "/storm-radar": "Weather warnings for the areas you cover.",
     "/boost-review": "Share your TreeKey experience and help other tree surgeons find us.",
     "/register-drop-spot": "Offer your site as a wood chip drop spot for local tree surgeons.",
 }
@@ -3713,7 +3713,7 @@ def pricing(request: Request):
                 <div style="text-align:right;">
                     <div style="font-size:22px; font-weight:bold; color:#34d399; margin-bottom:6px;">{price_display}</div>
                     <a href="/checkout/{key}" style="background:#1e293b; border:1px solid #475569; color:white; padding:8px 18px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:bold; display:inline-block;">
-                        Buy Single Lead
+                        Buy this introduction
                     </a>
                 </div>
             </div>"""
@@ -3733,10 +3733,10 @@ def pricing(request: Request):
         {single_cards}'''
     else:
         _pricing_title = "Pricing"
-        _pricing_lead = "Buy a single introduction. Printing and postage are included."
+        _pricing_lead = "Know what you're paying for."
         _pricing_sections_html = f'''<h2 class="text-[22px] mb-4 text-white font-bold">Buy one introduction at a time</h2>
         <p class="text-slate-400 text-[13px] -mt-2 mb-4">
-            Choose an opportunity, approve your letter, and we print and post it. Once any lead is bought it's removed and never resold.
+            Choose the work, approve your letter, and we print and post it. Once an introduction is bought, it is taken off sale on TreeKey.
         </p>
         {single_cards}'''
 
@@ -3773,7 +3773,13 @@ def pricing(request: Request):
              lower-page creed/comparison content rather than duplicating it). -->
         <div class="tk-usp-pricing" style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.35); border-radius:14px; padding:22px 24px; margin:0 0 32px 0;">
             <h2 style="margin:0 0 8px 0; font-size:22px; line-height:1.3; color:#ffffff; font-weight:800;">Every introduction includes printing and postage.</h2>
-            <p style="margin:0; font-size:15px; line-height:1.6; color:#cbd5e1;">Your approved letter introduces your business. Interested homeowners contact you directly, and TreeKey won't sell the same introduction to another contractor.</p>
+            <p style="margin:0 0 12px 0; font-size:15px; line-height:1.6; color:#cbd5e1;">Buy one introduction at a time. The price includes printing and posting your approved letter to the homeowner.</p>
+            <h3 style="margin:0 0 6px 0; font-size:16px; color:#ffffff; font-weight:700;">Included with your introduction</h3>
+            <ul style="margin:0; padding-left:22px; list-style:disc; color:#cbd5e1; font-size:14px; line-height:1.7;">
+                <li>The opportunity to introduce your business by post.</li>
+                <li>One approved introduction letter, printed and posted.</li>
+                <li>The introduction taken off sale on TreeKey after purchase.</li>
+            </ul>
         </div>
 
         {first_offer_promo}
@@ -3782,12 +3788,8 @@ def pricing(request: Request):
 
         <!-- 2026-10-01: the old creed banner and competitor comparison table are replaced by this plain how-it-works summary. -->
         <div style="margin:32px 0 20px 0; border:1px solid #334155; border-radius:12px; padding:20px 24px; background:#0f172a;">
-            <h3 style="margin:0 0 10px 0; font-size:17px; color:#ffffff; font-weight:700;">How an introduction works</h3>
-            <ol style="margin:0; padding-left:22px; list-style:decimal; color:#cbd5e1; font-size:14px; line-height:1.7;">
-                <li>Choose a local tree-work opportunity.</li>
-                <li>Approve your introduction letter (saved business details plus standard or your own wording).</li>
-                <li>We print and post it. It's the homeowner's choice whether to get in touch.</li>
-            </ol>
+            <h3 style="margin:0 0 10px 0; font-size:17px; color:#ffffff; font-weight:700;">What happens next?</h3>
+            <p style="margin:0; color:#cbd5e1; font-size:14px; line-height:1.7;">The homeowner decides whether to contact you. If they do, you speak to them directly about the work and any quote.</p>
         </div>
 
         <!-- Sep 11 2026, Nick's ask: same lead-quality promise as the
@@ -3795,13 +3797,14 @@ def pricing(request: Request):
              to pay, not just at the point of picking an individual lead. -->
         <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4 py-3 mb-5 text-[13px] text-emerald-200">
             <b>Lead-Quality Promise:</b> Every opportunity is filtered to check it is genuine tree work before it is offered to you. On the rare chance one is not, email <a href="mailto:support@treekey.co.uk" class="underline hover:text-emerald-100">support@treekey.co.uk</a> telling us which purchase it concerns &mdash; we will give you a replacement introduction of equivalent value or a refund, at your choice.
+        <p class="mt-2 mb-0">A homeowner not replying does not, by itself, mean the listing was inaccurate.</p>
         </div>
 
         <div class="text-center mt-10 p-5 bg-slate-800/50 rounded-xl border border-slate-700">
-            <p class="mb-2.5 text-sm text-slate-400">Have an idea or want a tool built specifically for your crew?</p>
-            <a href="/suggestions" class="text-emerald-400 font-bold no-underline text-sm">Submit a Suggestion to Our Product Board →</a>
+            <p class="mb-2.5 text-sm text-slate-400">Something that would make TreeKey more useful?</p>
+            <a href="/suggestions" class="text-emerald-400 font-bold no-underline text-sm">Tell us →</a>
             &nbsp;|&nbsp;
-            <a href="/" class="text-slate-400 no-underline text-sm">Return to Live Map</a>
+            <a href="/" class="text-slate-400 no-underline text-sm">Back to the opportunities map</a>
         </div>
     </div>
     {_shared_footer_html()}
@@ -3822,7 +3825,7 @@ def suggestions_page():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Arborist Suggestions Hub | TreeKey</title>
+        <title>What would make TreeKey more useful? | TreeKey</title>
         <style>
             body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#020617; color:#e2e8f0; margin:0; padding:40px 16px; }
             .box { max-width:580px; margin:auto; background:#0f172a; padding:32px; border-radius:16px; border:1px solid #1e293b; box-shadow:0 4px 16px rgba(0,0,0,0.04); }
@@ -3832,8 +3835,8 @@ def suggestions_page():
     </head>
     <body>
     <div class="box">
-        <h2 style="margin-top:0; color:#34d399;">Arborist Suggestions & Feature Requests</h2>
-        <p style="color:#94a3b8; font-size:14px; line-height:1.5;">We built TreeKey to serve UK tree surgeons. Tell us what tools, calculators, or data features you need to make your business more profitable.</p>
+        <h2 style="margin-top:0; color:#34d399;">What would make TreeKey more useful?</h2>
+        <p style="color:#94a3b8; font-size:14px; line-height:1.5;">Tell us what gets in the way of your working day, or what would make an existing tool easier to use.</p>
         <form action="/api/submit-suggestion" method="POST">
             <label style="font-size:13px; font-weight:600;">Your Name / Company Name:</label>
             <input type="text" name="name" placeholder="e.g. Dave, Apex Tree Care Ltd" required>
@@ -3844,7 +3847,7 @@ def suggestions_page():
             <label style="font-size:13px; font-weight:600;">Your Suggestion or Problem You Want Solved:</label>
             <textarea name="suggestion" rows="5" placeholder="e.g. I need a tool to calculate tipping weight for mature Ash trees, or an easier way to download council sketch maps..." required></textarea>
             
-            <button type="submit">Submit Suggestion to Founders </button>
+            <button type="submit">Send a suggestion</button>
         </form>
         <p style="text-align:center; margin-top:20px;"><a href="/" style="color:#94a3b8; text-decoration:none; font-size:13px;">← Return to Main Page</a></p>
     </div>
@@ -4354,11 +4357,11 @@ def _letter_optional_fields_html(settings: "letter_content.ContractorLetterSetti
                     <label for="business_intro">Business introduction</label>
                     <div class="lp-hint" style="font-style:italic; margin:-2px 0 6px 0;">(this is what customers will see on your introduction letter)</div>
                     <textarea id="business_intro" name="business_intro" placeholder="e.g. We're a family-run tree surgery covering Leeds, known locally for tidy, careful work." maxlength="{letter_content.MAX_BUSINESS_INTRO_LEN}">{esc(settings.business_intro)}</textarea>
-                    <div class="lp-hint">A short paragraph about your business, shown on your letter exactly as you write it. Up to {letter_content.MAX_BUSINESS_INTRO_LEN} characters. Leave blank to use our standard wording instead.</div>
+                    <div class="lp-hint">Tell homeowners about your business and the work you take on. Keep it clear and accurate &mdash; this helps form your introduction letter, and it is shown exactly as you write it. Up to {letter_content.MAX_BUSINESS_INTRO_LEN} characters. Leave blank to use our standard wording instead.</div>
 
                     <label for="services_note">Relevant services</label>
                     <textarea id="services_note" name="services_note" placeholder="e.g. Tree felling, crown reduction, hedge trimming, stump grinding" maxlength="{letter_content.MAX_SERVICES_NOTE_LEN}">{esc(settings.services_note)}</textarea>
-                    <div class="lp-hint">Tells homeowners what you offer. Up to {letter_content.MAX_SERVICES_NOTE_LEN} characters. Leave blank to leave it out.</div>
+                    <div class="lp-hint">What work do you cover? For example, reductions, dismantles, hedge work or stump grinding. Up to {letter_content.MAX_SERVICES_NOTE_LEN} characters. Leave blank to leave it out.</div>
 
                     <label for="service_area_note">Service area</label>
                     <input id="service_area_note" name="service_area_note" value="{esc(settings.service_area_note)}" placeholder="e.g. Covering Leeds and the surrounding 15 miles" maxlength="{letter_content.MAX_SERVICE_AREA_LEN}">
@@ -4368,7 +4371,7 @@ def _letter_optional_fields_html(settings: "letter_content.ContractorLetterSetti
 
                     <label for="insurance_note">Insurance details</label>
                     <textarea id="insurance_note" name="insurance_note" placeholder="e.g. Public liability insurance held (state your actual cover)" maxlength="{letter_content.MAX_INSURANCE_LEN}">{esc(settings.insurance_note)}</textarea>
-                    <label for="qualifications_note">Qualifications</label>
+                    <label for="qualifications_note">Qualifications and tickets</label>
                     <textarea id="qualifications_note" name="qualifications_note" placeholder="e.g. NPTC Level 2 Certificate in Arboriculture (state only what you actually hold)" maxlength="{letter_content.MAX_QUALIFICATIONS_LEN}">{esc(settings.qualifications_note)}</textarea>
                     <div class="lp-hint">Insurance, qualifications and any other credential you list here are your own claim, shown exactly as written. TreeKey never adds "insured", "qualified", "vetted" or similar wording on your behalf. Leave blank to leave them out.</div>
 
@@ -7312,9 +7315,9 @@ def _marketplace_heading_html() -> str:
     """Marketplace heading: the approved new introduction, or the previous heading when TREEKEY_MARKET_V2=off."""
     if page_theme.applies_to("/marketplace"):
         return ('<p class="m-0 mb-2 text-xs tracking-[.18em] uppercase" style="color:#e3b95f;">The TreeKey Marketplace</p>'
-                '<h1 class="m-0 text-[28px] font-extrabold text-white">Good work starts with an introduction.</h1>'
-                '<p class="mt-1 mb-0 text-slate-400 text-sm">Find potential tree work in the places you cover. Choose an opportunity. We print and post your introduction.</p>'
-                '<p class="mt-3 mb-0 text-sm" style="color:#f0d9a0;"><strong>No shared leads. No race to the bottom.</strong> Buy a lead and it is taken off our marketplace, for you alone.</p>')
+                '<h1 class="m-0 text-[28px] font-extrabold text-white">Find proposed work that fits your patch, crew and kit.</h1>'
+                '<p class="mt-1 mb-0 text-slate-400 text-sm">Browse the available opportunities, read the proposed work and choose whether to introduce your business. We’ll print and post your approved letter.</p>'
+                '<p class="mt-3 mb-0 text-sm" style="color:#f0d9a0;"><strong>Sold to one tree firm through TreeKey, then taken off sale.</strong> We won’t sell the same introduction to another firm. The homeowner decides whether to respond and who to appoint; other contractors may find the work independently.</p>')
     return ('<h1 class="m-0 text-[28px] font-extrabold text-white">Statutory Planning Marketplace</h1>'
             '<p class="mt-1 mb-0 text-slate-400 text-sm">Real-time council and National Park planning notices with statutory freshness countdowns.</p>')
 
@@ -7446,11 +7449,12 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
         {tab_btn("all", "All Leads")}
         {tab_btn("council", "Council & National Park Statutory (TPO & S211)")}
         {tab_btn("domestic", "Private Domestic Jobs")}
-        {tab_btn("flash_hot", "Flash Hot (Day 0–3)")}
-        {tab_btn("active", "Prime Quoting (Day 4–14)")}
+        {tab_btn("flash_hot", "0–3 days")}
+        {tab_btn("active", "4–14 days")}
         {tab_btn("clearance", "Clearance (<£10)")}
         {tab_btn("granted", "Approved / Granted")}
     </div>
+    <p class="text-[11px] text-slate-500 mb-4 leading-relaxed">Each listing shows whether the source record names an agent, or marks the status as unconfirmed. “No agent listed” does not mean nobody is involved. An agent is not necessarily the contractor doing the work, and records may be incomplete or out of date. Age is measured from council registration, or from the date TreeKey first found the record when registration is unavailable.</p>
     """
 
     # "Simple large buttons -- what kinds of leads are you looking for?
@@ -7469,7 +7473,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
 
     category_grid_html = f"""
     <div class="mb-2">
-        <div class="font-mono text-[11px] uppercase tracking-widest text-emerald-400 mb-2.5">What kind of leads are you looking for?</div>
+        <div class="font-mono text-[11px] uppercase tracking-widest text-emerald-400 mb-2.5">What sort of work are you looking for?</div>
         <div class="grid grid-cols-3 sm:grid-cols-6 gap-2.5 mb-5">
             {cat_btn(None, "All Types", "#10b981", "general")}
             {cat_btn("crown_work", "Crown Work", database.JOB_CATEGORIES["crown_work"]["color"], "crown")}
@@ -7673,7 +7677,6 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
                             {cat_label}
                         </span>
                         <span style="font-size:11px; background:{badge_bg}; color:{badge_color}; font-weight:bold; padding:4px 10px; border-radius:12px; text-transform:uppercase;">{badge_text}</span>
-                        <span style="font-size:11px; background:rgba(148,163,184,0.1); color:#cbd5e1; padding:3px 8px; border-radius:12px;">LPA: {council}</span>
                         {urgent_badge}
                         {size_badge}
                         {agent_badge}
@@ -7685,10 +7688,10 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
                     <div class="text-[11px] text-slate-500 font-mono">Listed {listed_date}</div>
 
                     <div class="mk-spec bg-slate-900/60 border-l-[3px] border-emerald-600 px-3.5 py-3 mt-3 text-[13px] text-slate-300 leading-relaxed rounded-r-lg">
-                        <span class="text-emerald-400 font-mono text-[10px] uppercase tracking-widest block mb-1">Job Specification</span>
+                        <span class="text-emerald-400 font-mono text-[10px] uppercase tracking-widest block mb-1">Proposed work</span>
                         {summary[:220]}...
                     </div>
-                    <a href="/marketplace/lead/{lid}" class="inline-block mt-2 text-emerald-400 hover:text-emerald-300 text-[12px] font-bold no-underline">View Full Job Details →</a>
+                    <a href="/marketplace/lead/{lid}" class="inline-block mt-2 text-emerald-400 hover:text-emerald-300 text-[12px] font-bold no-underline">Read the proposed work →</a>
                 </div>
 
                 <div class="mk-buy sm:w-[210px] shrink-0 bg-slate-900/60 border border-emerald-900/50 rounded-xl p-4 flex flex-col gap-3 text-center">
@@ -7709,16 +7712,16 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
                         </div>
                     </div>
                     <a href="/checkout/{plan_key}?lead_id={lid}{offer_qs}" class="bg-brand-green hover:bg-emerald-500 text-white px-5 py-3 rounded-lg no-underline font-bold text-[13px] transition-all duration-300 shadow-[0_0_20px_rgba(5,150,105,0.3)] hover:shadow-[0_0_30px_rgba(5,150,105,0.5)] inline-flex items-center justify-center gap-1.5 text-center">
-                        Buy This Lead →
+                        Buy this introduction →
                     </a>
                     {member_link_html}
                     <div class="text-[10px] text-slate-500 sm:mt-1 hidden sm:block">
-                        Single-Sale • sold once, never resold{"<br>Includes 1 printed &amp; posted intro letter" if _letter_promise_live else ""}
+                        Sold once through TreeKey{"<br>Includes one printed and posted introduction letter" if _letter_promise_live else ""}
                     </div>
                 </div>
             </div>
             <div class="mk-fine text-[10px] text-slate-500 mt-3 sm:hidden">
-                Single-Sale Asset — sold to one contractor only, then permanently removed from sale.{" Includes 1 printed &amp; posted intro letter." if _letter_promise_live else ""}
+                Sold once through TreeKey.{" Includes one printed and posted introduction letter." if _letter_promise_live else ""} Once purchased, this introduction is taken off sale on TreeKey.
             </div>
         </div>"""
 
@@ -7792,7 +7795,7 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
         {lead_cards}
 
         <div class="text-center mt-8">
-            <a href="/" class="text-slate-400 hover:text-white no-underline text-[13px] transition-colors">← Return to Main Intelligence Map</a>
+            <a href="/" class="text-slate-400 hover:text-white no-underline text-[13px] transition-colors">← Back to the opportunities map</a>
         </div>
     </div>
     {_shared_footer_html()}
@@ -7959,7 +7962,6 @@ def lead_detail_view(lead_id: str, request: Request):
                     {cat_label}
                 </span>
                 <span style="font-size:12px; background:{l['badge_bg']}; color:{l['badge_color']}; font-weight:bold; padding:5px 12px; border-radius:12px; text-transform:uppercase;">{l['badge_text']}</span>
-                <span style="font-size:12px; background:rgba(148,163,184,0.1); color:#cbd5e1; padding:4px 10px; border-radius:12px;">LPA: {l['council']}</span>
                 {urgent_badge}
                 {size_badge}
                 {agent_badge}
@@ -7971,14 +7973,15 @@ def lead_detail_view(lead_id: str, request: Request):
             </h1>
             <div class="text-[12px] text-slate-500 font-mono">Listed {listed_date}</div>
             {registered_date_html}
+            <div class="text-[11px] text-slate-500 mt-1">Age is measured from council registration, or from the date TreeKey first found the record when registration is unavailable.</div>
 
             <div class="bg-slate-900/60 border-l-[3px] border-emerald-600 px-5 py-4 mt-5 text-[15px] text-slate-200 leading-relaxed rounded-r-lg">
-                <span class="text-emerald-400 font-mono text-[11px] uppercase tracking-widest block mb-2">Full Job Specification</span>
+                <span class="text-emerald-400 font-mono text-[11px] uppercase tracking-widest block mb-2">Proposed work and application details</span>
                 {l['summary']}
             </div>
 
             <p class="text-[12px] text-slate-500 mt-4">
-                The exact address and applicant/agent identity are redacted above -- TreeKey does not hand these to buyers directly. Everything else the council's own public record states about the job is shown in full. Buying this opportunity reserves it for you and sends a printed introduction to the homeowner on your behalf -- it's their choice whether to get in touch, and a reply or job isn't guaranteed.
+                This listing describes proposed work from a public planning record. It isn't a request for quotes through TreeKey. You buy an introduction by post; the homeowner's name, address and contact details are not supplied to you. Each listing shows whether the source record names an agent, or marks the status as unconfirmed. “No agent listed” does not mean nobody is involved. An agent is not necessarily the contractor doing the work, and records may be incomplete or out of date. Buying this introduction takes it off sale and sends a printed letter to the homeowner on your behalf. It's their choice whether to get in touch, and a reply or job isn't guaranteed.
             </p>
 
             <!-- 2026-09-24, launch-experience rewrite: the "Includes 1
@@ -7994,15 +7997,15 @@ def lead_detail_view(lead_id: str, request: Request):
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
                         {l['days_left']}
                     </div>
-                    {'<div class="text-[11px] text-slate-500 mt-2">Includes 1 printed &amp; posted intro letter to the homeowner</div>' if _letter_promise_live else ''}
+                    {'<div class="text-[11px] text-slate-500 mt-2">Includes one printed and posted introduction letter</div>' if _letter_promise_live else ''}
                     <div class="mt-1">{member_link_html}</div>
                 </div>
                 <a href="/checkout/{plan_key}?lead_id={lid}{offer_qs}" class="shrink-0 bg-brand-green hover:bg-emerald-500 text-white px-7 py-4 rounded-lg no-underline font-bold text-sm transition-all duration-300 shadow-[0_0_20px_rgba(5,150,105,0.3)] hover:shadow-[0_0_30px_rgba(5,150,105,0.5)] inline-flex items-center justify-center gap-1.5 text-center">
-                    Buy This Lead →
+                    Buy this introduction →
                 </a>
             </div>
             <div class="text-[11px] text-slate-500 mt-3 text-center sm:text-left">
-                Single-Sale Asset — sold to one contractor only, then permanently removed from sale.
+                Sold once through TreeKey. Once purchased, this introduction is taken off sale on TreeKey.
             </div>
         </div>
     </div>
@@ -9544,8 +9547,8 @@ def free_dashboard(request: Request):
     quick_cards += [
         {"href": "/marketplace", "title": "Lead Marketplace", "hint": "Buy other unallocated leads outright"},
         {"href": "/ledger", "title": "TreeKey Ledger", "hint": "Van-day costing & £90k VAT gauge"},
-        {"href": "/chip-drop", "title": "Chip-Drop Network", "hint": "Skip £60-£120 tipping fees, free"},
-        {"href": "/storm-radar", "title": "Storm Watch", "hint": "High-wind warnings, be first to call"},
+        {"href": "/chip-drop", "title": "Chip-Drop Network", "hint": "Find a woodchip or timber drop spot"},
+        {"href": "/storm-radar", "title": "Storm Watch", "hint": "Weather warnings for your area"},
         {"href": "/suggestions", "title": "Suggest a Tool", "hint": "Request features from the founders"},
     ]
 
@@ -9873,7 +9876,7 @@ def contractor_dashboard(request: Request):
             </a>
             <a href="/chip-drop" class="quick-card" style="border-top:2px solid #fb923c;">
                 <div style="font-weight:bold; font-size:14px; margin:4px 0 2px 0;">Chip-Drop Network</div>
-                <div style="font-size:11px; color:#94a3b8;">Skip £60-£120 Tipping Fees Free</div>
+                <div style="font-size:11px; color:#94a3b8;">Find a woodchip or timber drop spot</div>
             </a>
             <a href="/marketplace" class="quick-card">
                 <div style="font-size:20px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg></div>
@@ -9899,13 +9902,13 @@ def contractor_dashboard(request: Request):
         <!-- Purchased / Dispatched Lead Inbox -->
         <h3 style="color:#34d399; font-size:18px; margin:0 0 14px 0;">Your Leads ({len(leads)})</h3>
         <p style="color:#94a3b8; font-size:13px; margin-top:-8px; margin-bottom:16px;">
-            Every lead below is exclusively yours -- removed from the Marketplace and every other system the moment you bought it.
+            Every introduction below was sold only to you through TreeKey.
         </p>
 
         {lead_rows}
 
         <div style="text-align:center; margin-top:32px;">
-            <a href="/" style="color:#94a3b8; text-decoration:none; font-size:13px;">← Return to Main Intelligence Map</a>
+            <a href="/" style="color:#94a3b8; text-decoration:none; font-size:13px;">← Back to the opportunities map</a>
         </div>
     </div>
     </body>
@@ -10263,7 +10266,7 @@ def my_leads_view(request: Request):
             <h2 style="color:white; font-size:24px; font-weight:800; margin:0;">My Leads</h2>
             <span style="color:#94a3b8; font-size:14px;">{total} total</span>
         </div>
-        <p style="color:#94a3b8; font-size:14px; margin-bottom:22px;">Every lead below is exclusively yours.</p>
+        <p style="color:#94a3b8; font-size:14px; margin-bottom:22px;">Every introduction below was sold only to you through TreeKey.</p>
         {upsell}
         {lead_cards}
         <div style="text-align:center; margin-top:32px;">
@@ -11126,13 +11129,12 @@ def chip_drop_view(request: Request, outcode: Optional[str] = None, material: Op
         empty_state_html = f"""
         <div class="bg-slate-900/40 border border-dashed border-slate-700 rounded-xl p-7 text-center text-slate-400">
             <div class="mb-2 flex justify-center"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L7 10h3v4H8l4 8 4-8h-2v-4h3z"></path></svg></div>
-            <h3 class="m-0 mb-2 text-white text-base">No drop sites listed{f' for {outcode}' if outcode else ''} yet</h3>
+            <h3 class="m-0 mb-2 text-white text-base">No registered drop spots in this area yet{f' ({outcode})' if outcode else ''}</h3>
             <p class="text-[13px] m-0 mb-4 max-w-[440px] mx-auto">
-                This directory is filled entirely by real allotments, farms, stables and gardens who register themselves —
-                nothing here is invented. Know a local landowner who'd want free arborist woodchip or logs? Point them at
-                the registration form and you'll have a drop site near your next job.
+                Know someone who wants woodchip or timber? They can register a site. This directory is filled only by
+                sites that register themselves &mdash; nothing here is invented.
             </p>
-            <a href="/register-drop-spot" class="inline-block bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg no-underline font-bold text-[13px] transition-colors">+ Register a Drop Site</a>
+            <a href="/register-drop-spot" class="inline-block bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg no-underline font-bold text-[13px] transition-colors">+ Register a drop spot</a>
         </div>
         """
 
@@ -11195,7 +11197,7 @@ def chip_drop_view(request: Request, outcode: Optional[str] = None, material: Op
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Woodchip & Timber Drop-Spotter | TreeKey</title>
+        <title>Find a woodchip or timber drop spot | TreeKey</title>
         <link rel="icon" href="/static/icon-192.png">
         <link href="/static/tailwind.css" rel="stylesheet">
     </head>
@@ -11204,14 +11206,14 @@ def chip_drop_view(request: Request, outcode: Optional[str] = None, material: Op
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
         <div class="flex justify-between items-center mb-5 flex-wrap gap-2.5">
             <div>
-                <h1 class="m-0 text-[28px] font-extrabold text-white">Free Woodchip & Timber Drop-Spotter</h1>
-                <p class="mt-1 mb-0 text-slate-400 text-sm">Drop fresh arborist chips and timber rings within minutes of your job site. Save £60–£120 tipping fees.</p>
+                <h1 class="m-0 text-[28px] font-extrabold text-white">Find a woodchip or timber drop spot</h1>
+                <p class="mt-1 mb-0 text-slate-400 text-sm">Look for registered sites near your job. Check what they'll accept, vehicle access and any arrangements before loading up or heading over.</p>
             </div>
             <a href="/register-drop-spot" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4.5 py-2.5 rounded-lg no-underline font-bold text-[13px] transition-colors">+ Register a Drop Site</a>
         </div>
 
         <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4.5 py-3.5 mb-6 text-[13px] text-emerald-200">
-            <b>Pro-Tip for Tree Surgeons:</b> Tipping stations charge £80–£120 + VAT per load plus 45 minutes round-trip driving time. Drop your arborist waste at local community sites for £0.00.
+            A suitable nearby tip site can help cut travelling and disposal costs.
         </div>
 
         <form method="GET" class="bg-[#0f172a] border border-slate-800 rounded-lg p-4 mb-5 flex gap-2.5 flex-wrap items-end">
@@ -11227,7 +11229,7 @@ def chip_drop_view(request: Request, outcode: Optional[str] = None, material: Op
         {spot_cards or empty_state_html}
 
         <div class="text-center mt-8">
-            <a href="/" class="text-slate-400 hover:text-white no-underline text-[13px] transition-colors">← Return to Main Intelligence Map</a>
+            <a href="/" class="text-slate-400 hover:text-white no-underline text-[13px] transition-colors">← Back to the opportunities map</a>
         </div>
     </div>
     {_shared_footer_html()}
@@ -11268,7 +11270,7 @@ def register_drop_spot_page(request: Request, site_name: Optional[str] = None, o
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Register Free Woodchip Drop Site | TreeKey</title>
+        <title>Register a woodchip or timber drop spot | TreeKey</title>
         <link rel="icon" href="/static/icon-192.png">
         <link href="/static/tailwind.css" rel="stylesheet">
     </head>
@@ -11276,8 +11278,8 @@ def register_drop_spot_page(request: Request, site_name: Optional[str] = None, o
     {_shared_nav_html(request)}
     <div class="max-w-[520px] mx-auto px-4 py-10">
         <div class="bg-[#0f172a] border border-slate-800 rounded-2xl p-8">
-            <h2 class="mt-0 text-white text-2xl font-bold">Register Free Woodchip Drop Site</h2>
-            <p class="text-slate-400 text-[13px]">Need free organic woodchip mulch, wood chips, or hardwood logs for your garden, allotment, or stables? Local tree surgeons will drop free loads directly to your property.</p>
+            <h2 class="mt-0 text-white text-2xl font-bold">Register a woodchip or timber drop spot</h2>
+            <p class="text-slate-400 text-[13px]">Let local tree contractors know what you can accept. Add clear access details, vehicle limits and any conditions so they can check before arranging a drop.</p>
             {prefill_note}
 
             <form action="/api/submit-drop-spot" method="POST">
@@ -11413,10 +11415,6 @@ def storm_radar_view(request: Request):
                     <h3 class="mt-2.5 mb-1 text-white text-xl font-bold">{region}</h3>
                     <span class="text-[13px] text-slate-400">Target Sectors: <b class="text-slate-200">{outcodes}</b></span>
                 </div>
-                <div class="text-right">
-                    <div class="text-[13px] text-slate-400">Emergency Rate Multiplier:</div>
-                    <div class="text-2xl font-extrabold text-emerald-400">1.5x – 2.0x Rates</div>
-                </div>
             </div>
             <p class="text-slate-300 text-sm my-3.5 leading-relaxed">
                 {summary}
@@ -11435,7 +11433,7 @@ def storm_radar_view(request: Request):
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Storm Watch & Emergency Dispatch | TreeKey</title>
+        <title>Weather warnings | TreeKey</title>
         <link rel="icon" href="/static/icon-192.png">
         <link href="/static/tailwind.css" rel="stylesheet">
     </head>
@@ -11444,20 +11442,20 @@ def storm_radar_view(request: Request):
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-10">
         <div class="flex justify-between items-center mb-5 flex-wrap gap-2.5">
             <div>
-                <h1 class="m-0 text-[28px] font-extrabold text-white">Emergency Storm Watch</h1>
-                <p class="mt-1 mb-0 text-slate-400 text-sm">Severe gale & wind triggers (45mph+). Targeted emergency mobilisation without notification spam.</p>
+                <h1 class="m-0 text-[28px] font-extrabold text-white">Weather warnings for your area</h1>
+                <p class="mt-1 mb-0 text-slate-400 text-sm">Keep an eye on severe weather in the areas you cover.</p>
             </div>
             <a href="/dashboard" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-4 py-2 rounded-lg no-underline text-[13px] font-bold transition-colors">← Contractor Dashboard</a>
         </div>
 
         <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4.5 py-3.5 mb-6 text-[13px] text-emerald-200">
-            <b>Zero-Spam Guarantee:</b> We never alert you for normal rain or mild breezes. Alerts trigger strictly for verified 45mph+ gale forecasts in your registered sector so you can mobilise emergency standby crews.
+            <b>About these warnings:</b> Alerts are shown for severe gale and wind events (45mph+ gusts). They are a guide only &mdash; check local conditions yourself and never work in unsafe weather.
         </div>
 
         {alert_cards or empty_state_html}
 
         <div class="text-center mt-8">
-            <a href="/" class="text-slate-400 hover:text-white no-underline text-[13px] transition-colors">← Return to Main Intelligence Map</a>
+            <a href="/" class="text-slate-400 hover:text-white no-underline text-[13px] transition-colors">← Back to the opportunities map</a>
         </div>
     </div>
     {_shared_footer_html()}
@@ -11733,7 +11731,7 @@ def boost_review_page(request: Request, contractor_name: Optional[str] = None, g
         {credentials_card_html}
 
         <div style="text-align:center; margin-top:32px;">
-            <a href="/" style="color:#94a3b8; text-decoration:none; font-size:13px;">← Return to Main Intelligence Map</a>
+            <a href="/" style="color:#94a3b8; text-decoration:none; font-size:13px;">← Back to the opportunities map</a>
         </div>
     </div>
     </body>
@@ -11773,7 +11771,7 @@ def quote_estimator_page():
                 AI Arborist Scope Engine
             </div>
             <h1 style="margin:0 0 6px 0; color:#34d399; font-size:26px;">Instant Tree Work Estimator</h1>
-            <p style="color:#94a3b8; font-size:14px; margin:0;">Get an accurate fair-market estimate and connect directly with 1 local tree surgeon.</p>
+            <p style="color:#94a3b8; font-size:14px; margin:0;">Get a rough fair-market estimate. Quote requests are currently unavailable.</p>
         </div>
 
         <form id="scopeForm" onsubmit="event.preventDefault(); calcScope();">
@@ -11844,19 +11842,8 @@ def quote_estimator_page():
             </div>
 
             <div style="background:#0f172a; border-radius:8px; padding:14px; margin-top:16px; border:1px solid rgba(16,185,129,0.3);">
-                <h4 style="margin:0 0 6px 0; color:#34d399; font-size:14px;">Connect Directly with 1 Local Tree Surgeon:</h4>
-                <p style="margin:0 0 12px 0; font-size:12px; color:#94a3b8;">
-                    We never share your contact with 5 competing companies. Your job is dispatched 1-to-1 exclusively to the local tree surgeon in your postcode.
-                </p>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
-                    <input type="text" id="custName" placeholder="Your Name" style="margin:0; padding:10px;" required>
-                    <input type="tel" id="custPhone" placeholder="Mobile / WhatsApp Number" style="margin:0; padding:10px;" required>
-                </div>
-                <input type="email" id="custEmail" placeholder="Email Address (for official quote)" style="margin:0 0 12px 0; padding:10px;">
-                <button type="button" onclick="submitHomeownerJob()" style="background:#059669; color:white; padding:12px 18px; border-radius:6px; font-weight:bold; font-size:14px; cursor:pointer; width:100%; border:none;">
-                    Request Free Official Site Visit & Quote ➔
-                </button>
-                <div id="submitStatus" style="font-size:13px; font-weight:bold; margin-top:8px; text-align:center;"></div>
+                <h4 style="margin:0 0 6px 0; color:#fbbf24; font-size:15px;">Quote requests are currently unavailable</h4>
+                <p id="submitStatus" role="status" style="margin:0; font-size:13px; color:#cbd5e1;">The estimate above is a rough guide only. It is not a quote, and no request is being passed to a tree surgeon at the moment. Please check back later.</p>
             </div>
         </div>
     </div>
@@ -11899,44 +11886,20 @@ def quote_estimator_page():
             document.getElementById('scopeResult').style.display = 'block';
         }
 
-        async function submitHomeownerJob() {
-            const name = document.getElementById('custName').value.trim();
-            const phone = document.getElementById('custPhone').value.trim();
-            const email = document.getElementById('custEmail').value.trim();
-            const statusEl = document.getElementById('submitStatus');
-
-            if (!name || !phone) {
-                statusEl.style.color = '#dc2626';
-                statusEl.innerText = 'Please enter your name and phone number.';
-                return;
-            }
-
-            statusEl.style.color = '#34d399';
-            statusEl.innerText = 'Connecting with a contractor...';
-
-            try {
-                const res = await fetch('/api/submit-homeowner-quote', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ...lastScope, name: name, phone: phone, email: email })
-                });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    statusEl.style.color = '#059669';
-                    statusEl.innerText = 'Quote Request Dispatched! The local contractor will contact you within 2 business hours.';
-                } else {
-                    statusEl.style.color = '#dc2626';
-                    statusEl.innerText = 'Submission error: ' + (data.message || 'Please try again.');
-                }
-            } catch(e) {
-                statusEl.style.color = '#059669';
-                statusEl.innerText = 'Quote Request Dispatched! The local contractor will contact you directly.';
-            }
-        }
     </script>
     </body>
     </html>
     """
+
+
+def _homeowner_quotes_enabled() -> bool:
+    """25 Oct 2026: homeowner quote requests are switched OFF unless the
+    HOMEOWNER_QUOTES_ENABLED environment variable is explicitly set to 1/true/yes/on.
+    While off, nothing is stored and nothing is routed to any contractor."""
+    return os.getenv("HOMEOWNER_QUOTES_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+HOMEOWNER_QUOTES_UNAVAILABLE_MESSAGE = "Quote requests are currently unavailable."
 
 
 @app.api_route("/api/submit-homeowner-quote", methods=["GET", "POST"])
@@ -11944,7 +11907,14 @@ async def submit_homeowner_quote(request: Request):
     """
     Direct Homeowner Lead Intake Webhook:
     Inserts private domestic job into Postgres and triggers 1-to-1 Seniority routing to the local contractor.
+    Currently switched off by default -- see _homeowner_quotes_enabled().
     """
+    if not _homeowner_quotes_enabled():
+        return Response(
+            content=json.dumps({"status": "unavailable", "message": HOMEOWNER_QUOTES_UNAVAILABLE_MESSAGE}),
+            media_type="application/json",
+            status_code=503,
+        )
     data = await request.json()
     name = data.get("name", "Homeowner")
     phone = data.get("phone", "")
@@ -12290,8 +12260,8 @@ def local_seo_intake_page(location_slug: str):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tree Surgeons in {city_name} ({region_name}) | Free AI Quote Estimator | TreeKey</title>
-    <meta name="description" content="Looking for trusted tree surgeons in {city_name}? Get an instant fair-market AI estimate for tree felling, pruning, and stump removal. 1-to-1 contractor matching with zero spam.">
+    <title>Tree Surgeons in {city_name} ({region_name}) | Tree Work Estimator | TreeKey</title>
+    <meta name="description" content="Looking for trusted tree surgeons in {city_name}? Get a rough fair-market estimate for tree felling, pruning, and stump removal.">
     
     <!-- JSON-LD LocalBusiness Schema for Google Rich Snippets -->
     <script type="application/ld+json">
@@ -12328,13 +12298,13 @@ def local_seo_intake_page(location_slug: str):
         <span class="badge">Local Service Hub: {city_name} & {region_name}</span>
         <h1 class="hero-title">Tree Surgeons in {city_name}</h1>
         <p style="color:#94a3b8; font-size: 16px; margin: 0 0 20px 0;">
-            Calculate your fair-market price in seconds and connect directly with <b>1 tree surgeon</b> in {city_name}.
+            Calculate a rough fair-market price in seconds. Quote requests are currently unavailable.
         </p>
 
         <div class="trust-grid">
             <div class="trust-item">
-                <div style="font-weight:bold; color:#34d399; margin-bottom:4px;">1-to-1 Dispatch Guarantee</div>
-                <div style="font-size:12px; color:#94a3b8;">We NEVER sell your details to 5 different companies. Only 1 local contractor receives your job.</div>
+                <div style="font-weight:bold; color:#34d399; margin-bottom:4px;">Quote requests</div>
+                <div style="font-size:12px; color:#94a3b8;">Quote requests are currently unavailable, so no details are collected or passed to any contractor.</div>
             </div>
             <div class="trust-item">
                 <div style="font-weight:bold; color:#34d399; margin-bottom:4px;">{council_name} Compliance</div>
@@ -12416,19 +12386,8 @@ def local_seo_intake_page(location_slug: str):
             </div>
 
             <div style="background:#0f172a; border-radius:8px; padding:18px; border:1px solid rgba(16,185,129,0.3);">
-                <h4 style="margin:0 0 6px 0; color:#34d399; font-size:15px;">Dispatch Directly to the Tree Surgeon in {city_name}:</h4>
-                <p style="margin:0 0 12px 0; font-size:12px; color:#94a3b8;">
-                    We never sell your details to 5 different companies. Your job is dispatched 1-to-1 exclusively to the local tree surgeon in your {city_name} postcode.
-                </p>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
-                    <input type="text" id="custName" placeholder="Your Name" style="margin:0; padding:10px;" required>
-                    <input type="tel" id="custPhone" placeholder="Mobile / WhatsApp Number" style="margin:0; padding:10px;" required>
-                </div>
-                <input type="email" id="custEmail" placeholder="Email Address (for official PDF quote)" style="margin:0 0 12px 0; padding:10px;">
-                <button type="button" onclick="submitLocalJob('{city_name}')" style="background:#059669; color:white; padding:14px 18px; border-radius:6px; font-weight:bold; font-size:15px; cursor:pointer; width:100%; border:none;">
-                    Request Free Site Visit & Quote in {city_name} ➔
-                </button>
-                <div id="submitStatus" style="font-size:13px; font-weight:bold; margin-top:10px; text-align:center;"></div>
+                <h4 style="margin:0 0 6px 0; color:#fbbf24; font-size:15px;">Quote requests are currently unavailable</h4>
+                <p id="submitStatus" role="status" style="margin:0; font-size:13px; color:#cbd5e1;">The estimate above is a rough guide only. It is not a quote, and no request is being passed to a tree surgeon at the moment. Please check back later.</p>
             </div>
         </div>
     </div>
@@ -12472,40 +12431,6 @@ def local_seo_intake_page(location_slug: str):
         document.getElementById('scopeResult').style.display = 'block';
     }}
 
-    async function submitLocalJob(cityName) {{
-        const name = document.getElementById('custName').value.trim();
-        const phone = document.getElementById('custPhone').value.trim();
-        const email = document.getElementById('custEmail').value.trim();
-        const statusEl = document.getElementById('submitStatus');
-
-        if (!name || !phone) {{
-            statusEl.style.color = '#dc2626';
-            statusEl.innerText = 'Please enter your name and contact number.';
-            return;
-        }}
-
-        statusEl.style.color = '#34d399';
-        statusEl.innerText = 'Connecting with a contractor in ' + cityName + '...';
-
-        try {{
-            const res = await fetch('/api/submit-homeowner-quote', {{
-                method: 'POST',
-                headers: {{ 'Content-Type': 'application/json' }},
-                body: JSON.stringify({{ ...currentScope, name: name, phone: phone, email: email }})
-            }});
-            const data = await res.json();
-            if (data.status === 'success') {{
-                statusEl.style.color = '#059669';
-                statusEl.innerText = 'Quote Request Dispatched! The local contractor in ' + cityName + ' will contact you within 2 business hours.';
-            }} else {{
-                statusEl.style.color = '#dc2626';
-                statusEl.innerText = 'Submission error: ' + (data.message || 'Please try again.');
-            }}
-        }} catch(e) {{
-            statusEl.style.color = '#059669';
-            statusEl.innerText = 'Quote Request Dispatched! The local contractor will contact you directly.';
-        }}
-    }}
 </script>
 </body>
 </html>
@@ -15052,7 +14977,7 @@ async def faq_page(request: Request = None):
                         if _faq_subs else "the moment it's bought from the Marketplace, it's removed from our system and never sold to anyone else.")
     _faq_matching = ("You set a home postcode and a radius (up to 50 miles depending on tier). We match leads to you by exact area first, then by distance within your radius, then by wider regional area as a fallback &mdash; so you get the closest, most relevant work first. Enter your full postcode rather than just the outward code (e.g. \"NG22 8AA\" instead of just \"NG22\") for the most accurate distance matching."
                      if _faq_subs else
-                     "You choose. Enter your postcode and a distance in the Marketplace search and it shows the opportunities within that distance. Enter your full postcode rather than just the outward code (e.g. \"NG22 8AA\" instead of just \"NG22\") for the most accurate distance matching.")
+                     "Yes. Browse the areas you cover and use the available filters to find proposed work that suits your business. Enter your postcode and a distance in the Marketplace search to see the opportunities within that distance. Read each listing before deciding to buy an introduction. Enter your full postcode rather than just the outward code (e.g. \"NG22 8AA\" instead of just \"NG22\") for the most accurate distance matching.")
     _faq_job_size = ("Yes &mdash; each subscription can be set to small, medium, large, or all job sizes, so a one-van operator isn't drowned in commercial clearance leads meant for a multi-crew outfit, or vice versa."
                      if _faq_subs else
                      "Each opportunity shows its job size (small, medium or large) before you buy, so you can choose the ones that suit your crew.")
@@ -15062,11 +14987,23 @@ async def faq_page(request: Request = None):
                      if _faq_subs else
                      "The Chip-Drop directory gives you a direct WhatsApp link to message a drop site's contact. There isn't yet a general WhatsApp support line &mdash; for anything else, email is the way to reach us.")
     faq_groups = [
-        ("About Tree Key", [
-            ("What is Tree Key?",
-             "Tree Key finds new tree work before your competitors do, and introduces you to it. We continuously monitor UK local council planning portals, the GLA Planning Datahub, and other statutory public sources for tree-related applications &mdash; TPO (Tree Preservation Order) consents, Section 211 notices, felling and pruning applications &mdash; and turn each one into an opportunity you can choose to pursue. When you choose one, we print and post a personalised introduction to the homeowner on your behalf, using your saved business details and letter template. We don't hand you the homeowner's address or contact details &mdash; it's their choice whether to get in touch, and a reply or job isn't guaranteed."),
-            ("How is this different from a directory like Checkatrade or Bark?",
-             "Directories sell the same lead to several competing contractors at once and take a cut of what you earn. Every opportunity on Tree Key is single-sale: " + _faq_single_sale + " Your introduction goes out under your own brand, with no ongoing commission &mdash; and because it's the homeowner who decides whether to make contact, we never promise a guaranteed reply or job."),
+        ("About TreeKey", [
+            ("What is TreeKey?",
+             "TreeKey brings together proposed tree work from public planning records. You choose an opportunity and approve a letter introducing your business. We print and post it to the homeowner, who can contact you directly if interested."),
+            ("Am I buying a confirmed enquiry?",
+             "No. This is an introduction based on a public planning record, not a request for quotes through TreeKey. The homeowner may already have a contractor or may choose not to respond."),
+            ("What does &ldquo;sold once&rdquo; mean?",
+             "Once you buy an introduction, we take it off sale and won&rsquo;t sell it to another firm through TreeKey. It doesn&rsquo;t mean other contractors cannot find or quote for the work independently."),
+            ("Can I see whether an agent is named?",
+             "Each listing shows whether the source record names an agent, or marks the status as unconfirmed. &ldquo;No agent listed&rdquo; does not mean nobody is involved. An agent is not necessarily the contractor doing the work, and records may be incomplete or out of date."),
+            ("Do I receive the homeowner&rsquo;s contact details?",
+             "No. We do not give buyers the homeowner&rsquo;s name, address or contact details. We post your letter for you. Interested homeowners can contact you using the business details in it."),
+            ("How do I prepare my letter?",
+             "Choose from three wording styles and add your business details and an optional offer. Check and approve the preview once. We reuse your approved letter for introductions you buy until you change your details."),
+            ("Is a reply or a job guaranteed?",
+             "No. The homeowner decides whether to respond and who to appoint."),
+            ("How is this different from finding planning records myself?",
+             "The underlying planning information is public. TreeKey brings opportunities together and handles printing and posting your approved introduction. You choose whether that service is worth paying for."),
             ("Where does the data come from, and is it legal?",
              "Entirely from public statutory sources: council planning registers and Companies House, both publicly accessible under the Open Government Licence. We don't buy data from private brokers or scrape anything that isn't otherwise publicly available. Full detail on how we're allowed to process it is in our <a href=\"/privacy-policy\" class=\"text-emerald-400 underline\">Privacy Policy</a>."),
             ("Is there a mobile app?",
@@ -15074,13 +15011,17 @@ async def faq_page(request: Request = None):
         ]),
         ("Pricing & Plans", [
             *_faq_pricing_intro_entries(),
+            ("What is included in the price?",
+             "Printing and posting your approved introduction letter are included. You see the price before buying, and there is no subscription."),
             ("Can I get a refund?",
              "You may cancel a purchase by emailing <strong>support@treekey.co.uk</strong>. If our cancellation process confirms that your letter was stopped before it was submitted to our printing provider, we will refund the full amount you paid. If submission has already begun, we will investigate whether the letter can be stopped and tell you the outcome; we cannot promise that it can be stopped. If your letter is not sent, we will send it or, at your choice, refund the amount you paid for it. Once your letter has been sent, refunds remain available under the Lead-Quality Promise and your statutory rights. Total refunds for a purchase never exceed the amount you paid, taking account of any earlier refunds."),
             ("What if an opportunity turns out not to be tree work at all?",
              "Every opportunity is automatically filtered to check that it describes genuine tree work before it is offered to you. On the rare occasion that an opportunity you have bought turns out not to be genuine tree work despite this, email <strong>support@treekey.co.uk</strong> telling us which purchase it concerns, and we will, at your choice, give you a replacement introduction of equivalent value or a refund for that purchase."),
+            ("What if something is wrong with a listing?",
+             "Contact <strong>support@treekey.co.uk</strong> if you think something is wrong with a listing. The Lead-Quality Promise and our cancellation policy above set out eligibility and conditions."),
         ]),
         ("How Matching Works", [
-            ("How do you decide which leads I get?",
+            (("How do you decide which leads I get?" if _faq_subs else "Can I choose the area and type of work?"),
              _faq_matching),
             ("Can I filter by job size?",
              _faq_job_size),
@@ -15091,7 +15032,7 @@ async def faq_page(request: Request = None):
             ("What is TreeKey Ledger?",
              "A financial dashboard built specifically for tree surgeons: it tracks your rolling 12-month turnover against the £90,000 UK VAT registration threshold so you're never caught out, holds a running CIS developer-tax tracker, and includes a van/crew-day cost calculator so you can quote profitably. " + _faq_ledger_tail),
             ("What is the Chip-Drop Network?",
-             "A directory of local allotments, farms, stables and gardens who want your arborist woodchip or logs for free. Instead of paying £60&ndash;£120 in commercial tipping fees and losing 45 minutes each way, you drop your waste at a nearby registered site instead. Landowners register their own site through the site; the directory only ever shows real, self-registered listings."),
+             "A directory of local allotments, farms, stables and gardens who want your arborist woodchip or logs for free. A suitable nearby site can help cut travelling and disposal costs; check what each site accepts and any arrangements before you go. Landowners register their own site through the site; the directory only ever shows real, self-registered listings."),
         ]),
         ("Your Account", [
             ("How do I log in? Why no password?",

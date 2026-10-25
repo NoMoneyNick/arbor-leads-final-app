@@ -471,7 +471,7 @@ class TestNavigationAndSubscriptionsOffWording(_Base):
         off_list, _ = self._signed_out_marketplace(False)
         on_list, _ = self._signed_out_marketplace(True)
         self.assertNotIn("View Monthly Subscriptions", off_list)
-        self.assertIn("Good work starts with an introduction.", off_list)  # new marketplace heading (previous one: TREEKEY_MARKET_V2=off)
+        self.assertIn("Find proposed work that fits your patch, crew and kit.", off_list)  # new marketplace heading (previous one: TREEKEY_MARKET_V2=off)
         self.assertIn("/checkout/", off_list)
         self.assertIn('<a href="/pricing" class="bg-emerald-600', on_list)
         self.assertIn("View Monthly Subscriptions", on_list)
@@ -482,7 +482,7 @@ class TestNavigationAndSubscriptionsOffWording(_Base):
         page, _ = self._signed_out_marketplace(False)
         self.assertIn("rounded-xl p-4 flex flex-col gap-3 text-center", page)
         self.assertNotIn("flex sm:flex-col items-center sm:items-stretch", page)
-        self.assertIn("Buy This Lead", page)
+        self.assertIn("Buy this introduction", page)
 
     def _marketplace_for(self, email=None, eligible=False, subscriber=False):
         request = MagicMock(); request.cookies = {}; request.query_params = {}; request.headers = {}

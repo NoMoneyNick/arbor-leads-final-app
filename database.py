@@ -6609,7 +6609,7 @@ def _calculate_lead_freshness_core(discovered_at, planning_status: str = "pendin
             # can know or promise. Describes exclusivity only within
             # TreeKey's own no-resale policy from here on ("Just Listed"),
             # not claims about who else in the world is aware of the record.
-            "badge_text": "Flash Hot (Day 0–3 • Just Listed)",
+            "badge_text": "0–3 days • Just listed",
             "price": _true_unlock_price(hot_key),
             "days_left": f"{days_left} days left in consultation",
             "plan_key": hot_key
@@ -6620,7 +6620,7 @@ def _calculate_lead_freshness_core(discovered_at, planning_status: str = "pendin
             "tier": "active",
             "badge_color": "#d97706",
             "badge_bg": "#fffbeb",
-            "badge_text": "Prime Quoting Window (Day 4–14)",
+            "badge_text": "4–14 days",
             "price": _true_unlock_price(older_key),
             "days_left": f"{days_left} days left in consultation",
             "plan_key": older_key

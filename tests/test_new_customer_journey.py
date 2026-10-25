@@ -114,8 +114,7 @@ class TestPricingCopy(unittest.TestCase):
             self.assertNotIn(phrase, low)
         # 2026-10-01: agreed USP block sits above the package cards.
         self.assertIn("Every introduction includes printing and postage.", page)
-        self.assertIn("Your approved letter introduces your business. Interested homeowners "
-                      "contact you directly, and TreeKey won't sell the same introduction to another contractor.", page)
+        self.assertIn("Buy one introduction at a time. The price includes printing and posting your approved letter to the homeowner.", page)
         self.assertLess(page.index("Every introduction includes printing and postage."),
                         page.index("Select Your Dedicated Subscription Tier"))
         # Obsolete comparison / creed content is replaced, not duplicated.
@@ -123,7 +122,7 @@ class TestPricingCopy(unittest.TestCase):
                      "100% committed", "First-Mover", "tank of diesel", "One job easily covers",
                      "Creed", "Opposite of Directories", "Real-World Math"):
             self.assertNotIn(gone, page)
-        self.assertEqual(page.count("won't sell the same introduction"), 1)
+        self.assertEqual(page.count("A homeowner not replying does not, by itself, mean the listing was inaccurate."), 1)
 
     def test_plan_descriptions_no_longer_claim_100_percent_exclusive(self):
         with open(os.path.join(_APP_DIR, "payments.py"), encoding="utf-8") as fh:

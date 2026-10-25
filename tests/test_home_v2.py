@@ -112,3 +112,33 @@ class TestSwitch(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAgreedCopy(unittest.TestCase):
+    def _page(self):
+        import home_v2
+        return home_v2.render({"feed": [], "counts": {}, "total": 0,
+                               "offer": {"price": "£4.99", "href": "/x"}, "auth": None})
+
+    def test_agreed_wording_present(self):
+        page = self._page()
+        for text in ("LOCAL TREE WORK. ON YOUR PATCH.", "from crown reductions to felling and removals",
+                     "Buy one introduction at a time. No subscription. Printing and postage included.",
+                     "Sold to one tree firm through TreeKey, then taken off sale.",
+                     "Try your first introduction for", "Not available to subscribers.",
+                     "Printed introductions and practical tools for tree contractors.",
+                     "published under the Open Government Licence"):
+            self.assertIn(text, page)
+
+    def test_old_claims_gone(self):
+        page = self._page()
+        for text in ("No shared leads", "for you alone", "A CLEARER VIEW", "write your own", "Closer to home",
+                     "An exclusive introduction", "Explore available leads", "Latest opportunities"):
+            self.assertNotIn(text, page)
+
+    def test_document_wording_present(self):
+        page = self._page()
+        for text in ("Browse local opportunities", "Find work that fits", "You choose the work.",
+                     "Keep an eye on the weather", "Find a woodchip or timber tip site",
+                     "Proposed work near you", "See prices and what’s included"):
+            self.assertIn(text, page)

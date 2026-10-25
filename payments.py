@@ -254,42 +254,42 @@ PLANS = {
     # Policy) rather than conflating the two under one overclaim.
     "single_lead_small": {
         "name": "Single Lead Purchase (Entry)",
-        "description": "Single-sale planning lead, sold once through TreeKey. Once purchased, it's reserved for you and never resold to another contractor.",
+        "description": "Proposed tree work from a public planning record, sold once through TreeKey and removed from sale on purchase.",
         "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 1900,   # £19 one-off -- Standard value, past its freshest window
         "mode": "payment",
         "badge": "Single Purchase",
-        "real_world_roi": "Full public planning application details for this job, exclusively yours to pursue. Applicant name included when the council has published one.",
+        "real_world_roi": "Full public planning application details for this job, sold once through TreeKey and removed from sale on purchase.",
         "roi_letter_suffix": " Also includes one printed & posted introduction letter."
     },
     "single_lead_medium": {
         "name": "Single Lead Purchase (Standard)",
-        "description": "Single-sale planning lead, sold once through TreeKey and removed from sale on purchase.",
+        "description": "Proposed tree work from a public planning record, sold once through TreeKey and removed from sale on purchase.",
         "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 2900,   # £29 one-off -- Standard value fresh, or Priority value past its freshest window
         "mode": "payment",
         "badge": "Single Purchase",
-        "real_world_roi": "Full public planning application details for this job, exclusively yours to pursue. Applicant name included when the council has published one.",
+        "real_world_roi": "Full public planning application details for this job, sold once through TreeKey and removed from sale on purchase.",
         "roi_letter_suffix": " Also includes one printed & posted introduction letter."
     },
     "single_lead_priority": {
         "name": "Single Lead Purchase (Priority)",
-        "description": "Single-sale planning lead with elevated statutory/legal weight or scale, sold once through TreeKey and removed from sale on purchase.",
+        "description": "Proposed tree work with greater statutory weight or scale, sold once through TreeKey and removed from sale on purchase.",
         "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 3900,   # £39 one-off -- Priority value fresh, or Elite value past its freshest window
         "mode": "payment",
         "badge": "Single Purchase",
-        "real_world_roi": "Full public planning application details for this job, exclusively yours to pursue. Applicant name included when the council has published one.",
+        "real_world_roi": "Full public planning application details for this job, sold once through TreeKey and removed from sale on purchase.",
         "roi_letter_suffix": " Also includes one printed & posted introduction letter."
     },
     "single_lead_large": {
         "name": "Single Lead Purchase (Elite)",
-        "description": "Single-sale high-value planning lead -- statutory weight or genuine urgency -- sold once through TreeKey and removed from sale on purchase.",
+        "description": "Higher-value proposed tree work, with significant statutory weight or scale, sold once through TreeKey and removed from sale on purchase.",
         "letter_suffix": " Includes one personalised introduction letter, printed and posted to the homeowner on your behalf.",
         "amount": 4900,   # £49 one-off -- Elite value, freshest window
         "mode": "payment",
         "badge": "Single Purchase",
-        "real_world_roi": "Full public planning application details and complete planning specs for this job, exclusively yours to pursue. Applicant name included when the council has published one.",
+        "real_world_roi": "Full public planning application details and complete planning specs for this job, sold once through TreeKey and removed from sale on purchase.",
         "roi_letter_suffix": " Also includes one printed & posted introduction letter."
     }
 }
@@ -574,7 +574,7 @@ def create_checkout_session(plan_key: str, outcode: str = None, lead_id: str = N
                     raise FirstOfferUnavailable(claim.get("reason") or "unavailable")
                 unit_amount = FIRST_INTRO_PRICE_PENCE
                 product_name = "Your first TreeKey introduction"
-                product_description = ("One exclusive opportunity, sold once through TreeKey, with your approved letter "
+                product_description = ("One opportunity, sold once through TreeKey, with your approved letter "
                                        "printed and posted for you. Printing and postage included. First-introduction "
                                        "price; normal prices apply to later purchases.")
 

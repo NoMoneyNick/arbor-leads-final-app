@@ -273,7 +273,7 @@ class TestFaq(unittest.TestCase):
         for gone in ("dispatched to a subscriber", "depending on tier", "each subscription can be set",
                      "Tools Included With Your Subscription", "once you're a subscriber", "any subscriber can turn on"):
             self.assertNotIn(gone, page, gone)
-        self.assertIn("the moment it's bought from the Marketplace, it's removed from our system and never sold to anyone else.", page)
+        self.assertIn("Once you buy an introduction, we take it off sale and won&rsquo;t sell it to another firm through TreeKey.", page)
         self.assertIn("Enter your postcode and a distance in the Marketplace search", page)
         self.assertIn("Each opportunity shows its job size (small, medium or large) before you buy", page)
         self.assertIn(">Tools<", page)
@@ -287,7 +287,7 @@ class TestFaq(unittest.TestCase):
 
     def test_on_keeps_the_original_subscription_wording(self):
         page = self._page(True)
-        for kept in ("dispatched to a subscriber (or bought from the Marketplace)", "up to 50 miles depending on tier",
+        for kept in ("up to 50 miles depending on tier",
                      "each subscription can be set to small, medium, large, or all job sizes",
                      "Tools Included With Your Subscription", "Find it in your dashboard once you're a subscriber.",
                      "any subscriber can turn on a one-tap 'Forward on WhatsApp'"):
