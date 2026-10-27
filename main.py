@@ -249,6 +249,35 @@ def _tidy_head_for_launch(text: str, path: str) -> str:
     return text
 
 
+
+# Oct 27 2026: Google Analytics (GA4) behind a cookie-consent banner (UK PECR).
+# Nothing from Google loads, and no analytics cookie is set, until a visitor
+# presses Accept. The choice is kept in the browser (localStorage "tk_consent").
+# Injected once for every public HTML page from the shared middleware below;
+# private/admin/payment pages are skipped.
+_GA_ID = "G-ERBBB795Y7"
+_GA_SKIP_PREFIXES = ("/admin", "/dashboard", "/account", "/login", "/trigger", "/system",
+                     "/director", "/checkout", "/api", "/stripe", "/webhook", "/export")
+_GA_CONSENT_SNIPPET = """<script>
+(function(){var ID="__GA_ID__",K="tk_consent";
+function get(){try{return localStorage.getItem(K)}catch(e){return null}}
+function set(v){try{localStorage.setItem(K,v)}catch(e){}}
+function load(){if(window.__tkGA)return;window.__tkGA=1;
+var s=document.createElement("script");s.async=true;s.src="https://www.googletagmanager.com/gtag/js?id="+ID;document.head.appendChild(s);
+window.dataLayer=window.dataLayer||[];window.gtag=function(){dataLayer.push(arguments)};gtag("js",new Date());gtag("config",ID)}
+function bar(){var d=document.createElement("div");d.setAttribute("role","dialog");d.setAttribute("aria-label","Cookie choice");
+d.style.cssText="position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;max-width:560px;margin:0 auto;background:#0f1f1a;color:#f3efe3;border:1px solid #c9a84c;border-radius:10px;padding:14px 16px;font:14px/1.45 system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.35)";
+d.innerHTML='<div style="margin-bottom:10px">We use analytics cookies (Google Analytics) to see how TreeKey is used and improve it. They stay off unless you accept. <a href="/privacy-policy" style="color:#e6c667;text-decoration:underline">Privacy policy</a></div>'
++'<button type="button" id="tkA" style="background:#c9a84c;color:#0f1f1a;border:0;border-radius:6px;padding:8px 16px;font-weight:600;cursor:pointer;margin-right:8px">Accept</button>'
++'<button type="button" id="tkD" style="background:transparent;color:#f3efe3;border:1px solid #8a9a92;border-radius:6px;padding:8px 16px;cursor:pointer">Decline</button>';
+document.body.appendChild(d);
+document.getElementById("tkA").onclick=function(){set("granted");d.remove();load()};
+document.getElementById("tkD").onclick=function(){set("denied");d.remove()}}
+var c=get();if(c==="granted"){load()}else if(c!=="denied"){
+if(document.body){bar()}else{document.addEventListener("DOMContentLoaded",bar)}}
+})();
+</script>""".replace("__GA_ID__", _GA_ID)
+
 @app.middleware("http")
 async def _security_headers_and_canonical(request: Request, call_next):
     """Sep 16 2026 site audit ("anything we're missing"): found two real
@@ -284,6 +313,8 @@ async def _security_headers_and_canonical(request: Request, call_next):
                     f'<link rel="canonical" href="{canonical_url}">\n</head>',
                     1,
                 )
+                if not request.url.path.startswith(_GA_SKIP_PREFIXES):
+                    text = text.replace("</head>", _GA_CONSENT_SNIPPET + "\n</head>", 1)
                 body = text.encode("utf-8")
         except UnicodeDecodeError:
             pass
@@ -14858,7 +14889,8 @@ async def privacy_policy(request: Request = None):
         <p class="mb-4">We take reasonable technical and organisational measures to protect personal data: encrypted (HTTPS) connections throughout the Service; account sessions secured with signed, tamper-evident tokens rather than plain credentials; no customer passwords are stored at all (login uses a one-time emailed link, so there is no password database to be breached); and administrative and automated-scan functions are protected by a separate access secret, not exposed publicly.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">11. Cookies</h2>
-        <p class="mb-4">Tree Key currently sets one cookie: a signed session cookie (<code class="text-emerald-300">treekey_contractor_session</code>) used solely to keep you logged in, marked HttpOnly, Secure, and SameSite=Lax. This is a strictly necessary cookie required for the Service to function, so under UK PECR rules it does not require a cookie consent banner. This will be revisited the moment any analytics, advertising, or tracking cookie is added.</p>
+        <p class="mb-4">Tree Key sets one strictly necessary cookie: a signed session cookie (<code class="text-emerald-300">treekey_contractor_session</code>) used solely to keep you logged in, marked HttpOnly, Secure, and SameSite=Lax. This is a strictly necessary cookie required for the Service to function, so under UK PECR rules it does not require a cookie consent banner. </p>
+        <p class="mb-4">If you press Accept on our cookie banner, we also use Google Analytics, which sets analytics cookies (such as <code class="text-emerald-300">_ga</code>) to show us how many people visit TreeKey and which pages they use. These cookies are off unless you accept, and nothing is sent to Google before then. Your choice is stored in your browser; clear your browser data for this site to be asked again.</p>
 
         <h2 class="text-xl font-bold text-emerald-400 mt-6 mb-2">12. Children</h2>
         <p class="mb-4">The Service is intended for business use and is not directed at children. We do not knowingly collect personal data from children.</p>
