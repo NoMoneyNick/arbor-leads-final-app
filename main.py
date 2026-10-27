@@ -7357,7 +7357,7 @@ _MARKET_MOBILE_CSS = """
 
 
 @app.get("/marketplace", response_class=HTMLResponse)
-def marketplace_view(request: Request, tier: Optional[str] = "all", category: Optional[str] = None,
+def marketplace_view(request: Request, response: Response, tier: Optional[str] = "all", category: Optional[str] = None,
                       outcode: Optional[str] = None, radius: int = 15):
     """
     Single-Purchase Lead Marketplace with Statutory Freshness Badges & Filter Tabs:
@@ -7421,8 +7421,14 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
     search_error_html = ""
     resolved_note_html = ""
     target_lat = target_lng = None
+    # Oct 27 2026: stage timings for postcode searches only (Server-Timing
+    # header + one log line). No change to what the page shows.
+    import time as _time
+    _search_timings = {} if (outcode and outcode.strip()) else None
+    _t_resolve = _time.perf_counter()
     if outcode and outcode.strip():
         resolved = _resolve_marketplace_location(outcode.strip())
+        _search_timings["resolve"] = round((_time.perf_counter() - _t_resolve) * 1000)
         if resolved["precision"] == "none":
             search_error_html = f"""<div class="bg-red-950/40 border border-red-500/40 text-red-300 px-3.5 py-2.5 rounded-lg mb-4 text-sm">Couldn't find "{outcode.strip()}" -- try a full postcode (e.g. NG22 8AA), just the outward part (e.g. NG22), or a UK town/city name (e.g. Nottingham).</div>"""
         else:
@@ -7436,7 +7442,9 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
         target_lat=target_lat, target_lng=target_lng,
         radius_miles=float(radius) if (target_lat is not None and resolved and resolved["precision"] != "none") else None,
         subscriber_early_access=_viewer_is_subscriber,
+        timings=_search_timings,
     )
+    _t_render = _time.perf_counter()
 
     # Preserves whatever's already active (tier/category/search) while a
     # link only changes the one thing it's for -- e.g. clicking a category
@@ -7757,6 +7765,14 @@ def marketplace_view(request: Request, tier: Optional[str] = "all", category: Op
     # the homepage's dark redesign -- shared nav/footer (_shared_nav_html /
     # _shared_footer_html), dark page background, same fonts/link colours
     # as the rest of the site, instead of its own standalone light page.
+    if _search_timings is not None:
+        _search_timings["build"] = round((_time.perf_counter() - _t_render) * 1000)
+        _st = {k: v for k, v in _search_timings.items() if isinstance(v, (int, float))}
+        _counts = ("rows", "outcodes", "area_lookups", "coord_lookups", "matched")
+        response.headers["Server-Timing"] = ", ".join(
+            (f'{k};desc="{v}"' if k in _counts else f"{k};dur={v}") for k, v in _st.items())
+        logger.info(f"[Marketplace timing] outcode={outcode.strip()[:10]} radius={radius} " +
+                    " ".join(f"{k}={v}" for k, v in _st.items()))
     return f"""
     <!DOCTYPE html>
     <html lang="en-GB">

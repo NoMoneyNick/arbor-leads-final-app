@@ -7061,7 +7061,7 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                                           target_lat: float = None, target_lng: float = None,
                                           radius_miles: float = None, max_fresh_lookups: int = 20,
                                           subscriber_early_access: bool = True,
-                                          only_id: str = None) -> list:
+                                          only_id: str = None, timings: dict = None) -> list:
     """
     Returns unallocated leads enriched with their dynamic statutory freshness calculation.
     Supports filtering by tier ('council', 'domestic', 'flash_hot', 'active', 'clearance', 'granted'),
@@ -7097,9 +7097,21 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
     """
     if not SURL:
         return []
+    # Oct 27 2026: stage timings for the postcode+radius search only (filled
+    # into `timings` when the caller passes a dict; nothing changes otherwise).
+    import time as _time
+    _t = [_time.perf_counter()]
+    _tm = {} if timings is not None else None
+
+    def _mark(name):
+        if _tm is not None:
+            now = _time.perf_counter()
+            _tm[name] = round((now - _t[0]) * 1000)
+            _t[0] = now
     try:
         conn = get_db_conn()
         cur = conn.cursor()
+        _mark("connect")
         try:
             # Sep 9 2026, CRITICAL fix, Nick's ask: a postcode+radius search
             # (e.g. his own CR5/Croydon test) was only ever turning up 1-2
@@ -7197,6 +7209,7 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 """, _ref_params + (_pool_limit,))
                 cols = ["id", "ref", "addr", "summary", "council", "score", "base_price", "discovered_at", "status", "reg_date", "source_type", "has_agent", "agent_is_tree_surgeon"]
             rows = cur.fetchall()
+            _mark("fetch")
             raw_leads = [dict(zip(cols, r)) for r in rows]
             for l in raw_leads:
                 l.setdefault("vertical", "tree")
@@ -7252,7 +7265,9 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 if oc:
                     _distinct_outcodes.add(oc)
 
+            _mark("prep")
             _area_by_outcode = {}
+            _missing = []
             if _distinct_outcodes:
                 try:
                     cur.execute("SELECT outcode, district, is_london FROM outcode_area_cache WHERE outcode = ANY(%s)",
@@ -7303,8 +7318,10 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
             # rather than re-parsing every address a second time. Both dicts
             # are initialised unconditionally so the per-lead loop below never
             # hits a NameError when no radius search is active.
+            _mark("area")
             _coords_by_outcode = {}
             _dist_by_lead = {}
+            _missing_coords = []
             if target_lat is not None and target_lng is not None and _distinct_outcodes:
                 try:
                     cur.execute("SELECT outcode, lat, lon FROM outcode_area_cache WHERE outcode = ANY(%s)",
@@ -7329,6 +7346,7 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                         lead_lat, lead_lon = _coords_by_outcode[oc]
                         _dist_by_lead[idx] = haversine_miles(target_lat, target_lng, lead_lat, lead_lon)
 
+            _mark("coords")
             enriched = []
             for idx, l in enumerate(raw_leads):
                 freshness = calculate_lead_freshness(l["discovered_at"], l["status"], l["summary"], source_type=l.get("source_type", "council_planning"), registered_date=l.get("reg_date"))
@@ -7431,6 +7449,13 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 # applied, so urgency can't be starved out by recency.
 
             enriched.sort(key=lambda x: (not x.get("is_urgent"), _sort_key_discovered_at(x)))
+            _mark("loop")
+            if _tm is not None:
+                _tm.update(rows=len(raw_leads), outcodes=len(_distinct_outcodes),
+                           area_lookups=min(len(_missing), 60 if _is_search else 30),
+                           coord_lookups=min(len(_missing_coords), max(max_fresh_lookups, 60) if _is_search else max_fresh_lookups),
+                           matched=len(enriched))
+                timings.update(_tm)
             return enriched[:limit]
         finally:
             cur.close()
