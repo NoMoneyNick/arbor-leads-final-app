@@ -7323,10 +7323,18 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
             _dist_by_lead = {}
             _missing_coords = []
             if target_lat is not None and target_lng is not None and _distinct_outcodes:
+                # Oct 27 2026: every outcode already in outcode_area_cache is
+                # "known", including ones saved with no coordinates (postcodes.io
+                # couldn't place them). get_outcode_area_label returns that same
+                # saved row without a live call, so re-checking them only cost one
+                # DB connection each (up to 60 per search, ~4s). Only outcodes
+                # missing from the cache still get a lookup below.
+                _coord_cached = set()
                 try:
                     cur.execute("SELECT outcode, lat, lon FROM outcode_area_cache WHERE outcode = ANY(%s)",
                                 (list(_distinct_outcodes),))
                     for oc, lat, lon in cur.fetchall():
+                        _coord_cached.add(oc)
                         if lat is not None and lon is not None:
                             _coords_by_outcode[oc] = (lat, lon)
                 except Exception as e:
@@ -7336,7 +7344,8 @@ def get_marketplace_leads_with_freshness(filter_tier: str = None, limit: int = 4
                 # fanned out over a small thread pool instead of one at a
                 # time (see _bulk_get_outcode_area_labels's docstring).
                 _coord_lookup_cap = max(max_fresh_lookups, 60) if _is_search else max_fresh_lookups
-                _missing_coords = [oc for oc in _distinct_outcodes if oc not in _coords_by_outcode]
+                _missing_coords = [oc for oc in _distinct_outcodes
+                                   if oc not in _coords_by_outcode and oc not in _coord_cached]
                 for oc, area in _bulk_get_outcode_area_labels(_missing_coords[:_coord_lookup_cap]).items():
                     if area.get("lat") is not None and area.get("lon") is not None:
                         _coords_by_outcode[oc] = (area["lat"], area["lon"])
